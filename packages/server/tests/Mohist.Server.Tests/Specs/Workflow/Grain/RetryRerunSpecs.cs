@@ -106,7 +106,7 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
     {
         await StartWorkflowAsync(SingleStage());
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
             await workflow.RetryAsync();

@@ -210,7 +210,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EnsureRun();
 
         if (_run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
-            throw new WorkflowDomainException($"Cannot stop workflow in {_run.Status} state");
+            throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
         await ClearExecutableStateAsync(reason ?? "stopped");
         var events = _run.Stop();

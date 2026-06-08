@@ -24,11 +24,11 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> Retry()
         {
             if (run.Status != WorkflowRunStatus.Failed)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, retry requires failed");
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, retry requires failed");
 
             var current = run.CurrentStage();
             if (current.Failure is null)
-                throw new WorkflowDomainException($"Stage {current.Id} is not failed");
+                throw new InvalidOperationException($"Stage {current.Id} is not failed");
 
             switch (current.Failure.Reason)
             {
@@ -38,16 +38,16 @@ public static partial class WorkflowRunExtensions
                     run.Status = WorkflowRunStatus.Running;
                     return [new WorkflowRunResumed()];
                 case FailureReason.TaskFailed:
-                    throw new WorkflowDomainException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
+                    throw new InvalidOperationException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
                 case FailureReason.CheckUnrepaired:
                     current.RetryFailedCheck(current.Failure.CheckName);
                     run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
                     return [new WorkflowRunResumed()];
                 case FailureReason.ApprovalRejected:
-                    throw new WorkflowDomainException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
+                    throw new InvalidOperationException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
                 default:
-                    throw new WorkflowDomainException($"Unknown failure reason: {current.Failure.Reason}");
+                    throw new InvalidOperationException($"Unknown failure reason: {current.Failure.Reason}");
             }
         }
 

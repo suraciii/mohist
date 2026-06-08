@@ -13,7 +13,7 @@ public static partial class WorkflowRunExtensions
             WorkflowRunMetadata? metadata = null)
         {
             if (definition.Stages.Count == 0)
-                throw new WorkflowDomainException("WorkflowDefinition requires at least one stage");
+                throw new InvalidOperationException("WorkflowDefinition requires at least one stage");
 
             var stages = definition.Stages
                 .Select((def, i) => new StageRun
@@ -41,15 +41,15 @@ public static partial class WorkflowRunExtensions
         public StageRun CurrentStage()
         {
             if (run.CurrentStageId is null)
-                throw new WorkflowDomainException("WorkflowRun has no current stage");
+                throw new InvalidOperationException("WorkflowRun has no current stage");
             return run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId)
-                ?? throw new WorkflowDomainException($"Current stage {run.CurrentStageId} not found");
+                ?? throw new InvalidOperationException($"Current stage {run.CurrentStageId} not found");
         }
 
         public IReadOnlyList<WorkflowEvent> Start()
         {
             if (run.Status != WorkflowRunStatus.Pending && run.Status != WorkflowRunStatus.Paused)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Status}");
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}");
 
             var wasPaused = run.Status == WorkflowRunStatus.Paused;
             var current = run.CurrentStage();
@@ -66,7 +66,7 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> Pause()
         {
             if (run.Status != WorkflowRunStatus.Running)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, pause requires Running");
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, pause requires Running");
             run.Status = WorkflowRunStatus.Paused;
             return [new WorkflowRunPaused()];
         }
@@ -74,7 +74,7 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> Resume()
         {
             if (run.Status != WorkflowRunStatus.Paused)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, resume requires Paused");
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, resume requires Paused");
 
             var current = run.CurrentStage();
             if (current.Status == StageRunStatus.Pending)
@@ -87,7 +87,7 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> Stop()
         {
             if (run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
-                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, stop requires Running or Paused");
+                throw new InvalidOperationException($"WorkflowRun is {run.Status}, stop requires Running or Paused");
             run.Status = WorkflowRunStatus.Stopped;
             return [new WorkflowRunStopped()];
         }

@@ -10,7 +10,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
-                throw new WorkflowDomainException($"Stage {current.Id} is not awaiting approval");
+                throw new InvalidOperationException($"Stage {current.Id} is not awaiting approval");
 
             var stageId = current.Id;
             current.ApprovalStatus = new ApprovalStatus(
@@ -30,7 +30,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
-                throw new WorkflowDomainException($"Stage {current.Id} is not awaiting approval");
+                throw new InvalidOperationException($"Stage {current.Id} is not awaiting approval");
 
             current.ApprovalStatus = new ApprovalStatus(
                 "rejected",

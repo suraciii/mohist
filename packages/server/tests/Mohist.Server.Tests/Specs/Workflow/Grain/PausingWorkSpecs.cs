@@ -73,13 +73,13 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StoppedWorkflow_Resume_ThrowsDomainException()
+    public async Task StoppedWorkflow_Resume_ThrowsInvalidOperationException()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
         await workflow.StopAsync("user-stop");
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.ResumeAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.ResumeAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -135,7 +135,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 
         await workflow.StopAsync("first");
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.StopAsync("second"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.StopAsync("second"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -153,6 +153,6 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         var status = await workflow.GetRunStatusAsync();
         Assert.Equal("Completed", status);
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.StopAsync("after-completion"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.StopAsync("after-completion"));
     }
 }
