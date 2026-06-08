@@ -20,6 +20,15 @@ export class RunnerHost {
   private readonly workspace: WorkspaceManager
   private readonly maxConcurrentWorkflows: number
 
+  // Step 10 of design/event-mechanism.md: AcpSessionManager and
+  // SharedAcpConnection are created once per host (not per work item).
+  // The previous design recreated them for every executeAndReport call,
+  // so AcpSessionManager's cross-task cache was always cold and
+  // SharedAcpConnection's session-resume path was never reachable.
+  private sessionManager: AcpSessionManager = new AcpSessionManager()
+  private sharedAcpConnection: SharedAcpConnection | null = null
+  private workExecutor: WorkExecutor | null = null
+
   constructor(private readonly options: RunnerOptions) {
     this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
     this.connection = new ServerConnection(options)
@@ -33,6 +42,7 @@ export class RunnerHost {
   async run(signal: AbortSignal) {
     while (!signal.aborted) {
       await this.connectRunner(signal)
+      await this.initializeSharedConnection(signal)
       const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
       try {
         await this.runWorkerPool(signal)
@@ -42,9 +52,38 @@ export class RunnerHost {
         await delay(this.options.pollIntervalMs, signal)
       } finally {
         clearInterval(heartbeat)
+        await this.shutdownSharedConnection()
         await this.shutdownConnection()
       }
     }
+  }
+
+  private async initializeSharedConnection(signal: AbortSignal) {
+    if (this.sharedAcpConnection !== null) return;
+    try {
+      this.sharedAcpConnection = await createSharedAcpConnection(process.cwd())
+      this.workExecutor = new WorkExecutor(
+        createDefaultRegistry(),
+        this.workspace,
+        this.connection,
+        this.sessionManager,
+        this.sharedAcpConnection,
+      )
+      console.log("runner ACP connection established (per-host, shared across work items)")
+    } catch (error) {
+      console.error("failed to start shared ACP connection:", error)
+    }
+  }
+
+  private async shutdownSharedConnection() {
+    if (this.sharedAcpConnection === null) return;
+    try {
+      await this.sharedAcpConnection.shutdown()
+    } catch { /* best effort */ }
+    this.sharedAcpConnection = null
+    this.workExecutor = null
+    // Reset the session manager so the next initialize starts clean.
+    this.sessionManager = new AcpSessionManager()
   }
 
   private async runWorkerPool(signal: AbortSignal) {
@@ -99,21 +138,40 @@ export class RunnerHost {
   }
 
   private async executeAndReport(work: WorkItem, signal: AbortSignal) {
-    const sessionManager = new AcpSessionManager()
-    let acpConnection: SharedAcpConnection | null = null
-    const executor = new WorkExecutor(createDefaultRegistry(), this.workspace, this.connection, sessionManager, null)
-    try {
-      const workspacePath = typeof work.variables?.workspace === "object" && work.variables.workspace !== null ? (work.variables.workspace as Record<string, unknown>).path : undefined
-      acpConnection = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
-      executor.updateAcpConnection(acpConnection)
-    } catch (error) {
-      console.error("failed to start shared ACP connection:", error)
+    if (this.workExecutor === null) {
+      // ACP connection failed to initialize at startup; fall back to the
+      // per-work-item ephemeral path so the work still attempts to run.
+      const sessionManager = new AcpSessionManager()
+      const executor = new WorkExecutor(
+        createDefaultRegistry(),
+        this.workspace,
+        this.connection,
+        sessionManager,
+        null,
+      )
+      try {
+        const workspacePath = typeof work.variables?.workspace === "object" && work.variables.workspace !== null ? (work.variables.workspace as Record<string, unknown>).path : undefined
+        const fallback = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
+        executor.updateAcpConnection(fallback)
+        try {
+          const result = await executor.execute(work, signal)
+          await this.connection.report(work, result, signal)
+        } finally {
+          await fallback.shutdown()
+        }
+      } catch (error) {
+        console.error("ephemeral ACP path failed for work", work.workId, error)
+        await this.connection.report(work, { status: "failed", message: String(error) }, signal)
+      }
+      return
     }
+
     try {
-      const result = await executor.execute(work, signal)
+      const result = await this.workExecutor.execute(work, signal)
       await this.connection.report(work, result, signal)
-    } finally {
-      await acpConnection?.shutdown()
+    } catch (error) {
+      console.error("executor failed for work", work.workId, error)
+      await this.connection.report(work, { status: "failed", message: String(error) }, signal)
     }
   }
 
