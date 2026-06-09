@@ -8,12 +8,10 @@ namespace Mohist.Server.Infrastructure.Data.Events;
 public class EventStore : IEventStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IEventBus _eventBus;
 
-    public EventStore(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus)
+    public EventStore(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        _eventBus = eventBus;
     }
 
     public async Task<WorkflowDomainEventDto> AppendWorkflowEventAsync(string workflowRunId, WorkflowEvent payload, CancellationToken ct = default)
@@ -23,13 +21,6 @@ public class EventStore : IEventStore
         await db.SaveChangesAsync(ct);
 
         var dto = WorkflowEventPersistence.ToDto(staged.Single());
-        var busType = WorkflowEventSerializer.BusType(payload);
-        var evt = CloudEventFactory.Create(
-            type: busType,
-            source: new Uri($"/mohist/workflow/{workflowRunId}", UriKind.Relative),
-            data: dto,
-            workflowRunId: workflowRunId);
-        _eventBus.Emit(evt);
         return dto;
     }
 

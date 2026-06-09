@@ -17,9 +17,6 @@ namespace Mohist.Server.Tests.Support;
 
 public class MohistIntegrationFixture : IAsyncLifetime
 {
-    private readonly InMemoryEventBus _eventBus = new(
-        Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
-
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
     private string? _runnerRoot;
@@ -28,7 +25,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
-    public IEventBus EventBus => _eventBus;
+    public IEventBus EventBus => _factory.Services.GetRequiredService<IEventBus>();
     public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
@@ -43,7 +40,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         Directory.CreateDirectory(_runnerRoot);
         _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
 
-        _factory = new MohistWebApplicationFactory(ConnectionString, _eventBus, _runnerRoot, _systemUpdateStatePath);
+        _factory = new MohistWebApplicationFactory(ConnectionString, _runnerRoot, _systemUpdateStatePath);
         Client = _factory.CreateClient();
     }
 
@@ -63,16 +60,14 @@ public class MohistIntegrationFixture : IAsyncLifetime
 public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly string _connectionString;
-    private readonly IEventBus _eventBus;
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
     private readonly string _configPath;
     private string? _webRoot;
 
-    public MohistWebApplicationFactory(string connectionString, IEventBus eventBus, string runnerRoot, string systemUpdateStatePath)
+    public MohistWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath)
     {
         _connectionString = connectionString;
-        _eventBus = eventBus;
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
@@ -99,7 +94,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
-            services.AddSingleton<IEventBus>(_eventBus);
             services.RemoveAll<IGitService>();
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());

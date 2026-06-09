@@ -1,117 +1,62 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using CloudNative.CloudEvents;
 
 namespace Mohist.Server.Infrastructure.Events;
 
-/// <summary>
-/// Default in-process <see cref="IEventBus"/> implementation.
-///
-/// <para>
-/// Subscriptions are <b>additive and permanent</b> — there is no
-/// <c>Unsubscribe</c> API on the typed subscribe path, by design.
-/// See the discussion on <see cref="IEventBus"/> for the rationale.
-/// </para>
-///
-/// <para>
-/// <b>Concurrency</b>. Each per-<c>type</c> handler list is guarded
-/// by a single per-list lock. Both the dispatch snapshot and the
-/// subscribe-append go through that lock, so the dispatch loop
-/// always sees a stable view even if a <see cref="Subscribe(string, Func{CloudEvent, Task})"/>
-/// call lands mid-dispatch. The legacy <c>On</c>/<c>Off</c>
-/// pair is a separate per-list lock with the same discipline.
-/// </para>
-///
-/// <para>
-/// <b>Why this avoids the prior race</b>. The race in
-/// <c>WorktreeCleanupService.StopAsync</c> was a
-/// <c>Collection was modified; enumeration operation may not execute</c>
-/// thrown by the .NET <c>List&lt;T&gt;.Enumerator</c>. That
-/// enumerator belongs to a private <c>_subscriptions</c> list the
-/// subscriber was iterating; the modification came from the host
-/// running several <c>StopAsync</c> paths concurrently. With
-/// <i>static</i> subscriptions — registered in
-/// <c>StartAsync</c>, never removed at runtime — the
-/// per-subscriber <c>StopAsync</c> body has no iteration to
-/// invalidate, so the race class is closed off at the source
-/// rather than defended against in every subscriber.
-/// </para>
-/// </summary>
 public sealed class InMemoryEventBus : IEventBus
 {
-    private readonly ConcurrentDictionary<string, List<Action<object>>> _handlers = new();
     private readonly ConcurrentDictionary<string, List<SubscriptionEntry>> _typedHandlers = new();
+    private readonly ConcurrentDictionary<string, Type> _handlerInterfaceByType = new();
+    private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<InMemoryEventBus> _log;
 
-    public InMemoryEventBus(ILogger<InMemoryEventBus> log)
+    public InMemoryEventBus(
+        IServiceScopeFactory scopes,
+        ILogger<InMemoryEventBus> log)
     {
+        _scopes = scopes;
         _log = log;
     }
 
-    // ── legacy string-name API (back-compat) ───────────────────────
-
-    public void On(string eventName, Action<object> handler)
+    public InMemoryEventBus(ILogger<InMemoryEventBus> log)
+        : this(NullScopeFactory.Instance, log)
     {
-        var list = _handlers.GetOrAdd(eventName, _ => new List<Action<object>>());
-        lock (list) list.Add(handler);
     }
 
-    public void Off(string eventName, Action<object> handler)
+    private sealed class NullScopeFactory : IServiceScopeFactory
     {
-        if (_handlers.TryGetValue(eventName, out var list))
-        {
-            lock (list) list.Remove(handler);
-        }
+        public static readonly NullScopeFactory Instance = new();
+        public IServiceScope CreateScope() => new NullScope();
     }
 
-    public void Emit(string eventName, object data)
+    private sealed class NullScope : IServiceScope
     {
-        if (_handlers.TryGetValue(eventName, out var list))
-        {
-            DispatchLegacy(list, eventName, data);
-        }
+        public IServiceProvider ServiceProvider { get; } = new NullServiceProvider();
+        public void Dispose() { }
+    }
 
-        if (_typedHandlers.TryGetValue(eventName, out var typedList))
-        {
-            var envelope = data as CloudEvent
-                ?? CloudEventFactory.Create(
-                    type: eventName,
-                    source: new Uri("about:blank", UriKind.Absolute),
-                    data: data);
-            DispatchTypedFireAndForget(typedList, envelope);
-        }
+    private sealed class NullServiceProvider : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => null;
     }
 
     public void Emit(CloudEvent cloudEvent)
     {
-        var type = cloudEvent.Type ?? string.Empty;
-
-        if (_handlers.TryGetValue(type, out var legacyList))
-        {
-            DispatchLegacy(legacyList, type, cloudEvent);
-        }
-
-        if (_typedHandlers.TryGetValue(type, out var typedList))
-        {
-            DispatchTypedFireAndForget(typedList, cloudEvent);
-        }
+        EmitAsync(cloudEvent, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     public async Task EmitAsync(CloudEvent cloudEvent, CancellationToken ct = default)
     {
         var type = cloudEvent.Type ?? string.Empty;
 
-        if (_handlers.TryGetValue(type, out var legacyList))
-        {
-            DispatchLegacy(legacyList, type, cloudEvent);
-        }
+        await DispatchTypedHandlersAsync(cloudEvent, ct).ConfigureAwait(false);
 
         if (_typedHandlers.TryGetValue(type, out var typedList))
         {
             await DispatchTypedAsync(typedList, cloudEvent, ct).ConfigureAwait(false);
         }
     }
-
-    // ── static, permanent subscribe ─────────────────────────────────
 
     public void Subscribe(string eventType, Func<CloudEvent, Task> handler)
         => SubscribeCore(bucketKey: eventType, filter: CloudEventFilter.Type(eventType), handler);
@@ -121,6 +66,30 @@ public sealed class InMemoryEventBus : IEventBus
             bucketKey: filter.Method.GetHashCode().ToString(),
             filter,
             handler);
+
+    public void RegisterHandlerInterfaces(
+        IReadOnlyDictionary<string, Type> eventTypeToHandlerInterface)
+    {
+        foreach (var (eventType, handlerInterface) in eventTypeToHandlerInterface)
+        {
+            if (handlerInterface is null)
+            {
+                throw new ArgumentException(
+                    $"Handler interface for event type '{eventType}' is null", nameof(eventTypeToHandlerInterface));
+            }
+            if (!handlerInterface.IsInterface)
+            {
+                throw new ArgumentException(
+                    $"Handler interface for event type '{eventType}' must be an interface (got {handlerInterface.Name})",
+                    nameof(eventTypeToHandlerInterface));
+            }
+            _handlerInterfaceByType[eventType] = handlerInterface;
+        }
+        _log.LogInformation(
+            "InMemoryEventBus registered {Count} typed handler interface(s): {Types}",
+            _handlerInterfaceByType.Count,
+            string.Join(", ", _handlerInterfaceByType.Keys));
+    }
 
     private void SubscribeCore(string bucketKey, Func<CloudEvent, bool> filter, Func<CloudEvent, Task> handler)
     {
@@ -132,46 +101,45 @@ public sealed class InMemoryEventBus : IEventBus
         }
     }
 
-    // ── dispatch paths ─────────────────────────────────────────────
-
-    private void DispatchLegacy(List<Action<object>> list, string eventName, object data)
+    private async Task DispatchTypedHandlersAsync(CloudEvent evt, CancellationToken ct)
     {
-        Action<object>[] snapshot;
-        lock (list)
+        var type = evt.Type ?? string.Empty;
+        if (!_handlerInterfaceByType.TryGetValue(type, out var handlerInterface)) return;
+
+        using var scope = _scopes.CreateScope();
+        var handlers = scope.ServiceProvider.GetServices(handlerInterface);
+        var handlerList = handlers.ToList();
+        if (handlerList.Count == 0) return;
+
+        var tasks = new List<Task>(handlerList.Count);
+        foreach (var handler in handlerList)
         {
-            snapshot = list.ToArray();
+            if (handler is null) continue;
+            tasks.Add(InvokeHandlerSafely(handler, handlerInterface, evt));
         }
-        foreach (var handler in snapshot)
-        {
-            try
-            {
-                handler(data);
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Event handler failed for {Event}", eventName);
-            }
-        }
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
     }
 
-    private void DispatchTypedFireAndForget(
-        List<SubscriptionEntry> list,
-        CloudEvent evt)
+    private static async Task InvokeHandlerSafely(object handler, Type handlerInterface, CloudEvent evt)
     {
-        SubscriptionEntry[] snapshot;
-        lock (list)
+        try
         {
-            snapshot = list.ToArray();
+            var method = handlerInterface.GetMethod(
+                "HandleAsync",
+                BindingFlags.Public | BindingFlags.Instance)
+                ?? throw new InvalidOperationException(
+                    $"Handler interface {handlerInterface.Name} has no public HandleAsync method");
+
+            var result = method.Invoke(handler, [evt, CancellationToken.None]);
+            if (result is Task task)
+            {
+                await task.ConfigureAwait(false);
+            }
         }
-        foreach (var entry in snapshot)
+        catch (TargetInvocationException tie) when (tie.InnerException is not null)
         {
-            if (!entry.Filter(evt)) continue;
-            // Schedule the handler on the thread pool. The bus
-            // intentionally does not await this — see the
-            // IEventBus doc on Emit. Exceptions are caught and
-            // logged inside the wrapper, so the dispatch loop
-            // never sees them.
-            _ = RunHandlerSafely(entry, evt);
+            throw tie.InnerException;
         }
     }
 
