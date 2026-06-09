@@ -7,20 +7,8 @@ using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Sessions.Services;
 
-/// <summary>
-/// Subscribes to <c>com.mohist.runner.disconnected</c> and marks any
-/// in-flight agent sessions tied to that runner as failed. Without this,
-/// a runner that crashes (process kill, TCP drop, heartbeat timeout) would
-/// leave its sessions in "running" forever — the audit's primary gap.
-///
-/// Sessions are failed by looking up <c>AgentSessionRow</c> entries where
-/// <c>RunnerId</c> matches the disconnected runner, then calling
-/// <c>IAgentSessionGrain.FailIfRunningAsync</c> on each. The grain's
-/// <c>FailIfRunningAsync</c> is idempotent — terminal sessions are skipped.
-/// </summary>
-public sealed class AgentSessionRunnerBridge : IHostedService
+public sealed class AgentSessionRunnerBridge : IRunnerDisconnectedHandler
 {
-    private readonly IEventBus _bus;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
     private readonly ILogger<AgentSessionRunnerBridge> _log;
@@ -33,33 +21,16 @@ public sealed class AgentSessionRunnerBridge : IHostedService
     };
 
     public AgentSessionRunnerBridge(
-        IEventBus bus,
         IDbContextFactory<MohistDbContext> dbFactory,
         IGrainFactory grains,
         ILogger<AgentSessionRunnerBridge> log)
     {
-        _bus = bus;
         _dbFactory = dbFactory;
         _grains = grains;
         _log = log;
     }
 
-    public Task StartAsync(CancellationToken ct)
-    {
-        // Static, permanent subscription. Restart the process
-        // to remove it.
-        _bus.Subscribe(EventCatalog.ReverseDns.RunnerDisconnected, OnRunnerDisconnected);
-        _log.LogInformation("AgentSessionRunnerBridge subscribed to {Event}", EventCatalog.ReverseDns.RunnerDisconnected);
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken ct)
-    {
-        // No subscriptions to tear down.
-        return Task.CompletedTask;
-    }
-
-    private async Task OnRunnerDisconnected(CloudEvent evt)
+    public async Task HandleAsync(CloudEvent evt, CancellationToken ct = default)
     {
         var runnerId = TryGetString(evt, "runnerid");
         if (string.IsNullOrEmpty(runnerId))
@@ -72,7 +43,7 @@ public sealed class AgentSessionRunnerBridge : IHostedService
 
         try
         {
-            var sessionIds = await FindActiveSessionsForRunnerAsync(runnerId);
+            var sessionIds = await FindActiveSessionsForRunnerAsync(runnerId, ct);
             if (sessionIds.Count == 0) return;
 
             _log.LogInformation("Failing {Count} sessions for disconnected runner {RunnerId} ({Reason})",
@@ -98,13 +69,13 @@ public sealed class AgentSessionRunnerBridge : IHostedService
         }
     }
 
-    private async Task<List<string>> FindActiveSessionsForRunnerAsync(string runnerId)
+    private async Task<List<string>> FindActiveSessionsForRunnerAsync(string runnerId, CancellationToken ct)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.AgentSessions.AsNoTracking()
             .Where(s => s.RunnerId == runnerId && !TerminalStates.Contains(s.Status))
             .Select(s => s.Id)
-            .ToListAsync();
+            .ToListAsync(ct);
         return rows;
     }
 

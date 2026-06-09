@@ -35,7 +35,7 @@ public class WorkflowRunStoreSpecs
         await using (var db = await factory.CreateDbContextAsync())
             await db.Database.EnsureCreatedAsync();
 
-        var store = new WorkflowRunStore(factory, NewEventBus());
+        var store = new WorkflowRunStore(factory);
         var run = WorkflowRun.Create("wf-etag", new WorkflowDefinition("spec/workflow", [
             new StageDefinition("build", Tasks: [
                 new TaskDefinition("T-001", "Do work", "spec/task")
@@ -93,7 +93,7 @@ public class WorkflowRunStoreSpecs
             new StageDefinition("plan", Tasks: [], Checks: [])
         ]));
 
-        var store = new WorkflowRunStore(factory, NewEventBus());
+        var store = new WorkflowRunStore(factory);
         await store.SaveAsync(run, [new WorkflowRunStarted(), new StageStarted("plan")]);
 
         await using (var db = await factory.CreateDbContextAsync())

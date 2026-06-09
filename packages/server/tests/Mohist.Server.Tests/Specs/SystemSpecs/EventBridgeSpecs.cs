@@ -28,24 +28,31 @@ public class EventBridgeSpecs
         registry.RegisterConnection("conn-B");
         registry.Subscribe("conn-A", "stage_changed");
 
-        bus.Emit("stage_changed", new StageChangedEvent(
+        var stageEvent = new StageChangedEvent(
             "project-1",
             "workflow-1",
             "Plan",
             "Running",
             "started",
             null,
-            "2026-06-05T00:00:00.0000000Z"));
+            "2026-06-05T00:00:00.0000000Z");
+        var envelope = CloudEventFactory.Create(
+            type: "stage_changed",
+            source: new Uri($"/mohist/workflow/workflow-1/stage/Plan", UriKind.Relative),
+            data: stageEvent,
+            projectId: "project-1",
+            workflowRunId: "workflow-1");
+        await bus.EmitAsync(envelope);
 
         var message = Assert.Single(hub.Messages);
         Assert.Equal("conn-A", message.ConnectionId);
         Assert.Equal("stage_changed", message.EventName);
-        var envelope = Assert.IsType<CloudEventEnvelope>(message.Data);
-        Assert.Equal("stage_changed", envelope.Type);
-        Assert.Equal("1.0", envelope.SpecVersion);
-        Assert.NotNull(envelope.Id);
-        Assert.NotNull(envelope.Time);
-        Assert.Equal("project-1", envelope.Extensions?["projectid"]);
+        var innerEnvelope = Assert.IsType<CloudEventEnvelope>(message.Data);
+        Assert.Equal("stage_changed", innerEnvelope.Type);
+        Assert.Equal("1.0", innerEnvelope.SpecVersion);
+        Assert.NotNull(innerEnvelope.Id);
+        Assert.NotNull(innerEnvelope.Time);
+        Assert.Equal("project-1", innerEnvelope.Extensions?["projectid"]);
 
         await bridge.StopAsync(CancellationToken.None);
     }
@@ -65,10 +72,11 @@ public class EventBridgeSpecs
         registry.RegisterConnection("conn-A");
         // conn-A has no subscriptions — registry defaults to empty set
 
-        bus.Emit("schedule_triggered", new { reason = "manual" });
+        var envelope = CloudEventFactory.Create(
+            type: "schedule_triggered",
+            source: new Uri("about:blank", UriKind.Absolute));
+        await bus.EmitAsync(envelope);
 
-        // No messages pushed because conn-A is not subscribed to
-        // "schedule_triggered".
         Assert.Empty(hub.Messages);
 
         await bridge.StopAsync(CancellationToken.None);

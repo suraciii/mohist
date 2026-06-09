@@ -1,3 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Infrastructure.Events;
+
 namespace Mohist.Server.Infrastructure.Hosting;
 
 public static class MohistSiloRegistration
@@ -15,6 +22,15 @@ public static class MohistSiloRegistration
         {
             logging.AddConsole();
         });
+
+        silo.Services.AddScoped<IssueIdentityResolver>();
+        silo.Services.AddTransient<WorktreeCleanupService>();
+        silo.Services.AddTransient<IssueWorkflowCompletionHandler>();
+        silo.Services.AddTransient<IssueWorkflowAbortedHandler>();
+        silo.Services.AddTransient<AgentSessionRunnerBridge>();
+        silo.Services.AddSingleton<IEventBus, InMemoryEventBus>();
+        silo.Services.AddSingleton<ILogger<InMemoryEventBus>>(sp => sp.GetRequiredService<ILoggerFactory>().CreateLogger<InMemoryEventBus>());
+        silo.Services.AddHostedService<EventHandlerRegistrationHostedService>();
 
         return silo;
     }

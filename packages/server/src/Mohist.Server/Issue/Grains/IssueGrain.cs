@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CloudNative.CloudEvents;
 using Microsoft.EntityFrameworkCore;
+using Orleans.Concurrency;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -30,7 +31,6 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IssueIdentityResolver _identityResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
-    private readonly IEventBus _eventBus;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -42,7 +42,6 @@ public class IssueGrain : Grain, IIssueGrain
         IssueIdentityResolver identityResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
-        IEventBus eventBus,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -53,7 +52,6 @@ public class IssueGrain : Grain, IIssueGrain
         _identityResolver = identityResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
-        _eventBus = eventBus;
         _log = log;
     }
 
@@ -62,69 +60,11 @@ public class IssueGrain : Grain, IIssueGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _issue = await _issueStore.LoadAsync(GrainKey);
-
-        // Static, permanent bus subscription. The bus has no
-        // Unsubscribe — restart the process to remove it. The
-        // handler captures <c>this</c>, but that is safe: if the
-        // activation has been deactivated by the time the bus
-        // dispatches, the call into the grain enters Orleans's
-        // grain-call pipeline, which rehydrates a fresh
-        // activation against the same persisted state and runs
-        // the method on the new dispatcher. From the grain's
-        // perspective it is a regular method call with the state
-        // reloaded from <c>IStateStore</c>.
-        _eventBus.Subscribe(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted);
-        _eventBus.Subscribe(EventCatalog.ReverseDns.WorkflowRunStopped, OnWorkflowStopped);
-        _eventBus.Subscribe(EventCatalog.ReverseDns.WorkflowRunFailed, OnWorkflowFailed);
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        // No subscriptions to tear down. The bus's typed
-        // subscriptions are permanent. If this grain is
-        // reactivated later, OnActivateAsync will re-register,
-        // which is idempotent because the bus dedupes by handler
-        // identity.
         return Task.CompletedTask;
-    }
-
-    private async Task OnWorkflowCompleted(CloudEvent evt)
-    {
-        if (_issue is null) return;
-        var wrId = TryGetExtension(evt, "workflowrunid");
-        if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
-        if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        await CompleteWorkAsync(wrId);
-    }
-
-    private async Task OnWorkflowStopped(CloudEvent evt)
-    {
-        if (_issue is null) return;
-        var wrId = TryGetExtension(evt, "workflowrunid");
-        if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
-        if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        await AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "stopped");
-    }
-
-    private async Task OnWorkflowFailed(CloudEvent evt)
-    {
-        if (_issue is null) return;
-        var wrId = TryGetExtension(evt, "workflowrunid");
-        if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
-        if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        await AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "failed");
-    }
-
-    private static string? TryGetExtension(CloudEvent evt, string name)
-    {
-        foreach (var (attr, value) in evt.GetPopulatedAttributes())
-        {
-            if (attr.IsExtension && attr.Name == name && value is not null)
-            {
-                return value.ToString();
-            }
-        }
-        return null;
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
@@ -233,10 +173,6 @@ public class IssueGrain : Grain, IIssueGrain
             var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
             await wfGrain.StopAsync("issue-closed");
         }
-        // Explicit close. The bus subscription below (workflow.run.stopped)
-        // will also call AbortWorkAsync for the same Stopped event;
-        // AbortWorkflow is idempotent (no-op if already Cancelled), so the
-        // double dispatch is safe.
         _issue.Close();
         await SaveIssueAsync();
     }

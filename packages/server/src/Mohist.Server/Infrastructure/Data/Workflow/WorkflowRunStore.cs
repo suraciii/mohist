@@ -19,7 +19,6 @@ public interface IWorkflowRunStore
 public class WorkflowRunStore : IWorkflowRunStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IEventBus _eventBus;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -28,10 +27,9 @@ public class WorkflowRunStore : IWorkflowRunStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public WorkflowRunStore(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus)
+    public WorkflowRunStore(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        _eventBus = eventBus;
     }
 
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
@@ -48,12 +46,9 @@ public class WorkflowRunStore : IWorkflowRunStore
         try
         {
             await StageRunAsync(db, run, ct);
-            var stagedEvents = await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
+            await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            var projectId = ExtractProjectId(run);
-            var issueNumber = ExtractIssueNumber(run);
-            Publish(stagedEvents, projectId, issueNumber);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -76,14 +71,11 @@ public class WorkflowRunStore : IWorkflowRunStore
         try
         {
             await StageRunAsync(db, run, ct);
-            var stagedEvents = await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
+            await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
             await StageLeaseAsync(db, run.Id, lease, ct);
             await StageVariablesAsync(db, run.Id, variables, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            var projectId = ExtractProjectId(run);
-            var issueNumber = ExtractIssueNumber(run);
-            Publish(stagedEvents, projectId, issueNumber);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -160,23 +152,6 @@ public class WorkflowRunStore : IWorkflowRunStore
             // JSON corruption is unrecoverable; surface to caller rather than silently returning null.
             throw new InvalidOperationException(
                 $"Failed to deserialize workflow run state. The persisted JSON is corrupt.", ex);
-        }
-    }
-
-    private void Publish(IReadOnlyList<StagedWorkflowEvent> stagedEvents, string? projectId, string? issueNumber)
-    {
-        foreach (var e in stagedEvents)
-        {
-            var (runId, _) = WorkflowEventSerializer.ExtractContext(e);
-            var busType = WorkflowEventSerializer.BusType(e.Payload);
-            var evt = CloudEventFactory.Create(
-                type: busType,
-                source: new Uri($"/mohist/workflow/{runId}", UriKind.Relative),
-                data: WorkflowEventSerializer.ToData(e.Payload),
-                projectId: projectId,
-                workflowRunId: runId,
-                issueNumber: issueNumber);
-            _eventBus.Emit(evt);
         }
     }
 

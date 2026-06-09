@@ -1,5 +1,4 @@
 using CloudNative.CloudEvents;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Services;
@@ -7,52 +6,23 @@ using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
-/// <summary>
-/// Subscribes to <c>com.mohist.workflow.run.completed</c> on the bus and
-/// removes the workflow's worktree. The worktree cleanup is non-idempotent
-/// (RemoveWorktreeAsync is safe to repeat but a no-op the second time) and
-/// historically lived in the in-grain <c>IssueWorkflowCompletionHook</c> —
-/// Step 8 of design/event-mechanism.md moves it to bus-driven execution
-/// so the workflow grain no longer holds a reference to issue-domain
-/// services.
-/// </summary>
-public sealed class WorktreeCleanupService : IHostedService
+public sealed class WorktreeCleanupService : IWorkflowRunCompletedHandler
 {
-    private readonly IEventBus _bus;
     private readonly ProjectQuerier _projectsQuery;
     private readonly IGitService _git;
     private readonly ILogger<WorktreeCleanupService> _log;
 
     public WorktreeCleanupService(
-        IEventBus bus,
         ProjectQuerier projectsQuery,
         IGitService git,
         ILogger<WorktreeCleanupService> log)
     {
-        _bus = bus;
         _projectsQuery = projectsQuery;
         _git = git;
         _log = log;
     }
 
-    public Task StartAsync(CancellationToken ct)
-    {
-        // Static, permanent subscription. The bus has no
-        // Unsubscribe — restart the process to remove it.
-        _bus.Subscribe(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted);
-        _log.LogInformation("WorktreeCleanupService subscribed to {Event}", EventCatalog.ReverseDns.WorkflowRunCompleted);
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken ct)
-    {
-        // No subscriptions to tear down. The bus's typed
-        // subscriptions are permanent; this method is a
-        // no-op kept for the IHostedService contract.
-        return Task.CompletedTask;
-    }
-
-    private async Task OnWorkflowCompleted(CloudEvent evt)
+    public async Task HandleAsync(CloudEvent evt, CancellationToken ct = default)
     {
         var projectId = TryGetString(evt, "projectid");
         var issueNumberStr = TryGetString(evt, "issueno");
