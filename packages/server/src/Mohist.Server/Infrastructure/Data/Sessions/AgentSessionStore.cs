@@ -3,7 +3,6 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Events;
 
 namespace Mohist.Server.Infrastructure.Data.Sessions;
 
@@ -49,7 +48,7 @@ public class AgentSessionStore : IAgentSessionStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await StageAsync(db, key, state, events, ct);
+            await StageSessionAsync(db, key, state, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -67,7 +66,7 @@ public class AgentSessionStore : IAgentSessionStore
         try
         {
             db.AgentSessionRuntimeEvents.AddRange(runtimeEvents);
-            await StageAsync(db, key, state, events, ct);
+            await StageSessionAsync(db, key, state, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -76,12 +75,6 @@ public class AgentSessionStore : IAgentSessionStore
             await transaction.RollbackAsync(ct);
             throw;
         }
-    }
-
-    private static async Task StageAsync(MohistDbContext db, string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
-    {
-        await StageSessionAsync(db, key, state, ct);
-        await AgentSessionEventPersistence.StageAsync(db, key, events, ct);
     }
 
     private static async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)

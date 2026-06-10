@@ -22,8 +22,8 @@ public sealed record StoredCloudEvent(
 
 /// <summary>
 /// Legacy DTO retained for back-compat with the pre-envelope read path
-/// (<c>WorkflowEventPersistence.ToDto</c>) and the <see cref="IEventStore"/>
-/// impl. New consumers should read <see cref="StoredCloudEvent"/> directly.
+/// and the <see cref="IEventStore"/> impl. New consumers should read
+/// <see cref="StoredCloudEvent"/> directly.
 /// </summary>
 public sealed record WorkflowDomainEventDto(
     long Id,

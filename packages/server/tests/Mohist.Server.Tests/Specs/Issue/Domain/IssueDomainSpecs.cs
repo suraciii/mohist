@@ -60,8 +60,8 @@ public class IssueDomainSpecs
 
         var json = IssueStore.Serialize(issue);
         using var document = JsonDocument.Parse(json);
-        Assert.True(document.RootElement.TryGetProperty("WorkflowRunId", out _));
-        Assert.False(document.RootElement.TryGetProperty("ActiveWorkflowRunId", out _));
+        Assert.True(document.RootElement.TryGetProperty("workflowRunId", out _));
+        Assert.False(document.RootElement.TryGetProperty("activeWorkflowRunId", out _));
 
         var reloaded = IssueStore.Deserialize(json);
 

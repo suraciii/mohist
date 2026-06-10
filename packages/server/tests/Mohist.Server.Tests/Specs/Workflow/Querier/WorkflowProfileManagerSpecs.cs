@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Workflow.Domain;
@@ -392,7 +393,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
             WorkflowRunId = runId,
-            State = JsonSerializer.Serialize(new
+            State = JSON.Serialize(new
             {
                 Id = runId,
                 Metadata = new
@@ -407,7 +408,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         db.Issues.Add(new IssueRow
         {
             IssueId = issueId,
-            State = JsonSerializer.Serialize(new
+            State = JSON.Serialize(new
             {
                 Id = issueId,
                 ProjectId = projectId,

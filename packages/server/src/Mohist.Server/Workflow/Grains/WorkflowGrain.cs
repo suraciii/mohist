@@ -588,11 +588,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             effectiveVarsJson = VariableBundle.DeepMerge(effectiveVarsJson, stageOverlay) ?? stageOverlay;
         }
 
-        // Set final vars in payload + inject dispatch scope
+        // Spread vars to payload top level (preserves opaque user context like "custom: { answer: 42 }")
+        if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in effectiveVarsJson.EnumerateObject())
+                payload[property.Name] = property.Value.Clone();
+        }
+
+        // Inject dispatch scope (workflow/stage/work override any same-named user vars)
         payload["vars"] = effectiveVarsJson;
         payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = GrainKey }, WorkflowVariableJson.Options);
         payload["stage"] = JsonSerializer.SerializeToElement(new { name = stage }, WorkflowVariableJson.Options);
         payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = workType, title, attempt }, WorkflowVariableJson.Options);
+
+        // --- 2. Load prompts from profile (independent from vars, same priority chain) ---
+        var prompts = await _profileManager.LoadPromptsAsync(GrainKey);
+        if (prompts.Count > 0)
+        {
+            var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (var p in prompts)
+                promptsMap[p.Key] = p.Body;
+            payload["prompts"] = JsonSerializer.SerializeToElement(promptsMap, WorkflowVariableJson.Options);
+        }
 
         var variables = JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
 

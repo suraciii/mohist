@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,9 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260610130306_DropEventsTable")]
+    partial class DropEventsTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -28,7 +31,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("ProjectId");
 
-                    b.ToTable("EpicCounters", (string)null);
+                    b.ToTable("EpicCounters");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicIssueRow", b =>
@@ -59,7 +62,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "IssueNumber");
 
-                    b.ToTable("EpicIssues", (string)null);
+                    b.ToTable("EpicIssues");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicRow", b =>
@@ -107,7 +110,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("Epics", (string)null);
+                    b.ToTable("Epics");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.IssueEventRow", b =>
@@ -242,7 +245,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "IssueNumber", "CreatedAt");
 
-                    b.ToTable("IssueComments", (string)null);
+                    b.ToTable("IssueComments");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueCounterRow", b =>
@@ -256,7 +259,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("ProjectId");
 
-                    b.ToTable("IssueCounters", (string)null);
+                    b.ToTable("IssueCounters");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssuePrerequisiteRow", b =>
@@ -276,7 +279,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("ProjectId", "IssueNumber", "PrerequisiteNumber");
 
-                    b.ToTable("IssuePrerequisites", (string)null);
+                    b.ToTable("IssuePrerequisites");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueRow", b =>
@@ -288,12 +291,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int?>("Number")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
-                        .HasComputedColumnSql("json_extract(State, '$.number')", true);
+                        .HasComputedColumnSql("json_extract(State, '$.Number')", true);
 
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(State, '$.projectId')", true);
+                        .HasComputedColumnSql("json_extract(State, '$.ProjectId')", true);
 
                     b.Property<string>("State")
                         .IsRequired()
@@ -302,7 +305,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("WorkflowRunId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(State, '$.workflowRunId')", true);
+                        .HasComputedColumnSql("json_extract(State, '$.WorkflowRunId')", true);
 
                     b.HasKey("IssueId");
 
@@ -348,7 +351,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Projects", (string)null);
+                    b.ToTable("Projects");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>
@@ -516,7 +519,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("ProjectId");
 
-                    b.ToTable("BacklogStates", (string)null);
+                    b.ToTable("BacklogStates");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.IssueWorkflowProfile", b =>
@@ -660,7 +663,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("MetadataProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(State, '$.metadata.annotations.projectId')", true);
+                        .HasComputedColumnSql("json_extract(State, '$.Metadata.Annotations.projectId')", true);
 
                     b.Property<string>("State")
                         .IsRequired()
@@ -670,7 +673,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("MetadataProjectId");
 
-                    b.ToTable("WorkflowRuns", (string)null);
+                    b.ToTable("WorkflowRuns");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowStageLockRow", b =>
@@ -685,7 +688,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Key");
 
-                    b.ToTable("WorkflowStageLocks", (string)null);
+                    b.ToTable("WorkflowStageLocks");
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowVariablesRow", b =>
@@ -700,7 +703,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("WorkflowRunId");
 
-                    b.ToTable("WorkflowVariables", (string)null);
+                    b.ToTable("WorkflowVariables");
                 });
 #pragma warning restore 612, 618
         }

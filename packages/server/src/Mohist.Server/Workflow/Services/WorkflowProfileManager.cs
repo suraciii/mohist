@@ -115,9 +115,9 @@ public class WorkflowProfileManager
         try
         {
             using var doc = JsonDocument.Parse(stateJson);
-            if (!doc.RootElement.TryGetProperty("Metadata", out var metadata)
+            if (!doc.RootElement.TryGetProperty("metadata", out var metadata)
                 || metadata.ValueKind != JsonValueKind.Object
-                || !metadata.TryGetProperty("Annotations", out var annotations)
+                || !metadata.TryGetProperty("annotations", out var annotations)
                 || annotations.ValueKind != JsonValueKind.Object
                 || !annotations.TryGetProperty(key, out var value)
                 || value.ValueKind != JsonValueKind.String)
@@ -156,16 +156,16 @@ public class WorkflowProfileManager
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
-            if (!root.TryGetProperty("WorkflowRunId", out var workflowRunId)
+            if (!root.TryGetProperty("workflowRunId", out var workflowRunId)
                 || workflowRunId.GetString() != runId)
                 return null;
-            if (!root.TryGetProperty("ProjectId", out var projectIdEl)
+            if (!root.TryGetProperty("projectId", out var projectIdEl)
                 || string.IsNullOrWhiteSpace(projectIdEl.GetString()))
                 return null;
-            if (!root.TryGetProperty("Id", out var issueIdEl)
+            if (!root.TryGetProperty("id", out var issueIdEl)
                 || string.IsNullOrWhiteSpace(issueIdEl.GetString()))
                 return null;
-            if (!root.TryGetProperty("Number", out var numberEl)
+            if (!root.TryGetProperty("number", out var numberEl)
                 || !numberEl.TryGetInt32(out var number))
                 return null;
 

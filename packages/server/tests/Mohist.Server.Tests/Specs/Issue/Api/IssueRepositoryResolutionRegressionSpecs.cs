@@ -923,9 +923,9 @@ public class IssueRepositoryResolutionRegressionSpecs
         // any of the previously-observed mutable fields as authority.
         var storedJson = await LoadStateAsync(projectId, issue.Number);
         using var doc = JsonDocument.Parse(storedJson);
-        Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
+        Assert.True(doc.RootElement.TryGetProperty("repositoryRef", out var refElement));
         Assert.Equal("secondary", refElement.GetString());
-        if (doc.RootElement.TryGetProperty("Repository", out var repositoryElement)
+        if (doc.RootElement.TryGetProperty("repository", out var repositoryElement)
             && repositoryElement.ValueKind == JsonValueKind.Object)
         {
             Assert.Fail("Issue storage must not carry a mutable Repository snapshot.");

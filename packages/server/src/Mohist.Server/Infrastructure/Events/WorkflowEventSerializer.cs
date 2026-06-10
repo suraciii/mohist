@@ -40,15 +40,11 @@ internal static class WorkflowEventSerializer
 
     /// <summary>
     /// Extract the workflow run id (source) and the issue number subject
-    /// from a staged event's row metadata.
+    /// from a workflow run event source URI.
     /// </summary>
-    public static (string WorkflowRunId, string? IssueNumber) ExtractContext(StagedWorkflowEvent staged) =>
-        ExtractContextFromSource(staged.Row.Source);
-
     public static (string WorkflowRunId, string? IssueNumber) ExtractContextFromSource(string source)
     {
-        // Source format: /workflow-runs/{workflowRunId}  (WorkflowEventPersistence.WorkflowRunSource)
-        var prefix = "/workflow-runs/";
+        var prefix = "/mohist/workflow-runs/";
         if (!source.StartsWith(prefix, StringComparison.Ordinal))
             return (source, null);
         return (source[prefix.Length..], null);

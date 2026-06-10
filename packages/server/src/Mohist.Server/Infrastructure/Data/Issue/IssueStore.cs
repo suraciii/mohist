@@ -1,6 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
@@ -10,13 +9,6 @@ namespace Mohist.Server.Infrastructure.Data.Issue;
 public class IssueStore : IStateStore<DomainIssue>
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     public IssueStore(IDbContextFactory<MohistDbContext> dbFactory)
     {
@@ -51,8 +43,8 @@ public class IssueStore : IStateStore<DomainIssue>
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
     public static DomainIssue? Deserialize(string json) =>
-        JsonSerializer.Deserialize<DomainIssue>(json, JsonOptions);
+        JSON.Deserialize<DomainIssue>(json);
 
     public static string Serialize(DomainIssue issue) =>
-        JsonSerializer.Serialize(issue, JsonOptions);
+        JSON.Serialize(issue);
 }
