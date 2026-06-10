@@ -72,8 +72,13 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
     private static WorkflowStartInput TestInput(string projectId)
     {
-        var json = System.Text.Json.JsonSerializer.Serialize(new { project = new { id = projectId } });
-        return new WorkflowStartInput(json, ProjectId: projectId);
+        return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+            }));
     }
 
     private static string TestProjectId(string workflowId) => $"test-project-{workflowId}";

@@ -32,8 +32,13 @@ public static class WorkflowGrainTestHelpers
     public static WorkflowStartInput TestInput(IGrainFactory grains, string workflowId, string? projectId = null)
     {
         projectId ??= TestProjectId(workflowId);
-        var json = JsonSerializer.Serialize(new { project = new { id = projectId } }, WorkflowVariableJson.Options);
-        return new WorkflowStartInput(json, ProjectId: projectId);
+        return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+            }));
     }
 
     public static async Task<string> RegisterRunnerAsync(

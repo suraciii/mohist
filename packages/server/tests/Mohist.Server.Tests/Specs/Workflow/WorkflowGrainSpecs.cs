@@ -104,8 +104,13 @@ public abstract class WorkflowGrainSpecs
     protected WorkflowStartInput TestInput(string? projectId = null)
     {
         projectId ??= _workflowId is null ? "test-project" : TestProjectId(_workflowId);
-        var json = JsonSerializer.Serialize(new { project = new { id = projectId } }, WorkflowVariableJson.Options);
-        return new WorkflowStartInput(json, ProjectId: projectId);
+        return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+            }));
     }
 
     protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";

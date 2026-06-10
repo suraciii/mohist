@@ -15,6 +15,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 
@@ -31,6 +32,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IssueIdentityResolver _identityResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly IEventStore _eventStore;
     private readonly IEventPublisher _eventBus;
     private readonly ILogger<IssueGrain> _log;
@@ -44,6 +46,7 @@ public class IssueGrain : Grain, IIssueGrain
         IssueIdentityResolver identityResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
+        IssueWorkflowProfileManager issueProfileManager,
         IEventStore eventStore,
         IEventPublisher eventBus,
         ILogger<IssueGrain> log)
@@ -56,6 +59,7 @@ public class IssueGrain : Grain, IIssueGrain
         _identityResolver = identityResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
+        _issueProfileManager = issueProfileManager;
         _eventStore = eventStore;
         _eventBus = eventBus;
         _log = log;
@@ -133,12 +137,20 @@ public class IssueGrain : Grain, IIssueGrain
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
 
+        await _issueProfileManager.PatchVariablesAsync(issue.Id, BuildIssueVariables(wrId, issue, projectContext));
+
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(input:
             new WorkflowStartInput(
-                BuildVariables(wrId, issue, projectContext, mergedPrompts),
-                ProjectId: projectContext.Id,
-                IssueId: issue.Id));
+                Metadata: new WorkflowRunMetadata(
+                    Name: null,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["projectId"] = projectContext.Id,
+                        ["issueId"] = issue.Id,
+                        ["issueNumber"] = issue.Number.ToString(),
+                    })));
 
         await SaveIssueAsync();
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
@@ -342,7 +354,7 @@ public class IssueGrain : Grain, IIssueGrain
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
-    private string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, IReadOnlyDictionary<string, string> prompts)
+    private VariableBundle BuildIssueVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project)
     {
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
@@ -352,10 +364,11 @@ public class IssueGrain : Grain, IIssueGrain
             ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, path = project.RepositoryPath, remote = project.RepositoryRemote, baseBranch = project.RepositoryBaseBranch ?? project.BaseBranch }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
-            ["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options),
         };
 
-        return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+        var varsJson = JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+        var varsElement = JsonSerializer.Deserialize<JsonElement>(varsJson);
+        return new VariableBundle(varsElement);
     }
 
     private async Task EnsurePromptsReferencesResolveAsync(Workflow.Domain.Definition.WorkflowDefinition definition, IReadOnlyDictionary<string, string> mergedPrompts)
@@ -374,22 +387,6 @@ public class IssueGrain : Grain, IIssueGrain
         {
             throw new MissingPromptsException(missing);
         }
-    }
-
-    private static Dictionary<string, Dictionary<string, string>>? BuildStageVariablesFromDefinition(Workflow.Domain.Definition.WorkflowDefinition definition)
-    {
-        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var stage in definition.Stages)
-        {
-            if (stage.Variables is null || stage.Variables.Count == 0) continue;
-            result[stage.Stage] = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["vars"] = JsonSerializer.Serialize(
-                    stage.Variables.ToDictionary(kv => kv.Key, kv => kv.Value.HasValue ? JsonSerializer.Deserialize<object?>(kv.Value.Value.GetRawText(), WorkflowVariableJson.Options) : null),
-                    WorkflowVariableJson.Options)
-            };
-        }
-        return result.Count == 0 ? null : result;
     }
 
     private async Task SaveIssueAsync()

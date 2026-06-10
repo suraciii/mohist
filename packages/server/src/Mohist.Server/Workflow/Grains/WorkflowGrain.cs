@@ -27,7 +27,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IWorkflowRunStore _runStore;
     private readonly IPersistentState<WorkLease> _leaseState;
-    private readonly IPersistentState<WorkflowExecutionContext> _variablesState;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
@@ -35,14 +34,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         [PersistentState("lease")] IPersistentState<WorkLease> leaseState,
-        [PersistentState("variables")] IPersistentState<WorkflowExecutionContext> variablesState,
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _leaseState = leaseState;
-        _variablesState = variablesState;
         _backlogs = backlogs;
         _profileManager = profileManager;
         _log = log;
@@ -135,26 +132,19 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
-        var pendingVariables = !string.IsNullOrWhiteSpace(input?.Variables)
-            ? new WorkflowExecutionContext(input.Variables!, input?.StageVariables)
-            : null;
-
         if (_run is null)
         {
-            _variablesState.State = pendingVariables!;
-            var effectiveDefinition = await LoadEffectiveDefinitionAsync(
-                input?.ProjectId ?? GetProjectId(),
-                input?.IssueId ?? GetIssueId());
-            _run = WorkflowRun.Create(GrainKey, effectiveDefinition,
-                BuildRunMetadata(input));
+            var metadata = input?.Metadata;
+            var projectId = metadata?.Annotations?.GetValueOrDefault("projectId") ?? GetProjectId();
+            var issueId = metadata?.Annotations?.GetValueOrDefault("issueId") ?? GetIssueId();
+            var effectiveDefinition = await LoadEffectiveDefinitionAsync(projectId, issueId);
+            _run = WorkflowRun.Create(GrainKey, effectiveDefinition, metadata ?? BuildRunMetadata(null));
         }
 
         var events = _run.Start();
-        if (pendingVariables is not null)
-            _variablesState.State = pendingVariables!;
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
-        await CommitAsync(events, saveVariables: pendingVariables is not null);
+        await CommitAsync(events);
     }
 
     private async Task<WorkflowDefinition> LoadEffectiveDefinitionAsync(
@@ -581,23 +571,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
         var resolved = VariableBundle.Patch(embedded, independent);
 
-        // --- 2. Build the complete dispatch payload ---
-        // Start from _variables.Json (frozen issue/project/prompts context + initial template vars).
-        // Then: merge resolved.Vars/Stages on top, inject dispatch scope.
-        var payload = WorkflowExecutionContext.ParseObject(_variablesState.State?.Json ?? "{}");
+        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
 
-        var baseVars = payload.TryGetValue("vars", out var existingVars0)
-            && existingVars0.HasValue && existingVars0.Value.ValueKind == JsonValueKind.Object
-            ? existingVars0.Value
+        var effectiveVarsJson = resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object
+            ? resolved.Vars.Value
             : JsonSerializer.Deserialize<JsonElement>("{}");
-
-        // Apply resolved.Vars (3-layer independent: project + issue + workflow-run, merged with embedded template vars)
-        var effectiveVarsJson = baseVars;
-        if (resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object)
-        {
-            var overlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(resolved.Vars.Value));
-            effectiveVarsJson = VariableBundle.DeepMerge(baseVars, overlay) ?? overlay;
-        }
 
         // Apply resolved stage-scoped vars
         if (resolved.Stages is not null
@@ -899,14 +877,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return result.Count == 0 ? null : result;
     }
 
-    private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, bool saveVariables = false, CancellationToken ct = default)
+    private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, CancellationToken ct = default)
     {
         if (_run is not null)
         {
             _runDirty = true;
             await SaveRunAsync(events);
-            if (saveVariables)
-                await SaveVariablesAsync();
         }
 
         foreach (var e in events)
@@ -990,42 +966,19 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return Task.CompletedTask;
     }
 
-    private string GetProjectId() => _variablesState.State?.String("project", "id") ?? "";
+    private string GetProjectId() =>
+        _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
 
-    private string? GetIssueId() => _variablesState.State?.String("issue", "id");
+    private string? GetIssueId() =>
+        _run?.Metadata?.Annotations?.TryGetValue("issueId", out var v) == true ? v : null;
 
-    private string? GetIssueNumber() => _variablesState.State?.String("issue", "number");
+    private string? GetIssueNumber() =>
+        _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true ? v : null;
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {
         if (input is null) return null;
-
-        Dictionary<string, string>? annotations = input.Annotations is not null
-            ? new Dictionary<string, string>(input.Annotations, StringComparer.Ordinal)
-            : null;
-
-        var projectId = input.ProjectId ?? GetProjectId();
-        if (!string.IsNullOrWhiteSpace(projectId))
-        {
-            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            annotations["projectId"] = projectId;
-        }
-
-        var issueId = input.IssueId ?? GetIssueId();
-        if (!string.IsNullOrWhiteSpace(issueId))
-        {
-            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            annotations["issueId"] = issueId;
-        }
-
-        var issueNumber = GetIssueNumber();
-        if (!string.IsNullOrWhiteSpace(issueNumber))
-        {
-            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            annotations["issueNumber"] = issueNumber;
-        }
-
-        return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, annotations);
+        return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, input.Annotations);
     }
 
     private async Task SaveRunAsync()
@@ -1069,10 +1022,5 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private Task SaveLeaseAsync() =>
         _leaseState.State is not null
             ? _leaseState.WriteStateAsync()
-            : Task.CompletedTask;
-
-    private Task SaveVariablesAsync() =>
-        _variablesState.State is not null
-            ? _variablesState.WriteStateAsync()
             : Task.CompletedTask;
 }

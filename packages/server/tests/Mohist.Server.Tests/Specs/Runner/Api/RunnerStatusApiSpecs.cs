@@ -6,6 +6,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -39,7 +40,13 @@ public class RunnerStatusApiSpecs
                 [])
         ]);
         await SeedWorkflowTemplateAsync(workflowId, definition);
-        await workflow.StartAsync(new WorkflowStartInput(Variables: """{"project":{"id":"test-project"}}"""));
+        await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = "test-project",
+            })));
         await workflow.AssignRunnerAsync(runnerId);
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
