@@ -1,8 +1,8 @@
 ---
-purpose: "Cross-aggregate interactions between Issue, WorkflowRun, Runner, and Session as diagrams."
+purpose: "Cross-aggregate interactions between Issue, WorkflowRun, Runner, and Session."
 style:
-  - "Vertical line = aggregate."
-  - "Solid arrow = synchronous command. Dashed arrow = event."
+  - "Sequence diagrams in mermaid."
+  - "Synchronous command: solid arrow (->>). Asynchronous event: open arrow (-))."
   - "Commands named without the Async suffix or parameter list."
 ---
 
@@ -10,9 +10,9 @@ style:
 
 ## Conventions
 
-- Aggregate names: `Issue` / `WorkflowRun` / `Runner` / `Session`
-- Solid arrow: command (synchronous cross-aggregate call)
-- Dashed arrow: event (triggers a downstream command)
+- Aggregates: `Issue` / `WorkflowRun` / `Runner` / `Session`
+- Solid arrow `->>`: command (synchronous cross-aggregate call)
+- Open arrow `-)` : event (triggers a downstream command)
 - Single-aggregate transitions are listed in prose, not drawn
 
 ## 跨聚合事件→命令
@@ -25,52 +25,54 @@ style:
 
 ## Start
 
-```text
-Issue              WorkflowRun
-  |                   |
-  |--- StartWork ---->|
+```mermaid
+sequenceDiagram
+    participant Issue
+    participant WorkflowRun
+    Issue->>WorkflowRun: StartWork
 ```
 
 ## Report (成功)
 
-```text
-Runner         WorkflowRun           Issue
-  |               |                   |
-  |--- Report --->|                   |
-  |               |                   |
-  |               · ··> WorkflowRunCompleted
-  |               |                   |
-  |               |--- CompleteWork ->|
+```mermaid
+sequenceDiagram
+    participant Runner
+    participant WorkflowRun
+    participant Issue
+    Runner->>WorkflowRun: Report
+    WorkflowRun-) Issue: WorkflowRunCompleted
+    WorkflowRun->>Issue: CompleteWork
 ```
 
 ## Report (失败)
 
-```text
-Runner         WorkflowRun           Issue
-  |               |                   |
-  |--- Report --->|                   |
-  |               |                   |
-  |               · ··> WorkflowRunFailed
-  |               |                   |
-  |               |--- AbortWork ---->|
+```mermaid
+sequenceDiagram
+    participant Runner
+    participant WorkflowRun
+    participant Issue
+    Runner->>WorkflowRun: Report
+    WorkflowRun-) Issue: WorkflowRunFailed
+    WorkflowRun->>Issue: AbortWork
 ```
 
 ## Stop (issue 在跑 workflow)
 
-```text
-Issue              WorkflowRun
-  |                   |
-  |--- Cancel ------->|
+```mermaid
+sequenceDiagram
+    participant Issue
+    participant WorkflowRun
+    Issue->>WorkflowRun: Cancel
 ```
 
 ## Runner Disconnect
 
-```text
-Runner            Session
-  |                 |
-  · ··> RunnerDisconnected
-  |                 |
-                    | (fail sessions)
+```mermaid
+sequenceDiagram
+    participant Runner
+    participant Session
+    Runner-) Session: RunnerDisconnected
+    Note over Session: fail sessions
 ```
 
 ## 单一聚合 transition
