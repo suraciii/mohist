@@ -57,5 +57,6 @@ internal static class IssueEventSerializer
         IssueArchived x => x,
         IssueUnarchived x => x,
         IssueReopened x => x,
+        null => throw new ArgumentNullException(nameof(payload)),
     };
 }

@@ -81,7 +81,7 @@ internal static class WorkflowEventSerializer
 
     public static object Unwrap(WorkflowEvent payload) => payload switch
     {
-        WorkflowRunStarted x => x,
+        WorkflowRunStarted x => (object)x,
         WorkflowRunResumed x => x,
         WorkflowRunPaused x => x,
         WorkflowRunStopped x => x,
@@ -98,5 +98,6 @@ internal static class WorkflowEventSerializer
         CheckFailed x => x,
         CheckPending x => x,
         RepairScheduled x => x,
+        null => throw new InvalidOperationException("Null workflow event"),
     };
 }

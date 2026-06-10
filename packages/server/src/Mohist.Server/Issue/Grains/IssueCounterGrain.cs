@@ -1,30 +1,25 @@
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Issue.Grains;
 
 public class IssueCounterGrain : Grain, IIssueCounterGrain
 {
-    private int _next;
-    private readonly IStateStore<IssueCounterState> _store;
+    private readonly IPersistentState<IssueCounterState> _state;
 
-    public IssueCounterGrain(IStateStore<IssueCounterState> store)
+    public IssueCounterGrain(
+        [PersistentState("counter")] IPersistentState<IssueCounterState> state)
     {
-        _store = store;
+        _state = state;
     }
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    public Task<int> NextAsync() => NextAsyncImpl();
 
-    public override async Task OnActivateAsync(CancellationToken ct)
+    private async Task<int> NextAsyncImpl()
     {
-        var state = await _store.LoadAsync(GrainKey);
-        _next = state?.Next ?? 1;
-    }
-
-    public async Task<int> NextAsync()
-    {
-        var value = _next++;
-        await _store.SaveAsync(GrainKey, new IssueCounterState(_next));
-        return value;
+        var current = _state.State?.Next ?? 0;
+        _state.State = new IssueCounterState(current + 1);
+        await _state.WriteStateAsync();
+        return current;
     }
 }

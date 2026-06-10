@@ -1,103 +1,99 @@
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
 public class WorkflowStageLockGrain : Grain, IWorkflowStageLockGrain
 {
-    private readonly IStateStore<WorkflowStageLockState> _store;
+    private readonly IPersistentState<WorkflowStageLockState> _state;
     private readonly ILogger<WorkflowStageLockGrain> _log;
-    private WorkflowStageLockState _state = new();
 
-    public WorkflowStageLockGrain(IStateStore<WorkflowStageLockState> store, ILogger<WorkflowStageLockGrain> log)
+    public WorkflowStageLockGrain(
+        [PersistentState("lock")] IPersistentState<WorkflowStageLockState> state,
+        ILogger<WorkflowStageLockGrain> log)
     {
-        _store = store;
+        _state = state;
         _log = log;
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
 
-    public override async Task OnActivateAsync(CancellationToken ct)
-    {
-        _state = await _store.LoadAsync(GrainKey) ?? new WorkflowStageLockState();
-    }
-
     public async Task<StageLockAcquireResult> AcquireSequentialAsync(StageLockRequest request)
     {
-        if (_state.Owner is { } owner)
+        if (_state.State.Owner is { } owner)
         {
             if (owner.WorkflowRunId == request.WorkflowRunId && owner.Stage == request.Stage)
             {
-                return new StageLockAcquireResult(true, request.Resource, owner.WorkflowRunId, _state.Waiting.Count);
+                return new StageLockAcquireResult(true, request.Resource, owner.WorkflowRunId, _state.State.Waiting.Count);
             }
 
             EnqueueIfMissing(request);
             await SaveAsync();
-            return new StageLockAcquireResult(false, request.Resource, owner.WorkflowRunId, _state.Waiting.Count);
+            return new StageLockAcquireResult(false, request.Resource, owner.WorkflowRunId, _state.State.Waiting.Count);
         }
 
         var next = DequeueNext();
         if (next is not null && (next.WorkflowRunId != request.WorkflowRunId || next.Stage != request.Stage))
         {
-            _state.Owner = new StageLockOwner(next.WorkflowRunId, next.Stage);
+            _state.State.Owner = new StageLockOwner(next.WorkflowRunId, next.Stage);
             EnqueueIfMissing(request);
             await SaveAsync();
             _log.LogInformation("Stage lock {LockKey} granted queued workflow {WorkflowRunId} before caller {Caller}",
                 GrainKey, next.WorkflowRunId, request.WorkflowRunId);
-            return new StageLockAcquireResult(false, request.Resource, next.WorkflowRunId, _state.Waiting.Count);
+            return new StageLockAcquireResult(false, request.Resource, next.WorkflowRunId, _state.State.Waiting.Count);
         }
 
-        _state.Owner = new StageLockOwner(request.WorkflowRunId, request.Stage);
+        _state.State.Owner = new StageLockOwner(request.WorkflowRunId, request.Stage);
         RemoveWaiting(request.WorkflowRunId, request.Stage);
         await SaveAsync();
         _log.LogInformation("Stage lock {LockKey} acquired by workflow {WorkflowRunId} stage {Stage}",
             GrainKey, request.WorkflowRunId, request.Stage);
-        return new StageLockAcquireResult(true, request.Resource, request.WorkflowRunId, _state.Waiting.Count);
+        return new StageLockAcquireResult(true, request.Resource, request.WorkflowRunId, _state.State.Waiting.Count);
     }
 
     public async Task<StageLockReleaseResult> ReleaseAsync(StageLockOwner owner)
     {
-        if (_state.Owner is null
-            || _state.Owner.WorkflowRunId != owner.WorkflowRunId
-            || _state.Owner.Stage != owner.Stage)
+        if (_state.State.Owner is null
+            || _state.State.Owner.WorkflowRunId != owner.WorkflowRunId
+            || _state.State.Owner.Stage != owner.Stage)
         {
             RemoveWaiting(owner.WorkflowRunId, owner.Stage);
             await SaveAsync();
-            return new StageLockReleaseResult(false, ResourceFromKey(), _state.Owner?.WorkflowRunId, _state.Waiting.Count);
+            return new StageLockReleaseResult(false, ResourceFromKey(), _state.State.Owner?.WorkflowRunId, _state.State.Waiting.Count);
         }
 
-        var next = _state.Waiting.FirstOrDefault();
-        _state.Owner = null;
+        var next = _state.State.Waiting.FirstOrDefault();
+        _state.State.Owner = null;
         await SaveAsync();
         _log.LogInformation("Stage lock {LockKey} released by workflow {WorkflowRunId}; next={Next}",
             GrainKey, owner.WorkflowRunId, next?.WorkflowRunId ?? "<none>");
-        return new StageLockReleaseResult(true, ResourceFromKey(), next?.WorkflowRunId, _state.Waiting.Count);
+        return new StageLockReleaseResult(true, ResourceFromKey(), next?.WorkflowRunId, _state.State.Waiting.Count);
     }
 
-    public Task<WorkflowStageLockState?> GetStateAsync() => Task.FromResult<WorkflowStageLockState?>(_state);
+    public Task<WorkflowStageLockState?> GetStateAsync() => Task.FromResult<WorkflowStageLockState?>(_state.State);
 
     private void EnqueueIfMissing(StageLockRequest request)
     {
-        if (_state.Waiting.Any(w => w.WorkflowRunId == request.WorkflowRunId && w.Stage == request.Stage))
+        if (_state.State.Waiting.Any(w => w.WorkflowRunId == request.WorkflowRunId && w.Stage == request.Stage))
             return;
 
-        _state.Waiting.Add(request);
+        _state.State.Waiting.Add(request);
     }
 
     private StageLockRequest? DequeueNext()
     {
-        if (_state.Waiting.Count == 0) return null;
-        var next = _state.Waiting[0];
-        _state.Waiting.RemoveAt(0);
+        if (_state.State.Waiting.Count == 0) return null;
+        var next = _state.State.Waiting[0];
+        _state.State.Waiting.RemoveAt(0);
         return next;
     }
 
     private void RemoveWaiting(string workflowRunId, string stage)
     {
-        _state.Waiting.RemoveAll(w => w.WorkflowRunId == workflowRunId && w.Stage == stage);
+        _state.State.Waiting.RemoveAll(w => w.WorkflowRunId == workflowRunId && w.Stage == stage);
     }
 
-    private Task SaveAsync() => _store.SaveAsync(GrainKey, _state);
+    private Task SaveAsync() => _state.WriteStateAsync();
 
     private string ResourceFromKey()
     {

@@ -5,7 +5,6 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -21,31 +20,29 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private static readonly TimeSpan WorkHeartbeatReminderDueTime = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan WorkHeartbeatReminderPeriod = TimeSpan.FromMinutes(1);
     private WorkflowRun? _run;
-    private WorkLease? _lease;
-    private WorkflowExecutionContext? _variables;
     private string? _lastRunnerId;
     private bool _runDirty;
     private IGrainReminder? _workHeartbeatReminder;
     private readonly HashSet<string> _announcedWaitingLocks = [];
     private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IWorkflowRunStore _runStore;
-    private readonly IStateStore<WorkLease> _leaseStore;
-    private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
+    private readonly IPersistentState<WorkLease> _leaseState;
+    private readonly IPersistentState<WorkflowExecutionContext> _variablesState;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
-        IStateStore<WorkLease> leaseStore,
-        IStateStore<WorkflowExecutionContext> variablesStore,
+        [PersistentState("lease")] IPersistentState<WorkLease> leaseState,
+        [PersistentState("variables")] IPersistentState<WorkflowExecutionContext> variablesState,
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
-        _leaseStore = leaseStore;
-        _variablesStore = variablesStore;
+        _leaseState = leaseState;
+        _variablesState = variablesState;
         _backlogs = backlogs;
         _profileManager = profileManager;
         _log = log;
@@ -56,10 +53,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _run = await _runStore.LoadAsync(GrainKey);
-        _lease = await _leaseStore.LoadAsync(GrainKey);
-        _variables = await _variablesStore.LoadAsync(GrainKey);
 
-        _lastRunnerId = _run?.Claim?.RunnerId ?? _lease?.RunnerId;
+        _lastRunnerId = _run?.Claim?.RunnerId ?? _leaseState.State?.RunnerId;
         await EnsureWorkHeartbeatAsync();
     }
 
@@ -101,13 +96,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     /// </summary>
     private async Task CheckLeaseAgeAsync()
     {
-        if (_lease?.DispatchedAt is not { } dispatchedAt) return;
+        if (_leaseState.State?.DispatchedAt is not { } dispatchedAt) return;
         var age = DateTime.UtcNow - dispatchedAt;
         if (age < LeaseTimeout) return;
 
         var runId = GrainKey;
-        var workId = _lease.WorkId;
-        var runnerId = _lease.RunnerId;
+        var workId = _leaseState.State.WorkId;
+        var runnerId = _leaseState.State.RunnerId;
         var reason = $"lease expired after {age.TotalSeconds:F0}s without runner report";
 
         _log.LogWarning(
@@ -130,7 +125,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         current.Status = StageRunStatus.Failed;
         _run.Failure = current.Failure;
         _run.Status = WorkflowRunStatus.Failed;
-        _lease = null;
+        _leaseState.State = null!;
 
         await SaveRunAsync([
             new StageFailed(current.Id, reason),
@@ -146,7 +141,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         if (_run is null)
         {
-            _variables = pendingVariables;
+            _variablesState.State = pendingVariables!;
             var effectiveDefinition = await LoadEffectiveDefinitionAsync(
                 input?.ProjectId ?? GetProjectId(),
                 input?.IssueId ?? GetIssueId());
@@ -156,7 +151,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         var events = _run.Start();
         if (pendingVariables is not null)
-            _variables = pendingVariables;
+            _variablesState.State = pendingVariables!;
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events, saveVariables: pendingVariables is not null);
@@ -301,8 +296,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return;
         }
 
-        var activeLease = await RestoreLeaseAsync();
-        if (activeLease is not null)
+        var activeLease = _leaseState?.State;
+        if (!string.IsNullOrWhiteSpace(activeLease?.WorkId))
         {
             if (!string.Equals(activeLease.RunnerId, runnerId, StringComparison.Ordinal))
                 return;
@@ -402,15 +397,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public async Task ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (_run is null || !_run.IsClaimedBy(runnerId)) return;
-        var lease = await RestoreReportLeaseAsync(runnerId, workId);
-        if (lease is null || workId != lease.WorkId) return;
-
-        if (lease.RunnerId != runnerId)
-        {
-            _log.LogWarning("Workflow {Id} ignoring report from runner {Caller} — lease owned by {Owner}",
-                GrainKey, runnerId, lease.RunnerId);
+        var lease = _leaseState?.State;
+        if (string.IsNullOrWhiteSpace(lease?.WorkId)
+            || !string.Equals(lease.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(lease.RunnerId, runnerId, StringComparison.Ordinal))
             return;
-        }
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
@@ -449,8 +440,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public async Task<string?> GetCurrentWorkIdAsync()
     {
-        var lease = await RestoreLeaseAsync();
-        return lease?.WorkId;
+        return _leaseState?.State is { WorkId: not null and not "" } l ? l.WorkId : null;
     }
 
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
@@ -593,7 +583,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         // --- 2. Build the complete dispatch payload ---
         // Start from _variables.Json (frozen issue/project/prompts context + initial template vars).
         // Then: merge resolved.Vars/Stages on top, inject dispatch scope.
-        var payload = WorkflowExecutionContext.ParseObject(_variables?.Json ?? "{}");
+        var payload = WorkflowExecutionContext.ParseObject(_variablesState.State?.Json ?? "{}");
 
         var baseVars = payload.TryGetValue("vars", out var existingVars0)
             && existingVars0.HasValue && existingVars0.Value.ValueKind == JsonValueKind.Object
@@ -662,7 +652,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             Stage: stage,
             Title: title,
             Issue: issueRef);
-        _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
+        _leaseState.State = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
         _lastRunnerId = runnerId;
         return dispatch;
     }
@@ -725,14 +715,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task ClearAndDeleteLeaseAsync()
     {
-        _lease = null;
-        await _leaseStore.DeleteAsync(GrainKey);
+        if (_leaseState is null) return;
+        _leaseState.State = null!;
+        await _leaseState.WriteStateAsync();
     }
 
     private async Task ClearChecksLeaseAsync()
     {
-        var lease = await RestoreLeaseAsync();
-        if (lease?.WorkType is "check" or "checks")
+        if (_leaseState?.State is { WorkId: not null, WorkType: "check" or "checks" })
             await ClearAndDeleteLeaseAsync();
     }
 
@@ -740,29 +730,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         await ReleaseCurrentStageLocksAsync(reason);
 
-        var lease = await RestoreLeaseAsync();
-        if (lease is not null)
+        if (_leaseState?.State is { WorkId: not null and not "" })
             await ClearAndDeleteLeaseAsync();
-    }
-
-    private async Task<WorkLease?> RestoreLeaseAsync()
-    {
-        if (_lease is not null)
-            return _lease;
-
-        _lease = await _leaseStore.LoadAsync(GrainKey);
-        _lastRunnerId = _lease?.RunnerId;
-        return _lease;
-    }
-
-    private async Task<WorkLease?> RestoreReportLeaseAsync(string runnerId, string workId)
-    {
-        var lease = await RestoreLeaseAsync();
-        if (lease is null
-            || !string.Equals(lease.WorkId, workId, StringComparison.Ordinal)
-            || !string.Equals(lease.RunnerId, runnerId, StringComparison.Ordinal))
-            return null;
-        return lease;
     }
 
     private IReadOnlyList<WorkflowEvent> ProcessTaskResult(WorkResult result)
@@ -934,36 +903,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run is not null)
         {
             _runDirty = true;
-            await SaveAllAsync(events, saveVariables);
+            await SaveRunAsync(events);
+            if (saveVariables)
+                await SaveVariablesAsync();
         }
 
         foreach (var e in events)
             await On(e, reason);
-    }
-
-    private async Task SaveAllAsync(IReadOnlyList<WorkflowEvent> events, bool saveLeaseAndVariables)
-    {
-        if (_run is null) return;
-        try
-        {
-            if (saveLeaseAndVariables)
-            {
-                await _runStore.SaveAllAsync(_run, events, _lease, _variables);
-            }
-            else
-            {
-                await _runStore.SaveAsync(_run, events);
-            }
-            _runDirty = false;
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            _log.LogWarning(ex,
-                "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
-                GrainKey);
-            DeactivateOnIdle();
-            throw;
-        }
     }
 
     private Task On(WorkflowEvent e, string? reason = null) =>
@@ -1043,11 +989,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return Task.CompletedTask;
     }
 
-    private string GetProjectId() => _variables?.String("project", "id") ?? "";
+    private string GetProjectId() => _variablesState.State?.String("project", "id") ?? "";
 
-    private string? GetIssueId() => _variables?.String("issue", "id");
+    private string? GetIssueId() => _variablesState.State?.String("issue", "id");
 
-    private string? GetIssueNumber() => _variables?.String("issue", "number");
+    private string? GetIssueNumber() => _variablesState.State?.String("issue", "number");
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {
@@ -1120,12 +1066,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     }
 
     private Task SaveLeaseAsync() =>
-        _lease is not null
-            ? _leaseStore.SaveAsync(GrainKey, _lease)
+        _leaseState.State is not null
+            ? _leaseState.WriteStateAsync()
             : Task.CompletedTask;
 
     private Task SaveVariablesAsync() =>
-        _variables is not null
-            ? _variablesStore.SaveAsync(GrainKey, _variables)
+        _variablesState.State is not null
+            ? _variablesState.WriteStateAsync()
             : Task.CompletedTask;
 }
