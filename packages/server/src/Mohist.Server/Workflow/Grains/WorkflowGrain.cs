@@ -32,7 +32,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IStateStore<WorkLease> _leaseStore;
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
     private readonly IWorkflowBacklogDirectory _backlogs;
-    private readonly IEventBus _eventBus;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
 
@@ -41,7 +40,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IStateStore<WorkLease> leaseStore,
         IStateStore<WorkflowExecutionContext> variablesStore,
         IWorkflowBacklogDirectory backlogs,
-        IEventBus eventBus,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
@@ -49,7 +47,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _leaseStore = leaseStore;
         _variablesStore = variablesStore;
         _backlogs = backlogs;
-        _eventBus = eventBus;
         _profileManager = profileManager;
         _log = log;
     }
@@ -139,21 +136,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             new StageFailed(current.Id, reason),
             new WorkflowRunFailed(reason),
         ]);
-
-        _eventBus.Emit(CloudEventFactory.Create(
-            type: EventCatalog.ReverseDns.LeaseExpired,
-            source: new Uri($"/mohist/workflow/{runId}/work/{workId}", UriKind.Relative),
-            subject: runId,
-            projectId: GetProjectId(),
-            issueNumber: GetIssueNumber(),
-            workflowRunId: runId,
-            extraExtensions: new Dictionary<string, object?>
-            {
-                ["workid"] = workId,
-                ["runnerid"] = runnerId ?? string.Empty,
-                ["ageseconds"] = (long)age.TotalSeconds,
-                ["reason"] = reason,
-            }));
     }
 
     public async Task StartAsync(WorkflowStartInput? input = null)
@@ -947,42 +929,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return result.Count == 0 ? null : result;
     }
 
-    private void EmitStageChanged(string action, string? reason = null)
-    {
-        if (_run is null) return;
-        var current = _run.Stages.FirstOrDefault(s => s.Id == _run.CurrentStageId);
-        var projectId = GetProjectId();
-        var runId = GrainKey;
-        var stageId = _run.CurrentStageId;
-        var status = current?.Status.ToString() ?? "Unknown";
-        var payload = new StageChangedEvent(
-            projectId,
-            runId,
-            stageId,
-            status,
-            action,
-            reason,
-            DateTime.UtcNow.ToString("o"));
-        var subject = _run.Metadata?.Annotations is { } a && a.TryGetValue("issueNumber", out var n)
-            ? n.ToString()
-            : null;
-        _eventBus.Emit(CloudEventFactory.Create(
-            type: "stage_changed",
-            source: new Uri($"/mohist/workflow/{runId}/stage/{stageId}", UriKind.Relative),
-            data: payload,
-            subject: subject,
-            projectId: projectId,
-            workflowRunId: runId,
-            issueNumber: subject,
-            extraExtensions: new Dictionary<string, object?>
-            {
-                ["stage"] = stageId,
-                ["status"] = status,
-                ["action"] = action,
-            }));
-    }
-
-    private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, bool saveVariables = false)
+    private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, bool saveVariables = false, CancellationToken ct = default)
     {
         if (_run is not null)
         {
@@ -1044,27 +991,23 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task OnWorkflowStartedAsync()
     {
-        EmitStageChanged("started");
         await EnsureWorkHeartbeatAsync();
     }
 
     private async Task OnWorkflowResumedAsync()
     {
-        EmitStageChanged("resumed");
         await EnsureWorkHeartbeatAsync();
     }
 
     private async Task OnWorkflowPausedAsync(string? reason)
     {
-        EmitStageChanged("paused", reason);
         await DisableWorkHeartbeatAsync();
     }
 
     private async Task OnWorkflowStoppedAsync(string? reason)
     {
-        EmitStageChanged("stopped", reason);
         await DisableWorkHeartbeatAsync();
-        // Step 8 of design/event-mechanism.md: hook dispatch removed.
+        // Step 8 of design/eventbus.md: hook dispatch removed.
         // Side effects now flow through the bus — IssueGrain subscribes
         // to com.mohist.workflow.run.stopped (Step 5) and the
         // worktree cleanup service subscribes to .completed.
@@ -1072,7 +1015,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task OnWorkflowFailedAsync(string? reason)
     {
-        EmitStageChanged("failed", reason);
         await DisableWorkHeartbeatAsync();
     }
 
@@ -1093,13 +1035,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task OnApprovalApprovedAsync()
     {
-        EmitStageChanged("approved");
         await EnsureWorkHeartbeatAsync();
     }
 
     private Task OnApprovalRejectedAsync(string? reason)
     {
-        EmitStageChanged("rejected", reason);
         return Task.CompletedTask;
     }
 

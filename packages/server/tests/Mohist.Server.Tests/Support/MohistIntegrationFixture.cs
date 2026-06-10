@@ -25,7 +25,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
-    public IEventBus EventBus => _factory.Services.GetRequiredService<IEventBus>();
+    public IEventPublisher EventBus => _factory.Services.GetRequiredService<IEventPublisher>();
     public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");

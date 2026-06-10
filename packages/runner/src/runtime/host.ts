@@ -21,7 +21,7 @@ export class RunnerHost {
   private readonly workspace: WorkspaceManager
   private readonly maxConcurrentWorkflows: number
 
-  // Step 10 of design/event-mechanism.md: AcpSessionManager and
+  // Step 10 of design/eventbus.md: AcpSessionManager and
   // SharedAcpConnection are created once per host (not per work item).
   // The previous design recreated them for every executeAndReport call,
   // so AcpSessionManager's cross-task cache was always cold and

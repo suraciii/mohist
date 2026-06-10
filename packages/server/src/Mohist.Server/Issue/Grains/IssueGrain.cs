@@ -1,7 +1,6 @@
 using System.Text.Json;
 using CloudNative.CloudEvents;
 using Microsoft.EntityFrameworkCore;
-using Orleans.Concurrency;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -71,7 +70,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (!string.IsNullOrWhiteSpace(repositoryRef))
             return repositoryRef;
-
+        
         var projectGrain = GrainFactory.GetGrain<IProjectGrain>(projectId);
         var project = await projectGrain.GetAsync();
         return _repositoryResolver.Resolve(project, repositoryRef: null).Repository?.Name;
@@ -235,7 +234,7 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
 
-        // Lazy reconciliation (Step 4 of design/event-mechanism.md): if the
+        // Lazy reconciliation (see design/eventbus.md §Lost Event Recovery): if the
         // bus subscription missed the terminal event (grain was deactivated
         // at emit time, or the event was lost across a silo restart before
         // the outbox), the read path here is the next chance to bring the

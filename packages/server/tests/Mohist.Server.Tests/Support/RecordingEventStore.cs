@@ -1,42 +1,33 @@
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Tests.Support;
 
 public class RecordingEventStore : IEventStore
 {
-    private readonly List<RecordedWorkflowEvent> _events = [];
+    private readonly List<RecordedEnvelope> _events = [];
     private readonly Lock _gate = new();
 
-    public Task<WorkflowDomainEventDto> AppendWorkflowEventAsync(string workflowRunId, WorkflowEvent payload, CancellationToken ct = default)
+    public Task AppendAsync(CloudEvent envelope, CancellationToken ct = default)
     {
-        WorkflowDomainEventDto dto;
         lock (_gate)
         {
-            dto = new WorkflowDomainEventDto(
-                _events.Count(e => e.WorkflowRunId == workflowRunId) + 1,
-                $"/workflow-runs/{workflowRunId}",
-                WorkflowEventSerializer.Type(payload),
-                payload,
-                DateTime.UtcNow,
-                "1.0");
-            _events.Add(new RecordedWorkflowEvent(workflowRunId, dto));
+            _events.Add(new RecordedEnvelope(envelope));
         }
-
-        return Task.FromResult(dto);
+        return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<WorkflowDomainEventDto>> ListWorkflowEventsAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
+    public Task<IReadOnlyList<StoredCloudEvent>> ListAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
     {
         lock (_gate)
         {
-            return Task.FromResult<IReadOnlyList<WorkflowDomainEventDto>>(_events
-                .Where(e => e.WorkflowRunId == workflowRunId)
+            var source = $"/workflow-runs/{workflowRunId}";
+            return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
+                .Where(e => e.Envelope.Source.ToString() == source)
                 .TakeLast(limit)
-                .Select(e => e.Event)
+                .Select((e, idx) => new StoredCloudEvent(idx + 1, e.Envelope))
                 .ToList());
         }
     }
 
-    private sealed record RecordedWorkflowEvent(string WorkflowRunId, WorkflowDomainEventDto Event);
+    private sealed record RecordedEnvelope(CloudEvent Envelope);
 }

@@ -52,7 +52,9 @@ public class DatabaseInitializationSpecs
 
         Assert.True(await TableExistsAsync(connection, "ProjectPromptTemplates"));
         Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
-        Assert.Single(await RecordedMigrationsAsync(connection));
+        var migrations = await RecordedMigrationsAsync(connection);
+        Assert.NotEmpty(migrations);
+        Assert.Contains("20260605025642_InitialSchema", migrations);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

@@ -20,7 +20,6 @@ public class RunnerGrain : Grain, IRunnerGrain
     private IDisposable? _heartbeatTimer;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IEventBus _eventBus;
     private readonly ILogger<RunnerGrain> _log;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
@@ -29,12 +28,10 @@ public class RunnerGrain : Grain, IRunnerGrain
     public RunnerGrain(
         IWorkflowBacklogDirectory backlogs,
         IDbContextFactory<MohistDbContext> dbFactory,
-        IEventBus eventBus,
         ILogger<RunnerGrain> log)
     {
         _backlogs = backlogs;
         _dbFactory = dbFactory;
-        _eventBus = eventBus;
         _log = log;
     }
 
@@ -221,20 +218,6 @@ public class RunnerGrain : Grain, IRunnerGrain
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
-
-        // Notify subscribers (AgentSessionRunnerBridge) so any in-flight
-        // sessions on this runner are marked failed promptly. Without this,
-        // sessions stay in "running" until the workflow's heartbeat timeout
-        // (separate, slower path) clears them.
-        _eventBus.Emit(CloudEventFactory.Create(
-            type: EventCatalog.ReverseDns.RunnerDisconnected,
-            source: new Uri($"/mohist/runner/{RunnerId}", UriKind.Relative),
-            subject: RunnerId,
-            extraExtensions: new Dictionary<string, object?>
-            {
-                ["runnerid"] = RunnerId,
-                ["reason"] = "heartbeat-timeout",
-            }));
     }
 
     private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;

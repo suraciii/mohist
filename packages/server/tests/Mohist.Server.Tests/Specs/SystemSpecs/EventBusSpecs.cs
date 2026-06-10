@@ -1,4 +1,4 @@
-using CloudNative.CloudEvents;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -10,99 +10,96 @@ public class EventBusSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public void Subscribe_FilterByType_HandlerReceivesMatchingEvent()
+    public async Task PublishAsync_NoSubscriber_DoesNotThrow()
     {
-        var bus = new InMemoryEventBus(Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
-        var matchingReceived = new List<CloudEvent>();
-        var otherReceived = new List<CloudEvent>();
-        bus.Subscribe("matching", evt => { matchingReceived.Add(evt); return Task.CompletedTask; });
-        bus.Subscribe("other", evt => { otherReceived.Add(evt); return Task.CompletedTask; });
+        var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
 
-        var matching = CloudEventFactory.Create(
-            type: "matching",
-            source: new Uri("about:blank", UriKind.Absolute));
-        bus.Emit(matching);
-
-        Assert.Single(matchingReceived);
-        Assert.Empty(otherReceived);
+        await bus.PublishAsync(
+            data: new TestPayload("orphan"),
+            type: "test.orphan",
+            source: "test://orphan");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public void Subscribe_NoSubscriber_DoesNotThrow()
+    public async Task PublishAsync_WithSubscriber_HandlerReceivesEnvelope()
     {
-        var bus = new InMemoryEventBus(Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
-        var orphan = CloudEventFactory.Create(
-            type: "orphan",
-            source: new Uri("about:blank", UriKind.Absolute));
-        bus.Emit(orphan);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task Emit_WithSubscriber_WaitsForHandler()
-    {
-        var bus = new InMemoryEventBus(Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
-        var handlerCompleted = false;
-        bus.Subscribe("awaitable", _ =>
+        var received = new Queue<CloudEvent>();
+        var subs = new List<Subscription>
         {
-            handlerCompleted = true;
+            new("test.greeting", new RecordingHandler(
+                filter: _ => true,
+                onEvent: e => received.Enqueue(e)),
+                DispatchDynamic),
+        };
+        var bus = new InMemoryEventBus(subs, NullLogger<InMemoryEventBus>.Instance);
+
+        await bus.PublishAsync(
+            data: new TestPayload("hello"),
+            type: "test.greeting",
+            source: "test://greeting");
+
+        var match = received.Single(e => e.Type == "test.greeting");
+        Assert.NotNull(match.Data);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task PublishAsync_FilteredOut_HandlerNotInvoked()
+    {
+        var received = new Queue<CloudEvent>();
+        var subs = new List<Subscription>
+        {
+            new("test.greeting", new RecordingHandler(
+                filter: e => false,
+                onEvent: e => received.Enqueue(e)),
+                DispatchDynamic),
+        };
+        var bus = new InMemoryEventBus(subs, NullLogger<InMemoryEventBus>.Instance);
+
+        await bus.PublishAsync(
+            data: new TestPayload("hello"),
+            type: "test.greeting",
+            source: "test://greeting");
+
+        Assert.Empty(received);
+    }
+
+    private sealed record TestPayload(string Message);
+
+    private static Task DispatchDynamic(object handler, CloudEvent evt, CancellationToken ct)
+    {
+        var h = (ICloudEventHandler)handler;
+        if (!h.Filter(evt)) return Task.CompletedTask;
+        return h.HandleAsync(evt, ct);
+    }
+
+    [Subscription(Type = "test.greeting")]
+    private sealed class RecordingHandler : ICloudEventHandler
+    {
+        private readonly Func<CloudEvent, bool> _filter;
+        private readonly Action<CloudEvent> _onEvent;
+
+        public RecordingHandler(Func<CloudEvent, bool> filter, Action<CloudEvent> onEvent)
+        {
+            _filter = filter;
+            _onEvent = onEvent;
+        }
+
+        public bool Filter(CloudEvent evt) => _filter(evt);
+
+        public Task HandleAsync(CloudEvent evt, CancellationToken ct)
+        {
+            _onEvent(evt);
             return Task.CompletedTask;
-        });
+        }
 
-        var evt = CloudEventFactory.Create(
-            type: "awaitable",
-            source: new Uri("about:blank", UriKind.Absolute));
-        await bus.EmitAsync(evt);
-
-        Assert.True(handlerCompleted);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task Emit_MultipleSubscribers_AllReceive()
-    {
-        var bus = new InMemoryEventBus(Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
-        var a = 0;
-        var b = 0;
-        bus.Subscribe("multi", _ => { Interlocked.Increment(ref a); return Task.CompletedTask; });
-        bus.Subscribe("multi", _ => { Interlocked.Increment(ref b); return Task.CompletedTask; });
-
-        var evt = CloudEventFactory.Create(
-            type: "multi",
-            source: new Uri("about:blank", UriKind.Absolute));
-        await bus.EmitAsync(evt);
-
-        Assert.Equal(1, a);
-        Assert.Equal(1, b);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
-    public async Task EmitAsync_SlowSubscriber_AwaitsHandler()
-    {
-        var bus = new InMemoryEventBus(Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
-        var handlerStarted = new ManualResetEventSlim(false);
-        var release = new TaskCompletionSource();
-        bus.Subscribe("slow", async _ =>
+        public Task OnEvent(CloudEvent evt)
         {
-            handlerStarted.Set();
-            await release.Task;
-        });
-
-        var evt = CloudEventFactory.Create(
-            type: "slow",
-            source: new Uri("about:blank", UriKind.Absolute));
-
-        var emitTask = bus.EmitAsync(evt);
-        Assert.True(handlerStarted.Wait(TimeSpan.FromSeconds(1)));
-        Assert.False(emitTask.IsCompleted);
-
-        release.SetResult();
-        await emitTask.WaitAsync(TimeSpan.FromSeconds(1));
+            _onEvent(evt);
+            return Task.CompletedTask;
+        }
     }
 }
