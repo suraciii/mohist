@@ -18,7 +18,7 @@ public class WorkflowEventSerializationSpecs
 
         var json = JsonSerializer.Serialize(e, JsonOptions);
 
-        Assert.Equal("""{"stage":"build","taskId":"task-1"}""", json);
+        Assert.Equal("""{"value":{"stage":"build","taskId":"task-1"}}""", json);
         Assert.Contains("build", json);
         Assert.Contains("task-1", json);
     }
@@ -26,12 +26,11 @@ public class WorkflowEventSerializationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void SystemTextJson_CannotRoundTripWorkflowEventUnionWithoutType()
+    public void SystemTextJson_RoundTripsWorkflowEventUnion()
     {
         WorkflowEvent e = new TaskCompleted("build", "task-1");
 
         var json = JsonSerializer.Serialize(e, JsonOptions);
-
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<WorkflowEvent>(json));
+        JsonSerializer.Deserialize<WorkflowEvent>(json);
     }
 }
