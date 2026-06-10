@@ -14,12 +14,13 @@ internal static class AgentSessionEventSerializer
 
     public static object Unwrap(AgentSessionEvent payload) => payload switch
     {
-        AgentSessionStarted x => x,
+        AgentSessionStarted x => (object)x,
         AgentSessionActivated x => x,
         AgentSessionUsageRecorded x => x,
         AgentSessionModelChanged x => x,
         AgentSessionCompleted x => x,
         AgentSessionFailed x => x,
         AgentSessionCancelled x => x,
+        null => throw new InvalidOperationException("Null agent session event"),
     };
 }

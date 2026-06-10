@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
+using Orleans.Hosting;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -10,6 +11,12 @@ public static class MohistSiloRegistration
     {
         silo.UseLocalhostClustering();
         silo.UseAdoNetReminderService(options =>
+        {
+            options.Invariant = "System.Data.SQLite";
+            options.ConnectionString = MohistServiceRegistration.ResolveSqliteConnectionString(configuration);
+        });
+
+        silo.AddAdoNetGrainStorageAsDefault(options =>
         {
             options.Invariant = "System.Data.SQLite";
             options.ConnectionString = MohistServiceRegistration.ResolveSqliteConnectionString(configuration);

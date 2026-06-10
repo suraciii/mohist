@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -8,13 +8,16 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
 {
     private readonly Queue<string> _waiting = new();
     private readonly HashSet<string> _all = new();
-    private readonly IStateStore<WorkflowBacklogState> _store;
+    private readonly IPersistentState<WorkflowBacklogState> _state;
     private readonly IWorkflowBacklogDirectory _directory;
     private readonly ILogger<WorkflowBacklogGrain> _log;
 
-    public WorkflowBacklogGrain(IStateStore<WorkflowBacklogState> store, IWorkflowBacklogDirectory directory, ILogger<WorkflowBacklogGrain> log)
+    public WorkflowBacklogGrain(
+        [PersistentState("backlog")] IPersistentState<WorkflowBacklogState> state,
+        IWorkflowBacklogDirectory directory,
+        ILogger<WorkflowBacklogGrain> log)
     {
-        _store = store;
+        _state = state;
         _directory = directory;
         _log = log;
     }
@@ -24,12 +27,17 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _directory.RegisterProject(GrainKey);
-        var state = await _store.LoadAsync(GrainKey);
-        if (state is null) return;
-        foreach (var wfId in state.Waiting)
-            _waiting.Enqueue(wfId);
-        foreach (var wfId in state.All)
-            _all.Add(wfId);
+        var stored = _state.State;
+        if (stored.Waiting is { Count: > 0 })
+        {
+            foreach (var wfId in stored.Waiting)
+                _waiting.Enqueue(wfId);
+        }
+        if (stored.All is { Count: > 0 })
+        {
+            foreach (var wfId in stored.All)
+                _all.Add(wfId);
+        }
     }
 
     public async Task EnqueueAsync(string workflowRunId)
@@ -108,5 +116,9 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
         return removed;
     }
 
-    private Task SaveAsync() => _store.SaveAsync(GrainKey, new WorkflowBacklogState(_waiting.ToList(), new HashSet<string>(_all)));
+    private Task SaveAsync()
+    {
+        _state.State = new WorkflowBacklogState(_waiting.ToList(), new HashSet<string>(_all));
+        return _state.WriteStateAsync();
+    }
 }

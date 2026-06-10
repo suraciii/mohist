@@ -11,6 +11,7 @@ public sealed record FailureDetails(
     string? CheckName = null,
     string? Message = null);
 
+[GenerateSerializer]
 public sealed record WorkLease(
     string WorkId,
     string WorkType,

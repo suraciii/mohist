@@ -19,60 +19,9 @@ using Orleans;
 using Orleans.TestingHost;
 using Xunit;
 using Mohist.Server.Tests.Specs.Issue.Profile;
+using Mohist.Server.Tests.Specs.Workflow;
 
 namespace Mohist.Server.Tests.Specs.Workflow.Grain;
-
-public class BacklogFixture : IAsyncLifetime
-{
-    public InProcessTestCluster Cluster { get; private set; } = null!;
-    public IGrainFactory Grains => Cluster.Client;
-    public string ConnectionString => _keeper.ConnectionString;
-
-    private SqliteConnection _keeper = null!;
-
-    public Task InitializeAsync()
-    {
-        var dbName = $"mohist-backlog-test-{Guid.NewGuid():N}";
-        var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-        _keeper = new SqliteConnection(connectionString);
-        _keeper.Open();
-
-        var builder = new InProcessTestClusterBuilder();
-        builder.Options.InitialSilosCount = 1;
-        ConfigureCluster(builder, connectionString);
-        Cluster = builder.Build();
-        return Cluster.DeployAsync();
-    }
-
-    public Task DisposeAsync()
-    {
-        Cluster?.Dispose();
-        _keeper?.Dispose();
-        return Task.CompletedTask;
-    }
-
-    public static void ConfigureCluster(InProcessTestClusterBuilder builder, string connectionString)
-    {
-        builder.ConfigureSilo((_, siloBuilder) =>
-        {
-            siloBuilder.UseInMemoryReminderService();
-            siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, InMemoryStateStore<WorkflowStageLockState>>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
-            siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
-            siloBuilder.Services.AddSingleton<ProjectQuerier>();
-            siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
-            siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
-            siloBuilder.Services.AddScoped<WorkflowProfileManager>();
-            siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
-            siloBuilder.Services.AddCloudEventBus();
-            siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
-            siloBuilder.Services.AddHostedService<DbSchemaInitializer>();
-        });
-    }
-}
 
 [Collection("Backlog")]
 public class BacklogSpecs : IClassFixture<BacklogFixture>

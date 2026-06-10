@@ -5,7 +5,6 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Project.Services;
-using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -56,13 +55,7 @@ public static class MohistServiceRegistration
             options.UseSqlite(connectionString));
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
-        services.AddScoped<IStateStore<IssueCounterState>, IssueCounterStore>();
-        services.AddScoped<IStateStore<EpicCounterState>, EpicCounterStore>();
-        services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
-        services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
-        services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
-        services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddSingleton<ProjectQuerier>();

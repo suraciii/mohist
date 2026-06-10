@@ -1,30 +1,25 @@
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Epic;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Epic.Grains;
 
 public class EpicCounterGrain : Grain, IEpicCounterGrain
 {
-    private int _next;
-    private readonly IStateStore<EpicCounterState> _store;
+    private readonly IPersistentState<EpicCounterState> _state;
 
-    public EpicCounterGrain(IStateStore<EpicCounterState> store)
+    public EpicCounterGrain(
+        [PersistentState("counter")] IPersistentState<EpicCounterState> state)
     {
-        _store = store;
+        _state = state;
     }
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    public Task<int> NextAsync() => NextAsyncImpl();
 
-    public override async Task OnActivateAsync(CancellationToken ct)
+    private async Task<int> NextAsyncImpl()
     {
-        var state = await _store.LoadAsync(GrainKey);
-        _next = state?.Next ?? 1;
-    }
-
-    public async Task<int> NextAsync()
-    {
-        var value = _next++;
-        await _store.SaveAsync(GrainKey, new EpicCounterState(_next));
-        return value;
+        var current = _state.State.Next;
+        _state.State = new EpicCounterState(current + 1);
+        await _state.WriteStateAsync();
+        return current;
     }
 }
