@@ -8,7 +8,6 @@ public union IssueEvent(
     IssuePrerequisiteRemoved,
     IssueWorkStarted,
     IssueWorkCompleted,
-    IssueWorkAborted,
     IssueClosed,
     IssueArchived,
     IssueUnarchived,
@@ -39,10 +38,6 @@ public sealed record IssueWorkStarted(
 
 public sealed record IssueWorkCompleted(
     string WorkflowRunId);
-
-public sealed record IssueWorkAborted(
-    string WorkflowRunId,
-    string? Reason);
 
 public sealed record IssueClosed(
     string? Reason);

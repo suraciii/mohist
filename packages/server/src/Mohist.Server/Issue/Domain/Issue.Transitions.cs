@@ -121,23 +121,4 @@ public sealed partial class Issue
         Touch(now);
         RecordEvent(new IssueReopened());
     }
-
-    /// <summary>
-    /// Idempotent transition invoked by the workflow lifecycle hook when the
-    /// workflow ends in Failed or Stopped. No-op if the workflow run id does
-    /// not match the current active run, or the issue is no longer InProgress
-    /// (e.g. another path already closed it). This makes the hook safe to
-    /// dispatch multiple times for the same terminal event.
-    /// </summary>
-    public bool AbortWorkflow(string workflowRunId, string? reason = null, DateTime? now = null)
-    {
-        if (_activeWorkflowRunId != workflowRunId) return false;
-        if (_status == IssueStatus.Cancelled) return false;
-        if (_status != IssueStatus.InProgress) return false;
-        _status = IssueStatus.Cancelled;
-        _activeWorkflowRunId = null;
-        Touch(now);
-        RecordEvent(new IssueWorkAborted(workflowRunId, reason));
-        return true;
-    }
 }

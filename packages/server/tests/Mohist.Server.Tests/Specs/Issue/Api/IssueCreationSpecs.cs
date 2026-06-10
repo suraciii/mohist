@@ -238,7 +238,11 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Closable");
 
         var grain = _grains.GetGrain<IIssueGrain>(created.Id);
-        await grain.StartWorkAsync();
+        var wrId = await grain.StartWorkAsync();
+
+        var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
+        await wfGrain.StopAsync("test-stop");
+
         await grain.CancelAsync();
 
         var info = await GetIssueInfoAsync(project.Id, created.Number);
@@ -271,6 +275,9 @@ public class IssueCreationSpecs
         }
 
         Assert.NotNull(dispatch);
+
+        var wfGrain = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        await wfGrain.StopAsync("user-cancel");
 
         await issue.CancelAsync();
 

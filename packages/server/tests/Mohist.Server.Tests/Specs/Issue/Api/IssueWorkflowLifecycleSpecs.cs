@@ -1,9 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Issue.Api;
@@ -45,28 +45,26 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task AbortWorkAsync_Stopped_IssueTransitionsFromInProgressToCancelled()
+    public async Task CancelAsync_WhenWorkflowRunning_RejectsWithError()
     {
-        var (projectId, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (_, _, issueId, _) = await SeedIssueInProgressAsync();
 
         var issue = _grains.GetGrain<IIssueGrain>(issueId);
-        await issue.AbortWorkAsync(wrId, "user-stopped");
-
-        var final = await GetIssueInfoAsync(projectId, issueNumber);
-        Assert.NotNull(final);
-        Assert.Equal("cancelled", final!.Status);
-        Assert.Null(final.WorkflowRunId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task AbortWorkAsync_Failed_IssueTransitionsFromInProgressToCancelled()
+    public async Task CancelAsync_WhenWorkflowStopped_IssueTransitionsToCancelled()
     {
         var (projectId, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
 
+        var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
+        await wfGrain.StopAsync("user-stopped");
+
         var issue = _grains.GetGrain<IIssueGrain>(issueId);
-        await issue.AbortWorkAsync(wrId, "task-failed:build-1");
+        await issue.CancelAsync();
 
         var final = await GetIssueInfoAsync(projectId, issueNumber);
         Assert.NotNull(final);
