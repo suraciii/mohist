@@ -1,96 +1,79 @@
 ---
-purpose: "How aggregates (Issue, Workflow, Runner, Session) interact. Each business command is described as a sequence of aggregate transitions, with synchronous calls and event reactions clearly separated."
+purpose: "How aggregates (Issue, Workflow, Runner, Session) interact. Documents the cross-aggregate impact of each business command, distinguishing synchronous commands from events that cause a state change in another aggregate."
 include:
   - "Business commands as sequences of aggregate transitions."
   - "Which aggregate calls which aggregate (synchronous)."
-  - "Which events one aggregate emits and which other aggregate subscribes to (asynchronous)."
+  - "Events that cause another aggregate to transition (asynchronous)."
   - "Failure ownership per command."
 exclude:
-  - "Transport / plumbing (HTTP, SignalR, bus, transport-layer notifications)."
+  - "Events that have no cross-aggregate effect (Web UI / notification subscribers only)."
   - "Event variant lists; see the domain model."
   - "Domain method signatures and class internals."
-  - "Read-side projection and UI rendering."
+  - "Transport / plumbing (HTTP, SignalR, bus)."
 style:
   - "Use aggregate names (Issue, Workflow, Runner, Session) as actors."
-  - "Prefer sequence diagrams over prose."
+  - "Vertical line = aggregate; horizontal line = interaction (command or event)."
+  - "Solid arrow = synchronous command. Dashed arrow = event with cross-aggregate impact."
+  - "Only draw events that cause a state change in another aggregate."
+  - "Pure observation events (UI, notifications) are not drawn."
+  - "Prefer diagrams over prose."
   - "Keep text short; let diagrams carry the explanation."
 ---
 
 # Aggregate Coordination
 
-本文以**业务命令**为骨架，描述四个聚合（Issue / Workflow / Runner / Session）之间的交互。
+## 跨聚合影响分析
 
-每条命令展开为：
-1. 序列图：哪个聚合调哪个聚合
-2. 产生的事实
-3. 失败归谁
+按"事件的影响"约定，列出每个聚合事件，判断它是否驱动另一聚合的状态变化：
 
-## 两条交互路径
+| Sender | Event | 跨聚合影响 |
+|---|---|---|
+| Issue | `IssueCreated` / `LabelsChanged` / `PriorityChanged` / `PrerequisiteAdded` / `PrerequisiteRemoved` | 无 |
+| Issue | `IssueWorkStarted` / `IssueWorkCompleted` / `IssueWorkAborted` | 无 — 由同步调用 Workflow 触发 |
+| Issue | `IssueClosed` / `IssueArchived` / `IssueUnarchived` / `IssueReopened` | 无 |
+| Workflow | 17 个 `Workflow*` 事件 | 无 |
+| Runner | `RunnerDisconnected` | **有** → Session 收尾 |
 
-```text
-路径 A：同步调用
-  一个聚合 transition 后同步调另一个聚合 transition。
-  强一致；调用方知道自己在做什么；失败抛回调用方。
-
-路径 B：事件
-  一个聚合 transition 后广播事实。
-  订阅方自决；事件不携带"应该做什么"；失败仅记日志。
-```
-
-**原则**：
+**结论**: mohist 当前**所有跨聚合状态变化**通过**同步命令**驱动。**唯一事件驱动**的反应是 `RunnerDisconnected` → `Session`。
 
 ```text
-- 状态转移用路径 A
-- 观察 / 异步协调用路径 B
-- 不混用：状态转移不通过订阅对方事件实现
+跨聚合驱动机制:
+  99% 同步命令 (Issue ↔ Workflow, Runner → Workflow)
+  1%  事件       (Runner → Session via RunnerDisconnected)
 ```
+
+为什么 99% 走同步命令：
+- 强一致：调用方知道结果；失败抛回
+- 失败责任清晰：调用方负责 retry / 回退
+- 调试容易：一次调用一个因果链
+
+为什么 Runner disconnect 走事件：
+- 没有同步调用方——没有聚合能在 disconnect 瞬间知道"哪些 session 还在跑这个 runner"
+- session 自决 fail 哪些 session；runner 不指示
 
 ## Start: User opens an issue for work
 
 ```text
-Issue          Workflow
-  |               |
-  | transition    |
-  | start         |
-  |               |
-  |--- call ----->|
-  |               | transition
-  |               | start
-  |               |
-  |               | facts: [WorkflowRunStarted]
-  |               |
-  |<-- return ----|
-  |               |
-  | facts: [IssueWorkStarted]
+Issue              Workflow
+  |                   |
+  |--- start ------->|
 ```
 
-**Facts**:
-- `WorkflowRunStarted` — workflow 侧
-- `IssueWorkStarted` — issue 侧
+**Facts** (由同步调用引发): `IssueWorkStarted` / `WorkflowRunStarted`
 
-**Failure**:
-- issue 校验失败（前提 / 仓库）→ 整个命令回退，issue 不 transition
+**失败**:
+- issue 校验失败（前提/仓库）→ 整个命令回退，issue 不 transition
 - workflow transition 抛异常 → issue 已 transition，**不回退**；错误上抛
-  - 这是当前实现选择——issue 与 workflow 跨聚合不通过事务协调
+  - 当前实现选择——issue 与 workflow 跨聚合不通过事务协调
   - 未来可考虑用 saga / outbox 模式回退 issue
 
 ## Approve / Reject: User resolves a stage approval
 
-```text
-Workflow
-  |
-  | transition
-  | resolveApproval
-  |
-  | facts: [StageApprovalResolved, StageStarted, ?StageApprovalRequested]
-```
+无跨聚合交互。workflow 内部 transition。
 
-**Facts**:
-- `StageApprovalResolved` — 审批结果
-- `StageStarted` — 进入下一 stage
-- 可能 `StageApprovalRequested` — 下一 stage 又要审批
+**Facts**: `StageApprovalResolved` / `StageStarted` / 可能 `StageApprovalRequested`
 
-**Failure**:
+**失败**:
 - 校验失败（当前 stage 不等待审批）→ 抛异常
 - 持久化失败 → 整个命令回退
 
@@ -99,145 +82,63 @@ Workflow
 **成功路径**:
 
 ```text
-Runner          Workflow           Issue
-  |                |                 |
-  | report         |                 |
-  |--------------->|                 |
-  |                |                 |
-  |                | transition      |
-  |                | report          |
-  |                |                 |
-  |                | facts:          |
-  |                | [TaskCompleted, |
-  |                |  StageCompleted,|
-  |                |  CheckPassed,   |
-  |                |  StageStarted,  |
-  |                |  WorkflowRunCompleted]
-  |                |                 |
-  |                |--- call ------->|
-  |                |                 |
-  |                |                 | transition
-  |                |                 | complete
-  |                |                 |
-  |                |                 | facts: [IssueWorkCompleted]
-  |                |                 |
-  |<-- return ------|                 |
+Runner         Workflow              Issue
+  |               |                   |
+  |--- report -->|                   |
+  |               |                   |
+  |               |--- complete ----->|
 ```
 
 **失败路径**:
 
 ```text
-Runner          Workflow           Issue
-  |                |                 |
-  | report         |                 |
-  |--------------->|                 |
-  |                |                 |
-  |                | transition      |
-  |                | report          |
-  |                |                 |
-  |                | facts:          |
-  |                | [TaskFailed,    |
-  |                |  StageFailed,   |
-  |                |  WorkflowRunFailed]
-  |                |                 |
-  |                |--- call ------->|
-  |                |                 |
-  |                |                 | transition
-  |                |                 | abortWorkflow
-  |                |                 |
-  |                |                 | facts: [IssueWorkAborted]
-  |                |                 |
-  |<-- return ------|                 |
+Runner         Workflow              Issue
+  |               |                   |
+  |--- report -->|                   |
+  |               |                   |
+  |               |--- abortWorkflow >|
 ```
 
 **Facts**:
-- 成功: `TaskCompleted` / `StageCompleted` / `CheckPassed` / `StageStarted` / `WorkflowRunCompleted` + `IssueWorkCompleted`
+- 成功: `TaskCompleted` / `StageCompleted` / `CheckPassed` / `WorkflowRunCompleted` + `IssueWorkCompleted`
 - 失败: `TaskFailed` / `StageFailed` / `WorkflowRunFailed` + `IssueWorkAborted`
 
-**关键不变量**:
-- workflow 终结时**同步**调 issue — 不订阅事件
-- 单一来源：调用方 (workflow) 失败时清晰回退
+**关键不变量**: workflow 终结时**同步**调 issue，**不**订阅事件。
 
-**Failure**:
+**失败**:
 - workflow 内部 advance 失败 → 整个 Report 命令失败 → runner 收到错误
 - issue transition 抛异常 → 同样回退到 workflow，runner 重试
 
 ## Stop: User cancels
 
-**Case A: issue 没在跑 workflow**:
-
-```text
-Issue
-  |
-  | transition
-  | close
-  |
-  | facts: [IssueClosed]
-```
+**Case A: issue 没在跑 workflow**: 单一聚合 transition，不画图。
 
 **Case B: issue 在跑 workflow**:
 
 ```text
-Issue          Workflow           Issue
-  |               |                 |
-  | call          |                 |
-  |--------------->|                 |
-  |               | transition      |
-  |               | stop            |
-  |               |                 |
-  |               | facts: [WorkflowRunStopped]
-  |               |                 |
-  |<-- return -----|                 |
-  |               |                 |
-  | transition                         |
-  | abortWorkflow                      |
-  |                                     |
-  | facts: [IssueWorkAborted]           |
-  |                                     |
-  | transition                         |
-  | close                              |
-  |                                     |
-  | facts: [IssueClosed]                 |
+Issue              Workflow
+  |                   |
+  |--- stop --------->|
 ```
 
-**Facts**:
-- Case A: `IssueClosed`
-- Case B: `WorkflowRunStopped` + `IssueWorkAborted` + `IssueClosed`
+**Facts**: `WorkflowRunStopped` / `IssueWorkAborted` / `IssueClosed`
 
-**关键**: Stop 是**反向**调用——issue 主动 stop workflow（**不**订阅 `WorkflowRunStopped` 事件来自我 abort）。
+**关键**: Stop 是**反向**调用——issue 主动 stop workflow，**不**订阅 `WorkflowRunStopped` 事件来自我 abort。
 
 ## Archive: User archives a done issue
 
-```text
-Issue
-  |
-  | transition
-  | archive
-  |
-  | facts: [IssueArchived]
-  |
-  | (then the transport layer invokes worktree cleanup
-  |  as part of the same atomic command)
-```
+无跨聚合交互。issue 内部 transition + 命令内部副作用（worktree cleanup 同步串联）。
 
 **Facts**: `IssueArchived`
 
 **关键不变量**:
 - worktree cleanup 与 archive 在**同一命令**中完成——原子
 - **不**订阅 `IssueArchived` 事件触发 cleanup
-
-**为什么 cleanup 不在领域交互中表示**: cleanup 是命令的副作用，不是聚合之间的协调。它属于 archive 命令的实现细节，依赖关系在 command handler 内部，不在聚合之间。
+- cleanup 是命令的副作用，不是聚合之间的协调；依赖关系在 command handler 内部
 
 ## Unarchive: User un-archives a done issue
 
-```text
-Issue
-  |
-  | transition
-  | unarchive
-  |
-  | facts: [IssueUnarchived]
-```
+无跨聚合交互。issue 内部 transition。
 
 **Facts**: `IssueUnarchived`
 
@@ -245,37 +146,22 @@ Issue
 
 ## Reopen: User reopens a cancelled issue
 
-```text
-Issue
-  |
-  | transition
-  | reopen
-  |
-  | facts: [IssueReopened]
-```
+无跨聚合交互。issue 内部 transition。
 
 **Facts**: `IssueReopened`
 
 Reopen 后 issue 状态变回 Backlog。User 可重新发 Start 命令。
 
-## Runner Disconnect
+## Runner Disconnect: 唯一有跨聚合影响的事件
 
 ```text
 Runner            Session
   |                 |
-  | fact:           |
-  | [RunnerDisconnected]
+  · ··> RunnerDisconnected
   |                 |
-  |---------------->|
-  |                 |
-  |                 | transition
-  |                 | fail (per session)
-  |                 |
+                    | transition
+                    | fail (per session)
 ```
-
-**Facts**: `RunnerDisconnected`
-
-**唯一响应方**: Session 聚合——fail 掉 active session 避免 leak。
 
 **关键**:
 - 没有同步调用方——没有聚合能在 disconnect 瞬间知道"哪些 session 还在跑这个 runner"
@@ -290,7 +176,7 @@ Runner            Session
 | Report (成功) | Workflow → Issue | workflow |
 | Report (失败) | Workflow → Issue | workflow |
 | Stop (未跑) | (issue 内部) | issue |
-| Stop (在跑) | Issue → Workflow → Issue | issue |
+| Stop (在跑) | Issue → Workflow | issue |
 | Archive | (issue 内部) | issue |
 | Unarchive | (issue 内部) | issue |
 | Reopen | (issue 内部) | issue |
@@ -303,18 +189,18 @@ Runner            Session
 ## 不变式
 
 ```text
-1. 同步调用 = 状态转移
-   A 的 transition 直接导致 B 的 transition
+1. 跨聚合状态变化 = 同步命令
+   Issue.WorkStart 调 Workflow.Start (不是订阅 IssueWorkStarted)
 
-2. 事件 = 事实通知
-   A 的 transition 让世界知道事实
-   不自动推动 B 的 state
+2. 事件仅在"驱动另一聚合状态变化"时使用
+   当前仅 RunnerDisconnected 一例
+   纯观察事件 (Web UI 通知) 不在本文档
 
 3. 同源事实不重复
    IssueWorkCompleted 与 WorkflowRunCompleted 是两个独立事实
 
 4. 事件不携带"应该做什么"
-   订阅方自决
+   订阅方自决 (RunnerDisconnected 案例)
 
 5. 失败由调用方负责
    同步调用方 catch + 决定 retry 或回退
@@ -383,11 +269,11 @@ Runner            Session
 ## 文档边界
 
 ```text
-本文       聚合之间如何交互
+本文       聚合之间如何交互 (sync commands + 有影响的事件)
 domain     每个聚合能产生什么事实 (union 变体)
 eventbus   事件基础设施 (envelope / 路由 / 订阅)
 其他       传输层 (HTTP / SignalR) 属于实现细节
-           不在领域交互中表示
+           纯观察事件 (Web UI 通知) 不在领域交互中表示
 ```
 
 ## Open Questions
