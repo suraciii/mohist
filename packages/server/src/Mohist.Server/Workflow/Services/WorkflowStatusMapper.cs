@@ -8,8 +8,7 @@ public static class WorkflowStatusMapper
 {
     public static WorkflowStatusView? BuildStatusView(
         WorkflowRun? run,
-        WorkflowDefinition? definition,
-        WorkLease? lease)
+        WorkflowDefinition? definition)
     {
         if (run is null) return null;
 
@@ -36,9 +35,7 @@ public static class WorkflowStatusMapper
                 stageFailure);
         }).ToList();
 
-        var pending = lease is not null
-            ? new PendingWorkView(lease.WorkId, lease.WorkType, lease.Stage, lease.Title, null)
-            : null;
+        var pending = BuildPendingWork(run);
 
         var effectiveFailure = run.Failure ?? CurrentStageFailure(run);
         var failure = effectiveFailure is not null
@@ -114,6 +111,23 @@ public static class WorkflowStatusMapper
         }
 
         return actions;
+    }
+
+    private static PendingWorkView? BuildPendingWork(WorkflowRun run)
+    {
+        if (run.CurrentStageId is null) return null;
+        if (run.Status != WorkflowRunStatus.Running) return null;
+        var stage = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
+        if (stage is null) return null;
+
+        var pendingTask = stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+        if (pendingTask is not null)
+            return new PendingWorkView(pendingTask.Id, "task", stage.Id, pendingTask.Title, null);
+
+        if (stage.Checks.Count > 0 && stage.Checks.Any(c => c.Status != StageCheckStatus.Passed))
+            return new PendingWorkView("checks", "checks", stage.Id, "Checks", null);
+
+        return null;
     }
 
     private static FailureDetails? CurrentStageFailure(WorkflowRun run)

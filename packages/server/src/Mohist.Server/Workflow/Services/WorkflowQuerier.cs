@@ -47,15 +47,7 @@ public class WorkflowQuerier
 
         var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
 
-        var leaseJson = await db.WorkflowLeases.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.State)
-            .FirstOrDefaultAsync();
-        var lease = leaseJson is not null && leaseJson != "null"
-            ? JsonSerializer.Deserialize<WorkLease>(leaseJson, StorageJsonOptions)
-            : null;
-
-        return WorkflowStatusMapper.BuildStatusView(run, definition, lease);
+        return WorkflowStatusMapper.BuildStatusView(run, definition);
     }
 
     public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)

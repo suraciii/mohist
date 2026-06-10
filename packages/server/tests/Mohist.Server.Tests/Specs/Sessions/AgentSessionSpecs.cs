@@ -709,29 +709,6 @@ public class AgentSessionSpecs
         Assert.Equal(1, grainSession.ToolErrorCount);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public async Task AgentActivity_WhenLeaseOwnerDiffers_ReportsOnlyLeaseOwnedActiveSession()
-    {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("lease-owner-activity");
-        var staleRunnerId = $"stale-runner-{Guid.NewGuid():N}";
-
-        await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
-        {
-            var row = await db.AgentSessions.SingleAsync(s => s.Id == session.Id);
-            row.RunnerId = staleRunnerId;
-            await db.SaveChangesAsync();
-        }
-
-        await SaveLeaseAsync(work.WorkflowRunId, new WorkLease(work.WorkId, work.WorkType, work.Stage ?? "Build", work.WorkId, work.Title, _runnerId));
-
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
-
-        Assert.Equal(0, activity.Summary.Active);
-        Assert.DoesNotContain(activity.Sessions, s => s.SessionId == session.Id && s.Status is "created" or "running" or "probing");
-        Assert.DoesNotContain(activity.Sessions, s => s.IssueNumber == issue.Number && s.Status is "created" or "running" or "probing");
-    }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
@@ -1048,26 +1025,6 @@ public class AgentSessionSpecs
         if (start)
             await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
-    }
-
-    private async Task SaveLeaseAsync(string workflowRunId, WorkLease lease)
-    {
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var row = await db.WorkflowLeases.FindAsync(workflowRunId);
-        var json = JsonSerializer.Serialize(lease, WorkflowStorageJson.Options);
-        if (row is null)
-        {
-            db.WorkflowLeases.Add(new WorkflowLeaseRow
-            {
-                WorkflowRunId = workflowRunId,
-                State = json
-            });
-        }
-        else
-        {
-            row.State = json;
-        }
-        await db.SaveChangesAsync();
     }
 
     private Task PostEventEntriesAsync(string projectId, string workflowRunId, string sessionName, string text) => _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{projectId}/{workflowRunId}/{sessionName}/events", new

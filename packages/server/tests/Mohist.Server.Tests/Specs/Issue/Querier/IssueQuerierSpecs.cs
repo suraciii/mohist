@@ -215,11 +215,6 @@ public class IssueQuerierSpecs
             """,
         };
         db.WorkflowRuns.Add(workflowRow);
-        db.WorkflowLeases.Add(new WorkflowLeaseRow
-        {
-            WorkflowRunId = "wf-run-1",
-            State = "null",
-        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -305,11 +300,6 @@ public class IssueQuerierSpecs
             """,
         };
         db.WorkflowRuns.Add(workflowRow);
-        db.WorkflowLeases.Add(new WorkflowLeaseRow
-        {
-            WorkflowRunId = "wf-run-orch-1",
-            State = "null",
-        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -392,11 +382,6 @@ public class IssueQuerierSpecs
             """,
         };
         db.WorkflowRuns.Add(workflowRow);
-        db.WorkflowLeases.Add(new WorkflowLeaseRow
-        {
-            WorkflowRunId = "wf-run-fail-1",
-            State = "null",
-        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -480,11 +465,6 @@ public class IssueQuerierSpecs
             """,
         };
         db.WorkflowRuns.Add(workflowRow);
-        db.WorkflowLeases.Add(new WorkflowLeaseRow
-        {
-            WorkflowRunId = "wf-run-done-1",
-            State = "null",
-        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -556,11 +536,6 @@ public class IssueQuerierSpecs
             """,
         };
         db.WorkflowRuns.Add(workflowRow);
-        db.WorkflowLeases.Add(new WorkflowLeaseRow
-        {
-            WorkflowRunId = "wf-run-nouser-1",
-            State = "null",
-        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -643,11 +618,6 @@ public class IssueQuerierSpecs
             """,
         };
         db.WorkflowRuns.Add(workflowRow);
-        db.WorkflowLeases.Add(new WorkflowLeaseRow
-        {
-            WorkflowRunId = "wf-run-approval-1",
-            State = "null",
-        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();

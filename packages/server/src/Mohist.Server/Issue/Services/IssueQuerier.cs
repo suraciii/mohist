@@ -190,27 +190,17 @@ public class IssueQuerier
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
-        var leaseRows = await db.WorkflowLeases
-            .AsNoTracking()
-            .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
-            .ToListAsync();
-
-        var leases = leaseRows.ToDictionary(r => r.WorkflowRunId, r => DeserializeLease(r.State), StringComparer.Ordinal);
-
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
             var run = DeserializeRun(row.State);
             if (run is null) continue;
-            leases.TryGetValue(row.WorkflowRunId, out var lease);
-            var snapshot = WorkflowStatusMapper.BuildStatusView(run, definition: null, lease);
+            var snapshot = WorkflowStatusMapper.BuildStatusView(run, definition: null);
             if (snapshot is not null)
                 workflows[row.WorkflowRunId] = snapshot;
         }
         return workflows;
     }
-
-    private static WorkLease? DeserializeLease(string json) => WorkflowLeaseJson.Deserialize(json);
 
     private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusView> workflows)
     {

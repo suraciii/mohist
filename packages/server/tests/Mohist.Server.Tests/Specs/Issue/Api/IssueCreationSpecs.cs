@@ -64,17 +64,6 @@ public class IssueCreationSpecs
         return row is null ? null : JsonSerializer.Deserialize<WorkflowBacklogState>(row.State);
     }
 
-    private async Task<string?> LoadLeaseJsonAsync(string workflowId)
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var row = await db.WorkflowLeases.FindAsync(workflowId);
-        return row?.State;
-    }
-
     private async Task<IReadOnlyList<StoredCloudEvent>> GetWorkflowEventsAsync(string workflowRunId)
     {
         using var scope = _services.CreateScope();
@@ -292,7 +281,6 @@ public class IssueCreationSpecs
 
         var backlog = await LoadBacklogStateAsync(project.Id);
         Assert.True(backlog is null || (!backlog.Waiting.Contains(workflowRunId) && !backlog.All.Contains(workflowRunId)));
-        Assert.Null(await LoadLeaseJsonAsync(workflowRunId));
         Assert.Null(await runner.PollAsync());
 
         var events = await GetWorkflowEventsAsync(workflowRunId);

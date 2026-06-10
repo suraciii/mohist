@@ -240,7 +240,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         stage.Failure = new FailureDetails(FailureReason.ApprovalRejected, stage.Id, Message: "needs rework");
         run.Status = WorkflowRunStatus.Failed;
 
-        var status = WorkflowStatusMapper.BuildStatusView(run, null, null);
+        var status = WorkflowStatusMapper.BuildStatusView(run, null);
 
         Assert.NotNull(status);
         Assert.NotNull(status.Failure);

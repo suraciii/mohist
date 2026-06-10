@@ -102,62 +102,12 @@ public static class WorkflowGrainTestHelpers
         return new WorkflowQuerier(factory, new WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
     }
 
-    public static async Task SeedLeaseAsync(string connectionString, string workflowId, WorkLease lease)
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var row = await db.WorkflowLeases.FindAsync(workflowId);
-        var json = JsonSerializer.Serialize(lease, WorkflowStorageJson.Options);
-
-        if (row is null)
-        {
-            db.WorkflowLeases.Add(new WorkflowLeaseRow
-            {
-                WorkflowRunId = workflowId,
-                State = json
-            });
-        }
-        else
-        {
-            row.State = json;
-        }
-
-        await db.SaveChangesAsync();
-    }
-
-    public static async Task DeactivateWorkflowAsync(IGrainFactory grains, string workflowId)
-    {
-        var workflow = grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.DeactivateForTestAsync();
-
-        var management = grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
-
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            var activations = await management.GetDetailedGrainStatistics();
-            if (!activations.Any(stat => stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
-                && stat.GrainId.ToString()!.Contains(workflowId, StringComparison.Ordinal)))
-            {
-                return;
-            }
-
-            await Task.Delay(50);
-        }
-
-        Assert.Fail($"Workflow grain '{workflowId}' did not deactivate in time.");
-    }
-
     public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
             .Options;
         await using var db = new MohistDbContext(options);
-        db.WorkflowLeases.RemoveRange(db.WorkflowLeases);
         db.BacklogStates.RemoveRange(db.BacklogStates);
         await db.SaveChangesAsync();
 

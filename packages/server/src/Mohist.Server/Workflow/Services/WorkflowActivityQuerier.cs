@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 
@@ -27,14 +26,12 @@ public class WorkflowActivityQuerier
         if (!string.IsNullOrWhiteSpace(projectId)) query = query.Where(s => s.ProjectId == projectId);
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
-        var leases = await LoadLeasesAsync(db, sessions.Select(s => s.WorkflowRunId).Distinct(StringComparer.Ordinal).ToArray(), ct);
         var result = new List<ActiveAgentDto>();
 
         foreach (var row in sessions)
         {
             var session = AgentSessionJson.Deserialize(row);
             if (session is null) continue;
-            if (!IsLeaseOwnedActiveSession(session, row, leases)) continue;
 
             var status = await _workflowQuerier.GetStatusAsync(session.RunId);
             var pending = status?.PendingWork;
@@ -66,28 +63,6 @@ public class WorkflowActivityQuerier
         }
 
         return result;
-    }
-
-    private static async Task<Dictionary<string, WorkLease?>> LoadLeasesAsync(MohistDbContext db, string[] workflowIds, CancellationToken ct)
-    {
-        if (workflowIds.Length == 0) return [];
-
-        var rows = await db.WorkflowLeases.AsNoTracking()
-            .Where(row => workflowIds.Contains(row.WorkflowRunId))
-            .ToListAsync(ct);
-        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.State), StringComparer.Ordinal);
-    }
-
-    private static bool IsLeaseOwnedActiveSession(AgentSession session, AgentSessionRow row, IReadOnlyDictionary<string, WorkLease?> leases)
-    {
-        if (session.Status.CompletedAt is not null || session.Status.Phase is not (AgentSessionStatus.Created or AgentSessionStatus.Running or AgentSessionStatus.Probing))
-            return false;
-
-        if (!leases.TryGetValue(session.RunId, out var lease) || lease is null)
-            return true;
-
-        return string.Equals(session.Runtime.RunnerId, lease.RunnerId, StringComparison.Ordinal)
-            && string.Equals(row.WorkId, lease.WorkId, StringComparison.Ordinal);
     }
 
     private static DateTime LastActivityAt(AgentSession session) =>

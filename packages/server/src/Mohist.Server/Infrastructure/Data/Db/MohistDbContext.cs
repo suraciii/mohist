@@ -38,7 +38,6 @@ public class MohistDbContext : DbContext
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
-    public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
@@ -274,13 +273,6 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.MetadataProjectId)
                 .HasComputedColumnSql("json_extract(State, '$.Metadata.Annotations.projectId')", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
-        });
-
-        modelBuilder.Entity<WorkflowLeaseRow>(entity =>
-        {
-            entity.HasKey(e => e.WorkflowRunId);
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.State).IsRequired();
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>
