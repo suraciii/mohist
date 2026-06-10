@@ -319,6 +319,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (dispatch is null)
             return;
 
+        await SaveRunAsync();
         await SaveLeaseAsync();
         await AssignRunnerWorkAsync(runnerId, dispatch);
     }

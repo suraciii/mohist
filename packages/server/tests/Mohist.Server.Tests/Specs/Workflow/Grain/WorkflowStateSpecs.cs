@@ -215,14 +215,9 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
 
-        var leaseJson = await ReadLeaseJsonAsync(_workflowId!);
-        Assert.NotNull(leaseJson);
-
-        var lease = JsonSerializer.Deserialize<WorkLease>(leaseJson!);
-        Assert.NotNull(lease);
-        Assert.Equal(work.WorkId, lease.WorkId);
-        Assert.Equal(runnerId, lease.RunnerId);
-
+        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
+        Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -246,16 +241,5 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
         var runtime = await runner.GetRuntimeStateAsync();
         Assert.DoesNotContain(_workflowId, runtime.ActiveWorkflowRunIds);
-    }
-
-    private async Task<string?> ReadLeaseJsonAsync(string workflowRunId)
-    {
-        var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_fixture.ConnectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var lease = await db.WorkflowLeases.FindAsync(workflowRunId);
-        return lease?.State;
     }
 }

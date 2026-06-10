@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -522,23 +523,19 @@ public class AgentSessionQuerier
             .ToList();
         if (activeRows.Count == 0) return sessions;
 
-        var workflowIds = activeRows
-            .Select(s => s.WorkflowRunId)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        var leases = await LoadLeasesAsync(db, workflowIds, ct);
-        if (leases.Count == 0) return sessions;
+        var runsByWorkflow = await LoadWorkflowRunsForReconciliationAsync(db, activeRows, ct);
+        if (runsByWorkflow.Count == 0) return sessions;
 
         var allowedSessionIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var activeSession in activeRows)
         {
-            if (!leases.TryGetValue(activeSession.WorkflowRunId, out var lease) || lease is null)
+            if (!runsByWorkflow.TryGetValue(activeSession.WorkflowRunId, out var run) || run is null)
             {
                 allowedSessionIds.Add(activeSession.Id);
                 continue;
             }
 
-            if (MatchesLease(activeSession, lease))
+            if (WorkflowRunOwnsSession(run, activeSession))
                 allowedSessionIds.Add(activeSession.Id);
         }
 
@@ -547,17 +544,50 @@ public class AgentSessionQuerier
             .ToList();
     }
 
-    private static async Task<Dictionary<string, WorkLease?>> LoadLeasesAsync(MohistDbContext db, string[] workflowIds, CancellationToken ct)
+    private static WorkflowRun? DeserializeWorkflowRun(string json)
     {
-        var rows = await db.WorkflowLeases.AsNoTracking()
-            .Where(row => workflowIds.Contains(row.WorkflowRunId))
-            .ToListAsync(ct);
-        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.State), StringComparer.Ordinal);
+        try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
+        catch { return null; }
     }
 
-    private static bool MatchesLease(AgentSessionRow session, WorkLease lease) =>
-        string.Equals(session.RunnerId, lease.RunnerId, StringComparison.Ordinal)
-        && string.Equals(session.WorkId, lease.WorkId, StringComparison.Ordinal);
+    private static readonly JsonSerializerOptions RunJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static async Task<Dictionary<string, WorkflowRun?>> LoadWorkflowRunsForReconciliationAsync(
+        MohistDbContext db, List<AgentSessionRow> sessions, CancellationToken ct)
+    {
+        var workflowIds = sessions
+            .Select(s => s.WorkflowRunId)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var rows = await db.WorkflowRuns.AsNoTracking()
+            .Where(r => workflowIds.Contains(r.WorkflowRunId))
+            .ToListAsync(ct);
+
+        var runs = new Dictionary<string, WorkflowRun?>(StringComparer.Ordinal);
+        foreach (var row in rows)
+            runs[row.WorkflowRunId] = DeserializeWorkflowRun(row.State);
+        return runs;
+    }
+
+    private static bool WorkflowRunOwnsSession(WorkflowRun run, AgentSessionRow session)
+    {
+        if (run.ClaimedBy is null) return true;
+
+        if (!string.Equals(run.ClaimedBy, session.RunnerId, StringComparison.Ordinal))
+            return false;
+
+        var runningTask = run.Stages
+            .SelectMany(s => s.Tasks)
+            .FirstOrDefault(t => t.Status == Workflow.Domain.Run.TaskRunStatus.Running);
+
+        return runningTask is null || string.Equals(runningTask.Id, session.WorkId, StringComparison.Ordinal);
+    }
 
     private static bool IsActiveSession(AgentSessionRow session) =>
         session.CompletedAt is null

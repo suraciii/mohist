@@ -110,32 +110,6 @@ public abstract class WorkflowGrainSpecs
 
     protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
 
-    protected async Task SeedLeaseAsync(string workflowId, WorkLease lease)
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_fixture.ConnectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var row = await db.WorkflowLeases.FindAsync(workflowId);
-        var json = JsonSerializer.Serialize(lease, WorkflowStorageJson.Options);
-
-        if (row is null)
-        {
-            db.WorkflowLeases.Add(new WorkflowLeaseRow
-            {
-                WorkflowRunId = workflowId,
-                State = json
-            });
-        }
-        else
-        {
-            row.State = json;
-        }
-
-        await db.SaveChangesAsync();
-    }
-
     protected async Task DeactivateWorkflowAsync(string workflowId)
     {
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
@@ -165,7 +139,6 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         await using var db = new MohistDbContext(options);
-        db.WorkflowLeases.RemoveRange(db.WorkflowLeases);
         db.BacklogStates.RemoveRange(db.BacklogStates);
         await db.SaveChangesAsync();
 
