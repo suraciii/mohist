@@ -40,8 +40,11 @@ sequenceDiagram
     participant WorkflowRun
     participant Issue
     Runner->>WorkflowRun: Report
-    WorkflowRun-) Issue: WorkflowRunCompleted
-    WorkflowRun->>Issue: CompleteWork
+    rect rgb(240, 248, 255)
+        Note over WorkflowRun,Issue: hook fires after WorkflowRunCompleted
+        WorkflowRun-) Issue: WorkflowRunCompleted
+        WorkflowRun->>Issue: CompleteWork
+    end
 ```
 
 ## Report (失败)
@@ -52,8 +55,11 @@ sequenceDiagram
     participant WorkflowRun
     participant Issue
     Runner->>WorkflowRun: Report
-    WorkflowRun-) Issue: WorkflowRunFailed
-    WorkflowRun->>Issue: AbortWork
+    rect rgb(255, 248, 240)
+        Note over WorkflowRun,Issue: hook fires after WorkflowRunFailed
+        WorkflowRun-) Issue: WorkflowRunFailed
+        WorkflowRun->>Issue: AbortWork
+    end
 ```
 
 ## Stop (issue 在跑 workflow)
