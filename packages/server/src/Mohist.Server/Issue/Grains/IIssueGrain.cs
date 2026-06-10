@@ -9,7 +9,6 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
-    Task AbortWorkAsync(string workflowRunId, string? reason);
     Task CancelAsync();
     Task UpdateAsync(string title, string? body);
     Task UpdateFullAsync(UpdateIssueData data);

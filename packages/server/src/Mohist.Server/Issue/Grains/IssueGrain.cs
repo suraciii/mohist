@@ -191,8 +191,9 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         if (_issue!.ActiveWorkflowRunId is { } wrId)
         {
-            var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-            await wfGrain.StopAsync("issue-closed");
+            var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
+            if (wfStatus?.Status is "Running" or "Paused" or "AwaitingApproval")
+                throw new InvalidOperationException($"Cannot close issue while workflow is {wfStatus.Status}. Stop the workflow first.");
         }
         _issue.Close("user-cancelled");
         await SaveIssueAsync();
@@ -202,13 +203,6 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null) return;
         if (!_issue.Complete(workflowRunId)) return;
-        await SaveIssueAsync();
-    }
-
-    public async Task AbortWorkAsync(string workflowRunId, string? reason)
-    {
-        if (_issue is null) return;
-        if (!_issue.AbortWorkflow(workflowRunId, reason)) return;
         await SaveIssueAsync();
     }
 
@@ -256,13 +250,9 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
 
-        // Lazy reconciliation (see design/eventbus.md §Lost Event Recovery): if the
-        // bus subscription missed the terminal event (grain was deactivated
-        // at emit time, or the event was lost across a silo restart before
-        // the outbox), the read path here is the next chance to bring the
-        // issue in sync with the workflow's actual state. Issuing the same
-        // command the bus handler would issue (CompleteWorkAsync /
-        // AbortWorkAsync) keeps the recovery idempotent.
+        // Lazy reconciliation: if the bus subscription missed the
+        // Completed event, the read path here is the next chance to bring
+        // the issue in sync with the workflow's actual state.
         await ReconcileWithWorkflowTerminalStateAsync(wrId, wfStatus);
 
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
@@ -286,18 +276,8 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue.Status != Domain.IssueStatus.InProgress) return;
         if (_issue.ActiveWorkflowRunId != workflowRunId) return;
 
-        switch (wfStatus.Status)
-        {
-            case "Completed":
-                await CompleteWorkAsync(workflowRunId);
-                break;
-            case "Failed":
-                await AbortWorkAsync(workflowRunId, wfStatus.Failure?.Message ?? "failed");
-                break;
-            case "Stopped":
-                await AbortWorkAsync(workflowRunId, "stopped");
-                break;
-        }
+        if (wfStatus.Status == "Completed")
+            await CompleteWorkAsync(workflowRunId);
     }
 
     public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null)
