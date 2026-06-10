@@ -29,11 +29,12 @@ Web UI 不解释 workflow 规则。它只展示 server state，并把用户意�
 
 ## Event Model
 
-SSE/live events are observation only.
+Realtime events are observation only. The server pushes events to the Web UI via SignalR (`/hubs/events`).
 
 ```text
 WorkflowGrain commits event
   -> server persists/publishes
+  -> SignalR hub forwards to Web UI
   -> Web UI invalidates or patches queries
 ```
 

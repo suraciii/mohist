@@ -334,6 +334,5 @@ private async Task PublishAsync(IReadOnlyList<WorkflowEvent> events, Cancellatio
 ## Related
 
 - `design/architecture.md`
-- `design/issue-lifecycle.md`
-- `design/workflow-domain-events.md`
-- `design/runner-lifecycle.md`
+- `design/workflow-scheduling.md`
+- `design/issue-workflow-coordination.md`
