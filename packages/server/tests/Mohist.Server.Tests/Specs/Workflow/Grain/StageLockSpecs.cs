@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.Tests.Support;
@@ -221,6 +222,14 @@ public class StageLockSpecs : WorkflowGrainSpecs
         ]);
     }
 
-    private static WorkflowStartInput ProjectInput(string projectId) =>
-        new(Variables: System.Text.Json.JsonSerializer.Serialize(new { project = new { id = projectId } }));
+    private static WorkflowStartInput ProjectInput(string projectId)
+    {
+        return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+            }));
+    }
 }

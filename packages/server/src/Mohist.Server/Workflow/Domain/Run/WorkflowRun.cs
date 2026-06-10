@@ -1,15 +1,17 @@
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
+using Orleans;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
 public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Stopped, Completed, Failed }
 
+[GenerateSerializer]
 public sealed record WorkflowRunMetadata(
-    string? Name,
-    DateTimeOffset CreatedAt,
-    Dictionary<string, string>? Labels = null,
-    Dictionary<string, string>? Annotations = null);
+    [property: Id(0)] string? Name,
+    [property: Id(1)] DateTimeOffset CreatedAt,
+    [property: Id(2)] Dictionary<string, string>? Labels = null,
+    [property: Id(3)] Dictionary<string, string>? Annotations = null);
 
 public sealed class WorkflowRun
 {

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.Tests.Support;
@@ -42,17 +44,24 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         _runnerId = await RegisterRunnerAsync();
         var projectId = TestProjectId(workflowId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        var variables = JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
-        {
-            ["custom"] = JsonSerializer.SerializeToElement(new { answer = 42 }),
-            ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>()),
-        });
         await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition("spec/workflow", [
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task")],
                 [])
         ]), projectId);
-        await workflow.StartAsync(new WorkflowStartInput(variables, ProjectId: projectId));
+        await PatchProjectVariablesAsync(projectId, new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
+            {
+                ["custom"] = JsonSerializer.SerializeToElement(new { answer = 42 }),
+                ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>()),
+            }))));
+        await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+            })));
 
         await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();
@@ -88,7 +97,13 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                 [new("publish", "Publish", "spec/task")],
                 [])
         ]), projectId);
-        await workflow.StartAsync(new WorkflowStartInput(ProjectId: projectId));
+        await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+            })));
 
         await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();
