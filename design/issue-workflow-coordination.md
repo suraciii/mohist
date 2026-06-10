@@ -76,7 +76,7 @@ Runner         WorkflowRun           Issue
   |               |                   |
   |--- Report --->|                   |
   |               |                   |
-  · ··> WorkflowRunCompleted          |
+  |               · ··> WorkflowRunCompleted
   |               |                   |
   |               |--- CompleteWork ->|
 ```
@@ -88,7 +88,7 @@ Runner         WorkflowRun           Issue
   |               |                   |
   |--- Report --->|                   |
   |               |                   |
-  · ··> WorkflowRunFailed             |
+  |               · ··> WorkflowRunFailed
   |               |                   |
   |               |--- AbortWork ---->|
 ```
