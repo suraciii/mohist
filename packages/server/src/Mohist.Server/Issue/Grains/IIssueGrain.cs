@@ -1,7 +1,6 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Services;
-using Orleans.Concurrency;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -9,9 +8,9 @@ public interface IIssueGrain : IGrainWithStringKey
 {
     Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
-    [AlwaysInterleave] Task CompleteWorkAsync(string workflowRunId);
-    [AlwaysInterleave] Task AbortWorkAsync(string workflowRunId, string? reason);
-    [AlwaysInterleave] Task CancelAsync();
+    Task CompleteWorkAsync(string workflowRunId);
+    Task AbortWorkAsync(string workflowRunId, string? reason);
+    Task CancelAsync();
     Task UpdateAsync(string title, string? body);
     Task UpdateFullAsync(UpdateIssueData data);
     Task ArchiveAsync();

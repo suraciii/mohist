@@ -1,197 +1,108 @@
-using System.Collections.Concurrent;
-using System.Reflection;
-using CloudNative.CloudEvents;
+using System.Text.Json;
 
 namespace Mohist.Server.Infrastructure.Events;
 
-public sealed class InMemoryEventBus : IEventBus
+public sealed class InMemoryEventBus : IEventPublisher
 {
-    private readonly ConcurrentDictionary<string, List<SubscriptionEntry>> _typedHandlers = new();
-    private readonly ConcurrentDictionary<string, Type> _handlerInterfaceByType = new();
-    private readonly IServiceScopeFactory _scopes;
-    private readonly ILogger<InMemoryEventBus> _log;
+    private readonly IReadOnlyList<Subscription> _subscriptions;
+    private readonly ILogger<InMemoryEventBus> _log = null!;
 
-    public InMemoryEventBus(
-        IServiceScopeFactory scopes,
-        ILogger<InMemoryEventBus> log)
+    public InMemoryEventBus(IEnumerable<Subscription> subscriptions, ILogger<InMemoryEventBus> log)
     {
-        _scopes = scopes;
+        _subscriptions = subscriptions.ToList();
         _log = log;
+
+        foreach (var sub in _subscriptions)
+            ValidateType(sub.Type);
+
+        log.LogInformation(
+            "Event bus ready: {Count} subscriptions", _subscriptions.Count);
     }
 
-    public InMemoryEventBus(ILogger<InMemoryEventBus> log)
-        : this(NullScopeFactory.Instance, log)
+    public InMemoryEventBus(ILogger<InMemoryEventBus> log) : this([], log) { }
+
+    public async Task PublishAsync<TData>(
+        TData data,
+        string type,
+        string source,
+        string? subject = null,
+        IReadOnlyDictionary<string, string>? extensions = null,
+        CancellationToken ct = default)
     {
-    }
+        var dataJson = JsonSerializer.SerializeToElement(data, CloudEvent.JsonOptions);
+        var extDict = extensions is null
+            ? null
+            : new Dictionary<string, string>(extensions, StringComparer.Ordinal);
+        var evt = new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.RelativeOrAbsolute),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: dataJson,
+            subject: subject,
+            extensions: extDict);
 
-    private sealed class NullScopeFactory : IServiceScopeFactory
-    {
-        public static readonly NullScopeFactory Instance = new();
-        public IServiceScope CreateScope() => new NullScope();
-    }
-
-    private sealed class NullScope : IServiceScope
-    {
-        public IServiceProvider ServiceProvider { get; } = new NullServiceProvider();
-        public void Dispose() { }
-    }
-
-    private sealed class NullServiceProvider : IServiceProvider
-    {
-        public object? GetService(Type serviceType) => null;
-    }
-
-    public void Emit(CloudEvent cloudEvent)
-    {
-        EmitAsync(cloudEvent, CancellationToken.None).GetAwaiter().GetResult();
-    }
-
-    public async Task EmitAsync(CloudEvent cloudEvent, CancellationToken ct = default)
-    {
-        var type = cloudEvent.Type ?? string.Empty;
-
-        await DispatchTypedHandlersAsync(cloudEvent, ct).ConfigureAwait(false);
-
-        if (_typedHandlers.TryGetValue(type, out var typedList))
+        foreach (var sub in _subscriptions)
         {
-            await DispatchTypedAsync(typedList, cloudEvent, ct).ConfigureAwait(false);
+            if (!Matches(sub.Type, evt.Type))
+                continue;
+
+            try
+            {
+                await sub.Dispatch(sub.Handler, evt, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "Handler {Handler} failed for event {EventType}",
+                    sub.Handler.GetType().Name, evt.Type);
+            }
         }
     }
 
-    public void Subscribe(string eventType, Func<CloudEvent, Task> handler)
-        => SubscribeCore(bucketKey: eventType, filter: CloudEventFilter.Type(eventType), handler);
-
-    public void Subscribe(Func<CloudEvent, bool> filter, Func<CloudEvent, Task> handler)
-        => SubscribeCore(
-            bucketKey: filter.Method.GetHashCode().ToString(),
-            filter,
-            handler);
-
-    public void RegisterHandlerInterfaces(
-        IReadOnlyDictionary<string, Type> eventTypeToHandlerInterface)
+    private static bool Matches(string pattern, string type)
     {
-        foreach (var (eventType, handlerInterface) in eventTypeToHandlerInterface)
+        foreach (var alternative in pattern.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (handlerInterface is null)
+            if (alternative == type) return true;
+            if (alternative == "*") return true;
+            if (alternative.EndsWith(".*", StringComparison.Ordinal))
+            {
+                var prefix = alternative[..^2];
+                if (type == prefix || type.StartsWith(prefix + ".", StringComparison.Ordinal))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static void ValidateType(string type)
+    {
+        if (string.IsNullOrEmpty(type))
+            throw new ArgumentException("Empty type", nameof(type));
+        foreach (var alternative in type.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (alternative == "*") continue;
+            if (alternative.EndsWith(".*", StringComparison.Ordinal))
+            {
+                if (alternative.IndexOf('*') != alternative.Length - 1)
+                    throw new ArgumentException(
+                        $"Invalid subscription type '{type}': wildcards are only allowed as '.*' suffix",
+                        nameof(type));
+            }
+            else if (alternative.Contains('*'))
             {
                 throw new ArgumentException(
-                    $"Handler interface for event type '{eventType}' is null", nameof(eventTypeToHandlerInterface));
+                    $"Invalid subscription type '{type}': wildcards are only allowed as '.*' suffix",
+                    nameof(type));
             }
-            if (!handlerInterface.IsInterface)
-            {
-                throw new ArgumentException(
-                    $"Handler interface for event type '{eventType}' must be an interface (got {handlerInterface.Name})",
-                    nameof(eventTypeToHandlerInterface));
-            }
-            _handlerInterfaceByType[eventType] = handlerInterface;
-        }
-        _log.LogInformation(
-            "InMemoryEventBus registered {Count} typed handler interface(s): {Types}",
-            _handlerInterfaceByType.Count,
-            string.Join(", ", _handlerInterfaceByType.Keys));
-    }
-
-    private void SubscribeCore(string bucketKey, Func<CloudEvent, bool> filter, Func<CloudEvent, Task> handler)
-    {
-        var entry = new SubscriptionEntry(filter, handler);
-        var list = _typedHandlers.GetOrAdd(bucketKey, _ => new List<SubscriptionEntry>());
-        lock (list)
-        {
-            list.Add(entry);
-        }
-    }
-
-    private async Task DispatchTypedHandlersAsync(CloudEvent evt, CancellationToken ct)
-    {
-        var type = evt.Type ?? string.Empty;
-        if (!_handlerInterfaceByType.TryGetValue(type, out var handlerInterface)) return;
-
-        using var scope = _scopes.CreateScope();
-        var handlers = scope.ServiceProvider.GetServices(handlerInterface);
-        var handlerList = handlers.ToList();
-        if (handlerList.Count == 0) return;
-
-        var tasks = new List<Task>(handlerList.Count);
-        foreach (var handler in handlerList)
-        {
-            if (handler is null) continue;
-            tasks.Add(InvokeHandlerSafely(handler, handlerInterface, evt));
-        }
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
-    }
-
-    private static async Task InvokeHandlerSafely(object handler, Type handlerInterface, CloudEvent evt)
-    {
-        try
-        {
-            var method = handlerInterface.GetMethod(
-                "HandleAsync",
-                BindingFlags.Public | BindingFlags.Instance)
-                ?? throw new InvalidOperationException(
-                    $"Handler interface {handlerInterface.Name} has no public HandleAsync method");
-
-            var result = method.Invoke(handler, [evt, CancellationToken.None]);
-            if (result is Task task)
-            {
-                await task.ConfigureAwait(false);
-            }
-        }
-        catch (TargetInvocationException tie) when (tie.InnerException is not null)
-        {
-            throw tie.InnerException;
-        }
-    }
-
-    private async Task DispatchTypedAsync(
-        List<SubscriptionEntry> list,
-        CloudEvent evt,
-        CancellationToken ct)
-    {
-        SubscriptionEntry[] snapshot;
-        lock (list)
-        {
-            snapshot = list.ToArray();
-        }
-        var tasks = new List<Task>(snapshot.Length);
-        foreach (var entry in snapshot)
-        {
-            if (!entry.Filter(evt)) continue;
-            tasks.Add(RunHandlerSafely(entry, evt));
-        }
-        if (tasks.Count > 0)
-        {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
-        }
-        ct.ThrowIfCancellationRequested();
-    }
-
-    private async Task RunHandlerSafely(SubscriptionEntry entry, CloudEvent evt)
-    {
-        try
-        {
-            await entry.Handler(evt).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Typed event handler failed for {Type}", evt.Type);
-        }
-    }
-
-    private sealed class SubscriptionEntry
-    {
-        public readonly Func<CloudEvent, bool> Filter;
-        public readonly Func<CloudEvent, Task> Handler;
-
-        public SubscriptionEntry(Func<CloudEvent, bool> filter, Func<CloudEvent, Task> handler)
-        {
-            Filter = filter;
-            Handler = handler;
         }
     }
 }
 
-internal static class CloudEventFilter
-{
-    public static Func<CloudEvent, bool> Type(string type) => e => e.Type == type;
-}
+public sealed record Subscription(
+    string Type,
+    object Handler,
+    DispatchDelegate Dispatch);
+
+public delegate Task DispatchDelegate(object handler, CloudEvent evt, CancellationToken ct);

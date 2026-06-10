@@ -56,7 +56,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
 
         var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
-        Assert.Contains(startEvents, e => e.Type == "WorkflowRunStarted");
+        Assert.Contains(startEvents, e => e.Type == "com.mohist.workflow.run.started");
 
         var initialStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         Assert.Contains(initialStatus.Workflow!.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
@@ -69,8 +69,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Null(planStage.ApprovalStatus?.Result);
 
         var planEvents = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
-        Assert.Contains(planEvents, e => e.Type == "TaskCompleted");
-        Assert.Contains(planEvents, e => e.Type == "CheckPassed");
+        Assert.Contains(planEvents, e => e.Type == "com.mohist.workflow.task.completed");
+        Assert.Contains(planEvents, e => e.Type == "com.mohist.workflow.check.passed");
 
         var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.Equal("in_progress", listedAtApproval.Status);
@@ -91,9 +91,10 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal("done", completed.Status);
         Assert.Equal("done", completed.Health);
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/archive");
         var events = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
-        Assert.Contains(events, e => e.Type == "WorkflowRunCompleted");
+        Assert.Contains(events, e => e.Type == "com.mohist.workflow.run.completed");
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/archive");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

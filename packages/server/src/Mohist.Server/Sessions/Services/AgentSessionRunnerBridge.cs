@@ -1,4 +1,3 @@
-using CloudNative.CloudEvents;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
@@ -7,7 +6,8 @@ using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Sessions.Services;
 
-public sealed class AgentSessionRunnerBridge : IRunnerDisconnectedHandler
+[Subscription(Type = "com.mohist.runner.disconnected")]
+public sealed class AgentSessionRunnerBridge : ICloudEventHandler
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
@@ -30,16 +30,19 @@ public sealed class AgentSessionRunnerBridge : IRunnerDisconnectedHandler
         _log = log;
     }
 
-    public async Task HandleAsync(CloudEvent evt, CancellationToken ct = default)
+    public bool Filter(CloudEvent evt) => true;
+
+    public async Task HandleAsync(CloudEvent evt, CancellationToken ct)
     {
-        var runnerId = TryGetString(evt, "runnerid");
-        if (string.IsNullOrEmpty(runnerId))
+        if (!evt.Extensions.TryGetValue("runnerid", out var runnerId) || string.IsNullOrEmpty(runnerId))
         {
             _log.LogWarning("runner_disconnected event missing runnerid extension");
             return;
         }
 
-        var reason = TryGetString(evt, "reason") ?? "runner-disconnected";
+        var reason = evt.Extensions.TryGetValue("reason", out var r) && r is not null
+            ? r
+            : "runner-disconnected";
 
         try
         {
@@ -77,17 +80,5 @@ public sealed class AgentSessionRunnerBridge : IRunnerDisconnectedHandler
             .Select(s => s.Id)
             .ToListAsync(ct);
         return rows;
-    }
-
-    private static string? TryGetString(CloudEvent evt, string extensionName)
-    {
-        foreach (var (attr, value) in evt.GetPopulatedAttributes())
-        {
-            if (attr.IsExtension && attr.Name == extensionName && value is not null)
-            {
-                return value.ToString();
-            }
-        }
-        return null;
     }
 }

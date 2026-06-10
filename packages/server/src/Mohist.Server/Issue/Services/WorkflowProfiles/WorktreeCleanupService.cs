@@ -1,12 +1,13 @@
-using CloudNative.CloudEvents;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
-public sealed class WorktreeCleanupService : IWorkflowRunCompletedHandler
+[Subscription(Type = "com.mohist.workflow.run.completed")]
+public sealed class WorktreeCleanupService : ICloudEventHandler<WorkflowRunCompleted>
 {
     private readonly ProjectQuerier _projectsQuery;
     private readonly IGitService _git;
@@ -22,10 +23,12 @@ public sealed class WorktreeCleanupService : IWorkflowRunCompletedHandler
         _log = log;
     }
 
-    public async Task HandleAsync(CloudEvent evt, CancellationToken ct = default)
+    public bool Filter(CloudEvent<WorkflowRunCompleted> evt) => true;
+
+    public async Task HandleAsync(CloudEvent<WorkflowRunCompleted> evt, CancellationToken ct)
     {
-        var projectId = TryGetString(evt, "projectid");
-        var issueNumberStr = TryGetString(evt, "issueno");
+        var projectId = TryGetExtension(evt, "projectid");
+        var issueNumberStr = TryGetExtension(evt, "issueno");
         if (string.IsNullOrEmpty(projectId) || string.IsNullOrEmpty(issueNumberStr)) return;
         if (!int.TryParse(issueNumberStr, out var issueNumber)) return;
 
@@ -54,15 +57,6 @@ public sealed class WorktreeCleanupService : IWorkflowRunCompletedHandler
         }
     }
 
-    private static string? TryGetString(CloudEvent evt, string name)
-    {
-        foreach (var (attr, value) in evt.GetPopulatedAttributes())
-        {
-            if (attr.IsExtension && attr.Name == name && value is not null)
-            {
-                return value.ToString();
-            }
-        }
-        return null;
-    }
+    private static string? TryGetExtension<TData>(CloudEvent<TData> evt, string name) where TData : class =>
+        evt.Extensions.TryGetValue(name, out var v) ? v : null;
 }

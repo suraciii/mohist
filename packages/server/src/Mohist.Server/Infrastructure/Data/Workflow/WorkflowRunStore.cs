@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
@@ -19,6 +19,8 @@ public interface IWorkflowRunStore
 public class WorkflowRunStore : IWorkflowRunStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IEventPublisher _eventBus;
+    private readonly IEventStore _eventStore;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -27,9 +29,14 @@ public class WorkflowRunStore : IWorkflowRunStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public WorkflowRunStore(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowRunStore(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventPublisher eventBus,
+        IEventStore eventStore)
     {
         _dbFactory = dbFactory;
+        _eventBus = eventBus;
+        _eventStore = eventStore;
     }
 
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
@@ -46,15 +53,12 @@ public class WorkflowRunStore : IWorkflowRunStore
         try
         {
             await StageRunAsync(db, run, ct);
-            await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            await PublishAsync(run, events, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
-            // transaction is rolled back automatically by `await using` on
-            // dispose. The caller (WorkflowGrain.SaveRunAsync) logs the
-            // ETag mismatch and deactivates the grain to reload state.
             throw;
         }
     }
@@ -71,17 +75,74 @@ public class WorkflowRunStore : IWorkflowRunStore
         try
         {
             await StageRunAsync(db, run, ct);
-            await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
             await StageLeaseAsync(db, run.Id, lease, ct);
             await StageVariablesAsync(db, run.Id, variables, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            await PublishAsync(run, events, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
-            // transaction is rolled back automatically by `await using` on
-            // dispose.
             throw;
+        }
+    }
+
+    private async Task PublishAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct)
+    {
+        var projectId = ExtractProjectId(run) ?? string.Empty;
+        var issueNumber = ExtractIssueNumber(run) ?? string.Empty;
+        var source = WorkflowRunEventPersistence.SourcePrefix + run.Id;
+        var subject = string.IsNullOrEmpty(issueNumber) ? null : issueNumber;
+        var extensions = new Dictionary<string, string>
+        {
+            ["projectid"] = projectId,
+            ["workflowrunid"] = run.Id,
+            ["issueno"] = issueNumber,
+        };
+
+        foreach (var (evt, type) in EnumerateWithTypes(events))
+        {
+            var dataJson = JsonSerializer.SerializeToElement(evt, JsonOptions);
+            var envelope = new CloudEvent(
+                id: Guid.NewGuid().ToString(),
+                source: new Uri(source, UriKind.Relative),
+                type: type,
+                time: DateTimeOffset.UtcNow,
+                data: dataJson,
+                subject: subject,
+                extensions: extensions);
+
+            await _eventStore.AppendAsync(envelope, ct);
+            await _eventBus.PublishAsync(evt, type, source, subject, extensions, ct);
+        }
+    }
+
+    private static IEnumerable<(WorkflowEvent Evt, string Type)> EnumerateWithTypes(IReadOnlyList<WorkflowEvent> events)
+    {
+        foreach (var evt in events)
+        {
+            var type = evt switch
+            {
+                WorkflowRunStarted => "com.mohist.workflow.run.started",
+                WorkflowRunResumed => "com.mohist.workflow.run.resumed",
+                WorkflowRunPaused => "com.mohist.workflow.run.paused",
+                WorkflowRunStopped => "com.mohist.workflow.run.stopped",
+                WorkflowRunCompleted => "com.mohist.workflow.run.completed",
+                WorkflowRunFailed => "com.mohist.workflow.run.failed",
+                StageStarted => "com.mohist.workflow.stage.started",
+                StageCompleted => "com.mohist.workflow.stage.completed",
+                StageFailed => "com.mohist.workflow.stage.failed",
+                StageApprovalRequested => "com.mohist.workflow.stage.approval-requested",
+                StageApprovalResolved => "com.mohist.workflow.stage.approval-resolved",
+                TaskCompleted => "com.mohist.workflow.task.completed",
+                TaskFailed => "com.mohist.workflow.task.failed",
+                CheckPassed => "com.mohist.workflow.check.passed",
+                CheckFailed => "com.mohist.workflow.check.failed",
+                CheckPending => "com.mohist.workflow.check.pending",
+                RepairScheduled => "com.mohist.workflow.repair-scheduled",
+                _ => throw new InvalidOperationException($"Unknown workflow event: {evt.GetType().Name}"),
+            };
+            yield return (evt, type);
         }
     }
 
@@ -149,7 +210,6 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
         catch (Exception ex)
         {
-            // JSON corruption is unrecoverable; surface to caller rather than silently returning null.
             throw new InvalidOperationException(
                 $"Failed to deserialize workflow run state. The persisted JSON is corrupt.", ex);
         }

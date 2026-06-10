@@ -67,7 +67,7 @@ public class BacklogFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
             siloBuilder.Services.AddScoped<WorkflowProfileManager>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
-            siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
+            siloBuilder.Services.AddCloudEventBus();
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
             siloBuilder.Services.AddHostedService<DbSchemaInitializer>();
         });

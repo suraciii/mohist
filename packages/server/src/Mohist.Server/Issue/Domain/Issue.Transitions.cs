@@ -56,7 +56,6 @@ public sealed partial class Issue
         if (_status != IssueStatus.InProgress)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
         _status = IssueStatus.Done;
-        _activeWorkflowRunId = null;
         Touch(now);
         return true;
     }
@@ -67,6 +66,7 @@ public sealed partial class Issue
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only Done can archive");
         var archivedAt = now ?? DateTime.UtcNow;
         _archivedAt = archivedAt;
+        _activeWorkflowRunId = null;
         Touch(archivedAt);
     }
 

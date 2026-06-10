@@ -27,6 +27,7 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
     public DbSet<EventRow> Events { get; set; } = null!;
+    public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
     public DbSet<AgentSessionRuntimeEventRow> AgentSessionRuntimeEvents { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
@@ -63,8 +64,7 @@ public class MohistDbContext : DbContext
         {
             entity.ToTable("Events");
             entity.HasKey(e => new { e.Source, e.Id });
-            entity.Property(e => e.Id)
-                .IsRequired();
+            entity.Property(e => e.Id).IsRequired();
             entity.Property(e => e.Source)
                 .HasMaxLength(256)
                 .IsRequired();
@@ -91,6 +91,44 @@ public class MohistDbContext : DbContext
             entity.Ignore(e => e.WorkflowEvent);
             entity.Ignore(e => e.AgentSessionEvent);
             entity.HasIndex("Type", nameof(EventRow.Source), nameof(EventRow.Id));
+        });
+
+        modelBuilder.Entity<WorkflowRunEventRow>(entity =>
+        {
+            entity.ToTable("WorkflowRunEvents");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.HasIndex(nameof(WorkflowRunEventRow.Type), nameof(WorkflowRunEventRow.Source), nameof(WorkflowRunEventRow.Id));
         });
 
         modelBuilder.Entity<AgentSessionRow>(entity =>

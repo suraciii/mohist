@@ -12,74 +12,63 @@ public class EventBridgeSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task EventBusEvent_ForSubscribedConnection_IsPushedToThatClient()
+    public async Task PublishedEvent_ForSubscribedConnection_IsPushedToThatClient()
     {
-        var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
         var registry = new ConnectionSubscriptionRegistry();
-        var dispatcher = new UserNotificationDispatcher(registry);
-        var hub = new RecordingHubContext();
-        var bridge = new EventBridge(bus, dispatcher, hub, NullLogger<EventBridge>.Instance);
-        await bridge.StartAsync(CancellationToken.None);
-
-        // Two connections. Only the first one is subscribed to the
-        // event type. The dispatcher should forward to that one
-        // only.
         registry.RegisterConnection("conn-A");
         registry.RegisterConnection("conn-B");
-        registry.Subscribe("conn-A", "stage_changed");
+        registry.Subscribe("conn-A", "com.mohist.workflow.run.completed");
 
-        var stageEvent = new StageChangedEvent(
-            "project-1",
-            "workflow-1",
-            "Plan",
-            "Running",
-            "started",
-            null,
-            "2026-06-05T00:00:00.0000000Z");
-        var envelope = CloudEventFactory.Create(
-            type: "stage_changed",
-            source: new Uri($"/mohist/workflow/workflow-1/stage/Plan", UriKind.Relative),
-            data: stageEvent,
-            projectId: "project-1",
-            workflowRunId: "workflow-1");
-        await bus.EmitAsync(envelope);
+        var dispatcher = new UserNotificationDispatcher(registry);
+        var hub = new RecordingHubContext();
+        var bridge = new EventBridge(dispatcher, hub, NullLogger<EventBridge>.Instance);
+        var bus = new InMemoryEventBus(
+            [new Subscription("com.mohist.*", bridge, (h, e, ct) => ((ICloudEventHandler)h).HandleAsync(e, ct))],
+            NullLogger<InMemoryEventBus>.Instance);
+
+        await bus.PublishAsync(
+            data: new { Action = "started" },
+            type: "com.mohist.workflow.run.completed",
+            source: "/mohist/workflow/workflow-1",
+            subject: null,
+            extensions: new Dictionary<string, string>
+            {
+                ["projectid"] = "project-1",
+                ["workflowrunid"] = "workflow-1",
+            });
 
         var message = Assert.Single(hub.Messages);
         Assert.Equal("conn-A", message.ConnectionId);
-        Assert.Equal("stage_changed", message.EventName);
+        Assert.Equal("com.mohist.workflow.run.completed", message.EventName);
         var innerEnvelope = Assert.IsType<CloudEventEnvelope>(message.Data);
-        Assert.Equal("stage_changed", innerEnvelope.Type);
+        Assert.Equal("com.mohist.workflow.run.completed", innerEnvelope.Type);
         Assert.Equal("1.0", innerEnvelope.SpecVersion);
         Assert.NotNull(innerEnvelope.Id);
         Assert.NotNull(innerEnvelope.Time);
         Assert.Equal("project-1", innerEnvelope.Extensions?["projectid"]);
-
-        await bridge.StopAsync(CancellationToken.None);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task EventBusEvent_ForUnsubscribedConnection_IsNotPushedToThatClient()
+    public async Task PublishedEvent_ForUnsubscribedConnection_IsNotPushedToAnyClient()
     {
-        var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
         var registry = new ConnectionSubscriptionRegistry();
+        registry.RegisterConnection("conn-A");
+
         var dispatcher = new UserNotificationDispatcher(registry);
         var hub = new RecordingHubContext();
-        var bridge = new EventBridge(bus, dispatcher, hub, NullLogger<EventBridge>.Instance);
-        await bridge.StartAsync(CancellationToken.None);
+        var bridge = new EventBridge(dispatcher, hub, NullLogger<EventBridge>.Instance);
+        var bus = new InMemoryEventBus(
+            [new Subscription("com.mohist.*", bridge, (h, e, ct) => ((ICloudEventHandler)h).HandleAsync(e, ct))],
+            NullLogger<InMemoryEventBus>.Instance);
 
-        registry.RegisterConnection("conn-A");
-        // conn-A has no subscriptions — registry defaults to empty set
-
-        var envelope = CloudEventFactory.Create(
-            type: "schedule_triggered",
-            source: new Uri("about:blank", UriKind.Absolute));
-        await bus.EmitAsync(envelope);
+        await bus.PublishAsync(
+            data: new { Reason = "user-paused" },
+            type: "com.mohist.workflow.run.paused",
+            source: "/mohist/workflow/workflow-1");
 
         Assert.Empty(hub.Messages);
-
-        await bridge.StopAsync(CancellationToken.None);
     }
 
     private sealed class RecordingHubContext : IHubContext<MohistHub, IEventsClient>

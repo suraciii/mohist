@@ -1,11 +1,6 @@
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
@@ -24,138 +19,64 @@ public class EventStoreSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task AppendWorkflowEventAsync_StoresMinimalDomainEventRow()
+    public async Task AppendAsync_StoresEnvelope()
     {
         using var scope = _fixture.Services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var source = new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative);
 
-        await store.AppendWorkflowEventAsync(workflowRunId, new WorkflowRunStarted());
-        await store.AppendWorkflowEventAsync(workflowRunId, new StageStarted("plan"));
+        await store.AppendAsync(new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: source,
+            type: "com.mohist.workflow.run.started",
+            time: DateTimeOffset.UtcNow,
+            data: null));
 
-        await using var db = await dbFactory.CreateDbContextAsync();
-        var rows = await db.Events.AsNoTracking()
-            .Where(e => e.Source == $"/workflow-runs/{workflowRunId}")
-            .OrderBy(e => e.Id)
-            .Select(e => new
-            {
-                e.Id,
-                e.Source,
-                e.Data,
-                e.Time,
-                Type = EF.Property<string>(e, "Type"),
-                SpecVersion = EF.Property<string>(e, "SpecVersion"),
-            })
-            .ToListAsync();
-
-        Assert.Collection(rows,
-            first =>
-            {
-                Assert.Equal(1, first.Id);
-                Assert.Equal(nameof(WorkflowRunStarted), first.Type);
-                Assert.Equal("1.0", first.SpecVersion);
-                Assert.Equal(JsonValueKind.Object, first.Data.ValueKind);
-                Assert.Empty(first.Data.EnumerateObject());
-            },
-            second =>
-            {
-                Assert.Equal(2, second.Id);
-                Assert.Equal($"/workflow-runs/{workflowRunId}", second.Source);
-                Assert.Equal(nameof(StageStarted), second.Type);
-                Assert.Equal("1.0", second.SpecVersion);
-                Assert.True(second.Time > DateTime.UtcNow.AddMinutes(-1));
-
-                Assert.Equal("plan", second.Data.GetProperty("stage").GetString());
-            });
+        var events = await store.ListAsync(workflowRunId);
+        var first = Assert.Single(events);
+        Assert.Equal("com.mohist.workflow.run.started", first.Envelope.Type);
+        Assert.Equal(source, first.Envelope.Source);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task ListWorkflowEventsAsync_ProjectsDomainEventsFromPayload()
+    public async Task ListAsync_RoundtripsEnvelopeWithExtensions()
     {
         using var scope = _fixture.Services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
 
-        await store.AppendWorkflowEventAsync(
-            workflowRunId, new TaskCompleted("build", "task.1"));
+        var extensions = new Dictionary<string, string>
+        {
+            ["projectid"] = "proj",
+            ["workflowrunid"] = workflowRunId,
+        };
+        await store.AppendAsync(new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri($"/mohist/workflow-runs/{workflowRunId}", UriKind.Relative),
+            type: "com.mohist.workflow.task.completed",
+            time: DateTimeOffset.UtcNow,
+            data: null,
+            subject: "42",
+            extensions: extensions));
 
-        var events = await store.ListWorkflowEventsAsync(workflowRunId);
-
+        var events = await store.ListAsync(workflowRunId);
         var e = Assert.Single(events);
-        Assert.Equal(nameof(TaskCompleted), e.Type);
-        Assert.Equal($"/workflow-runs/{workflowRunId}", e.Source);
-        var payload = Assert.IsType<TaskCompleted>(e.Data.Value);
-        Assert.Equal("build", payload.Stage);
-        Assert.Equal("task.1", payload.TaskId);
+        Assert.Equal("com.mohist.workflow.task.completed", e.Envelope.Type);
+        Assert.Equal("42", e.Envelope.Subject);
+        Assert.Equal("proj", e.Envelope.Extensions["projectid"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task AgentSessionStore_StoresSessionStateAndDomainEventsInOneCommit()
+    public async Task ListAsync_EmptyForUnknownWorkflowRun()
     {
         using var scope = _fixture.Services.CreateScope();
-        var store = scope.ServiceProvider.GetRequiredService<IAgentSessionStore>();
-        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        var session = CreateAgentSession();
-
-        var events = session.AttachAgent("runtime-session-1", "codex-high", "/work", null, null, DateTime.UtcNow);
-        await store.SaveAsync(session.Id, session, events);
-
-        await using var db = await dbFactory.CreateDbContextAsync();
-        var row = await db.AgentSessions.AsNoTracking().SingleAsync(e => e.Id == session.Id);
-        Assert.Equal("runtime-session-1", row.AgentSessionId);
-        Assert.Equal("running", row.Status);
-
-        var rows = await db.Events.AsNoTracking()
-            .Where(e => e.Source == $"/agent-sessions/{session.Id}")
-            .OrderBy(e => e.Id)
-            .Select(e => new
-            {
-                e.Id,
-                e.Source,
-                e.Data,
-                Type = EF.Property<string>(e, "Type"),
-                SpecVersion = EF.Property<string>(e, "SpecVersion"),
-            })
-            .ToListAsync();
-
-        Assert.Collection(rows,
-            first =>
-            {
-                Assert.Equal(1, first.Id);
-                Assert.Equal(nameof(AgentSessionStarted), first.Type);
-                Assert.Equal("1.0", first.SpecVersion);
-                Assert.Equal("runtime-session-1", first.Data.GetProperty("agentRuntimeSessionId").GetString());
-            },
-            second =>
-            {
-                Assert.Equal(2, second.Id);
-                Assert.Equal($"/agent-sessions/{session.Id}", second.Source);
-                Assert.Equal(nameof(AgentSessionModelChanged), second.Type);
-                Assert.Equal("codex-high", second.Data.GetProperty("model").GetString());
-            });
+        var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        var events = await store.ListAsync("nonexistent");
+        Assert.Empty(events);
     }
-
-    private static AgentSession CreateAgentSession()
-    {
-        var metadata = new AgentSessionMetadata()
-            .WithLabel(AgentSessionMetadataKeys.ProjectId, "proj")
-            .WithLabel(AgentSessionMetadataKeys.IssueNumber, "1")
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
-            .WithLabel(AgentSessionMetadataKeys.SourceId, "wf")
-            .WithLabel(AgentSessionMetadataKeys.SessionName, "plan");
-
-        return AgentSession.Create(
-            $"proj/wf/plan-{Guid.NewGuid():N}",
-            "runner-1",
-            "opencode",
-            "/work",
-            metadata: metadata,
-            now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc));
-    }
-
 }

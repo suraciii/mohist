@@ -42,6 +42,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
     public string ConnectionString => _connectionString
         ?? throw new InvalidOperationException("MohistDbFixture is not initialized");
     public InMemoryEventBus EventBus => _eventBus;
+    public IEventPublisher EventPublisher => _eventBus;
     public RecordingEventStore EventStore => _eventStore;
 
     /// <summary>
@@ -88,13 +89,13 @@ public sealed class MohistDbFixture : IAsyncLifetime
         services.AddSingleton<IGitService>(sp => sp.GetRequiredService<FakeGitService>());
         services.RemoveAll<IEnvironmentVariableProvider>();
         services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
-        // IEventBus is shared so all tests in the same fixture see each
-        // other's emissions, mirroring MohistIntegrationFixture's
+        // IEventPublisher is shared so all tests in the same fixture see
+        // each other's emissions, mirroring MohistIntegrationFixture's
         // behaviour. IEventStore is left as the real production
         // implementation so its DB writes are visible to the test's
         // query scope.
-        services.RemoveAll<IEventBus>();
-        services.AddSingleton<IEventBus>(_eventBus);
+        services.RemoveAll<IEventPublisher>();
+        services.AddSingleton<IEventPublisher>(_eventBus);
         // RecordingEventStore remains available via the EventStore
         // property for specs that explicitly want to assert on recorded
         // calls; the in-scope IEventStore is the real one.

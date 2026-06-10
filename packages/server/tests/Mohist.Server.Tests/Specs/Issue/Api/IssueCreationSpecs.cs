@@ -75,11 +75,11 @@ public class IssueCreationSpecs
         return row?.State;
     }
 
-    private async Task<IReadOnlyList<WorkflowDomainEventDto>> GetWorkflowEventsAsync(string workflowRunId)
+    private async Task<IReadOnlyList<StoredCloudEvent>> GetWorkflowEventsAsync(string workflowRunId)
     {
         using var scope = _services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        return (await events.ListWorkflowEventsAsync(workflowRunId)).ToList();
+        return (await events.ListAsync(workflowRunId)).ToList();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -296,7 +296,7 @@ public class IssueCreationSpecs
         Assert.Null(await runner.PollAsync());
 
         var events = await GetWorkflowEventsAsync(workflowRunId);
-        Assert.Single(events, e => e.Type == "WorkflowRunStopped");
+        Assert.Single(events, e => e.Envelope.Type == "com.mohist.workflow.run.stopped");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
