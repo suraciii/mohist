@@ -139,6 +139,9 @@ public class IssueGrain : Grain, IIssueGrain
 
         await _issueProfileManager.PatchVariablesAsync(issue.Id, BuildIssueVariables(wrId, issue, projectContext));
 
+        foreach (var (key, body) in mergedPrompts)
+            await _issueProfileManager.SetPromptAsync(issue.Id, key, body);
+
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(input:
             new WorkflowStartInput(

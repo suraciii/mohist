@@ -17,7 +17,10 @@ public class IssueCounterGrain : Grain, IIssueCounterGrain
 
     private async Task<int> NextAsyncImpl()
     {
-        var current = _state.State?.Next ?? 0;
+        if (!_state.RecordExists)
+            await _state.ReadStateAsync();
+
+        var current = _state.State is null || _state.State.Next <= 0 ? 1 : _state.State.Next;
         _state.State = new IssueCounterState(current + 1);
         await _state.WriteStateAsync();
         return current;

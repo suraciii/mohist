@@ -52,18 +52,28 @@ public class WorkflowQuerier
 
     public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)
     {
-        await using var db = await _db.CreateDbContextAsync();
-        var json = await db.WorkflowVariables.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.State)
-            .FirstOrDefaultAsync();
+        var bundle = await _profileManager.LoadVariablesAsync(workflowRunId);
+        if (!bundle.Vars.HasValue && bundle.Stages is null)
+            return null;
 
-        if (json is null) return null;
+        var varsJson = bundle.Vars.HasValue
+            ? JsonSerializer.Serialize(bundle.Vars.Value, RunJsonOptions)
+            : "{}";
 
-        var ctx = JsonSerializer.Deserialize<VariablesDto>(json, StorageJsonOptions);
-        return ctx is null
-            ? null
-            : new WorkflowVariablesView(ctx.Json, ctx.StageVariables);
+        Dictionary<string, Dictionary<string, string>>? stageMap = null;
+        if (bundle.Stages is not null)
+        {
+            stageMap = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+            foreach (var (stage, stageVars) in bundle.Stages)
+            {
+                if (!stageVars.Vars.HasValue) continue;
+                var stageVarsJson = JsonSerializer.Serialize(stageVars.Vars.Value, RunJsonOptions);
+                var inner = JsonSerializer.Deserialize<Dictionary<string, string>>(stageVarsJson, RunJsonOptions);
+                if (inner is not null) stageMap[stage] = inner;
+            }
+        }
+
+        return new WorkflowVariablesView(varsJson, stageMap);
     }
 
     public async Task<string?> GetDefinitionYamlAsync(string workflowRunId)

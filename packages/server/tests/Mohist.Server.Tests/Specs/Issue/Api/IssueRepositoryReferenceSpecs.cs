@@ -38,10 +38,10 @@ public class IssueRepositoryReferenceSpecs
         var storedJson = await LoadStateAsync(projectId, 1);
         using var doc = JsonDocument.Parse(storedJson);
 
-        Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
+        Assert.True(doc.RootElement.TryGetProperty("repositoryRef", out var refElement));
         Assert.Equal("secondary", refElement.GetString());
         Assert.False(
-            doc.RootElement.TryGetProperty("Repository", out _),
+            doc.RootElement.TryGetProperty("repository", out _),
             "New issues must not persist a mutable repository configuration snapshot as authority.");
     }
 
@@ -63,10 +63,10 @@ public class IssueRepositoryReferenceSpecs
 
         var storedJson = await LoadStateAsync(projectId, 1);
         using var doc = JsonDocument.Parse(storedJson);
-        Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
+        Assert.True(doc.RootElement.TryGetProperty("repositoryRef", out var refElement));
         Assert.Equal(project.DefaultRepository?.Name, refElement.GetString());
         Assert.False(
-            doc.RootElement.TryGetProperty("Repository", out _),
+            doc.RootElement.TryGetProperty("repository", out _),
             "Default-bound issues must not persist a repository configuration snapshot as authority.");
     }
 
@@ -90,9 +90,9 @@ public class IssueRepositoryReferenceSpecs
         var json = IssueStore.Serialize(issue);
         using (var doc = JsonDocument.Parse(json))
         {
-            Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
+            Assert.True(doc.RootElement.TryGetProperty("repositoryRef", out var refElement));
             Assert.Equal("secondary", refElement.GetString());
-            Assert.False(doc.RootElement.TryGetProperty("Repository", out _));
+            Assert.False(doc.RootElement.TryGetProperty("repository", out _));
         }
 
         var reloaded = IssueStore.Deserialize(json);

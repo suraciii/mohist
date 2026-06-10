@@ -26,7 +26,6 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
-    public DbSet<EventRow> Events { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
     public DbSet<AgentSessionRuntimeEventRow> AgentSessionRuntimeEvents { get; set; } = null!;
@@ -58,39 +57,6 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(ProjectName.MaxLength).IsRequired();
             entity.Property(e => e.RepositoriesJson).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
-        });
-
-        modelBuilder.Entity<EventRow>(entity =>
-        {
-            entity.ToTable("Events");
-            entity.HasKey(e => new { e.Source, e.Id });
-            entity.Property(e => e.Id).IsRequired();
-            entity.Property(e => e.Source)
-                .HasMaxLength(256)
-                .IsRequired();
-            entity.Property<string>("Type")
-                .HasMaxLength(256)
-                .IsRequired()
-                .HasValueGenerator<EventTypeGenerator>()
-                .ValueGeneratedOnAdd();
-            entity.Property(e => e.Data)
-                .IsRequired()
-                .HasColumnType("JSON")
-                .HasConversion(
-                    data => data.GetRawText(),
-                    json => JsonDocument.Parse(json).RootElement.Clone());
-            entity.Property(e => e.Time)
-                .IsRequired()
-                .HasValueGenerator<EventTimeGenerator>()
-                .ValueGeneratedOnAdd();
-            entity.Property<string>("SpecVersion")
-                .HasMaxLength(16)
-                .IsRequired()
-                .HasValueGenerator<EventSpecVersionGenerator>()
-                .ValueGeneratedOnAdd();
-            entity.Ignore(e => e.WorkflowEvent);
-            entity.Ignore(e => e.AgentSessionEvent);
-            entity.HasIndex("Type", nameof(EventRow.Source), nameof(EventRow.Id));
         });
 
         modelBuilder.Entity<WorkflowRunEventRow>(entity =>
@@ -217,11 +183,11 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueId).HasMaxLength(256);
             entity.Property(e => e.State).IsRequired();
             entity.Property(e => e.ProjectId)
-                .HasComputedColumnSql("json_extract(State, '$.ProjectId')", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
             entity.Property(e => e.Number)
-                .HasComputedColumnSql("json_extract(State, '$.Number')", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.number'), json_extract(State, '$.Number'))", stored: true);
             entity.Property(e => e.WorkflowRunId)
-                .HasComputedColumnSql("json_extract(State, '$.WorkflowRunId')", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => e.WorkflowRunId);
         });
@@ -271,7 +237,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.State).IsRequired();
             entity.Property<long>("ETag").IsConcurrencyToken();
             entity.Property(e => e.MetadataProjectId)
-                .HasComputedColumnSql("json_extract(State, '$.Metadata.Annotations.projectId')", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
         });
 
