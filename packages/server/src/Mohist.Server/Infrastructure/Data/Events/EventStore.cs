@@ -24,12 +24,45 @@ public class EventStore : IEventStore
             "[event-store] AppendAsync: incoming source={Source} type={Type} eventId={EventId} subject={Subject}",
             source, envelope.Type, envelope.Id, envelope.Subject);
 
-        var nextId = await NextIdAsync(source, ct);
-
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        if (source.StartsWith(IssueEventPersistence.SourcePrefix, StringComparison.Ordinal))
+        {
+            var nextId = await NextIssueIdAsync(source, ct);
+            db.IssueEvents.Add(new IssueEventRow
+            {
+                Id = nextId,
+                Source = source,
+                EventId = envelope.Id,
+                Type = envelope.Type,
+                Time = envelope.Time,
+                SpecVersion = envelope.SpecVersion,
+                Subject = envelope.Subject,
+                DataContentType = envelope.DataContentType ?? "application/json",
+                Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = SerializeExtensions(envelope.Extensions),
+            });
+            try
+            {
+                var saved = await db.SaveChangesAsync(ct);
+                _log.LogInformation(
+                    "[event-store] AppendAsync: persisted source={Source} type={Type} id={Id} eventId={EventId} rows={Rows}",
+                    source, envelope.Type, nextId, envelope.Id, saved);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId} at id={Id}",
+                    source, envelope.Type, envelope.Id, nextId);
+                throw;
+            }
+            return;
+        }
+
+        var workflowNextId = await NextWorkflowIdAsync(source, ct);
         db.WorkflowRunEvents.Add(new WorkflowRunEventRow
         {
-            Id = nextId,
+            Id = workflowNextId,
             Source = source,
             EventId = envelope.Id,
             Type = envelope.Type,
@@ -45,13 +78,13 @@ public class EventStore : IEventStore
             var saved = await db.SaveChangesAsync(ct);
             _log.LogInformation(
                 "[event-store] AppendAsync: persisted source={Source} type={Type} id={Id} eventId={EventId} rows={Rows}",
-                source, envelope.Type, nextId, envelope.Id, saved);
+                source, envelope.Type, workflowNextId, envelope.Id, saved);
         }
         catch (Exception ex)
         {
             _log.LogError(ex,
                 "[event-store] AppendAsync: FAILED source={Source} type={Type} eventId={EventId} at id={Id}",
-                source, envelope.Type, envelope.Id, nextId);
+                source, envelope.Type, envelope.Id, workflowNextId);
             throw;
         }
     }
@@ -70,7 +103,33 @@ public class EventStore : IEventStore
         return rows.Select(ToStored).ToList();
     }
 
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListIssueEventsAsync(string issueId, int limit = 200, CancellationToken ct = default)
+    {
+        var source = IssueEventPersistence.IssueSource(issueId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.IssueEvents.AsNoTracking()
+            .Where(e => e.Source == source)
+            .OrderByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Id)
+            .ToListAsync(ct);
+
+        return rows.Select(ToIssueStored).ToList();
+    }
+
     private static StoredCloudEvent ToStored(WorkflowRunEventRow row) =>
+        new(row.Id, new CloudEvent(
+            id: row.EventId,
+            source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
+            type: row.Type,
+            time: row.Time,
+            data: row.Data,
+            dataContentType: row.DataContentType,
+            subject: row.Subject,
+            specVersion: row.SpecVersion,
+            extensions: DeserializeExtensions(row.ExtensionsJson)));
+
+    private static StoredCloudEvent ToIssueStored(IssueEventRow row) =>
         new(row.Id, new CloudEvent(
             id: row.EventId,
             source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
@@ -89,10 +148,19 @@ public class EventStore : IEventStore
         JsonSerializer.Deserialize<Dictionary<string, string>>(json, CloudEvent.JsonOptions)
             ?? new Dictionary<string, string>();
 
-    private async Task<long> NextIdAsync(string source, CancellationToken ct)
+    private async Task<long> NextWorkflowIdAsync(string source, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return (await db.WorkflowRunEvents
+            .Where(e => e.Source == source)
+            .Select(e => (long?)e.Id)
+            .MaxAsync(ct) ?? 0) + 1;
+    }
+
+    private async Task<long> NextIssueIdAsync(string source, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return (await db.IssueEvents
             .Where(e => e.Source == source)
             .Select(e => (long?)e.Id)
             .MaxAsync(ct) ?? 0) + 1;

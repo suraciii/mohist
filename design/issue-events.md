@@ -31,19 +31,20 @@ Issue 聚合根当前没有任何领域事件——状态变化只修改 `Issue`
 
 | CloudEvent Type | IssueEvent 变体 | 触发 Transition | 关键字段 |
 |---|---|---|---|
-| `com.mohist.issue.created` | `Created` | `Issue.Create()` | title, priority, labels, repositoryRef |
-| `com.mohist.issue.labels-changed` | `LabelsChanged` | `Issue.Update(labels)` | oldLabels, newLabels |
-| `com.mohist.issue.priority-changed` | `PriorityChanged` | `Issue.Update(priority)` | oldPriority, newPriority |
-| `com.mohist.issue.repository-ref-changed` | `RepositoryRefChanged` | `Issue.Update(repositoryRef)` | oldRef, newRef |
-| `com.mohist.issue.prerequisite-added` | `PrerequisiteAdded` | `Issue.AddPrerequisite(n)` | prerequisiteNumber |
-| `com.mohist.issue.prerequisite-removed` | `PrerequisiteRemoved` | `Issue.RemovePrerequisite(n)` | prerequisiteNumber |
-| `com.mohist.issue.work-started` | `WorkStarted` | `Issue.StartWorkflow(wrId)` | workflowRunId |
-| `com.mohist.issue.work-completed` | `WorkCompleted` | `Issue.Complete(wrId)` | workflowRunId |
-| `com.mohist.issue.work-aborted` | `WorkAborted` | `Issue.AbortWorkflow(wrId, reason)` | workflowRunId, reason |
-| `com.mohist.issue.closed` | `Closed` | `Issue.Close(reason)` | reason |
-| `com.mohist.issue.archived` | `Archived` | `Issue.Archive()` | (公共字段) |
-| `com.mohist.issue.unarchived` | `Unarchived` | `Issue.Unarchive()` | (公共字段) |
-| `com.mohist.issue.reopened` | `Reopened` | `Issue.Reopen()` | (公共字段) |
+| `com.mohist.issue.created` | `IssueCreated` | `Issue.Create()` | title, priority, labels, repositoryRef |
+| `com.mohist.issue.labels-changed` | `IssueLabelsChanged` | `Issue.Update(labels)` | oldLabels, newLabels |
+| `com.mohist.issue.priority-changed` | `IssuePriorityChanged` | `Issue.Update(priority)` | oldPriority, newPriority |
+| `com.mohist.issue.prerequisite-added` | `IssuePrerequisiteAdded` | `Issue.AddPrerequisite(n)` | prerequisiteNumber |
+| `com.mohist.issue.prerequisite-removed` | `IssuePrerequisiteRemoved` | `Issue.RemovePrerequisite(n)` | prerequisiteNumber |
+| `com.mohist.issue.work-started` | `IssueWorkStarted` | `Issue.StartWorkflow(wrId)` | workflowRunId |
+| `com.mohist.issue.work-completed` | `IssueWorkCompleted` | `Issue.Complete(wrId)` | workflowRunId |
+| `com.mohist.issue.work-aborted` | `IssueWorkAborted` | `Issue.AbortWorkflow(wrId, reason)` | workflowRunId, reason |
+| `com.mohist.issue.closed` | `IssueClosed` | `Issue.Close(reason)` | reason |
+| `com.mohist.issue.archived` | `IssueArchived` | `Issue.Archive()` | (公共字段) |
+| `com.mohist.issue.unarchived` | `IssueUnarchived` | `Issue.Unarchive()` | (公共字段) |
+| `com.mohist.issue.reopened` | `IssueReopened` | `Issue.Reopen()` | (公共字段) |
+
+**实际变体数：12**。`IssueRepositoryRefChanged` 不在表中——`Issue.RepositoryRef` 只能 `init`（不可变），当前没有 transition 触发它；按"不预创死代码"原则删去。
 
 **语义区分**：`WorkAborted` 与 `Closed` 都会把 status 推到 `Cancelled`，但语义不同：
 - `WorkAborted` 来自 `InProgress`（workflow 失败 / 停止导致）
@@ -201,10 +202,11 @@ Api/WorkflowEventRoutes.cs (扩展)
 ```
 
 `GET /api/projects/{projectRef}/issues/{number}/events`：
-- 当前：从 workflow events 代理（按 `issue.WorkflowRunId` 查 `WorkflowRunEvents`）
-- 改造后：**优先**从 `IssueEvents` 查（按 issueId）；issue 没 events 返回空，不回退到 workflow
+- 合并返回 `IssueEvents`（按 issueId）+ `WorkflowRunEvents`（按 issue.WorkflowRunId）
+- 按 `Envelope.Time` 排序返回全时间线
+- Issue 视角：UI 看到"这个 issue 的所有事件"（issue lifecycle + workflow 内部过程事件）
 
-`GET /api/issues/{issueId}/events`（已存在 `WorkflowEventRoutes`）保持原 workflow 域语义。
+`GET /api/workflow-runs/{workflowRunId}/events` 保持原 workflow 域语义。
 
 ### Module 7: 删 IssueWorkflowAbortedHandler
 

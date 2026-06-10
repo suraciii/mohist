@@ -18,10 +18,25 @@ public static class WorkflowEventRoutes
 
             var issue = await issues.GetInfoAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId)) return ApiResults.Ok(Array.Empty<StoredCloudEventDto>());
 
-            var list = await events.ListAsync(issue.WorkflowRunId, limit ?? 200, HttpContextRequestAborted(context));
-            return ApiResults.Ok(list.Select(StoredCloudEventDto.From).ToList());
+            var ct = HttpContextRequestAborted(context);
+            var take = limit ?? 200;
+            var issueEvents = await events.ListIssueEventsAsync(issue.Id, take, ct);
+
+            IReadOnlyList<StoredCloudEvent> workflowEvents = issue.WorkflowRunId is { } wrId
+                ? await events.ListAsync(wrId, take, ct)
+                : [];
+
+            // Merge by per-source sequence id; issue events and workflow
+            // events live in separate tables with their own id sequences,
+            // so we sort by Time for chronological order.
+            var merged = issueEvents
+                .Concat(workflowEvents)
+                .OrderBy(e => e.Envelope.Time)
+                .Select(StoredCloudEventDto.From)
+                .ToList();
+
+            return ApiResults.Ok(merged);
         });
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/events", async (string workflowRunId, int? limit, IEventStore events) =>

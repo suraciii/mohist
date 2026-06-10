@@ -1,0 +1,25 @@
+using System.Text.Json;
+
+namespace Mohist.Server.Infrastructure.Data.Events;
+
+/// <summary>
+/// CloudEvents 1.0.2 envelope persisted for each issue domain event.
+/// One row per (Source, Id) where Source identifies the issue
+/// (<c>/mohist/issues/{issueId}</c>) and Id is the per-source sequence.
+/// Mirrors <see cref="WorkflowRunEventRow"/>; the two are kept as
+/// separate tables so workflow and issue remain distinct bounded
+/// contexts at the storage layer.
+/// </summary>
+public sealed class IssueEventRow
+{
+    public required long Id { get; init; }
+    public required string Source { get; init; }
+    public required string EventId { get; init; }
+    public required string Type { get; init; }
+    public required DateTimeOffset Time { get; init; }
+    public required string SpecVersion { get; init; }
+    public string? Subject { get; init; }
+    public required string DataContentType { get; init; }
+    public required JsonElement Data { get; init; }
+    public required string ExtensionsJson { get; init; }
+}
