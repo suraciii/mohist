@@ -35,6 +35,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
     public DbSet<IssueRow> Issues { get; set; } = null!;
+    public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
@@ -224,6 +225,44 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("json_extract(State, '$.WorkflowRunId')", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => e.WorkflowRunId);
+        });
+
+        modelBuilder.Entity<IssueEventRow>(entity =>
+        {
+            entity.ToTable("IssueEvents");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.HasIndex(nameof(IssueEventRow.Type), nameof(IssueEventRow.Source), nameof(IssueEventRow.Id));
         });
 
         modelBuilder.Entity<WorkflowRunRow>(entity =>

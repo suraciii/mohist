@@ -1,3 +1,5 @@
+using Mohist.Server.Issue.Domain.Events;
+
 namespace Mohist.Server.Issue.Domain;
 
 public sealed partial class Issue
@@ -9,6 +11,7 @@ public sealed partial class Issue
         if (_prerequisiteNumbers.Contains(prerequisiteNumber)) return;
         _prerequisiteNumbers = [.. _prerequisiteNumbers, prerequisiteNumber];
         Touch(now);
+        RecordEvent(new IssuePrerequisiteAdded(prerequisiteNumber));
     }
 
     public void RemovePrerequisite(int prerequisiteNumber, DateTime? now = null)
@@ -17,5 +20,6 @@ public sealed partial class Issue
         if (next.Length == _prerequisiteNumbers.Length) return;
         _prerequisiteNumbers = next;
         Touch(now);
+        RecordEvent(new IssuePrerequisiteRemoved(prerequisiteNumber));
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Mohist.Server.Issue.Domain.Events;
 
 namespace Mohist.Server.Issue.Domain;
 
@@ -14,6 +15,7 @@ public sealed partial class Issue
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
+    private readonly List<IssueEvent> _pendingEvents = new();
 
     public required string Id { get; init; }
     public required string ProjectId { get; init; }
@@ -75,6 +77,13 @@ public sealed partial class Issue
         get => _status;
         init => _status = value;
     }
+
+    [JsonIgnore]
+    public IReadOnlyList<IssueEvent> PendingEvents => _pendingEvents;
+
+    public void ClearPendingEvents() => _pendingEvents.Clear();
+
+    private void RecordEvent(IssueEvent evt) => _pendingEvents.Add(evt);
 
     public int[] PrerequisiteNumbers
     {

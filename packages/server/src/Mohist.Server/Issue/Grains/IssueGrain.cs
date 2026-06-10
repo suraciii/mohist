@@ -1,8 +1,9 @@
 using System.Text.Json;
-using CloudNative.CloudEvents;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -30,6 +31,8 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IssueIdentityResolver _identityResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IEventStore _eventStore;
+    private readonly IEventPublisher _eventBus;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -41,6 +44,8 @@ public class IssueGrain : Grain, IIssueGrain
         IssueIdentityResolver identityResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
+        IEventStore eventStore,
+        IEventPublisher eventBus,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -51,6 +56,8 @@ public class IssueGrain : Grain, IIssueGrain
         _identityResolver = identityResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
+        _eventStore = eventStore;
+        _eventBus = eventBus;
         _log = log;
     }
 
@@ -172,7 +179,7 @@ public class IssueGrain : Grain, IIssueGrain
             var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
             await wfGrain.StopAsync("issue-closed");
         }
-        _issue.Close();
+        _issue.Close("user-cancelled");
         await SaveIssueAsync();
     }
 
@@ -186,7 +193,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task AbortWorkAsync(string workflowRunId, string? reason)
     {
         if (_issue is null) return;
-        if (!_issue.AbortWorkflow(workflowRunId)) return;
+        if (!_issue.AbortWorkflow(workflowRunId, reason)) return;
         await SaveIssueAsync();
     }
 
@@ -388,7 +395,47 @@ public class IssueGrain : Grain, IIssueGrain
     private async Task SaveIssueAsync()
     {
         if (_issue is null) return;
+        var pending = _issue.PendingEvents;
+        _issue.ClearPendingEvents();
         await _issueStore.SaveAsync(_issue.Id, _issue);
+        await PublishIssueEventsAsync(pending);
+    }
+
+    private async Task PublishIssueEventsAsync(IReadOnlyList<Issue.Domain.Events.IssueEvent> events)
+    {
+        if (events.Count == 0 || _issue is null) return;
+        var source = IssueEventPersistence.IssueSource(_issue.Id);
+        var subject = _issue.Number.ToString();
+        var extensions = new Dictionary<string, string>
+        {
+            ["projectid"] = _issue.ProjectId,
+            ["issueid"] = _issue.Id,
+            ["issueno"] = subject,
+        };
+
+        try
+        {
+            foreach (var evt in events)
+            {
+                var type = IssueEventSerializer.BusType(evt);
+                var dataJson = IssueEventSerializer.ToData(evt);
+                var envelope = new CloudEvent(
+                    id: Guid.NewGuid().ToString(),
+                    source: new Uri(source, UriKind.Relative),
+                    type: type,
+                    time: DateTimeOffset.UtcNow,
+                    data: dataJson,
+                    subject: subject,
+                    extensions: extensions);
+
+                await _eventStore.AppendAsync(envelope);
+                await _eventBus.PublishAsync(evt, type, source, subject, extensions, CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Post-commit publish failed for issue {IssueId}", _issue.Id);
+        }
     }
 
     private void EnsureIssue()
