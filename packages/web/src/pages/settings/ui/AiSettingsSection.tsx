@@ -35,14 +35,14 @@ export function AiSettingsSection() {
   const handleSetStageModel = (stage: string, modelId: string) => {
     const updated = { ...localStageModels, [stage]: modelId }
     setLocalStageModels(updated)
-    setStageModels.mutate(updated)
+    setStageModels.mutate({ stage, model: modelId })
   }
 
   const handleClearStageModel = (stage: string) => {
     const updated = { ...localStageModels }
     delete updated[stage]
     setLocalStageModels(updated)
-    setStageModels.mutate(Object.keys(updated).length > 0 ? updated : null)
+    setStageModels.mutate({ stage, model: null })
   }
 
   if (runtimeLoading || modelsLoading) {

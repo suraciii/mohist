@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -16,28 +17,33 @@ public class RuntimeSettingsSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GivenUserChoosesDefaultAndStageAgents_WhenSettingsAreSaved_ThenMohistUsesThoseRuntimePreferences()
+    public async Task GivenUserChoosesDefaultAndStageModels_WhenSettingsPatchProjectVariables_ThenMohistUsesThoseRuntimePreferences()
     {
-        await _client.PostOkAsync("/api/projects", new { name = $"settings-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var projectName = $"settings-{Guid.NewGuid():N}";
+        await _client.PostOkAsync("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 
-        await _client.PutAsJsonOkAsync("/api/opencode-model", new { model = "openai/gpt-4o" });
-        await _client.PutAsJsonOkAsync("/api/agent-config", new
+        await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
         {
-            agent = new Dictionary<string, object?> { ["model"] = "openai/gpt-4o" },
-            stageAgents = new Dictionary<string, Dictionary<string, object?>>
+            vars = new { agent = new { type = "opencode", model = "openai/gpt-4o" } }
+        });
+        await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
+        {
+            stages = new
             {
-                ["plan"] = new() { ["model"] = "anthropic/claude" }
+                plan = new { vars = new { agent = new { type = "opencode", model = "anthropic/claude" } } },
+                build = new { vars = new { agent = new { type = "opencode", model = "openai/gpt-4o" } } }
             }
         });
 
-        var model = await _client.GetDataAsync<ModelDto>("/api/opencode-model");
-        var agentConfig = await _client.GetDataAsync<AgentConfigDto>("/api/agent-config");
+        var variables = await _client.GetDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables");
 
-        Assert.Equal("openai/gpt-4o", model.Model);
-        Assert.NotNull(agentConfig.StageAgents);
-        Assert.Equal("anthropic/claude", agentConfig.StageAgents["plan"]["model"]?.ToString());
+        Assert.NotNull(variables.Vars);
+        Assert.Equal("openai/gpt-4o", variables.Vars.RootElement.GetProperty("agent").GetProperty("model").GetString());
+        Assert.NotNull(variables.Stages);
+        Assert.Equal("anthropic/claude", variables.Stages["plan"].Vars.RootElement.GetProperty("agent").GetProperty("model").GetString());
+        Assert.Equal("openai/gpt-4o", variables.Stages["build"].Vars.RootElement.GetProperty("agent").GetProperty("model").GetString());
     }
 
-    private sealed record ModelDto(string? Model);
-    private sealed record AgentConfigDto(Dictionary<string, object?>? Agent, Dictionary<string, Dictionary<string, object?>>? StageAgents);
+    private sealed record ProjectVariablesDto(JsonDocument? Vars, Dictionary<string, ProjectStageVariablesDto>? Stages);
+    private sealed record ProjectStageVariablesDto(JsonDocument Vars);
 }
