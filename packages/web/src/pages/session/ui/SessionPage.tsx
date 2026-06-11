@@ -438,13 +438,21 @@ export function SessionPage() {
   const lookupKey = decodedSessionName ?? decodedSessionId
 
   const hasRoute = !!routeSessionLookup && !!projectId && !!decodedSessionName && issueNumber > 0
+  const metadataQueryKey = useMemo(
+    () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
+    [issueNumber, projectId, lookupKey],
+  )
+  const eventsQueryKey = useMemo(
+    () => ['issues', issueNumber, projectId, 'agent-session-events', lookupKey] as const,
+    [issueNumber, projectId, lookupKey],
+  )
 
   const {
     data: metadata,
     isLoading: metadataLoading,
     isError: metadataError,
   } = useQuery<AgentSessionMetadata | null, Error>({
-    queryKey: ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey],
+    queryKey: metadataQueryKey,
     queryFn: async () => {
       if (!decodedSessionName) return null
       return getAgentSessionMetadata(issueNumber, decodedSessionName, projectId)
@@ -455,7 +463,7 @@ export function SessionPage() {
   const {
     data: eventsResponse,
   } = useQuery<{ events: AgentSessionEvent[] } | null, Error>({
-    queryKey: ['issues', issueNumber, projectId, 'agent-session-events', lookupKey],
+    queryKey: eventsQueryKey,
     queryFn: async () => {
       if (!decodedSessionName) return null
       return getAgentSessionEvents(issueNumber, decodedSessionName, projectId)
@@ -520,6 +528,7 @@ export function SessionPage() {
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
     acpSessionId,
     initialEvents: initialEvents.length > 0 ? initialEvents : undefined,
+    sessionQueryKeys: [metadataQueryKey, eventsQueryKey],
     isRunning,
   })
 

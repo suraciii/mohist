@@ -20,6 +20,7 @@ interface UseSessionTranscriptOptions {
   acpSessionId: string
   initialTurns?: SessionTurn[]
   initialEvents?: SessionEvent[]
+  sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
 }
 
@@ -620,6 +621,7 @@ export function useSessionTranscript({
   acpSessionId,
   initialTurns,
   initialEvents,
+  sessionQueryKeys,
   isRunning,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
@@ -647,8 +649,13 @@ export function useSessionTranscript({
   const mountedRef = useRef(true)
   const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isStreamingRef = useRef(false)
+  const hasLiveTailRef = useRef(false)
 
   const issueId = String(issueNumber)
+
+  useEffect(() => {
+    hasLiveTailRef.current = false
+  }, [issueId, sessionId, acpSessionId])
 
   const scrollToBottom = useCallback(() => {
     setIsNearBottom(true)
@@ -689,22 +696,29 @@ export function useSessionTranscript({
 
   const invalidateAndRefetch = useCallback(() => {
     setIsFinalizing(true)
+    for (const queryKey of sessionQueryKeys ?? []) {
+      queryClient.invalidateQueries({ queryKey })
+    }
     queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions', sessionId] })
-  }, [queryClient, issueNumber, sessionId])
+  }, [queryClient, issueNumber, sessionId, sessionQueryKeys])
 
   useEffect(() => {
+    if (hasLiveTailRef.current && isRunning) {
+      return
+    }
     if (initialEvents && initialEvents.length > 0) {
       setTurns(projectHistoricalEvents(initialEvents))
     } else {
       setTurns(initialTurns ?? [])
     }
+    hasLiveTailRef.current = false
     liveToolCallMapRef.current.clear()
     pendingCorrelationRef.current.clear()
     setIsFinalizing(false)
     setIsThinking(false)
     setIsStreaming(false)
     setTranscriptVersion((version) => version + 1)
-  }, [initialEvents, initialTurns])
+  }, [initialEvents, initialTurns, isRunning])
 
   useEffect(() => {
     if (!isRunning) {
@@ -730,6 +744,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
+        hasLiveTailRef.current = true
         setIsStreaming(true)
         setTurns((prev) => {
           const next = ensureLiveTurn(prev, new Date().toISOString())
@@ -747,6 +762,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
+        hasLiveTailRef.current = true
         setIsStreaming(true)
         setTurns((prev) => {
           const now = new Date().toISOString()
@@ -766,6 +782,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
+        hasLiveTailRef.current = true
         const now = new Date().toISOString()
         const toolCallId = detail.toolCallId
         const normalizedName = getNormalizedName(detail)
@@ -881,6 +898,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.coderSessionId !== sessionId) return
 
+        hasLiveTailRef.current = true
         const now = new Date().toISOString()
 
         setTurns((prev) => {
@@ -902,6 +920,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.coderSessionId !== sessionId) return
 
+        hasLiveTailRef.current = true
         const now = new Date().toISOString()
 
         setTurns((prev) => {
@@ -941,6 +960,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.coderSessionId !== sessionId) return
 
+        hasLiveTailRef.current = true
         const now = new Date().toISOString()
 
         setTurns((prev) => {
@@ -980,6 +1000,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
+        hasLiveTailRef.current = true
         const now = new Date().toISOString()
         const errorMessages: Record<string, string> = {
           detected: 'Recovery detected',
@@ -1015,6 +1036,7 @@ export function useSessionTranscript({
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
+        hasLiveTailRef.current = true
         const timestamp = detail.probeSentAt ?? detail.lastDataAt ?? new Date().toISOString()
         const message = detail.status === 'probing'
           ? `Liveness probe sent. Waiting until ${detail.probeDeadlineAt ?? 'deadline unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
