@@ -103,6 +103,28 @@ public class IssueQuerier
         return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
     }
 
+    public async Task<IReadOnlyList<IssueReadModel>> ListInProgressWithApprovalGateAsync(string projectId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.Issues
+            .AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync();
+        var list = IssueRowMapper.ByNumber(rows, projectId)
+            .Select(issue => ToReadModel(ToInfo(issue)))
+            .ToList();
+        ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+
+        return list
+            .Where(IsPausedOnApprovalGate)
+            .OrderBy(i => i.Number)
+            .ToList();
+    }
+
+    private static bool IsPausedOnApprovalGate(IssueReadModel issue) =>
+        string.Equals(issue.Status, "in_progress", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(issue.WorkflowStatus, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
+
     private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
     {
         var model = ToReadModel(ToInfo(issue, project));

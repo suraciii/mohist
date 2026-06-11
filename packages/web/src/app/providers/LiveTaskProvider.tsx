@@ -8,6 +8,26 @@ import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
+import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
+
+/**
+ * Compile-time guard: every name the switch can route (i.e. every key of
+ * `EventMap`) must be in the canonical subscription set. The reverse-DNS
+ * names are added to `EventMap` in `entities/issue/@x/events.ts` and the
+ * `EVENT_TYPES` constant is the union of legacy + reverse-DNS names. If a
+ * new switch arm is added without adding its event type to `EVENT_TYPES`,
+ * the assignment below will fail to typecheck.
+ *
+ * Note: the check uses `[T] extends [never]` rather than `T extends never`
+ * because TypeScript collapses `Exclude<..., string[]>` to `never` even
+ * when the result is non-empty; wrapping in a tuple prevents the collapse
+ * and gives a meaningful conditional check.
+ */
+type _AssertEventNameSubscribed = [Exclude<EventName, (typeof EVENT_TYPES)[number]>] extends [never]
+  ? true
+  : false
+const _subscriptionCoversSwitch: _AssertEventNameSubscribed = true
+void _subscriptionCoversSwitch
 
 const LIVE_TIMER_INTERVAL = 500
 
@@ -17,9 +37,23 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
+function routeTranscriptEventName(name: string): string {
+  switch (name) {
+    case 'agent_message_chunk':
+      return 'coder_text_chunk'
+    case 'agent_thought_chunk':
+      return 'coder_thought_chunk'
+    case 'tool_call':
+    case 'tool_call_update':
+      return 'coder_tool_call'
+    default:
+      return name
+  }
+}
+
 /**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
- * 1.0.2 envelope; the Web reads {@link data} for the original event body
+ * 1.0.2 envelope; the Web reads {@link payload} for the original event body
  * and {@link extensions} for routing metadata (projectid, workflowrunid,
  * issueno). Falls back to the legacy raw-payload shape (where the event
  * body sits in a top-level `payload` field) for any unmigrated producers.
@@ -45,8 +79,9 @@ function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
     && typeof candidate.source === 'string'
     && typeof candidate.type === 'string'
   ) {
-    if (candidate.data && typeof candidate.data === 'object') {
-      return candidate.data as Record<string, unknown>
+    const payload = candidate.payload ?? candidate.data
+    if (payload && typeof payload === 'object') {
+      return payload as Record<string, unknown>
     }
     return {}
   }
@@ -61,12 +96,156 @@ function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
   return candidate
 }
 
-export const __testing__ = { unwrapEnvelope }
+function readEnvelopeField(candidate: Record<string, unknown>, camelCase: string, pascalCase: string): unknown {
+  return candidate[camelCase] ?? candidate[pascalCase]
+}
+
+function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payload: unknown; detail: unknown } | null {
+  if (!rawData || typeof rawData !== 'object') {
+    return null
+  }
+  const candidate = rawData as Record<string, unknown>
+  const eventName = readEnvelopeField(candidate, 'type', 'Type')
+    ?? readEnvelopeField(candidate, 'eventType', 'EventType')
+    ?? readEnvelopeField(candidate, 'name', 'Name')
+  if (typeof eventName !== 'string') {
+    return null
+  }
+  const innerPayload = readEnvelopeField(candidate, 'payload', 'Payload') ?? readEnvelopeField(candidate, 'data', 'Data')
+  const hasRuntimeRowMetadata = readEnvelopeField(candidate, 'sessionId', 'SessionId') !== undefined
+    || readEnvelopeField(candidate, 'sequence', 'Sequence') !== undefined
+    || readEnvelopeField(candidate, 'createdAt', 'CreatedAt') !== undefined
+  if (hasRuntimeRowMetadata && innerPayload && typeof innerPayload === 'object') {
+    return {
+      eventName,
+      payload: innerPayload,
+      detail: {
+        ...candidate,
+        ...(innerPayload as Record<string, unknown>),
+        type: eventName,
+        payload: innerPayload,
+      },
+    }
+  }
+  return {
+    eventName,
+    payload: candidate,
+    detail: candidate,
+  }
+}
+
+export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope }
 
 
 function getCurrentIssueNumber(): number | null {
   const match = window.location.pathname.match(/\/issue\/(\d+)/)
   return match ? parseInt(match[1], 10) : null
+}
+
+function findIssueNumber(
+  queryClient: ReturnType<typeof useQueryClient>,
+  issueId: string,
+): number | null {
+  const matches = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })
+  for (const [, data] of matches) {
+    if (Array.isArray(data)) {
+      const found = data.find((i) => i.id === issueId)
+      if (found) {
+        return found.number
+      }
+    }
+  }
+  return null
+}
+
+function notifyRunLifecycleToast(
+  queryClient: ReturnType<typeof useQueryClient>,
+  viewedIssue: number | null,
+  issueId: string,
+  kind: 'pause' | 'error',
+): void {
+  const issueNumber = findIssueNumber(queryClient, issueId)
+  if (issueNumber === null || issueNumber === viewedIssue) return
+  if (kind === 'pause') {
+    toast.info(`Issue #${issueNumber} needs approval`)
+  } else {
+    toast.error(`Issue #${issueNumber} encountered an error`)
+  }
+}
+
+function notifyApprovalRequestedToast(
+  queryClient: ReturnType<typeof useQueryClient>,
+  viewedIssue: number | null,
+  evt: { issueId?: string; issueNumber?: number },
+): void {
+  const issueNumber = evt.issueNumber ?? (evt.issueId ? findIssueNumber(queryClient, evt.issueId) : null)
+  if (issueNumber === null || issueNumber === undefined || issueNumber === viewedIssue) return
+  toast.info(`Issue #${issueNumber} needs approval`)
+}
+
+function readIssueNumber(parsed: Record<string, unknown>): number | null {
+  const issueNumber = parsed.issueNumber ?? parsed.issueNo ?? parsed.number
+  return typeof issueNumber === 'number' ? issueNumber : null
+}
+
+function readOutcome(parsed: Record<string, unknown>): string | null {
+  const outcome = parsed.outcome ?? parsed.result ?? parsed.kind ?? parsed.operation ?? parsed.reason
+  return typeof outcome === 'string' ? outcome : null
+}
+
+function isRebasePayload(parsed: Record<string, unknown>): boolean {
+  const outcome = readOutcome(parsed)
+  return outcome?.includes('rebase') === true || 'rebased' in parsed || 'conflicts' in parsed
+}
+
+function isMergePayload(parsed: Record<string, unknown>): boolean {
+  const outcome = readOutcome(parsed)
+  return outcome?.includes('merge') === true
+}
+
+function handleReverseDnsIntegrationOutcome(
+  eventName: string,
+  parsed: Record<string, unknown>,
+  queryClient: ReturnType<typeof useQueryClient>,
+  setRebaseConflict: React.Dispatch<React.SetStateAction<RebaseConflictState | null>>,
+): boolean {
+  const issueNumber = readIssueNumber(parsed)
+  if (issueNumber === null) return false
+
+  if (eventName === REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted) {
+    if (isRebasePayload(parsed)) {
+      const rebased = typeof parsed.rebased === 'boolean' ? parsed.rebased : true
+      setRebaseConflict(null)
+      dispatchRebaseEvent({ type: 'rebase_completed', issueNumber, rebased })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      return true
+    }
+    if (isMergePayload(parsed)) {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      toast.success(`Issue #${issueNumber} merged successfully`)
+      return true
+    }
+  }
+
+  const isFailureEvent = eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed
+    || eventName === REVERSE_DNS_EVENT_TYPES.StageFailed
+  if (!isFailureEvent) return false
+
+  if (isRebasePayload(parsed)) {
+    const conflicts = Array.isArray(parsed.conflicts) ? parsed.conflicts.filter((x): x is string => typeof x === 'string') : []
+    const error = typeof parsed.error === 'string' ? parsed.error : undefined
+    setRebaseConflict({ issueNumber, conflicts, status: 'failed', error })
+    dispatchRebaseEvent({ type: 'rebase_conflict', issueNumber, conflicts, status: 'failed', error })
+    toast.error(`Rebase conflict on Issue #${issueNumber}`)
+    queryClient.invalidateQueries({ queryKey: ['issues'] })
+    return true
+  }
+  if (isMergePayload(parsed)) {
+    queryClient.invalidateQueries({ queryKey: ['issues'] })
+    toast.error(`Merge failed for Issue #${issueNumber}`)
+    return true
+  }
+  return false
 }
 
 function useLiveEvents(projectId: string | null): LiveTaskState {
@@ -109,11 +288,11 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
   }, [])
 
   const handleEvent = useCallback(
-    (eventName: string, rawData: unknown) => {
+    (eventName: string, rawData: unknown, options?: { dispatchAgentDetail?: boolean }) => {
       try {
         const parsed = unwrapEnvelope(rawData)
 
-        if (isAgentDetailEvent(eventName)) {
+        if (options?.dispatchAgentDetail !== false && isAgentDetailEvent(eventName)) {
           dispatchAgentEvent(eventName, parsed as AgentDetailEventMap[typeof eventName])
         }
 
@@ -153,7 +332,13 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
         }
 
         switch (eventName as EventName) {
-          case 'stage_changed': {
+          case 'stage_changed':
+          case REVERSE_DNS_EVENT_TYPES.StageStarted:
+          case REVERSE_DNS_EVENT_TYPES.StageCompleted:
+          case REVERSE_DNS_EVENT_TYPES.StageFailed: {
+            if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
+              break
+            }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
@@ -165,35 +350,80 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             }
             break
           }
+          case REVERSE_DNS_EVENT_TYPES.IssueCreated:
+          case REVERSE_DNS_EVENT_TYPES.IssueClosed:
+          case REVERSE_DNS_EVENT_TYPES.IssueArchived:
+          case REVERSE_DNS_EVENT_TYPES.IssueUnarchived:
+          case REVERSE_DNS_EVENT_TYPES.IssueReopened:
+          case REVERSE_DNS_EVENT_TYPES.IssueWorkStarted:
+          case REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted:
+          case REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged:
+          case REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged:
+          case REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded:
+          case REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved: {
+            if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
+              break
+            }
+            const { issueId } = parsed as { issueId: string; projectId: string }
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            if (issueId) {
+              queryClient.invalidateQueries({ queryKey: ['issues', 'detail', issueId] })
+            }
+            break
+          }
           case 'agent_started':
           case 'agent_completed':
           case 'agent_paused':
-          case 'agent_error': {
+          case 'agent_error':
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunStopped:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunCompleted:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying:
+          case REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionStarted:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionActivated:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged: {
+            if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
+              break
+            }
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            if (eventName === 'agent_paused' || eventName === 'agent_error') {
-              const viewed = viewedIssueRef.current
-              const evt = parsed as EventMap['agent_paused'] | EventMap['agent_error']
-              const matches = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })
-              let issueNumber: number | null = null
-              for (const [, data] of matches) {
-                if (Array.isArray(data)) {
-                  const found = data.find((i) => i.id === evt.issueId)
-                  if (found) {
-                    issueNumber = found.number
-                    break
-                  }
-                }
-              }
-              if (issueNumber !== null && issueNumber !== viewed) {
-                if (eventName === 'agent_paused') {
-                  toast.info(`Issue #${issueNumber} needs approval`)
-                } else {
-                  toast.error(`Issue #${issueNumber} encountered an error`)
-                }
-              }
+            if (
+              eventName === 'agent_paused' ||
+              eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused
+            ) {
+              const evt = parsed as EventMap['agent_paused']
+              notifyRunLifecycleToast(queryClient, viewedIssueRef.current, evt.issueId, 'pause')
+            } else if (
+              eventName === 'agent_error' ||
+              eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed
+            ) {
+              const evt = parsed as EventMap['agent_error']
+              notifyRunLifecycleToast(queryClient, viewedIssueRef.current, evt.issueId, 'error')
             }
+            break
+          }
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionFailed:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled: {
+            queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            const evt = parsed as {
+              issueId: string
+              projectId: string
+              reason?: string
+            }
+            notifyRunLifecycleToast(
+              queryClient,
+              viewedIssueRef.current,
+              evt.issueId,
+              'error',
+            )
             break
           }
           case 'agent_blocked': {
@@ -202,7 +432,15 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             break
           }
-          case 'approval_requested': {
+          case 'approval_requested':
+          case REVERSE_DNS_EVENT_TYPES.StageApprovalRequested: {
+            const evt = parsed as EventMap['approval_requested'] & { issueNumber?: number }
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+            notifyApprovalRequestedToast(queryClient, viewedIssueRef.current, evt)
+            break
+          }
+          case REVERSE_DNS_EVENT_TYPES.StageApprovalResolved: {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             break
@@ -339,7 +577,23 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
     [queryClient, clearLiveTimer],
   )
 
-  useEventsConnection(projectId, handleEvent)
+  const handleTranscriptEvent = useCallback(
+    (rawData: unknown) => {
+      const transcript = unwrapTranscriptEnvelope(rawData)
+      if (!transcript) return
+      const routedName = routeTranscriptEventName(transcript.eventName)
+      if (isAgentDetailEvent(routedName)) {
+        dispatchAgentEvent(
+          routedName,
+          transcript.detail as AgentDetailEventMap[typeof routedName],
+        )
+      }
+      handleEvent(routedName, transcript.payload, { dispatchAgentDetail: false })
+    },
+    [handleEvent],
+  )
+
+  useEventsConnection(projectId, handleEvent, handleTranscriptEvent)
 
   useEffect(() => {
     return () => {

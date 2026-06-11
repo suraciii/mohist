@@ -94,6 +94,7 @@ public static class EventCatalog
         ReverseDns.CheckPending,
         ReverseDns.RepairScheduled,
         ReverseDns.AgentSessionStarted,
+        ReverseDns.AgentSessionActivated,
         ReverseDns.AgentSessionCompleted,
         ReverseDns.AgentSessionFailed,
         ReverseDns.AgentSessionCancelled,
@@ -136,6 +137,7 @@ public static class EventCatalog
         public const string RepairScheduled = "com.mohist.workflow.repair-scheduled";
 
         public const string AgentSessionStarted = "com.mohist.agent-session.started";
+        public const string AgentSessionActivated = "com.mohist.agent-session.activated";
         public const string AgentSessionCompleted = "com.mohist.agent-session.completed";
         public const string AgentSessionFailed = "com.mohist.agent-session.failed";
         public const string AgentSessionCancelled = "com.mohist.agent-session.cancelled";

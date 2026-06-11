@@ -1,4 +1,5 @@
 import type { AgentDetailEventMap } from '../../agent/@x/events'
+import { REVERSE_DNS_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 
 export type EventMap = {
   stage_changed: { issueId: string; projectId: string; from: string; to: string }
@@ -30,6 +31,36 @@ export type EventMap = {
   base_drift_detected: { issueId: string; projectId: string; issueNumber: number; baseBranch: string; observedBaseSha: string | null; currentBaseSha: string | null; decision: string }
   rebase_opportunity: { issueId: string; projectId: string; issueNumber: number; decision: string; deferReason?: string }
   user_attention_requested: { issueId: string; projectId: string; issueNumber: number; reason: string; nextAction: string }
+  [REVERSE_DNS_EVENT_TYPES.StageStarted]: { issueId: string; projectId: string; from: string; to: string }
+  [REVERSE_DNS_EVENT_TYPES.StageCompleted]: { issueId: string; projectId: string; from: string; to: string }
+  [REVERSE_DNS_EVENT_TYPES.StageFailed]: { issueId: string; projectId: string; from: string; to: string }
+  [REVERSE_DNS_EVENT_TYPES.StageApprovalRequested]: { issueId: string; projectId: string; stage: string }
+  [REVERSE_DNS_EVENT_TYPES.StageApprovalResolved]: { issueId: string; projectId: string; stage: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunStopped]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunCompleted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueCreated]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueClosed]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueArchived]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueUnarchived]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueReopened]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueWorkStarted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged]: { issueId: string; projectId: string; labels: string[] }
+  [REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged]: { issueId: string; projectId: string; priority: string }
+  [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded]: { issueId: string; projectId: string; prerequisiteId: string }
+  [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved]: { issueId: string; projectId: string; prerequisiteId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionStarted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionActivated]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionFailed]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged]: { issueId: string; projectId: string; status: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap

@@ -1,3 +1,4 @@
+using Mohist.Server.Tests.Specs.Events;
 using Mohist.Server.Tests.Specs.Workflow;
 using Mohist.Server.Tests.Specs.Workflow.Grain;
 using Xunit;
@@ -26,3 +27,6 @@ public class WorkflowEventsCollection;
 
 [CollectionDefinition("SkillsCli", DisableParallelization = true)]
 public sealed class SkillsCliCollection;
+
+[CollectionDefinition("EventPublishing", DisableParallelization = true)]
+public class EventPublishingCollection : ICollectionFixture<EventPublishingIntegrationFixture>;

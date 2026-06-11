@@ -1,0 +1,166 @@
+import { describe, it, expect } from 'vitest'
+import { AGENT_DETAIL_EVENTS } from '../src/entities/agent'
+import type { EventName } from '../src/entities/issue'
+import {
+  EVENT_TYPES,
+  LEGACY_ISSUE_EVENT_TYPES,
+  LEGACY_AGENT_DETAIL_EVENT_TYPES,
+  LEGACY_EVENT_TYPES,
+  TRANSCRIPT_EVENT_TYPES,
+  REVERSE_DNS_EVENT_TYPES,
+  CanonicalEventType,
+} from '../src/shared/lib/canonical-event-types'
+
+describe('canonical event types', () => {
+  it('EVENT_TYPES is a non-empty list', () => {
+    expect(EVENT_TYPES.length).toBeGreaterThan(0)
+  })
+
+  it('includes every legacy snake_case name from EventName', () => {
+    for (const name of LEGACY_ISSUE_EVENT_TYPES) {
+      expect(EVENT_TYPES).toContain(name)
+    }
+  })
+
+  it('includes every legacy snake_case name from AGENT_DETAIL_EVENTS', () => {
+    for (const name of LEGACY_AGENT_DETAIL_EVENT_TYPES) {
+      expect(EVENT_TYPES).toContain(name)
+    }
+  })
+
+  it('includes the 8 transcript event types', () => {
+    expect(TRANSCRIPT_EVENT_TYPES).toEqual([
+      'coder_text_chunk',
+      'coder_thought_chunk',
+      'coder_tool_call',
+      'ralph_task_update',
+      'ralph_loop_progress',
+      'agent_liveness_status',
+      'agent_usage_update',
+      'agent_session_model_resolved',
+    ])
+    for (const name of TRANSCRIPT_EVENT_TYPES) {
+      expect(EVENT_TYPES).toContain(name)
+    }
+  })
+
+  it('includes the reverse-DNS names for workflow stage events', () => {
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageStarted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageCompleted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageFailed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageApprovalRequested)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved)
+  })
+
+  it('includes the reverse-DNS names for workflow run events', () => {
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunStopped)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunCompleted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning)
+  })
+
+  it('includes the reverse-DNS names for issue lifecycle events', () => {
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueCreated)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueClosed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueArchived)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueUnarchived)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueReopened)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueWorkStarted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved)
+  })
+
+  it('includes the reverse-DNS names for agent-session events', () => {
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionStarted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionFailed)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged)
+  })
+
+  it('reverse-DNS names match the documented format', () => {
+    expect(REVERSE_DNS_EVENT_TYPES.StageStarted).toBe('com.mohist.workflow.stage.started')
+    expect(REVERSE_DNS_EVENT_TYPES.StageApprovalRequested).toBe('com.mohist.workflow.stage.approval-requested')
+    expect(REVERSE_DNS_EVENT_TYPES.AgentSessionStarted).toBe('com.mohist.agent-session.started')
+    expect(REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged).toBe('com.mohist.agent-session.status-changed')
+  })
+
+  it('every legacy event is in LEGACY_EVENT_TYPES', () => {
+    const legacySet = new Set<string>(LEGACY_EVENT_TYPES)
+    for (const name of LEGACY_ISSUE_EVENT_TYPES) {
+      expect(legacySet.has(name)).toBe(true)
+    }
+    for (const name of LEGACY_AGENT_DETAIL_EVENT_TYPES) {
+      expect(legacySet.has(name)).toBe(true)
+    }
+  })
+
+  it('AGENT_DETAIL_EVENTS matches the legacy agent-detail set plus transcript types and reverse-DNS agent-session names', () => {
+    const expected = new Set<string>([
+      ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
+      ...TRANSCRIPT_EVENT_TYPES,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionStarted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionFailed,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged,
+    ])
+    expect(new Set(AGENT_DETAIL_EVENTS as readonly string[])).toEqual(expected)
+  })
+
+  it('contains no duplicates', () => {
+    const set = new Set(EVENT_TYPES)
+    expect(set.size).toBe(EVENT_TYPES.length)
+  })
+
+  it('the type alias CanonicalEventType is exhaustive at the type level', () => {
+    const sample: CanonicalEventType = 'stage_changed'
+    expect(EVENT_TYPES).toContain(sample)
+  })
+
+  it('EventName (union) is consistent with EVENT_TYPES (runtime list)', () => {
+    const eventNameValues: readonly EventName[] = [
+      ...LEGACY_ISSUE_EVENT_TYPES,
+      ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
+      REVERSE_DNS_EVENT_TYPES.StageStarted,
+      REVERSE_DNS_EVENT_TYPES.StageCompleted,
+      REVERSE_DNS_EVENT_TYPES.StageFailed,
+      REVERSE_DNS_EVENT_TYPES.StageApprovalRequested,
+      REVERSE_DNS_EVENT_TYPES.StageApprovalResolved,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunStopped,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunCompleted,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying,
+      REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning,
+      REVERSE_DNS_EVENT_TYPES.IssueCreated,
+      REVERSE_DNS_EVENT_TYPES.IssueClosed,
+      REVERSE_DNS_EVENT_TYPES.IssueArchived,
+      REVERSE_DNS_EVENT_TYPES.IssueUnarchived,
+      REVERSE_DNS_EVENT_TYPES.IssueReopened,
+      REVERSE_DNS_EVENT_TYPES.IssueWorkStarted,
+      REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted,
+      REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged,
+      REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged,
+      REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded,
+      REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionStarted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionFailed,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged,
+    ] as readonly EventName[]
+    for (const name of eventNameValues) {
+      expect(EVENT_TYPES).toContain(name)
+    }
+  })
+})

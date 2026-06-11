@@ -7,13 +7,26 @@ namespace Mohist.Server.Events.Hub;
 public interface IEventsClient
 {
     /// <summary>
-    /// Receive an event from the bus. <paramref name="eventName"/> is the
+    /// Receive a domain event from the CloudEventBus. <paramref name="eventName"/> is the
     /// CloudEvents <c>type</c> for back-compat; <paramref name="data"/>
     /// carries a <see cref="CloudEventEnvelope"/> with the full CloudEvents
     /// 1.0.2 attributes (id, source, type, subject, time, extensions, data).
     /// New Web code should read from <c>envelope</c> in <paramref name="data"/>.
     /// </summary>
     Task OnEvent(string eventName, object? data);
+
+    /// <summary>
+    /// Receive a transcript (non-domain, observation-only) event from the
+    /// dedicated <see cref="ITranscriptEventPublisher"/> channel. Carries a
+    /// <see cref="TranscriptEnvelope"/> whose <c>Type</c> is the runtime
+    /// event name (e.g. <c>coder_text_chunk</c>, <c>ralph_task_update</c>)
+    /// and whose <c>Payload</c> is the deserialised payload JSON the
+    /// runner sent. The <c>OnEvent</c> channel is intentionally
+    /// separate: domain events and transcript events flow on physically
+    /// distinct SignalR methods so the Web can subscribe to one without
+    /// the other.
+    /// </summary>
+    Task OnTranscriptEvent(TranscriptEnvelope envelope);
 }
 
 /// <summary>
@@ -26,6 +39,19 @@ public interface IEventsClient
 /// <see cref="Mohist.Server.Infrastructure.Events.ConnectionSubscriptionRegistry"/>
 /// to decide which connections receive each event and pushes via
 /// <see cref="IHubClients{T}.Client(string)"/>.
+///
+/// <para>
+/// <b>Two channels, one hub</b>. The hub exposes both
+/// <see cref="IEventsClient.OnEvent"/> (domain events, fanned out
+/// by <see cref="EventBridge"/> from the CloudEventBus) and
+/// <see cref="IEventsClient.OnTranscriptEvent"/> (non-domain
+/// observation data, fanned out by
+/// <see cref="Mohist.Server.Infrastructure.Events.SignalRTranscriptEventPublisher"/>
+/// directly). Both are filtered by the same per-connection
+/// subscription set in <see cref="ConnectionSubscriptionRegistry"/>,
+/// so a client opts into a transcript type by including it in its
+/// <see cref="SetSubscriptionsAsync"/> list.
+/// </para>
 ///
 /// <para>
 /// <b>Static vs dynamic split</b>. The bus has static subscribers
@@ -47,10 +73,21 @@ public interface IEventsClient
 ///             back-compat (older clients used these groups for
 ///             broadcast).</item>
 ///       <item>Register the connectionId in
-///             <see cref="ConnectionSubscriptionRegistry"/>.</item>
-///       <item>Fetch the durable subscription set from
-///             <see cref="IConnectionSubscriptionGrain"/> and
-///             re-apply it to the registry (replay-on-reconnect).</item>
+///             <see cref="ConnectionSubscriptionRegistry"/>. The
+///             initial subscription set is empty — that is the
+///             expected default for a freshly opened tab. The
+///             dispatcher will not push anything to a connection
+///             whose set is empty, which is the correct behaviour
+///             in the window between connect and the first
+///             <see cref="SetSubscriptionsAsync"/> call.</item>
+///       <item>Best-effort replay the durable subscription set from
+///             <see cref="IConnectionSubscriptionGrain"/> when
+///             present. This is the replay-on-reconnect path. A new
+///             connectionId (the usual case after a SignalR
+///             reconnect that rotated the connection id) starts
+///             with an empty stored set, and the Web is expected to
+///             re-invoke <see cref="SetSubscriptionsAsync"/> from
+///             its <c>onreconnected</c> callback.</item>
 ///     </list>
 ///   </item>
 ///   <item><c>OnDisconnectedAsync</c>: remove from groups and
@@ -61,7 +98,12 @@ public interface IEventsClient
 ///   <item>Hub methods: <see cref="SubscribeAsync"/> /
 ///         <see cref="UnsubscribeAsync"/> / <see cref="SetSubscriptionsAsync"/>:
 ///         update both the registry (hot path) and the grain
-///         (durable).</item>
+///         (durable). The client's first
+///         <see cref="SetSubscriptionsAsync"/> call after
+///         <c>OnConnectedAsync</c> is the source of truth and
+///         populates both at once; <see cref="SetSubscriptionsAsync"/>
+///         is idempotent, so a re-invoke on reconnect is a safe
+///         no-op when the durable grain is already in sync.</item>
 /// </list>
 /// </para>
 /// </summary>
@@ -88,15 +130,26 @@ public sealed class MohistHub : Hub<IEventsClient>
             await Groups.AddToGroupAsync(Context.ConnectionId, $"project:{projectId}");
         }
 
-        // Hot-path registry. The dispatcher will see this
-        // connection on its next emit.
+        // Hot-path registry. RegisterConnection always inserts
+        // an empty subscription set. That empty set is the
+        // expected initial state for a freshly opened tab — the
+        // dispatcher (UserNotificationDispatcher) filters by
+        // ShouldNotify, and ShouldNotify returns false for an
+        // empty set, so no bus emit reaches the connection in
+        // the window between connect and the first
+        // SetSubscriptionsAsync call from the client.
         _registry.RegisterConnection(Context.ConnectionId);
 
         // Replay the durable subscription set on reconnect. The
-        // grain is keyed by connectionId; a new connectionId (the
-        // usual case after SignalR reconnect) starts with an empty
-        // set, and the Web UI is expected to call SetSubscriptions
-        // on tab open.
+        // grain is keyed by connectionId; a new connectionId
+        // (the usual case after a SignalR reconnect) starts
+        // with an empty stored set, and the Web is expected to
+        // re-invoke SetSubscriptionsAsync from its
+        // onreconnected callback. A grain lookup failure MUST
+        // NOT block OnConnectedAsync — the connection is open
+        // either way, and the client will repopulate both the
+        // grain and the registry from its first
+        // SetSubscriptionsAsync call.
         var grain = _grains.GetGrain<IConnectionSubscriptionGrain>(Context.ConnectionId);
         try
         {
@@ -105,10 +158,10 @@ public sealed class MohistHub : Hub<IEventsClient>
         }
         catch
         {
-            // Best-effort replay — fresh connection with empty
-            // default is fine; the next SetSubscriptions call
-            // from the client will populate both the grain and
-            // the registry.
+            // Best-effort replay — empty default is the
+            // documented initial state; the next
+            // SetSubscriptionsAsync call from the client
+            // populates both the grain and the registry.
             _registry.SetSubscriptions(Context.ConnectionId, Array.Empty<string>());
         }
 
@@ -131,7 +184,13 @@ public sealed class MohistHub : Hub<IEventsClient>
 
     /// <summary>
     /// Set the connection's subscription list to exactly
-    /// <paramref name="eventTypes"/>. Idempotent.
+    /// <paramref name="eventTypes"/>. Idempotent: a second call
+    /// with the same list does not duplicate or shift registry
+    /// entries. Populates the in-process
+    /// <see cref="ConnectionSubscriptionRegistry"/> (hot path the
+    /// dispatcher reads) and the durable
+    /// <see cref="IConnectionSubscriptionGrain"/> (source of truth
+    /// for replay-on-reconnect) together.
     /// </summary>
     public async Task SetSubscriptionsAsync(IReadOnlyList<string> eventTypes)
     {
