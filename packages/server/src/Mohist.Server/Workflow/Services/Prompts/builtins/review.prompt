@@ -33,8 +33,11 @@ Read the issue, proposal, specs, design, tasks, and all changed files before pro
 </dependencies>
 
 <instruction>
-Perform a full review pass. Do not stop after the first blocker.
-When you find a bug, inspect nearby changed code and tests for sibling bugs caused by the same mistaken assumption before writing the review.
+Review the full change thoroughly.
+
+Find as many problems as possible. Do not stop after the first problem.
+Include all issues you find: large, small, tests, edge cases, cleanup, consistency, and sibling problems in nearby code.
+Write every finding in the final review.
 
 Inspect:
 1. Current issue acceptance criteria with concrete evidence.
@@ -89,7 +92,7 @@ If unsure, report the issue as unresolved instead of fixing it.
 ## Blocking Items
 
 - [ID: item-N]
-  Severity: blocking
+  Severity: blocking | warning | minor | test-gap | cleanup
   Scope: file path or area
   Evidence: What is wrong [disallowed:reason] if repair was considered but disallowed
   SuggestedAction: What should be done
@@ -101,7 +104,7 @@ If unsure, report the issue as unresolved instead of fixing it.
 - [ID: item-N]
   Severity: follow-up
   Scope: file path or area
-  Evidence: Description
+  Evidence: Description of a useful improvement that is not a problem in the reviewed change
   SuggestedAction: Suggested improvement
   Status: follow-up
 
@@ -117,7 +120,7 @@ If unsure, report the issue as unresolved instead of fixing it.
 
 <verdict_rules>
 - The verdict MUST reflect the post-repair candidate snapshot.
-- Do not PASS if unresolved blocking items remain.
+- Do not PASS if any finding in Blocking Items remains unresolved.
 - Do not PASS if repaired items lack verification evidence.
 - Pre-existing failures do not block the current change but must be reported.
 </verdict_rules>
