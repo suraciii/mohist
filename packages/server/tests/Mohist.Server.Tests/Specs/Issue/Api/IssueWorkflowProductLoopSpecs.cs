@@ -130,6 +130,33 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task IssueWorkflowVariablesPatch_ProjectsModelSettingsOnIssueDetail()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"issue-model-profile-{Guid.NewGuid():N}", path = "/tmp/mohist-issue-model-profile", baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Configure issue model profile", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
+
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            new
+            {
+                vars = new { agent = new { type = "opencode", model = "issue/default-model", timeout = 1200 } },
+                stages = new { plan = new { vars = new { agent = new { type = "opencode", model = "issue/plan-model" } } } }
+            });
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+
+        Assert.Equal("issue/default-model", detail.Model);
+        Assert.NotNull(detail.AgentConfig);
+        Assert.Equal("issue/default-model", detail.AgentConfig["model"].GetString());
+        Assert.NotNull(detail.StageModels);
+        Assert.Equal("issue/plan-model", detail.StageModels["plan"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-variable-patch", baseBranch = "main" });
@@ -395,7 +422,19 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record ProjectVariablesDto(JsonElement? Vars, Dictionary<string, ProjectStageVariablesDto?>? Stages);
     private sealed record ProjectStageVariablesDto(JsonElement? Vars);
-    private sealed record IssueDto(int Number, string Title, string Status, string Health, ApprovalStateDto? ApprovalState, AttentionDto? Attention, string? WorkflowRunId, string? WorkflowStage, string? WorkflowStatus);
+    private sealed record IssueDto(
+        int Number,
+        string Title,
+        string Status,
+        string Health,
+        ApprovalStateDto? ApprovalState,
+        AttentionDto? Attention,
+        string? WorkflowRunId,
+        string? WorkflowStage,
+        string? WorkflowStatus,
+        string? Model,
+        Dictionary<string, JsonElement>? AgentConfig,
+        Dictionary<string, string>? StageModels);
     private sealed record ApprovalStateDto(string Stage, string Status);
     private sealed record AttentionDto(string Reason);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);

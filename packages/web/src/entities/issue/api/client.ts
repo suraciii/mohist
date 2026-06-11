@@ -1,6 +1,11 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
 import type { CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
 
+export interface IssueWorkflowVariables {
+  vars?: Record<string, unknown> | null
+  stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null
+}
+
 export function getIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   const search = new URLSearchParams()
   if (params?.stage) search.set('stage', params.stage)
@@ -118,19 +123,23 @@ export function getWorkflowTimeline(number: number, projectId?: string | null) {
     .then(response => response.workflow)
 }
 
+export function getIssueWorkflowVariables(number: number, projectId: string) {
+  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`))
+}
+
 export function getIssueWorkflowDefinitionVar(number: number, _name: string, projectId: string) {
-  return request<unknown>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`))
+  return getIssueWorkflowVariables(number, projectId)
 }
 
 export function patchIssueWorkflowDefinitionVar(number: number, name: string, value: unknown, projectId: string) {
-  return request<unknown>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`), {
+  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`), {
     method: 'PATCH',
     body: JSON.stringify({ vars: { [name]: value } }),
   })
 }
 
 export function patchIssueWorkflowStageDefinitionVar(number: number, stage: string, name: string, value: unknown, projectId: string) {
-  return request<unknown>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`), {
+  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/workflow-profile/variables`), {
     method: 'PATCH',
     body: JSON.stringify({ stages: { [stage]: { vars: { [name]: value } } } }),
   })
