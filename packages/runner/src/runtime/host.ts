@@ -141,8 +141,8 @@ export class RunnerHost {
   private async executeAndReport(work: WorkItem, signal: AbortSignal) {
     // Capture the last known result for a best-effort drain report when the
     // host is being torn down (SIGINT). Using a fresh AbortSignal (with a
-    // short timeout) for the final report so the server can mark the lease
-    // failed promptly instead of waiting the 5-min lease timeout.
+    // short timeout) gives the workflow an explicit runner report instead of
+    // leaving it waiting for a result which may never arrive.
     let lastResult: WorkItemResult | undefined
     let lastError: unknown
     const reportDrain = async (status: "failed", message: string) => {

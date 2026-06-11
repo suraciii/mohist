@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Grains;
@@ -71,12 +72,22 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
-            await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
+            try
+            {
+                await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
+            }
+            catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
+            {
+                var issueGrain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
+                if (issueGrain is null) return ApiResults.NotFound($"Issue #{number} not found");
+                await issueGrain.StartWorkAsync();
+            }
             return ApiResults.Ok();
         });
 
@@ -118,5 +129,17 @@ public static partial class IssueRoutes
                 return ApiResults.Conflict(ex.Message);
             }
         });
+    }
+
+    private static bool IsWorkflowRunStateCorruption(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is InvalidOperationException
+                && current.Message.Contains("Failed to deserialize workflow run state", StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 }

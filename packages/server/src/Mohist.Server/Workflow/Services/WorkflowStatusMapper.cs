@@ -6,6 +6,10 @@ namespace Mohist.Server.Workflow.Services;
 
 public static class WorkflowStatusMapper
 {
+    private static string FrontendStatus(string raw) =>
+        raw.Equals("AwaitingApproval", StringComparison.Ordinal)
+            ? "awaiting-approval"
+            : raw.ToLowerInvariant();
     public static WorkflowStatusView? BuildStatusView(
         WorkflowRun? run,
         WorkflowDefinition? definition)
@@ -25,7 +29,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                s.Status.ToString(),
+                FrontendStatus(s.Status.ToString()),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -51,7 +55,7 @@ public static class WorkflowStatusMapper
 
         return new WorkflowStatusView(
             run.Id,
-            run.Status.ToString(),
+            FrontendStatus(run.Status.ToString()),
             run.CurrentStageId,
             stages,
             pending,
@@ -64,24 +68,24 @@ public static class WorkflowStatusMapper
     public static List<TaskStatusView> MapTasks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Tasks.Count > 0)
-            return stage.Tasks.Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, t.Status.ToString(), t.RequiredFiles, t.Classification)).ToList();
+            return stage.Tasks.Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, FrontendStatus(t.Status.ToString()), t.RequiredFiles, t.Classification)).ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];
         return stageDefinition.Tasks
-            .Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, "Pending", TaskRunExtensions.ExtractRequiredFiles(t.With), TaskRunExtensions.DeriveClassification(t.Uses, null)))
+            .Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, "pending", TaskRunExtensions.ExtractRequiredFiles(t.With), TaskRunExtensions.DeriveClassification(t.Uses, null)))
             .ToList();
     }
 
     public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Checks.Count > 0)
-            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList();
+            return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, FrontendStatus(c.Status.ToString()), c.Message)).ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];
         return stageDefinition.Checks
-            .Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, "Pending", null))
+            .Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, "pending", null))
             .ToList();
     }
 

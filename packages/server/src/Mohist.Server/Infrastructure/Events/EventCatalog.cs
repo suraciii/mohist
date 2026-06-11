@@ -99,7 +99,6 @@ public static class EventCatalog
         ReverseDns.AgentSessionCancelled,
         ReverseDns.AgentSessionStatusChanged,
         ReverseDns.RunnerDisconnected,
-        ReverseDns.LeaseExpired,
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
     };
@@ -143,8 +142,6 @@ public static class EventCatalog
         public const string AgentSessionStatusChanged = "com.mohist.agent-session.status-changed";
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
-
-        public const string LeaseExpired = "com.mohist.workflow.lease-expired";
 
         public const string IssueCompleted = "com.mohist.issue.completed";
         public const string IssueCancelled = "com.mohist.issue.cancelled";

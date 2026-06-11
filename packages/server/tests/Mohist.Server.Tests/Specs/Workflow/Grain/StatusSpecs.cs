@@ -24,7 +24,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        Assert.Equal("running", status.Status);
         Assert.Equal("build", status.CurrentStage);
         Assert.Single(status.Stages);
         Assert.Equal("build", status.Stages[0].Stage);
@@ -76,14 +76,14 @@ public class StatusSpecs : WorkflowGrainSpecs
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
-        Assert.Equal("AwaitingApproval", status.Status);
+        Assert.Equal("awaiting-approval", status.Status);
         var planStage = status.Stages.Find(s => s.Stage == "plan");
         Assert.NotNull(planStage);
-        Assert.Equal("AwaitingApproval", planStage.Status);
+        Assert.Equal("awaiting-approval", planStage.Status);
         Assert.Single(planStage.Tasks);
-        Assert.Equal("Completed", planStage.Tasks[0].Status);
+        Assert.Equal("completed", planStage.Tasks[0].Status);
         Assert.Single(planStage.Checks);
-        Assert.Equal("Passed", planStage.Checks[0].Status);
+        Assert.Equal("passed", planStage.Checks[0].Status);
         Assert.NotNull(planStage.ApprovalStatus);
         Assert.Null(planStage.ApprovalStatus.Result);
     }
@@ -100,7 +100,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        Assert.Equal("running", status.Status);
         Assert.DoesNotContain("Issue", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("Worktree", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));

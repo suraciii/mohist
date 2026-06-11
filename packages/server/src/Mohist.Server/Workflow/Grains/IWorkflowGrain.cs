@@ -23,6 +23,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkResult result);
     Task<string?> GetRunStatusAsync();
+    Task<bool> IsStoppedOrTerminalAsync();
     Task<string?> GetClaimedRunnerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();
     Task DeactivateForTestAsync();

@@ -348,7 +348,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         for (var i = 0; i < 100; i++)
         {
             var status = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
-            if (status.Workflow?.Status == "AwaitingApproval" && status.Workflow.CurrentStage == stage)
+            if (status.Workflow?.Status == "awaiting-approval" && status.Workflow.CurrentStage == stage)
                 return;
             await CompleteNextWorkAsync();
         }

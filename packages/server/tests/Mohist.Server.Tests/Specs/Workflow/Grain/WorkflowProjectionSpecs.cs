@@ -236,18 +236,18 @@ public class WorkflowProjectionSpecs
     {
         var status = new WorkflowStatusView(
             WorkflowRunId: "wf-fail",
-            Status: "Running",
+            Status: "running",
             CurrentStage: "build",
             Stages:
             [
                 new StageStatusView(
                     Stage: "build",
-                    Status: "Running",
+                    Status: "running",
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("t1", "Failed task", "mohist/acp-agent", "Failed", null, TaskClassification.UserFacing),
-                        new TaskStatusView("t2", "Pending task", "mohist/acp-agent", "Pending", null, TaskClassification.UserFacing)
+                        new TaskStatusView("t1", "Failed task", "mohist/acp-agent", "failed", null, TaskClassification.UserFacing),
+                        new TaskStatusView("t2", "Pending task", "mohist/acp-agent", "pending", null, TaskClassification.UserFacing)
                     ],
                     Checks: [],
                     ApprovalStatus: null,
@@ -272,7 +272,7 @@ public class WorkflowProjectionSpecs
     {
         var status = new WorkflowStatusView(
             WorkflowRunId: "wf-done",
-            Status: "Completed",
+            Status: "completed",
             CurrentStage: "done",
             Stages: [],
             PendingWork: null,
@@ -291,17 +291,17 @@ public class WorkflowProjectionSpecs
     {
         var status = new WorkflowStatusView(
             WorkflowRunId: "wf-orch",
-            Status: "Running",
+            Status: "running",
             CurrentStage: "build",
             Stages:
             [
                 new StageStatusView(
                     Stage: "build",
-                    Status: "Running",
+                    Status: "running",
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("orch1", "Internal", "core/script", "Running", null, TaskClassification.Orchestration)
+                        new TaskStatusView("orch1", "Internal", "core/script", "running", null, TaskClassification.Orchestration)
                     ],
                     Checks: [],
                     ApprovalStatus: null,
@@ -323,21 +323,21 @@ public class WorkflowProjectionSpecs
     {
         var status = new WorkflowStatusView(
             WorkflowRunId: "wf-approval",
-            Status: "Running",
+            Status: "running",
             CurrentStage: "check",
             Stages:
             [
                 new StageStatusView(
                     Stage: "check",
-                    Status: "AwaitingApproval",
+                    Status: "awaiting-approval",
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("review.1", "Prepare review", "mohist/acp-agent", "Completed", null, TaskClassification.UserFacing)
+                        new TaskStatusView("review.1", "Prepare review", "mohist/acp-agent", "completed", null, TaskClassification.UserFacing)
                     ],
                     Checks:
                     [
-                        new CheckStatusView("merge-ready", "Merge ready", "mohist/merge-ready", "Completed", null)
+                        new CheckStatusView("merge-ready", "Merge ready", "mohist/merge-ready", "completed", null)
                     ],
                     ApprovalStatus: new ApprovalStatusView(null, "2024-01-01T01:00:00Z", null),
                     Failure: null)
@@ -435,18 +435,18 @@ public class WorkflowProjectionSpecs
     {
         return new WorkflowStatusView(
             WorkflowRunId: "wf-mixed",
-            Status: "Running",
+            Status: "running",
             CurrentStage: "build",
             Stages:
             [
                 new StageStatusView(
                     Stage: "build",
-                    Status: "Running",
+                    Status: "running",
                     Order: 0,
                     Tasks:
                     [
-                        new TaskStatusView("user.1", "User task", "mohist/acp-agent", "Running", null, TaskClassification.UserFacing),
-                        new TaskStatusView("orch.1", "Internal orch", "core/script", "Running", null, TaskClassification.Orchestration)
+                        new TaskStatusView("user.1", "User task", "mohist/acp-agent", "running", null, TaskClassification.UserFacing),
+                        new TaskStatusView("orch.1", "Internal orch", "core/script", "running", null, TaskClassification.Orchestration)
                     ],
                     Checks: [],
                     ApprovalStatus: null,
@@ -469,13 +469,13 @@ public class WorkflowProjectionSpecs
         if (userTasks.Count == 0) return null;
 
         var total = userTasks.Count;
-        var completed = userTasks.Count(t => t.Status == "Completed");
-        var running = userTasks.Count(t => t.Status == "Running");
-        var failed = userTasks.Count(t => t.Status == "Failed");
+        var completed = userTasks.Count(t => t.Status == "completed");
+        var running = userTasks.Count(t => t.Status == "running");
+        var failed = userTasks.Count(t => t.Status == "failed");
 
         if (total == 0) return null;
 
-        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "Running" or "Pending")?.Title;
+        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "running" or "pending")?.Title;
 
         return new WorkflowStageProgress(
             status.CurrentStage!,
@@ -488,18 +488,18 @@ public class WorkflowProjectionSpecs
 
     private static bool IsNonMeaningfulProgressState(WorkflowStatusView status)
     {
-        if (status.Status is "Completed" or "Failed" or "AwaitingApproval" or "Paused")
+        if (status.Status is "completed" or "failed" or "awaiting-approval" or "paused")
             return true;
 
         var currentStage = status.Stages.FirstOrDefault(s => s.Stage == status.CurrentStage);
         if (currentStage is null)
             return true;
 
-        if (currentStage.Status == "AwaitingApproval")
+        if (currentStage.Status == "awaiting-approval")
             return true;
 
         return currentStage.ApprovalStatus is { Result: null }
-            || (currentStage.Tasks.All(t => t.Status == "Completed") && currentStage.Checks.All(c => c.Status == "Completed"));
+            || (currentStage.Tasks.All(t => t.Status == "completed") && currentStage.Checks.All(c => c.Status == "completed"));
     }
 }
 

@@ -77,57 +77,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (!string.Equals(reminderName, WorkHeartbeatReminderName, StringComparison.Ordinal))
             return;
 
-        await CheckLeaseAgeAsync();
         await EnsureWorkHeartbeatAsync();
-    }
-
-    private static readonly TimeSpan LeaseTimeout = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// Detect a stuck lease (no runner report, no heartbeat from the runner,
-    /// the workflow is still waiting on the lease) and emit a
-    /// <c>com.mohist.workflow.lease-expired</c> event so subscribers
-    /// (AgentSessionRunnerBridge, etc.) can mark the in-flight session
-    /// failed and the workflow can re-dispatch or surface a task-failed
-    /// transition.
-    /// </summary>
-    private async Task CheckLeaseAgeAsync()
-    {
-        if (_leaseState.State?.DispatchedAt is not { } dispatchedAt) return;
-        var age = DateTime.UtcNow - dispatchedAt;
-        if (age < LeaseTimeout) return;
-
-        var runId = GrainKey;
-        var workId = _leaseState.State.WorkId;
-        var runnerId = _leaseState.State.RunnerId;
-        var reason = $"lease expired after {age.TotalSeconds:F0}s without runner report";
-
-        _log.LogWarning(
-            "Workflow {RunId} lease for work {WorkId} (runner {RunnerId}) has been pending for {AgeSeconds}s; failing the run",
-            runId, workId, runnerId, age.TotalSeconds);
-
-        var current = _run?.CurrentStage();
-        if (current is null) return;
-        if (_run!.Status == WorkflowRunStatus.Completed
-            || _run.Status == WorkflowRunStatus.Failed
-            || _run.Status == WorkflowRunStatus.Stopped)
-        {
-            return;
-        }
-
-        current.Failure = new FailureDetails(
-            FailureReason.LeaseExpired,
-            current.Id,
-            Message: reason);
-        current.Status = StageRunStatus.Failed;
-        _run.Failure = current.Failure;
-        _run.Status = WorkflowRunStatus.Failed;
-        _leaseState.State = null!;
-
-        await SaveRunAsync([
-            new StageFailed(current.Id, reason),
-            new WorkflowRunFailed(reason),
-        ]);
     }
 
     public async Task StartAsync(WorkflowStartInput? input = null)
@@ -422,6 +372,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public Task<string?> GetRunStatusAsync()
     {
         return Task.FromResult(_run?.Status.ToString());
+    }
+
+    public Task<bool> IsStoppedOrTerminalAsync()
+    {
+        if (_run is null) return Task.FromResult(true);
+        return Task.FromResult(_run.Status is WorkflowRunStatus.Stopped or WorkflowRunStatus.Completed or WorkflowRunStatus.Failed);
     }
 
     public Task<string?> GetClaimedRunnerIdAsync()

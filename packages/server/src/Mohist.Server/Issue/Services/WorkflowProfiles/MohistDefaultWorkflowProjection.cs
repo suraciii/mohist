@@ -61,21 +61,21 @@ public static class MohistDefaultWorkflowProjection
             approval,
             attention,
             ChangeDir(issueNumber),
-            workflow.Status == "Completed");
+            workflow.Status == "completed");
     }
 
     private static WorkflowAttention? ProjectAttention(WorkflowStatusView? workflow)
     {
-        if (workflow?.Status == "AwaitingApproval")
+        if (workflow?.Status == "awaiting-approval")
             return WorkflowAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
-        if (workflow?.Status == "Failed")
+        if (workflow?.Status == "failed")
             return WorkflowAttention.Blocked(workflow.WorkflowRunId, workflow.Failure?.Message ?? "Workflow failed");
         return null;
     }
 
     private static string? ComputeBlockedReason(WorkflowAttention? attention, WorkflowStatusView? workflow) =>
         attention?.Message
-        ?? (workflow?.Status == "Failed" ? workflow.Failure?.Message : null);
+        ?? (workflow?.Status == "failed" ? workflow.Failure?.Message : null);
 
     private static string RuntimeStatus(string issueStatus, WorkflowAttention? attention, string? workflowStatus = null, string? claimedBy = null)
     {
@@ -85,9 +85,9 @@ public static class MohistDefaultWorkflowProjection
         if (attention is not null) return "attention";
         return workflowStatus switch
         {
-            "Running" when claimedBy is null => "queued",
-            "Paused" => "paused",
-            "Failed" => "blocked",
+            "running" when claimedBy is null => "queued",
+            "paused" => "paused",
+            "failed" => "blocked",
             _ => "active",
         };
     }
