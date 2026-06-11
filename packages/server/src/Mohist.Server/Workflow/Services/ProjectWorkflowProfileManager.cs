@@ -29,7 +29,11 @@ public class ProjectWorkflowProfileManager
         new(
             Id: "mohist/default",
             Name: "Mohist Default",
-            Description: "Plan, build, check, and integrate an issue using OpenSpec artifacts.")
+            Description: "Plan, build, check, and integrate an issue using OpenSpec artifacts."),
+        new(
+            Id: "mohist/github",
+            Name: "Mohist GitHub",
+            Description: "GitHub-based workflow. Pushes each stage to remote, creates a PR, and merges via GitHub API.")
     ];
 
     public ProjectWorkflowProfileManager(
@@ -55,6 +59,8 @@ public class ProjectWorkflowProfileManager
     {
         if (string.Equals(templateId, "mohist/default", StringComparison.Ordinal))
             return MohistWorkflow.Definition;
+        if (string.Equals(templateId, "mohist/github", StringComparison.Ordinal))
+            return MohistWorkflow.GitHub;
         return null;
     }
 
