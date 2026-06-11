@@ -1,12 +1,13 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 import type { ActionContext, ActionResult } from "../core/types.js"
-import { arrayInput, numberInput, stringInput } from "../core/json.js"
+import { arrayInput, numberInput, stringAt, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
+import { githubPrAction } from "./github-pr.js"
 import { git } from "./git.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
@@ -38,6 +39,7 @@ export function createDefaultRegistry() {
   registry.register("mohist/rebase-status", rebaseStatusAction)
   registry.register("mohist/merge-ready", mergeReadyAction)
   registry.register("mohist/merge", mergeAction)
+  registry.register("mohist/github-pr", githubPrAction)
   return registry
 }
 
@@ -199,14 +201,6 @@ function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
     parent.addEventListener("abort", onAbort, { once: true })
   }
   return controller.signal
-}
-
-function stringAt(value: unknown, path: string[]) {
-  const found = path.reduce<unknown>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return (current as Record<string, unknown>)[part]
-  }, value)
-  return typeof found === "string" ? found : undefined
 }
 
 function numberAtString(value: unknown, path: string[]) {

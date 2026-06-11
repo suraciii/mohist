@@ -32,3 +32,11 @@ export function arrayInput(input: JsonObject | null | undefined, key: string) {
 export function isObject(value: JsonValue | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
+
+export function stringAt(value: unknown, path: string[]): string | undefined {
+  const found = path.reduce<unknown>((current, part) => {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
+    return (current as Record<string, unknown>)[part]
+  }, value)
+  return typeof found === "string" ? found : undefined
+}

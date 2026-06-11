@@ -28,6 +28,20 @@ vi.mock("../src/runtime/opencode-models.js", () => ({
   discoverOpencodeModels: vi.fn(async () => ["openai/gpt-5.5"]),
 }))
 
+vi.mock("../src/runtime/acp-connection.js", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../src/runtime/acp-connection.js")>()
+  return {
+    ...mod,
+    createSharedAcpConnection: vi.fn().mockResolvedValue({
+      connection: {} as unknown,
+      processPid: null,
+      setSessionHandlers: vi.fn(),
+      clearSessionHandlers: vi.fn(),
+      shutdown: vi.fn().mockResolvedValue(undefined),
+    }),
+  }
+})
+
 describe("RunnerHost", () => {
   it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
     vi.clearAllMocks()
