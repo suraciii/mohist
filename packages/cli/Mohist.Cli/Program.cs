@@ -15,7 +15,7 @@ internal static class CliProgram
         };
         var fileSystem = RealFileSystem.Instance;
         var commandExecutor = new SystemCommandExecutor();
-        var api = new MohistCliApi(http, Console.Out, Console.Error, fileSystem, commandExecutor);
+        var api = new MohistCliApi(http, Console.Out, Console.Error, fileSystem, commandExecutor, Console.In);
         var systemd = new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor);
         var updater = new SourceCodeUpdater(Console.Out, Console.Error, systemd, commandExecutor, fileSystem, environment);
 

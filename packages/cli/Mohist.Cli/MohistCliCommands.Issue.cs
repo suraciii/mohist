@@ -40,7 +40,7 @@ internal static class IssueCommands
     private static string ProjectIssuesPath(string? projectId, string path = "")
     {
         if (string.IsNullOrWhiteSpace(projectId))
-            throw new InvalidOperationException("No active project. Run 'mo project use <id-or-name>' or pass --project-id.");
+            throw new InvalidOperationException(MohistCliCommands.NoActiveProjectMessage);
         return $"/api/projects/{MohistCliCommands.Escape(projectId)}{(path.StartsWith('/') ? path : "/" + path)}";
     }
 
@@ -48,38 +48,55 @@ internal static class IssueCommands
     {
         var cmd = new Command("list", "List issues");
         cmd.Aliases.Add("ls");
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var stageOpt = MohistCliCommands.StageOption();
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
         var allOpt = new Option<bool>("--all") { Description = "Show all issues" };
         var archivedOpt = new Option<bool>("--archived") { Description = "Show archived issues" };
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(stageOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
         cmd.Options.Add(allOpt);
         cmd.Options.Add(archivedOpt);
+        cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var stage = ctx.GetValue(stageOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
             var all = ctx.GetValue(allOpt);
             var archived = ctx.GetValue(archivedOpt);
+            var output = ctx.GetValue(outputOpt);
             return ListAsync();
 
             async Task<int> ListAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 var query = MohistCliCommands.Query(
                     Stage: stage,
                     Label: labels is { Length: > 0 } ? string.Join(",", labels) : null,
                     Priority: priority,
                     Archived: archived ? true : null,
                     All: all ? true : null);
-                return await api.PrintGetAsync(ProjectIssuesPath(resolvedProjectId, "/issues") + query);
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectIssuesPath(resolvedProjectId, "/issues") + query,
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueList));
             }
         });
         return cmd;
@@ -89,16 +106,21 @@ internal static class IssueCommands
     {
         var cmd = new Command("create", "Create a new issue");
         var titleArg = new Argument<string>("title") { Description = "Issue title" };
-        var bodyOpt = new Option<string?>("--body", "-b") { Description = "Issue body" };
+        var bodyOpt = new Option<string?>("--body", "-b") { Description = "Issue body (mutually exclusive with --body-file and --body-stdin)" };
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read issue body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body and --body-stdin)" };
+        var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read issue body from stdin (mutually exclusive with --body and --body-file)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(bodyOpt);
+        cmd.Options.Add(bodyFileOpt);
+        cmd.Options.Add(bodyStdinOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(workflowProfileOpt);
@@ -106,8 +128,11 @@ internal static class IssueCommands
         {
             var title = ctx.GetValue(titleArg);
             var body = ctx.GetValue(bodyOpt);
+            var bodyFile = ctx.GetValue(bodyFileOpt);
+            var bodyStdin = ctx.GetValue(bodyStdinOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
@@ -115,11 +140,18 @@ internal static class IssueCommands
 
             async Task<int> CreateAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var resolvedBody = await BodyInputResolver.ResolveAsync(
+                    body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
+                if (resolvedBody is BodyInputResolver.Result.Failure)
+                    return 1;
+                var bodyText = ((BodyInputResolver.Result.Success)resolvedBody).Body;
                 return await api.PrintPostAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
                 {
                     title,
-                    body = body ?? "",
+                    body = bodyText,
                     labels = labels ?? [],
                     priority = priority ?? "p2",
                     model,
@@ -134,19 +166,36 @@ internal static class IssueCommands
     {
         var cmd = new Command("show", "Show issue details");
         var numberArg = NumberArg();
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
             return GetAsync();
 
             async Task<int> GetAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
-                return await api.PrintGetAsync(ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"));
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;
@@ -157,16 +206,21 @@ internal static class IssueCommands
         var cmd = new Command("update", "Update an issue");
         var numberArg = NumberArg();
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
-        var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body" };
+        var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file and --body-stdin)" };
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read new body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body and --body-stdin)" };
+        var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read new body from stdin (mutually exclusive with --body and --body-file)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(bodyOpt);
+        cmd.Options.Add(bodyFileOpt);
+        cmd.Options.Add(bodyStdinOpt);
         cmd.Options.Add(labelOpt);
         cmd.Options.Add(priorityOpt);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.SetAction(ctx =>
@@ -174,15 +228,32 @@ internal static class IssueCommands
             var number = ctx.GetValue(numberArg);
             var title = ctx.GetValue(titleOpt);
             var body = ctx.GetValue(bodyOpt);
+            var bodyFile = ctx.GetValue(bodyFileOpt);
+            var bodyStdin = ctx.GetValue(bodyStdinOpt);
             var labels = ctx.GetValue(labelOpt);
             var priority = ctx.GetValue(priorityOpt);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             return UpdateAsync();
 
             async Task<int> UpdateAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var hasAnyBodySource =
+                    !string.IsNullOrWhiteSpace(body) ||
+                    !string.IsNullOrWhiteSpace(bodyFile) ||
+                    bodyStdin;
+                if (hasAnyBodySource)
+                {
+                    var resolvedBody = await BodyInputResolver.ResolveAsync(
+                        body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
+                    if (resolvedBody is BodyInputResolver.Result.Failure)
+                        return 1;
+                    body = ((BodyInputResolver.Result.Success)resolvedBody).Body;
+                }
                 return await api.PrintPatchAsync(ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"), new
                 {
                     title,
@@ -200,18 +271,22 @@ internal static class IssueCommands
     {
         var cmd = new Command(name, $"{description} an issue");
         var numberArg = NumberArg();
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             return ActAsync();
 
             async Task<int> ActAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"),
                     new { });
@@ -225,20 +300,24 @@ internal static class IssueCommands
         var cmd = new Command("reject", "Reject workflow approval");
         var numberArg = NumberArg();
         var reasonOpt = new Option<string?>("--reason", "-m") { Description = "Rejection reason" };
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(reasonOpt);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var reason = ctx.GetValue(reasonOpt);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             return RejectAsync();
 
             async Task<int> RejectAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/reject"),
                     new { reason });
@@ -252,20 +331,24 @@ internal static class IssueCommands
         var cmd = new Command("rebase", "Rebase issue branch");
         var numberArg = NumberArg();
         var baseBranchOpt = new Option<string?>("--base-branch", "-b") { Description = "Base branch to rebase onto" };
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(baseBranchOpt);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
             var baseBranch = ctx.GetValue(baseBranchOpt);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             return RebaseAsync();
 
             async Task<int> RebaseAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/rebase"),
                     new { baseBranch });
@@ -284,20 +367,24 @@ internal static class IssueCommands
             DefaultValueFactory = _ => null,
         };
         var allCompletedOpt = new Option<bool>("--all-completed") { Description = "Archive all completed issues" };
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(allCompletedOpt);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
         {
             var allCompleted = ctx.GetValue(allCompletedOpt);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var number = ctx.GetValue(numberArg);
             return ArchiveAsync();
 
             async Task<int> ArchiveAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 if (allCompleted)
                     return await api.PrintPostAsync(ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"), new { });
                 return await api.PrintPostAsync(
@@ -312,18 +399,22 @@ internal static class IssueCommands
     {
         var cmd = new Command(name, $"Show issue {name}");
         var numberArg = NumberArg();
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             return GetAsync();
 
             async Task<int> GetAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 return await api.PrintGetAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"));
             }
@@ -336,20 +427,36 @@ internal static class IssueCommands
         var cmd = new Command("sessions", "Show coder sessions for issue");
         cmd.Aliases.Add("coder-sessions");
         var numberArg = NumberArg();
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
             return SessionsAsync();
 
             async Task<int> SessionsAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
-                return await api.PrintGetAsync(
-                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/coder-sessions"));
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/coder-sessions"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.Sessions));
             }
         });
         return cmd;
@@ -359,37 +466,58 @@ internal static class IssueCommands
     {
         var workflow = new Command("workflow", "Issue workflow actions");
         var numberArg = new Argument<string>("number") { Description = "Issue number" };
-        var projectIdOpt = MohistCliCommands.ProjectIdOption();
 
         var statusCmd = new Command("status", "Show workflow status");
+        var (statusProjectOpt, statusProjectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var statusOutputOpt = MohistCliCommands.OutputOption();
         statusCmd.Arguments.Add(numberArg);
-        statusCmd.Options.Add(projectIdOpt);
+        statusCmd.Options.Add(statusProjectOpt);
+        statusCmd.Options.Add(statusProjectIdOpt);
+        statusCmd.Options.Add(statusOutputOpt);
         statusCmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
-            var projectId = ctx.GetValue(projectIdOpt);
+            var project = ctx.GetValue(statusProjectOpt);
+            var projectId = ctx.GetValue(statusProjectIdOpt);
+            var output = ctx.GetValue(statusOutputOpt);
             return StatusAsync();
 
             async Task<int> StatusAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
-                return await api.PrintGetAsync(
-                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/status"));
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/status"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.WorkflowStatus));
             }
         });
 
         var timelineCmd = new Command("timeline", "Show workflow timeline");
+        var (timelineProjectOpt, timelineProjectIdOpt) = MohistCliCommands.ProjectRefOption();
         timelineCmd.Arguments.Add(numberArg);
-        timelineCmd.Options.Add(projectIdOpt);
+        timelineCmd.Options.Add(timelineProjectOpt);
+        timelineCmd.Options.Add(timelineProjectIdOpt);
         timelineCmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
-            var projectId = ctx.GetValue(projectIdOpt);
+            var project = ctx.GetValue(timelineProjectOpt);
+            var projectId = ctx.GetValue(timelineProjectIdOpt);
             return TimelineAsync();
 
             async Task<int> TimelineAsync()
             {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
                 return await api.PrintGetAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/workflow/timeline"));
             }

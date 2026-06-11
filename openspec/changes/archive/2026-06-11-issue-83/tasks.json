@@ -1,0 +1,240 @@
+{
+  "project": "mohist",
+  "description": "Expand Mohist CLI ergonomics for project-scoped work: canonical --project, --output table|json, --body-stdin/--body-file, mo project repo subcommands.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add ProjectRefOption() and OutputOption() option factories",
+      "spec": "specs/cli-project-ref/spec.md#project-scoped-issue-commands-accept-canonical---project-name-or-id- | specs/cli-output-modes/spec.md#--output-table-json--is-available-on-high-use-list-detail-commands",
+      "description": "Introduce two static option-builder helpers in MohistCliCommands.cs: ProjectRefOption() returns the (--project, --project-id) option pair with shared description text, and OutputOption() returns a single --output option with DefaultValueFactory -> 'json'. Existing ProjectIdOption() remains as a thin wrapper for non-issues. The factories are pure builders with no behavior; later tasks wire them into command definitions.",
+      "acceptanceCriteria": [
+        "MohistCliCommands.ProjectRefOption() returns two Option<string?> instances; the first has name 'project' and the second has name 'project-id'",
+        "Both options share the same Description text and document --project as canonical and --project-id as a backwards-compatible alias",
+        "MohistCliCommands.OutputOption() returns a single Option<string> with DefaultValueFactory returning 'json' and Description listing 'table' and 'json'",
+        "Unit tests assert option names, descriptions, and the json default"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.cs (ProjectRefOption + OutputOption methods) and unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Mechanism: returns (Option<string?>, Option<string?>) tuple for the project pair, single Option<string> for output. Helps the next two tasks focus on resolver/renderer behavior."
+    },
+    {
+      "id": "T-002",
+      "title": "Refactor ResolveProjectIdAsync to accept (project, projectId) with conflict validation",
+      "spec": "specs/cli-project-ref/spec.md#--project-and---project-id--must-agree-or-fail-with-a-clear-error | specs/cli-project-ref/spec.md#active-project-is-the-fallback-when-neither-project-option-is-passed",
+      "description": "Change MohistCliApi.ResolveProjectIdAsync from string? explicitProjectId to (string? project, string? projectId). Implement: blank+blank -> fall back to cli-state.json activeProjectId; exactly one non-blank -> use it; both non-blank and identical -> use the single value; both non-blank and different -> print guided error to stderr, do NOT call the server, and return a sentinel the action delegate maps to exit code 1. The same-value / different-value check is a string compare, not a server round-trip.",
+      "acceptanceCriteria": [
+        "ResolveProjectIdAsync(project: 'mohist-local', projectId: null) returns a non-null resolved id",
+        "ResolveProjectIdAsync(project: null, projectId: 'proj_abc') returns a non-null resolved id",
+        "ResolveProjectIdAsync(project: 'mohist-local', projectId: 'mohist-local') proceeds with the single value (string-equal)",
+        "ResolveProjectIdAsync(project: 'mohist-local', projectId: 'proj_other') prints the conflict error mentioning both values and the fix, returns the sentinel, and does not call the HTTP layer",
+        "ResolveProjectIdAsync(project: null, projectId: null) with no active project emits the standardized 'no active project' diagnostic and returns the sentinel",
+        "ResolveProjectIdAsync(project: 'other-project', projectId: null) when active project is set returns 'other-project' (active project is NOT overridden)"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliApi.cs (ResolveProjectIdAsync overload) and unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Sentinel pattern: a nullable tuple result where null means 'failed, action delegate should exit 1' (the action delegate is the only one that calls Environment.Exit / sets exit code)."
+    },
+    {
+      "id": "T-003",
+      "title": "Add NoActiveProjectMessage helper and replace hard-coded error in Issue.cs",
+      "spec": "specs/cli-interface/spec.md#standardized--no-active-project--diagnostic-references-the-canonical---project-option | specs/cli-project-ref/spec.md#standardized--no-active-project--diagnostic-guides-the-user",
+      "description": "Introduce MohistCliCommands.NoActiveProjectMessage (a constant string) and replace the hard-coded 'No active project. Run ...' string in MohistCliCommands.Issue.cs:43 with a call to it. The new wording is 'Run 'mo project use <name-or-id>' or pass --project <name-or-id>'. The helper is also used by MohistCliApi.ResolveProjectIdAsync (T-002) so all project-scoped commands emit identical wording.",
+      "acceptanceCriteria": [
+        "MohistCliCommands.NoActiveProjectMessage equals 'Run \\'mo project use <name-or-id>\\' or pass --project <name-or-id>' (or clearly equivalent)",
+        "MohistCliCommands.Issue.cs:43 no longer contains a hard-coded 'No active project' string; it references the helper",
+        "ResolveProjectIdAsync (from T-002) emits the same NoActiveProjectMessage verbatim when no active project is set",
+        "Unit tests assert the exact wording and verify the helper is the single source of truth"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.cs (NoActiveProjectMessage) + packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs edit",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "T-003 must follow T-002 because ResolveProjectIdAsync references the same helper; this keeps wording identical across the two code paths."
+    },
+    {
+      "id": "T-004",
+      "title": "Add BodyInputResolver static class with mutual-exclusion and file/stdin reads",
+      "spec": "specs/cli-body-input-sources/spec.md#issue-create-and-issue-update-accept-three-mutually-exclusive-body-input-sources | specs/cli-body-input-sources/spec.md#file-read-failures-fail-with-a-clear-error-and-non-zero-exit",
+      "description": "Introduce internal static class BodyInputResolver in Mohist.Cli with ResolveAsync(string? inlineBody, string? bodyFile, bool bodyStdin, IFileSystem fileSystem, TextReader standardInput, TextWriter error). The method enforces: exactly one source required (zero sources -> 'issue body is required' error, exit code 1, no HTTP); more than one source -> mutual-exclusion error listing the conflicting options, exit code 1, no HTTP; file read uses IFileSystem.ReadAllTextAsync as UTF-8; stdin is drained to EOF. Resolution must happen before the create/update request is constructed.",
+      "acceptanceCriteria": [
+        "BodyInputResolver.ResolveAsync(body: 'x', file: null, stdin: false) returns 'x'",
+        "BodyInputResolver.ResolveAsync(body: null, file: 'body.md', stdin: false) with a fake IFileSystem containing 'body.md' returns the file contents",
+        "BodyInputResolver.ResolveAsync(body: null, file: null, stdin: true) with a fake TextReader returns the drained stream contents",
+        "Zero sources -> writes 'issue body is required' to error and returns a Failure result (no HTTP allowed)",
+        "Two or three sources -> writes a mutual-exclusion error naming the conflicting options to error and returns a Failure result",
+        "File does not exist -> writes 'could not read body file: ...' to error and returns a Failure result",
+        "Unit tests use FakeFileSystem and a fake TextReader (no real I/O) and assert the Failure result type"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/BodyInputResolver.cs and unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Static class with a Result record (Success(string body) | Failure(string message)) so callers can short-circuit before constructing the request."
+    },
+    {
+      "id": "T-005",
+      "title": "Add OutputOption validation and PrintWithOutputAsync dispatch",
+      "spec": "specs/cli-output-modes/spec.md#--output-table-json--is-available-on-high-use-list-detail-commands | specs/cli-output-modes/spec.md#table-rendering-does-not-change-the-underlying-request",
+      "description": "Add MohistCliApi.ValidateOutputMode(string?) that returns the canonical 'json' or 'table' or throws/writes an error listing accepted values. Add MohistCliApi.PrintWithOutputAsync(path, mode, httpContext) that fetches the response, then dispatches to PrintResponseAsync for json or RenderTableAsync for table. Unknown values fail pre-flight (no HTTP call) via the same validation. The json path is byte-identical to the existing PrintResponseAsync output.",
+      "acceptanceCriteria": [
+        "ValidateOutputMode(null) returns 'json'",
+        "ValidateOutputMode('json') returns 'json'",
+        "ValidateOutputMode('table') returns 'table'",
+        "ValidateOutputMode('yaml') writes a validation error listing 'table' and 'json' and returns a Failure result (no HTTP call)",
+        "PrintWithOutputAsync with mode 'json' prints the same data payload as the existing PrintResponseAsync",
+        "Unit tests use RecordingHttpHandler to assert that the same HTTP request is sent for both modes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliApi.cs (ValidateOutputMode + PrintWithOutputAsync) and unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "RenderTableAsync is its own task (T-006); T-005 stubs the table dispatch and adds the json equivalence assertion first."
+    },
+    {
+      "id": "T-006",
+      "title": "Add RenderTableAsync table renderer for the seven table shapes",
+      "spec": "specs/cli-output-modes/spec.md#table-output-renders-a-readable-human-summary | specs/cli-project-repositories/spec.md#repository-subcommands-support---output--for-list",
+      "description": "Add MohistCliApi.RenderTableAsync(JsonNode? data, TableShape shape) with TableShape enum: ProjectList, ProjectShow, IssueList, IssueShow, WorkflowStatus, Sessions, RepoList. Column accessors are co-located in one file. Long text fields truncate to a soft cap (60 chars title/body, 24 chars id-like) with single-line ellipsis. Active project is marked with '*' in ProjectList when cli-state.json's activeProjectId matches. The HTTP request and response body are identical to the json path: one server round-trip per command regardless of mode.",
+      "acceptanceCriteria": [
+        "ProjectList table contains columns id, name, base branch and marks the active project with '*' when applicable",
+        "ProjectShow table is a multi-line summary including id, name, base branch, repository count, created/updated time",
+        "IssueList table contains columns number, title, stage, status, priority and truncates long titles",
+        "IssueShow table is a multi-line summary with number, title, stage, status, priority, project, updated time, and a condensed body (not a full Markdown dump)",
+        "WorkflowStatus table summarizes current stage, task states, and waiting reasons",
+        "Sessions table lists session id, state, started, and model",
+        "RepoList table lists repository name, path, remote, base branch, and an isDefault marker",
+        "RecordingHttpHandler tests assert that table and json paths issue the same HTTP request (method, path, body) and that the rendered table contains at least one representative cell per shape"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliApi.cs (TableShape enum + RenderTableAsync) and unit tests",
+      "dependsOn": ["T-005"],
+      "passes": true,
+      "notes": "Hard cap 60/24 per design D5. No color. Plain text only."
+    },
+    {
+      "id": "T-007",
+      "title": "Apply ProjectRefOption + OutputOption to issue list/show/sessions/workflow status subcommands",
+      "spec": "specs/cli-output-modes/spec.md#--output-table-json--is-available-on-high-use-list-detail-commands | specs/cli-project-ref/spec.md#project-scoped-issue-commands-accept-canonical---project-name-or-id-",
+      "description": "In MohistCliCommands.Issue.cs, replace ProjectIdOption() with ProjectRefOption() on BuildList, BuildShow, BuildSessions, and BuildWorkflow (status subcommand). Add OutputOption() to all four. Each action delegate calls ValidateOutputMode + PrintWithOutputAsync. The 'no active project' diagnostic in BuildShow is replaced with the helper from T-003. BuildWorkflow status path is wired to PrintWithOutputAsync so --output works there too.",
+      "acceptanceCriteria": [
+        "mo issue list --help lists --project, --project-id, and --output (default json)",
+        "mo issue show --help lists --project, --project-id, and --output (default json)",
+        "mo issue sessions --help lists --project, --project-id, and --output (default json)",
+        "mo issue workflow status --help lists --project, --project-id, and --output (default json)",
+        "mo issue show 83 --project mohist-local sends GET /api/projects/mohist-local/issues/83 (or equivalent path through ProjectResolutionEndpointFilter)",
+        "mo issue list --output table renders the IssueList table; --output json matches the no-flag JSON output",
+        "Backwards compatibility: mo issue show 83 --project-id <id> still works and resolves through the same helper"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs (BuildList/BuildShow/BuildSessions/BuildWorkflow edits) and integration tests",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-005", "T-006"],
+      "passes": true,
+      "notes": "These four are the commands that need --output per the spec; --project is added uniformly because the same ProjectRefOption helper is used everywhere."
+    },
+    {
+      "id": "T-008",
+      "title": "Apply ProjectRefOption to remaining issue subcommands (create/update/start/approve/reject/close/reopen/retry/rerun/force-stop/resume/rebase/archive/unarchive/logs/events/diff/commits/workflow timeline)",
+      "spec": "specs/cli-project-ref/spec.md#project-scoped-issue-commands-accept-canonical---project-name-or-id- | specs/cli-project-ref/spec.md#--project-id--remains-a-backwards-compatible-alias | specs/cli-interface/spec.md#project-scoped-issue-subcommands-accept---project-name-or-id--and-keep---project-id--as-a-compatibility-alias",
+      "description": "In MohistCliCommands.Issue.cs, replace ProjectIdOption() with ProjectRefOption() on the remaining 18+ project-scoped subcommands listed in cli-project-ref spec. None of these gain --output. The 'no active project' diagnostic is updated to use the helper. Each action delegate's project resolution is routed through the new ResolveProjectIdAsync (project, projectId) overload.",
+      "acceptanceCriteria": [
+        "mo issue create --help lists --project and --project-id (no --output)",
+        "mo issue update --help lists --project and --project-id (no --output)",
+        "mo issue start --help, mo issue approve --help, mo issue reject --help, mo issue close --help, mo issue reopen --help, mo issue retry --help, mo issue rerun --help, mo issue force-stop --help, mo issue resume --help, mo issue rebase --help, mo issue archive --help, mo issue unarchive --help, mo issue logs --help, mo issue events --help, mo issue diff --help, mo issue commits --help, mo issue workflow timeline --help all list --project and --project-id",
+        "mo issue close 83 --project mohist-local sends the close request to the resolved project route",
+        "Backwards compatibility: existing --project-id scripts continue to work unchanged"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs (mechanical ProjectIdOption -> ProjectRefOption replacements) and integration tests covering a representative sample",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": true,
+      "notes": "Mechanical change at each site. Representative sample of 3-4 subcommands in integration tests; full surface covered by the unit-level option-name tests."
+    },
+    {
+      "id": "T-009",
+      "title": "Wire --body, --body-file, --body-stdin into BuildCreate and BuildUpdate via BodyInputResolver",
+      "spec": "specs/cli-body-input-sources/spec.md#issue-create-and-issue-update-accept-three-mutually-exclusive-body-input-sources | specs/cli-body-input-sources/spec.md#body-input-source-resolution-is-applied-before-the-create-update-request | specs/cli-body-input-sources/spec.md#---body-stdin-and---body-file--are-documented-in-help-text",
+      "description": "In MohistCliCommands.Issue.cs BuildCreate and BuildUpdate, register --body (existing), --body-file <path>, and --body-stdin options. Mutual exclusion is documented in help text. The action delegate calls BodyInputResolver.ResolveAsync before constructing the create/update payload. The resolved text is sent as the body field; the CLI does not log it in normal mode.",
+      "acceptanceCriteria": [
+        "mo issue create --help lists --body, --body-file, --body-stdin and notes mutual exclusion",
+        "mo issue update --help lists --body, --body-file, --body-stdin and notes mutual exclusion",
+        "mo issue create 'Title' --body 'literal' sends the literal body unchanged",
+        "mo issue create 'Title' --body-file body.md (with body.md present) reads the file and sends its contents",
+        "mo issue create 'Title' --body-stdin with piped stdin drains stdin and sends the contents",
+        "mo issue create 'Title' (no body option) writes 'issue body is required' to stderr and exits non-zero with no HTTP call",
+        "mo issue create 'Title' --body 'a' --body-file b.md writes a mutual-exclusion error mentioning the conflicting options and exits non-zero with no HTTP call",
+        "mo issue create 'Title' --body-file missing.md writes a file-read error and exits 1 with no HTTP call"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs (BuildCreate/BuildUpdate edits) and integration tests using FakeFileSystem + a fake TextReader",
+      "dependsOn": ["T-001", "T-002", "T-004"],
+      "passes": true,
+      "notes": "The text 'literal' is sent in the JSON body field; BodyInputResolver is the single source of truth, called once per create/update."
+    },
+    {
+      "id": "T-010",
+      "title": "Add mo project repo subcommand group (list/add/set-default/remove)",
+      "spec": "specs/cli-project-repositories/spec.md#mo-project-repo--exposes-a-subcommand-group-for-project-repositories | specs/cli-project-repositories/spec.md#repository-subcommands-accept---project--and-active-project-fallback | specs/cli-project-repositories/spec.md#repository-subcommands-surface-server-conflicts-and-not-found-errors | specs/cli-project-repositories/spec.md#repository-subcommands-support---output--for-list | specs/cli-interface/spec.md#mo-project-repo--subcommand-group-is-exposed | specs/project-management/spec.md#mo-project--exposes-a-repo-subcommand-group | specs/project-management/spec.md#mo-project-repo--subcommands-accept---project--with-active-project-fallback",
+      "description": "In MohistCliCommands.Project.cs, add a new BuildRepo() method returning a 'repo' command with four subcommands. list -> GET /api/projects/{ref}/repositories; add --name X [--path Y] [--remote Z] [--base-branch W] [--set-default] -> POST /api/projects/{ref}/repositories with AddRepositoryRequest payload; set-default <name> -> PATCH /api/projects/{ref}/repositories/{name} with { setDefault: true }; remove <name> (alias rm) -> DELETE /api/projects/{ref}/repositories/{name}. Each subcommand uses ProjectRefOption() and routes through ResolveProjectIdAsync. Only list supports --output; add/set-default/remove always print success/failure text. Register BuildRepo under BuildProject so 'mo project --help' lists 'repo'.",
+      "acceptanceCriteria": [
+        "mo project --help lists 'repo' alongside the existing subcommands",
+        "mo project repo --help lists list, add, set-default, remove and documents --project <name-or-id> requirement",
+        "mo project repo list --project mohist-local sends GET /api/projects/mohist-local/repositories and renders the response (or --output table when specified)",
+        "mo project repo add --project mohist-local --name api --path /path --set-default sends POST /api/projects/mohist-local/repositories with the documented payload",
+        "mo project repo set-default --project mohist-local api sends PATCH /api/projects/mohist-local/repositories/api with { setDefault: true }",
+        "mo project repo remove --project mohist-local api sends DELETE /api/projects/mohist-local/repositories/api",
+        "mo project repo add --help does NOT advertise --output; add/set-default/remove always print success/failure text",
+        "mo project repo list --project-id <id> resolves through the same helper as --project (backwards-compatible alias)",
+        "mo project repo list with no --project and no active project prints the standardized diagnostic and exits non-zero with no HTTP call"
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Project.cs (BuildRepo method + BuildProject edit) and integration tests",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-005", "T-006"],
+      "passes": false,
+      "notes": "Reuses PrintGetAsync/PrintPostAsync/PrintPatchAsync/PrintDeleteAsync; the request paths and bodies are verbatim from the design's D7 table."
+    },
+    {
+      "id": "T-011",
+      "title": "Apply OutputOption to mo project list and mo project show",
+      "spec": "specs/cli-output-modes/spec.md#--output-table-json--is-available-on-high-use-list-detail-commands | specs/cli-output-modes/spec.md#table-output-renders-a-readable-human-summary | specs/cli-interface/spec.md#project-scoped-list-detail-commands-accept---output-table-json",
+      "description": "In MohistCliCommands.Project.cs, add OutputOption() to BuildList and BuildShow so they accept --output table|json (default json). Each action calls ValidateOutputMode + PrintWithOutputAsync so the table path renders via RenderTableAsync (ProjectList and ProjectShow shapes from T-006) and the json path matches the no-flag JSON output.",
+      "acceptanceCriteria": [
+        "mo project list --help lists --output (default json)",
+        "mo project show --help lists --output (default json)",
+        "mo project list --output table renders the ProjectList table including id, name, base branch and marks the active project with '*' when set",
+        "mo project list --output json matches the no-flag JSON output (request identical)",
+        "mo project list --output yaml writes a validation error listing table and json, exits non-zero, makes no HTTP call"
+      ],
+      "priority": 11,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Project.cs (BuildList/BuildShow edits) and integration tests",
+      "dependsOn": ["T-001", "T-005", "T-006"],
+      "passes": false,
+      "notes": "BuildList/BuildShow are project commands and the active project is determined by cli-state.json (not by --project), so --project is not added here per the design's Open Questions."
+    }
+  ]
+}
