@@ -2,9 +2,8 @@ namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
 /// Publishes a transcript (non-domain, observation-only) event from
-/// <c>AgentSessionGrain.AppendRuntimeEventsAsync</c> to subscribed
-/// SignalR connections on the dedicated <c>OnTranscriptEvent</c>
-/// channel.
+/// <c>AgentSessionGrain.AppendRuntimeEventsAsync</c> to subscribed SignalR
+/// connections on the dedicated <c>OnTranscriptEvent</c> channel.
 ///
 /// <para>
 /// Transcript events are NOT domain events: they describe what the
@@ -24,7 +23,8 @@ namespace Mohist.Server.Infrastructure.Events;
 /// subscription set. The Web is expected to include the canonical
 /// transcript event set in its subscription list when it wants live
 /// transcript data, including both the legacy coder event names and
-/// runner-native aliases such as <c>agent_message_chunk</c>,
+/// runner-native aliases such as <c>agent_message</c>,
+/// <c>agent_thought</c>, <c>agent_message_chunk</c>,
 /// <c>agent_thought_chunk</c>, <c>tool_call</c>, and
 /// <c>tool_call_update</c>.
 /// </para>

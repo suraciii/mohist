@@ -4,12 +4,11 @@ using System.Text.Json.Serialization;
 namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
-/// Wire shape for a single runtime event row carried to the Web over the
-/// dedicated non-domain transcript channel (<c>OnTranscriptEvent</c>).
-/// Mirrors the persisted <c>AgentSessionRuntimeEvents</c> row: the same
-/// payload JSON the runner POSTed and the same row id / sequence /
-/// created-at, plus the <see cref="Type"/> name so the Web can route by
-/// event type without parsing the payload.
+/// Wire shape for a single runtime event or transcript segment carried to the
+/// Web over the dedicated non-domain transcript channel
+/// (<c>OnTranscriptEvent</c>). Realtime delivery carries the raw runtime event
+/// payload the runner POSTed; durable history is queried from compact
+/// transcript segments.
 ///
 /// <para>
 /// This is a <i>non-domain</i> envelope: it is observation data, not a

@@ -66,4 +66,16 @@ public class AgentSessionEventSerializerSpecs
 
         Assert.Equal(EventCatalog.ReverseDns.AgentSessionStatusChanged, busType);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void EventCatalog_IncludesTranscriptObservationTypes()
+    {
+        Assert.Contains("agent_message", EventCatalog.All);
+        Assert.Contains("agent_thought", EventCatalog.All);
+        Assert.Contains("agent_message_chunk", EventCatalog.All);
+        Assert.Contains("agent_thought_chunk", EventCatalog.All);
+        Assert.Contains("agent_session_terminal", EventCatalog.All);
+    }
 }
