@@ -4,6 +4,12 @@ description: "5-dimension self review of plan artifacts"
 tags: [plan, openspec, review]
 stage: plan
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 <artifact id="self-review">
 
 <task>

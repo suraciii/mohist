@@ -345,6 +345,40 @@ public class MohistDefaultWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void DefaultPrompts_LoadIssueDetailsThroughMohistCli()
+    {
+        var loader = new FilePromptLoader();
+        var prompts = loader.LoadAll();
+
+        const string command = "mo issue show ${{ issue.number }} --project-id ${{ project.id }}";
+        var executionPrompts = prompts.Keys.ToArray();
+        Assert.NotEmpty(executionPrompts);
+        foreach (var key in executionPrompts)
+        {
+            Assert.Contains(command, prompts[key], StringComparison.Ordinal);
+            Assert.DoesNotContain("prompts.issue-context", prompts[key], StringComparison.Ordinal);
+        }
+
+        var profile = new MohistDefaultIssueWorkflowProfile(loader, new FakeDbContextFactory());
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-42",
+            ProjectId = "project-1",
+            Number = 42,
+            Title = "Use CLI issue details",
+        };
+        var variablesJson = profile.BuildVariables("wr-42", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+        using var variables = JsonDocument.Parse(variablesJson);
+        var (rendered, missing, _) = new PromptTemplateEngine().Render(prompts["proposal"], variables.RootElement);
+
+        Assert.Empty(missing);
+        Assert.Contains("mo issue show 42 --project-id project-1", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("prompts.issue-context", rendered, StringComparison.Ordinal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void WorkflowYamlParser_ParsesRepairTasksAndWithObjects()
     {
         var definition = MohistWorkflow.ParseYaml("""
