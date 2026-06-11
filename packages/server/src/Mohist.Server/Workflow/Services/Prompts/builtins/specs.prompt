@@ -4,6 +4,12 @@ description: "Writes spec delta files (ADDED/MODIFIED/REMOVED)"
 tags: [plan, openspec]
 stage: plan
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 <artifact id="specs" schema="mohist-default">
 
 <task>

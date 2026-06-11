@@ -4,9 +4,15 @@ description: "External agent for requirement exploration"
 tags: [explore]
 stage: null
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 ## Your Task
 
-1. Read the issue description
+1. Read the issue details using the Mohist CLI command above
 2. Read any context-files listed above — existing proposal, design, and specs constrain the output
 3. Explore the codebase — read files, search patterns, trace dependencies
 4. Let the shape of the problem emerge before structuring

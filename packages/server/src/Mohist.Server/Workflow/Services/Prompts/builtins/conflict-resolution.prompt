@@ -4,6 +4,12 @@ description: "Resolves rebase/merge conflicts"
 tags: [integrate]
 stage: integrate
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 ## Resolution Rules
 
 1. **Preserve both sides.** Never drop or overwrite either side's changes.

@@ -4,6 +4,12 @@ description: "Implements a single build task"
 tags: [build]
 stage: build
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 <artifact id="build-task">
 
 <task>

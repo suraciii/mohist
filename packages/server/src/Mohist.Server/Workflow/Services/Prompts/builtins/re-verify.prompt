@@ -4,6 +4,12 @@ description: "Re-verifies after fix"
 tags: [check, review]
 stage: check
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 ## Input
 
 A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and structured blocking items. Auto-fixes have been applied since.

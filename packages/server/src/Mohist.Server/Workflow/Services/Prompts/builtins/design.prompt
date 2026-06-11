@@ -4,6 +4,12 @@ description: "Writes the OpenSpec design.md"
 tags: [plan, openspec]
 stage: plan
 ---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
 <artifact id="design" schema="mohist-default">
 
 <task>
