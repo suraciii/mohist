@@ -8,8 +8,8 @@ import { acpArgs, acpCommand } from "./acp-command.js"
 export interface SharedAcpConnection {
   readonly connection: ClientSideConnection
   readonly processPid: number | null
-  setActiveHandlers(sessionUpdate: SessionUpdateHandler, permission: PermissionHandler): void
-  clearActiveHandlers(): void
+  setSessionHandlers(sessionId: string, sessionUpdate: SessionUpdateHandler, permission: PermissionHandler): void
+  clearSessionHandlers(sessionId: string): void
   shutdown(): Promise<void>
 }
 
@@ -79,16 +79,16 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
   exitFailure.catch(() => {})
   proc.stdin?.on("error", () => {})
   proc.stdout?.on("error", () => {})
-  let activeSessionUpdateHandler: SessionUpdateHandler = async () => {}
-  let activePermissionHandler: PermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
+  const sessionUpdateHandlers = new Map<string, SessionUpdateHandler>()
+  const permissionHandlers = new Map<string, PermissionHandler>()
 
   const connection = new ClientSideConnection(
     () => ({
       sessionUpdate: async (notification: SessionNotification) => {
-        await activeSessionUpdateHandler(notification)
+        await (sessionUpdateHandlers.get(notification.sessionId) ?? noopSessionUpdateHandler)(notification)
       },
       requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
-        return await activePermissionHandler(params)
+        return await (permissionHandlers.get(params.sessionId) ?? cancelPermissionHandler)(params)
       },
     }),
     stream,
@@ -106,13 +106,13 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
   return {
     connection,
     processPid: proc.pid ?? null,
-    setActiveHandlers(sessionUpdate: SessionUpdateHandler, permission: PermissionHandler) {
-      activeSessionUpdateHandler = sessionUpdate
-      activePermissionHandler = permission
+    setSessionHandlers(sessionId: string, sessionUpdate: SessionUpdateHandler, permission: PermissionHandler) {
+      sessionUpdateHandlers.set(sessionId, sessionUpdate)
+      permissionHandlers.set(sessionId, permission)
     },
-    clearActiveHandlers() {
-      activeSessionUpdateHandler = async () => {}
-      activePermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
+    clearSessionHandlers(sessionId: string) {
+      sessionUpdateHandlers.delete(sessionId)
+      permissionHandlers.delete(sessionId)
     },
     async shutdown() {
       await Promise.allSettled([
@@ -129,6 +129,9 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
     },
   }
 }
+
+const noopSessionUpdateHandler: SessionUpdateHandler = async () => {}
+const cancelPermissionHandler: PermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
 
 function timeout(ms: number, message: string): Promise<never> {
   return new Promise((_, reject) => {

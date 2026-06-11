@@ -552,7 +552,8 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     }
   }
 
-  acp.setActiveHandlers(
+  acp.setSessionHandlers(
+    entry.sessionId,
     createAcpSessionUpdateHandler({
       notifyData,
       recordActivity: () => { activityCount += 1 },
@@ -586,7 +587,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     const message = error instanceof Error ? error.message : String(error)
     return { text: agentText, success: false, error: message, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
   } finally {
-    acp.clearActiveHandlers()
+    acp.clearSessionHandlers(entry.sessionId)
   }
 }
 
@@ -618,19 +619,6 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     }
   }
 
-  acp.setActiveHandlers(
-    createAcpSessionUpdateHandler({
-      notifyData,
-      recordActivity: () => { activityCount += 1 },
-      appendAssistantText,
-      emitUpdate: createObservabilityAwareEmitter(context, () => acpSessionId, toolIds),
-    }),
-    async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
-      const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
-      return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
-    },
-  )
-
   try {
     const resumeResult = await Promise.race([
       connection.resumeSession({ sessionId: acpSessionId, cwd: workDir, mcpServers: [] }),
@@ -654,6 +642,20 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
         }
       }
 
+    acp.setSessionHandlers(
+      acpSessionId,
+      createAcpSessionUpdateHandler({
+        notifyData,
+        recordActivity: () => { activityCount += 1 },
+        appendAssistantText,
+        emitUpdate: createObservabilityAwareEmitter(context, () => acpSessionId, toolIds),
+      }),
+      async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+        const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
+        return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
+      },
+    )
+
     await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig, resolvedModel, "resumeSession")
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
 
@@ -676,7 +678,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     const message = error instanceof Error ? error.message : String(error)
     return { text: agentText, success: false, error: message, acpSessionId, exitCode: 1, activityCount }
   } finally {
-    acp.clearActiveHandlers()
+    acp.clearSessionHandlers(acpSessionId)
   }
 }
 
@@ -709,19 +711,6 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     }
   }
 
-  acp.setActiveHandlers(
-    createAcpSessionUpdateHandler({
-      notifyData,
-      recordActivity: () => { activityCount += 1 },
-      appendAssistantText,
-      emitUpdate: createObservabilityAwareEmitter(context, () => sessionId, toolIds),
-    }),
-    async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
-      const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
-      return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
-    },
-  )
-
   try {
     const session = await Promise.race([
       connection.newSession({ cwd: context.workDir, mcpServers: [] }),
@@ -730,6 +719,20 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
     sessionId = session.sessionId
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
+
+    acp.setSessionHandlers(
+      sessionId,
+      createAcpSessionUpdateHandler({
+        notifyData,
+        recordActivity: () => { activityCount += 1 },
+        appendAssistantText,
+        emitUpdate: createObservabilityAwareEmitter(context, () => sessionId, toolIds),
+      }),
+      async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+        const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
+        return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
+      },
+    )
 
     const resolvedModel = extractResolvedModelId(session)
 
@@ -772,7 +775,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     const message = error instanceof Error ? error.message : String(error)
     return { text: agentText, success: false, error: message, exitCode: 1, activityCount }
   } finally {
-    acp.clearActiveHandlers()
+    if (sessionId) acp.clearSessionHandlers(sessionId)
   }
 }
 
