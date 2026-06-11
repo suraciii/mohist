@@ -1,0 +1,358 @@
+# OpenSpec Capability: coder-session-tracking
+
+### Requirement: Coder tool call events carry full payload
+
+The `coder_tool_call` event emitted by `runAcpSession()` and `createAcpConnection()` SHALL include `rawInput`, `rawOutput`, and `title` fields in its payload when available. This data already exists in the ACP notification's `toolCall` object but is currently discarded.
+
+**Note**: In `createAcpConnection`, when `onSessionUpdate` is set, `coder_tool_call` is not emitted (see pipeline-session-events spec). This enrichment only applies when `onSessionUpdate` is NOT set (i.e., default Build stage behavior).
+
+#### Scenario: Tool call started with input
+- **WHEN** a tool_call sessionUpdate is received with status not 'completed' and the update contains toolCall data
+- **THEN** the emitted `coder_tool_call` event includes `rawInput` from `toolCall.input` and `title` from `toolCall.title`
+
+#### Scenario: Tool call completed with output
+- **WHEN** a tool_call_update sessionUpdate is received with status 'completed'
+- **THEN** the emitted `coder_tool_call` event includes `rawOutput` from `toolCall.output`, `title` from `toolCall.title`, plus `rawInput` from `toolCall.input` if available
+
+#### Scenario: Both runAcpSession and createAcpConnection emit enriched events
+- **WHEN** coder_tool_call events are emitted from either `runAcpSession` (Build stage) or `createAcpConnection` (when `onSessionUpdate` not set)
+- **THEN** both code paths produce events with `rawInput`, `rawOutput`, `title` fields
+
+### Requirement: SSE event issueId uses issue number for coder sessions
+
+The `coder_text_chunk` and `coder_tool_call` events SHALL use `String(options.issueNumber ?? options.issueId)` as `issueId`. DB operations continue using `options.issueId` (UUID).
+
+#### Scenario: coder_text_chunk with issueNumber
+- **WHEN** `issueNumber: 5` is passed in options
+- **THEN** `coder_text_chunk` event has `issueId: "5"`
+- **AND** `workflowLogRepo.insert` is called with UUID `issueId`
+
+### Requirement: Tool call events include stable toolCallId for deduplication
+
+The `coder_tool_call` event SHALL include a stable `toolCallId` that can be used by the frontend for deduplication. The ID generation logic in `acp-session.ts` (using `sessionId-toolName-counter` pattern) SHALL remain unchanged. Both `runAcpSession` and `createAcpConnection` SHALL use the same ID generation algorithm.
+
+#### Scenario: Frontend deduplicates tool calls by toolCallId
+- **WHEN** the frontend receives a `coder_tool_call` event with `toolCallId: "sess-abc-read-0"`
+- **THEN** the frontend can use this ID as a Map key for deduplication
+- **AND** the same ID appears in both the started and completed events for the same tool call
+
+### Requirement: Workflow log stores tool call data with extractable fields
+
+The `workflowLogRepo.insert()` call in `acp-session.ts` SHALL store the full ACP notification payload (including `toolCall.input`, `toolCall.output`, `toolCall.title`). The frontend SHALL extract these fields from `WorkflowLogItem.data` when reconstructing historical rounds.
+
+#### Scenario: Frontend extracts tool call details from workflow_log
+- **WHEN** the frontend loads workflow_log entries for an issue
+- **THEN** entries with `eventType: "tool_call"` have `data.toolCall.input` (rawInput) and `data.toolCall.title` available
+- **AND** entries with `eventType: "tool_call_update"` and `status: "completed"` have `data.toolCall.output` (rawOutput) available
+
+### Requirement: Tool lifecycle normalization
+
+Coder session transcript assembly SHALL normalize raw tool lifecycle events into one logical tool part per real tool call. `tool_call` and `tool_call_update` events for the same provider call id, ACP call id, nested tool call id, or deterministic correlation key SHALL merge into a single stable transcript part.
+
+#### Scenario: Tool start and update merge by id
+
+- **WHEN** a persisted session contains `tool_call` and `tool_call_update` events for the same `toolCallId`, nested `toolCall.toolCallId`, `id`, or `callId`
+- **THEN** the transcript exposes exactly one tool part for that tool call
+- **AND** the tool part contains the best available name, title, input, output, status, timestamps, and error data
+
+#### Scenario: No-id tool events merge by correlation
+
+- **WHEN** a tool start event and a later update event do not carry a stable id but share inferable normalized name plus target or title
+- **THEN** the transcript merges them into one logical tool part
+- **AND** ambiguous name-only fallback correlation adds a transcript warning rather than silently implying certainty
+
+#### Scenario: Inferable tools avoid unknown fallback
+
+- **WHEN** a raw tool event lacks `toolName` but contains a known `name`, title, raw input shape, command, file path, pattern, patch text, todo payload, or raw output metadata
+- **THEN** the transcript infers a useful normalized name and display title
+- **AND** the visible transcript does not show an orphan `unknown running...` entry
+
+#### Scenario: Tool status is normalized for transcript display
+
+- **WHEN** raw tool lifecycle status is pending, started, running, completed, failed, cancelled, or timeout-like
+- **THEN** the transcript exposes an accurate display status of pending, running, completed, failed, or cancelled where available
+- **AND** only non-terminal logical tools appear as active/running in the UI
+
+### Requirement: REQ-CST-001 Coder sessions persist liveness fields
+
+Persisted coder session records SHALL store session liveness data needed to understand the current opencode session call without writing session health into issue stage or status.
+
+#### Scenario: New session initializes liveness data
+- **WHEN** a coder session record is created for an opencode session call
+- **THEN** its status SHALL be `running`
+- **AND** `lastDataAt` SHALL be initialized to the session start time
+- **AND** `probeSentAt`, `probeDeadlineAt`, and `failureReason` SHALL be empty
+
+#### Scenario: Data refresh is persisted
+- **WHEN** runtime observes valid ACP/opencode data for the session
+- **THEN** the coder session record SHALL update `lastDataAt`
+- **AND** issue `stage` and `status` SHALL NOT be modified by that update
+
+#### Scenario: Probe state is persisted
+- **WHEN** runtime transitions a session to `probing`
+- **THEN** the coder session record SHALL store status `probing`, `probeSentAt`, and `probeDeadlineAt`
+
+#### Scenario: Failure reason is persisted
+- **WHEN** runtime marks a session as failed due to probe timeout, probe send failure, protocol disconnect, or process exit
+- **THEN** the coder session record SHALL store status `failed`, terminal timestamp, and `failureReason`
+
+### Requirement: REQ-CST-002 Coder session status remains a session-call state
+
+Coder session status SHALL use only session-call states for this feature: `running`, `probing`, `completed`, `failed`, and `cancelled`.
+
+#### Scenario: No health taxonomy is persisted
+- **WHEN** a session is quiet but has not reached the probe threshold
+- **THEN** no `quiet`, `stale`, `hung-suspected`, `healthy`, or `recoverable` state SHALL be persisted
+
+### Requirement: Transcript assembly preserves stable tool identity and turn semantics
+
+Coder session tracking SHALL preserve the information needed to reconstruct stable prompt-led turns, merged tool lifecycle state, and readable historical replay across live and completed sessions.
+
+#### Scenario: Tool lifecycle updates resolve to one logical tool
+
+- **WHEN** a tool emits start and update or completion events for the same invocation
+- **THEN** transcript assembly merges those events into one logical tool record whenever identity can be inferred
+- **AND** replay does not show duplicate running and completed entries for the same tool invocation
+
+#### Scenario: Unknown-tool fallback is last resort
+
+- **WHEN** a tool name is absent or malformed in tracked events
+- **THEN** transcript assembly infers tool identity from toolName, name, title, payload shape, or metadata before falling back to `unknown`
+
+#### Scenario: Historical replay stays ordered and readable
+
+- **WHEN** prompts, assistant output, tool updates, and terminal events share close timestamps
+- **THEN** transcript assembly still produces deterministic turn ordering with prompts opening turns before assistant activity and terminal events closing them last
+
+### Requirement: Session log persistence preserves deterministic grouped ordering
+
+Session stream logs and workflow logs SHALL support grouped multi-session reads and SHALL preserve deterministic event ordering across mixed legacy second-precision rows and new millisecond-precision rows.
+
+#### Scenario: Batch reads return ordered rows for multiple sessions
+
+- **WHEN** a caller requests logs for multiple session ids
+- **THEN** `SessionStreamLogRepo` and `WorkflowLogRepo` can return grouped results for those session ids
+- **AND** rows are ordered by `session_id`, `created_at`, and `rowid`
+
+#### Scenario: Legacy second-precision rows remain stable
+
+- **WHEN** multiple historical rows share the same second-precision `created_at`
+- **THEN** reads remain deterministic because `rowid` is preserved as the fallback ordering key
+
+### Requirement: New session log writes use millisecond ISO timestamps
+
+New `session_stream_log` and `workflow_log` writes SHALL store `created_at` as millisecond-precision ISO 8601 strings generated by application code instead of SQLite `datetime('now')`.
+
+#### Scenario: New stream log writes capture millisecond precision
+
+- **WHEN** a new session stream log row is inserted
+- **THEN** its `created_at` value is generated in JavaScript with millisecond precision
+
+#### Scenario: New workflow log writes capture millisecond precision
+
+- **WHEN** a new workflow log row is inserted
+- **THEN** its `created_at` value is generated in JavaScript with millisecond precision
+
+### Requirement: Transcript assembly preserves emitted reasoning and text ordering
+
+Session transcript assembly SHALL preserve the emitted alternation between reasoning and assistant text by closing the currently open opposite stream part before appending the next chunk type.
+
+#### Scenario: Text closes active reasoning before continuing
+
+- **WHEN** a text chunk arrives while a reasoning part is still open
+- **THEN** the assembler completes the reasoning part before appending text
+- **AND** the stored transcript keeps the original emitted order
+
+#### Scenario: Non-stream parts close active text or reasoning
+
+- **WHEN** a tool, error, or terminal part is appended while text or reasoning is still streaming
+- **THEN** the assembler closes the active streaming part before inserting the new part
+
+### Requirement: Tool lifecycle correlation preserves one logical tool call
+
+Session transcript assembly SHALL merge tool lifecycle events into one logical tool part even when start and update events use different synthetic and provider ids.
+
+#### Scenario: Synthetic and provider ids resolve to one tool part
+
+- **WHEN** a tool start uses a synthetic transcript-local id and later updates arrive with the provider tool id
+- **THEN** the assembler correlates them to the same logical tool part
+- **AND** the transcript does not render orphan `unknown` tool rows for that lifecycle
+
+### Requirement: File-changing tools expose normalized diff metadata
+
+The transcript normalization layer SHALL enrich `apply_patch`, `edit`, and `write` tool parts with canonical file-change metadata for downstream rendering.
+
+#### Scenario: File-changing tools provide shared diff contract
+
+- **WHEN** `apply_patch`, `edit`, or `write` runs in a tracked session
+- **THEN** the normalized tool metadata includes changed-file summaries and a unified diff string when one can be produced
+- **AND** raw tool payloads remain available for audit/debugging
+
+### Requirement: REQ-CST-214 Tool lifecycle identity remains stable across live and replayed coder sessions
+
+Coder session tracking SHALL preserve normalized tool name and tool call id identity from Agent runtime so a single real tool invocation is represented as one logical lifecycle in live events and replayed transcripts.
+
+#### Scenario: Live coder tool event carries recovered name
+- **WHEN** Agent runtime receives an ACP tool notification whose explicit name is only available as `name` or a top-level field
+- **THEN** `coder_tool_call` events SHALL carry the recovered tool name instead of an empty or `unknown` value
+
+#### Scenario: Start and update share one id
+- **WHEN** a tool start and completion/update notification refer to the same provider call id or normalized synthetic id
+- **THEN** live coder events and replayed session transcripts SHALL use the same `toolCallId`
+- **AND** SHALL NOT render separate started and completed entries for the same invocation
+
+#### Scenario: Raw payload details remain available
+- **WHEN** a normalized tool update contains input, output, title, status, or metadata
+- **THEN** those details SHALL remain available in persisted session data and transcript assembly
+
+### Requirement: agent-backed-rejected-approval-retry-session
+
+When an agent-backed stage is retried after approval rejection, the retry SHALL be observable as a new stage execution attempt through existing runner and coder-session tracking. The retried attempt SHALL receive the recorded rejection feedback in its input context.
+
+#### Scenario: Rejected Plan approval starts new session
+- **GIVEN** an issue has a failed current-stage WorkflowRun due to rejected Plan approval
+- **WHEN** `resume-pipeline` starts the retry for `Stage.name = "plan"`
+- **THEN** a new Plan runner/coder session SHALL be started through existing session tracking
+- **AND** the prior Plan session SHALL NOT be reused as the retry attempt
+
+#### Scenario: Rejection feedback is in retry input
+- **GIVEN** a Plan approval was rejected with feedback
+- **WHEN** the Plan stage is retried
+- **THEN** the retried Plan prompt or task input SHALL include the rejection feedback
+- **AND** the agent SHALL be able to use that feedback while regenerating Plan artifacts
+
+#### Scenario: Retried stage requests approval again
+- **GIVEN** a rejected Plan stage retry has regenerated reviewable artifacts
+- **WHEN** the Plan stage reaches its approval gate
+- **THEN** the stage SHALL request approval again
+- **AND** the retry SHALL NOT bypass approval because a prior approval was rejected
+
+### Requirement: Shared task prompts are tracked in one real coder session
+
+Coder-session tracking SHALL represent multiple task prompts that use the same resolved agent session reference as one real coder session transcript containing multiple prompt-led blocks. Each participating task result SHALL report the real `acpSessionId` it used, and projections SHALL keep task progress separate from session transcript state.
+
+#### Scenario: Plan artifact prompts share acpSessionId
+- **WHEN** a fresh Plan run executes `proposal`, `specs`, `design`, `tasks`, and `self-review` with `agentSessionRef: "plan-artifacts"`
+- **THEN** coder-session tracking SHALL expose one real Plan coder session for those executed tasks
+- **AND** each executed task result SHALL reference the same real `acpSessionId`
+
+#### Scenario: Restored tasks do not create empty session records
+- **WHEN** a Plan artifact task is restored from checkpoint or disk and dispatched as a service-call completion
+- **THEN** coder-session tracking SHALL NOT create or touch a coder session solely because that task's policy contains `agentSessionRef`
+
+#### Scenario: Retry creates distinct tracked session
+- **WHEN** a later stage attempt uses the same logical `agentSessionRef` as an earlier attempt
+- **THEN** coder-session tracking SHALL expose a distinct real session for the later attempt
+- **AND** it SHALL NOT append later prompts to the earlier attempt's completed transcript
+
+### Requirement: Coder sessions support attempt interruption evidence
+
+Coder session tracking SHALL preserve the session evidence needed to connect stopped, cancelled, failed, or lost agent execution to the related workflow work item attempt without making runtime proof a first-class persisted domain entity.
+
+#### Scenario: Running session records attempt evidence identifiers
+
+- **WHEN** a workflow work item starts an agent-backed attempt
+- **THEN** the related coder session or attempt metadata SHALL retain identifiers such as issue id, ACP session id, execution id, queue task id, or process id when available
+- **AND** those identifiers MAY be used by reconciliation to evaluate liveness
+
+#### Scenario: Stopped session records cancellation evidence
+
+- **WHEN** Mohist intentionally stops a coder session that is executing a workflow work item
+- **THEN** coder session tracking SHALL record cancelled or interrupted session state and diagnostic reason
+- **AND** the workflow attempt interruption path SHALL be able to associate that evidence with the current work item
+
+#### Scenario: Lost session remains inspection evidence
+
+- **WHEN** a coder session is stale or its process disappears
+- **THEN** coder session tracking SHALL preserve historical session evidence for inspection
+- **AND** reconciliation MAY use the absence of live matching evidence to interrupt the latest running attempt
+- **AND** historical evidence SHALL NOT by itself make interrupted work a failed retry target
+
+### Requirement: Transcript normalization preserves semantic tool identity across updates
+
+The persisted coder session transcript SHALL preserve the best available tool family, display title, and semantic details across tool lifecycle updates so replay matches the final live state.
+
+#### Scenario: Late tool updates replace generic titles
+
+- **WHEN** a `tool_call_update` arrives with a more specific title, target, input, output, or metadata than the original `tool_call`
+- **THEN** the normalized transcript record refreshes its user-facing semantic fields
+- **AND** persisted replay uses the updated values instead of the initial generic label
+
+#### Scenario: Skill and task are inferred from semantic payloads
+
+- **WHEN** provider payloads omit or mislabel the tool family but `title`, `rawInput`, or metadata clearly describe a `skill` or `task`
+- **THEN** transcript normalization classifies the tool under that semantic family rather than leaving it as `unknown`
+
+### Requirement: Common tool families persist structured semantic details
+
+The normalized transcript payload SHALL persist structured semantic details for common tool families so live rendering and replay share one display contract.
+
+#### Scenario: Context, execution, planning, interaction, and skill tools keep semantic details
+
+- **WHEN** `read`, `list`, `glob`, `grep`, `search`, `search_files`, `bash`, `shell`, `todowrite`, `todo`, `task`, `question`, `webfetch`, `websearch`, or `skill` tools are normalized
+- **THEN** the persisted transcript includes family-appropriate details such as paths, patterns, includes, offsets, limits, commands, cwd, exit codes, todo statuses, subagent metadata, URLs, queries, questions, and loaded skill names when available
+
+#### Scenario: Mutation tools persist reviewable change metadata
+
+- **WHEN** `apply_patch`, `edit`, or `write` tools are normalized
+- **THEN** the persisted transcript includes per-file change metadata with file path, operation type, additions/deletions when available, and diff or content payloads when derivable
+
+### Requirement: Live and replay transcript rendering stay semantically equivalent
+
+For the same session data, the live transcript view and the replayed persisted transcript SHALL expose equivalent semantic tool rows and prompt metadata.
+
+#### Scenario: Refresh after live updates preserves semantic rendering
+
+- **WHEN** a session first renders tool rows from live events and the user later refreshes into persisted replay
+- **THEN** semantic tool titles, grouped child tool targets, mutation change views, todo visibility, execution summaries, and prompt output-target deduplication remain materially the same
+
+## ADDED Requirements
+
+### Requirement: Transcript rows fan out to a dedicated non-domain realtime channel
+
+`AgentSessionGrain.AppendRuntimeEventsAsync` SHALL forward each appended transcript row (`coder_text_chunk`, `coder_thought_chunk`, `coder_tool_call`, `ralph_task_update`, `ralph_loop_progress`, `agent_liveness_status`, `agent_usage_update`, `agent_session_model_resolved`) to the Web through a new `ITranscriptEventPublisher` in addition to persisting the row to `AgentSessionRuntimeEvents`. The `ITranscriptEventPublisher` is the only realtime fan-out for transcript events and SHALL NOT be a wrapper around `IEventPublisher` or `EventBridge`. The persisted row shape and the `toolCall` / `toolError` / `resolvedModel` / `failureCategory` projections SHALL remain unchanged.
+
+#### Scenario: coder_text_chunk row reaches a subscribed connection
+- **WHEN** `AppendRuntimeEventsAsync` persists a `coder_text_chunk` row
+- **THEN** the grain also calls `ITranscriptEventPublisher.PublishAsync` with a `TranscriptEnvelope` carrying the same payload
+- **AND** a connection that subscribed to `coder_text_chunk` via `SetSubscriptionsAsync` receives it through the new `OnTranscriptEvent` SignalR method
+
+#### Scenario: ralph_task_update and loop progress reach the Web
+- **WHEN** `ralph_task_update` or `ralph_loop_progress` rows are appended
+- **THEN** the same `ITranscriptEventPublisher` fan-out path delivers them to subscribed connections
+- **AND** the live task timer driven by `ralph_task_update` ticks in the Web
+
+#### Scenario: agent_liveness_status observation fans out
+- **WHEN** an `agent_liveness_status` row is appended
+- **THEN** the grain forwards the row via `ITranscriptEventPublisher`
+- **AND** the Web's transcript and live state update to reflect the new status
+
+#### Scenario: agent_usage_update and model_resolved fan out
+- **WHEN** an `agent_usage_update` or `agent_session_model_resolved` row is appended
+- **THEN** the grain forwards the row via `ITranscriptEventPublisher`
+- **AND** the Web's activity surface reflects the new model, cost, and token usage
+
+#### Scenario: Persisted row shape and projections are unchanged
+- **WHEN** transcript rows are appended
+- **THEN** the `AgentSessionRuntimeEvents` row shape is unchanged
+- **AND** the `toolCall` / `toolError` / `resolvedModel` / `failureCategory` projections are computed from the same row data as before
+
+### Requirement: Lifecycle transitions publish domain events through the bus
+
+When `AppendRuntimeEventsAsync` advances the agent session to a new lifecycle state, the grain SHALL publish the corresponding domain event (`AgentSessionStarted` / `AgentSessionActivated` / `AgentSessionCompleted` / `AgentSessionFailed` / `AgentSessionCancelled` / `AgentSessionStatusChanged`) through `IEventPublisher` exactly once for that transition. The lifecycle branch is independent of the transcript branch: lifecycle transitions publish to the domain bus, while observation events publish to the transcript channel.
+
+#### Scenario: Start transitions to lifecycle started
+- **WHEN** `AppendRuntimeEventsAsync` runs on a fresh session and persists the first event row
+- **THEN** the grain publishes `AgentSessionStarted` through `IEventPublisher`
+- **AND** the bus uses `com.mohist.agent-session.started` as the CloudEvents `type`
+- **AND** `ITranscriptEventPublisher` is NOT used for the lifecycle transition
+
+#### Scenario: Terminal events publish the right lifecycle event
+- **WHEN** an `agent_session_terminal` row is appended with `status: "completed"`, `"failed"`, or `"cancelled"`
+- **THEN** the grain publishes `AgentSessionCompleted`, `AgentSessionFailed`, or `AgentSessionCancelled` respectively
+- **AND** the same lifecycle event SHALL NOT be published twice for the same already-emitted transition
+
+#### Scenario: Liveness status changes publish AgentSessionStatusChanged
+- **WHEN** an `agent_liveness_status` row is appended
+- **THEN** the grain also publishes `AgentSessionStatusChanged` through `IEventPublisher` if the status actually changed
+- **AND** the grain also forwards the same row through `ITranscriptEventPublisher` so observers see the observation data

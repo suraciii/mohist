@@ -10,15 +10,40 @@ namespace Mohist.Server.Sessions.Grains;
 
 public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
+    private static readonly HashSet<string> TranscriptEventTypes = new(StringComparer.Ordinal)
+    {
+        "coder_text_chunk",
+        "coder_thought_chunk",
+        "coder_tool_call",
+        "agent_message_chunk",
+        "agent_thought_chunk",
+        "tool_call",
+        "tool_call_update",
+        "ralph_task_update",
+        "ralph_loop_progress",
+        "agent_liveness_status",
+        "agent_usage_update",
+        "agent_session_model_resolved",
+    };
+
     private readonly IAgentSessionStore _stateStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IEventPublisher _eventPublisher;
+    private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly ILogger<AgentSessionGrain> _log;
     private AgentSession? _session;
 
-    public AgentSessionGrain(IAgentSessionStore stateStore, IDbContextFactory<MohistDbContext> dbFactory, ILogger<AgentSessionGrain> log)
+    public AgentSessionGrain(
+        IAgentSessionStore stateStore,
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IEventPublisher eventPublisher,
+        ITranscriptEventPublisher transcriptPublisher,
+        ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
         _dbFactory = dbFactory;
+        _eventPublisher = eventPublisher;
+        _transcriptPublisher = transcriptPublisher;
         _log = log;
     }
 
@@ -108,6 +133,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var session = await GetOrCreateAsync();
         var wasTerminal = session.IsTerminal;
+        var phaseBefore = session.Status.Phase;
+        var statusBefore = AgentSessionStatusNames.ToName(phaseBefore);
 
         var now = DateTime.UtcNow;
         var events = new List<AgentSessionEvent>();
@@ -122,6 +149,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .MaxAsync() ?? 0;
 
         var entries = new List<AgentSessionRuntimeEventRow>();
+        var statusChangedThisCall = new List<string>();
+        var terminalThisCall = false;
+        AgentSessionEvent? terminalEvent = null;
+        string? terminalStatus = null;
 
         foreach (var e in command.Events)
         {
@@ -131,7 +162,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 {
                     var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                     var status = GetStringProp(payload, "status") ?? "running";
-                    events.AddRange(session.MarkActive(status, now, GetStringProp(payload, "failureReason")));
+                    var failureReason = GetStringProp(payload, "failureReason");
+                    var activatedEvents = session.MarkActive(status, now, failureReason);
+                    events.AddRange(activatedEvents);
+                    if (activatedEvents.Count > 0)
+                        statusChangedThisCall.Add(AgentSessionStatusNames.ToName(session.Status.Phase));
                 }
                 else if (e.Type == "agent_session_terminal")
                 {
@@ -140,12 +175,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                     var failureReason = GetStringProp(payload, "failureReason");
                     var failureCategory = GetStringProp(payload, "failureCategory");
                     var exitCode = GetIntProp(payload, "exitCode");
+                    AgentSessionEvent? terminalEvt = null;
                     if (status == "failed")
-                        events.AddRange(session.Fail(now, failureReason, exitCode));
+                        terminalEvt = EmitAndCapture(session.Fail(now, failureReason, exitCode), events);
                     else if (status == "cancelled")
-                        events.AddRange(session.Cancel(now, failureReason, exitCode));
+                        terminalEvt = EmitAndCapture(session.Cancel(now, failureReason, exitCode), events);
                     else
-                        events.AddRange(session.Complete(now, exitCode));
+                        terminalEvt = EmitAndCapture(session.Complete(now, exitCode), events);
+                    if (terminalEvt is not null && !terminalThisCall)
+                    {
+                        terminalThisCall = true;
+                        terminalEvent = terminalEvt;
+                        terminalStatus = status;
+                    }
                 }
                 else if (e.Type == "agent_usage_update")
                 {
@@ -209,13 +251,155 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (!wasTerminal)
             events.AddRange(session.EnsureActive(now));
 
-        var isTerminal = session.IsTerminal;
-        var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
+        var firstRowThisCall = !wasTerminal
+            && phaseBefore == AgentSessionStatus.Created
+            && session.Status.StartedAt is null;
 
         await _stateStore.SaveAsync(SessionId, session, events, entries);
         _session = session;
 
+        await FanOutRealtimeAsync(
+            session,
+            entries,
+            firstRowThisCall,
+            terminalThisCall,
+            terminalEvent,
+            terminalStatus,
+            statusChangedThisCall,
+            statusBefore);
+
         return entries.Select(e => ToEventInfo(e)).ToList();
+    }
+
+    private static AgentSessionEvent? EmitAndCapture(IReadOnlyList<AgentSessionEvent> domainEvents, List<AgentSessionEvent> sink)
+    {
+        if (domainEvents.Count == 0) return null;
+        sink.AddRange(domainEvents);
+        return domainEvents[domainEvents.Count - 1];
+    }
+
+    private async Task FanOutRealtimeAsync(
+        AgentSession session,
+        IReadOnlyList<AgentSessionRuntimeEventRow> entries,
+        bool firstRowThisCall,
+        bool terminalThisCall,
+        AgentSessionEvent? terminalEvent,
+        string? terminalStatus,
+        IReadOnlyList<string> statusChangedThisCall,
+        string statusBefore)
+    {
+        var source = AgentSessionSource(session);
+
+        if (firstRowThisCall)
+        {
+            try
+            {
+                var startedEvent = new AgentSessionStarted(session.Status.AgentRuntimeSessionId ?? string.Empty);
+                var type = AgentSessionEventSerializer.BusType(startedEvent);
+                var data = AgentSessionEventSerializer.ToData(startedEvent);
+                await _eventPublisher.PublishAsync(
+                    data,
+                    type,
+                    source,
+                    subject: session.SessionName,
+                    ct: CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to publish AgentSessionStarted for {SessionId}",
+                    session.Id);
+            }
+        }
+
+        if (terminalThisCall && terminalEvent is not null)
+        {
+            try
+            {
+                await PublishAgentSessionLifecycleAsync(terminalEvent, source, session.SessionName);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to publish {Status} for {SessionId}",
+                    terminalStatus ?? "terminal", session.Id);
+            }
+        }
+
+        var lastDistinctStatus = statusBefore;
+        foreach (var newStatus in statusChangedThisCall)
+        {
+            if (string.Equals(newStatus, lastDistinctStatus, StringComparison.Ordinal))
+                continue;
+            lastDistinctStatus = newStatus;
+
+            try
+            {
+                var statusEvent = new AgentSessionStatusChanged(newStatus, session.Status.FailureReason);
+                var type = AgentSessionEventSerializer.BusType(statusEvent);
+                var data = AgentSessionEventSerializer.ToData(statusEvent);
+                await _eventPublisher.PublishAsync(
+                    data,
+                    type,
+                    source,
+                    subject: session.SessionName,
+                    ct: CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to publish AgentSessionStatusChanged for {SessionId}",
+                    session.Id);
+            }
+        }
+
+        if (entries.Count == 0) return;
+
+        foreach (var row in entries)
+        {
+            if (!TranscriptEventTypes.Contains(row.Type))
+                continue;
+
+            JsonElement payload;
+            try
+            {
+                payload = JsonSerializer.Deserialize<JsonElement>(row.PayloadJson);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "AgentSessionGrain failed to deserialise transcript payload for {Type} on {SessionId}",
+                    row.Type, session.Id);
+                continue;
+            }
+
+            var envelope = new TranscriptEnvelope(
+                Id: row.Id.ToString(),
+                SessionId: row.SessionId,
+                ProjectId: row.ProjectId,
+                IssueNumber: row.IssueNumber,
+                WorkflowRunId: row.WorkflowRunId,
+                SessionName: row.SessionName,
+                AgentSessionId: row.AgentSessionId,
+                WorkId: row.WorkId,
+                WorkType: row.WorkType,
+                Stage: row.Stage,
+                Sequence: row.Sequence,
+                Type: row.Type,
+                Payload: payload,
+                CreatedAt: row.CreatedAt.ToString("o"));
+
+            try
+            {
+                await _transcriptPublisher.PublishAsync(envelope, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "AgentSessionGrain transcript publish failed for {Type} on {SessionId}",
+                    row.Type, session.Id);
+            }
+        }
     }
 
     public async Task<AgentSessionInfo?> FailIfRunningAsync(string reason)
@@ -264,10 +448,43 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         await _stateStore.SaveAsync(SessionId, session, events);
         _session = session;
+
+        var source = AgentSessionSource(session);
+        foreach (var domainEvent in events)
+        {
+            try
+            {
+                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.SessionName);
+            }
+            catch (InvalidOperationException)
+            {
+                // Non-lifecycle AgentSession events are persisted but are not CloudEventBus notifications.
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to publish lifecycle event for {SessionId}",
+                    session.Id);
+            }
+        }
     }
 
-    private static Uri AgentSessionSource(AgentSession session) =>
-        new($"/mohist/agent-session/{session.Id}", UriKind.Relative);
+    private static string AgentSessionSource(AgentSession session) =>
+        $"/mohist/agent-session/{session.Id}";
+
+    private async Task PublishAgentSessionLifecycleAsync(AgentSessionEvent? domainEvent, string source, string subject)
+    {
+        if (domainEvent is null) return;
+        var concrete = domainEvent.Value;
+        var type = AgentSessionEventSerializer.BusType(concrete);
+        var data = AgentSessionEventSerializer.ToData(concrete);
+        await _eventPublisher.PublishAsync(
+            data,
+            type,
+            source,
+            subject: subject,
+            ct: CancellationToken.None);
+    }
 
     private static long DurationMs(AgentSession session)
     {

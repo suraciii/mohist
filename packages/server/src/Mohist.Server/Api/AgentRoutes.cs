@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Services;
@@ -28,14 +29,35 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (HttpContext context, int? limit, AgentSessionQuerier sessions, IGrainFactory grains, WorkflowActivityQuerier projection, CancellationToken ct) =>
+        group.MapGet("/activity", async (HttpContext context, int? limit, AgentSessionQuerier sessions, IssueQuerier issues, IGrainFactory grains, WorkflowActivityQuerier projection, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
             var runnerIds = (await ListAvailableRunnersAsync(grains, project.Id)).Select(r => r.RunnerId).ToArray();
-            return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, runnerIds: runnerIds, ct: ct));
+            var waiting = await BuildWaitingCardsAsync(issues, project.Id, ct);
+            return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, runnerIds: runnerIds, ct: ct));
         });
 
         return app;
+    }
+
+    private static async Task<IReadOnlyList<ActivityWaitingCardDto>> BuildWaitingCardsAsync(
+        IssueQuerier issues,
+        string projectId,
+        CancellationToken ct)
+    {
+        var waiting = await issues.ListInProgressWithApprovalGateAsync(projectId);
+        if (waiting.Count == 0) return [];
+
+        return waiting
+            .Select(issue => new ActivityWaitingCardDto(
+                IssueId: issue.Id,
+                IssueNumber: issue.Number,
+                IssueTitle: string.IsNullOrWhiteSpace(issue.Title) ? $"Issue #{issue.Number}" : issue.Title,
+                Stage: issue.WorkflowStage,
+                Label: "Needs Approval",
+                RequestedAt: issue.StageApproval is null ? null : issue.StageApproval.RequestedAt.ToString("o"),
+                Preview: null))
+            .ToList();
     }
 
     private static async Task<IReadOnlyList<RunnerInfo>> ListAvailableRunnersAsync(IGrainFactory grains, string projectId)

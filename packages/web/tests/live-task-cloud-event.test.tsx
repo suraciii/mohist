@@ -1,8 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { __testing__ } from '../src/app/providers/LiveTaskProvider'
 import { dispatchRebaseEvent, onRebaseEvent } from '../src/entities/issue/model/rebase-events'
+import { LiveTaskProvider } from '../src/app/providers/LiveTaskProvider'
+import { ProjectProvider } from '../src/entities/project'
+import { useLiveTask } from '../src/entities/issue'
+import { onAgentEvent } from '../src/entities/agent'
 
-const { unwrapEnvelope } = __testing__
+const toast = vi.hoisted(() => ({
+  info: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+}))
+
+vi.mock('sonner', () => ({ toast }))
+
+const eventsHub = vi.hoisted(() => ({
+  useEventsConnection: vi.fn(),
+}))
+
+vi.mock('../src/shared/api/events-hub', () => ({
+  useEventsConnection: eventsHub.useEventsConnection,
+}))
+
+const { unwrapEnvelope, unwrapTranscriptEnvelope } = __testing__
 
 describe('unwrapEnvelope', () => {
   it('returns the data when given a CloudEvents 1.0.2 envelope', () => {
@@ -15,6 +38,20 @@ describe('unwrapEnvelope', () => {
       specVersion: '1.0',
     }
     expect(unwrapEnvelope(envelope)).toBe(data)
+  })
+
+  it('returns the payload when given the server CloudEventEnvelope shape', () => {
+    const payload = { issueId: '42', projectId: 'mohist' }
+    const envelope = {
+      type: 'com.mohist.workflow.stage.started',
+      payload,
+      id: 'evt-1',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      dataContentType: 'application/json',
+      extensions: { projectid: 'mohist' },
+    }
+    expect(unwrapEnvelope(envelope)).toBe(payload)
   })
 
   it('returns the raw object when given a back-compat raw payload', () => {
@@ -74,6 +111,368 @@ describe('unwrapEnvelope', () => {
     // Malformed: missing 'type' is the common bug class
     const noType = { id: 'a', source: 'b', specVersion: '1.0', data: { foo: 'bar' } }
     expect(unwrapEnvelope(noType)).toBe(noType)
+  })
+})
+
+function LiveTaskProbe() {
+  const state = useLiveTask()
+  return <div data-testid="active-task">{state.activeTaskId ?? ''}</div>
+}
+
+describe('LiveTaskProvider transcript routing', () => {
+  beforeEach(() => {
+    eventsHub.useEventsConnection.mockClear()
+    toast.info.mockClear()
+  })
+
+  it('unwraps transcript envelopes without dropping runtime row metadata', () => {
+    const transcript = unwrapTranscriptEnvelope({
+      Type: 'ralph_task_update',
+      SessionId: 'session-1',
+      Sequence: 12,
+      CreatedAt: '2026-06-11T00:00:00.0000000Z',
+      WorkId: 'work-1',
+      Payload: { taskId: 'task-1', status: 'started' },
+    })
+
+    expect(transcript).toEqual({
+      eventName: 'ralph_task_update',
+      payload: { taskId: 'task-1', status: 'started' },
+      detail: {
+        Type: 'ralph_task_update',
+        SessionId: 'session-1',
+        Sequence: 12,
+        CreatedAt: '2026-06-11T00:00:00.0000000Z',
+        WorkId: 'work-1',
+        Payload: { taskId: 'task-1', status: 'started' },
+        type: 'ralph_task_update',
+        taskId: 'task-1',
+        status: 'started',
+        payload: { taskId: 'task-1', status: 'started' },
+      },
+    })
+  })
+
+  it('routes OnTranscriptEvent envelopes through the live task handler', async () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    expect(connectionCall).toBeDefined()
+    const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
+
+    onTranscriptEvent({
+      Type: 'ralph_task_update',
+      SessionId: 'session-1',
+      Sequence: 1,
+      Payload: { taskId: 'task-1', status: 'started' },
+    })
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="active-task"]')?.textContent).toBe('task-1')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+  })
+
+  it.each([
+    ['ralph_task_update', { taskId: 'task-1', status: 'started' }],
+    ['coder_text_chunk', { text: 'hello' }],
+    ['coder_tool_call', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
+  ] as const)('forwards %s transcript events to Agent activity subscribers', async (eventName, partialPayload) => {
+    const queryClient = new QueryClient()
+    const received: unknown[] = []
+    const off = onAgentEvent(eventName, (detail) => received.push(detail))
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
+    const payload = {
+      issueId: 'issue-1',
+      projectId: 'project-1',
+      executionId: 'execution-1',
+      acpSessionId: 'acp-1',
+      ...partialPayload,
+    }
+
+    onTranscriptEvent({
+      Type: eventName,
+      SessionId: 'session-1',
+      Sequence: 1,
+      CreatedAt: '2026-06-11T00:00:00.0000000Z',
+      Payload: payload,
+    })
+
+    await waitFor(() => {
+      expect(received).toEqual([{
+        Type: eventName,
+        SessionId: 'session-1',
+        Sequence: 1,
+        CreatedAt: '2026-06-11T00:00:00.0000000Z',
+        Payload: payload,
+        type: eventName,
+        payload,
+        ...payload,
+      }])
+    })
+    off()
+  })
+
+  it.each([
+    ['agent_message_chunk', 'coder_text_chunk', { text: 'hello' }],
+    ['tool_call', 'coder_tool_call', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
+    ['tool_call_update', 'coder_tool_call', { toolName: 'Read', state: 'completed', toolCallId: 'tool-1' }],
+  ] as const)('routes runner %s transcript events to %s subscribers', async (eventName, routedName, partialPayload) => {
+    const queryClient = new QueryClient()
+    const received: unknown[] = []
+    const off = onAgentEvent(routedName, (detail) => received.push(detail))
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
+    const payload = {
+      issueId: 'issue-1',
+      projectId: 'project-1',
+      executionId: 'execution-1',
+      acpSessionId: 'acp-1',
+      ...partialPayload,
+    }
+
+    onTranscriptEvent({
+      Type: eventName,
+      SessionId: 'session-1',
+      Sequence: 1,
+      CreatedAt: '2026-06-11T00:00:00.0000000Z',
+      Payload: payload,
+    })
+
+    await waitFor(() => {
+      expect(received).toEqual([{
+        Type: eventName,
+        SessionId: 'session-1',
+        Sequence: 1,
+        CreatedAt: '2026-06-11T00:00:00.0000000Z',
+        Payload: payload,
+        type: eventName,
+        payload,
+        ...payload,
+      }])
+    })
+    off()
+  })
+
+  it('shows approval toast for legacy approval_requested events', async () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['issues'], [{ id: 'issue-1', number: 82 }])
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('approval_requested', { issueId: 'issue-1', projectId: 'project-1', stage: 'review' })
+
+    await waitFor(() => {
+      expect(toast.info).toHaveBeenCalledWith('Issue #82 needs approval')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+  })
+
+  it('shows approval toast for reverse-DNS approval-requested events', async () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('com.mohist.workflow.stage.approval-requested', {
+      id: 'evt-1',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      type: 'com.mohist.workflow.stage.approval-requested',
+      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, stage: 'review' },
+    })
+
+    await waitFor(() => {
+      expect(toast.info).toHaveBeenCalledWith('Issue #82 needs approval')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+  })
+
+  it('shows merge completion toast for reverse-DNS work-completed events', async () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('com.mohist.issue.work-completed', {
+      id: 'evt-merge-1',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      type: 'com.mohist.issue.work-completed',
+      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'merge' },
+    })
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Issue #82 merged successfully')
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+  })
+
+  it('shows merge failure toast for reverse-DNS workflow failed events', async () => {
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('com.mohist.workflow.run.failed', {
+      id: 'evt-merge-failed-1',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      type: 'com.mohist.workflow.run.failed',
+      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'merge', error: 'boom' },
+    })
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Merge failed for Issue #82')
+    })
+  })
+
+  it('dispatches rebase completion for reverse-DNS work-completed events', async () => {
+    const queryClient = new QueryClient()
+    const seen: unknown[] = []
+    const off = onRebaseEvent((event) => seen.push(event))
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('com.mohist.issue.work-completed', {
+      id: 'evt-rebase-1',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      type: 'com.mohist.issue.work-completed',
+      payload: { issueId: 'issue-1', projectId: 'project-1', issueNumber: 82, operation: 'rebase', rebased: true },
+    })
+
+    await waitFor(() => {
+      expect(seen).toContainEqual({ type: 'rebase_completed', issueNumber: 82, rebased: true })
+    })
+    off()
+  })
+
+  it('shows rebase conflict toast and updates conflict state for reverse-DNS failed events', async () => {
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('com.mohist.workflow.stage.failed', {
+      id: 'evt-rebase-conflict-1',
+      source: '/mohist/test',
+      specVersion: '1.0',
+      type: 'com.mohist.workflow.stage.failed',
+      payload: {
+        issueId: 'issue-1',
+        projectId: 'project-1',
+        issueNumber: 82,
+        operation: 'rebase',
+        conflicts: ['src/App.tsx'],
+        error: 'conflict',
+      },
+    })
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Rebase conflict on Issue #82')
+    })
   })
 })
 

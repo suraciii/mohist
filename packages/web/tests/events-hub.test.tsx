@@ -5,6 +5,10 @@ import { createEventsConnection, useEventsConnection } from '../src/shared/api/e
 const signalr = vi.hoisted(() => {
   const connection = {
     on: vi.fn(),
+    onreconnected: vi.fn(),
+    onreconnecting: vi.fn(),
+    onclose: vi.fn(),
+    invoke: vi.fn(() => Promise.resolve()),
     start: vi.fn(() => Promise.resolve()),
     stop: vi.fn(() => Promise.resolve()),
   }

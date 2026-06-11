@@ -1,4 +1,5 @@
 import type { AgentDetailEventMap } from './types'
+import { AGENT_DETAIL_ROUTED_EVENT_TYPES } from '../../../shared/lib/canonical-event-types'
 
 type AgentEventName = keyof AgentDetailEventMap
 
@@ -23,26 +24,5 @@ export function onAgentEvent<T extends AgentEventName>(
 }
 
 export const AGENT_DETAIL_EVENTS: AgentEventName[] = [
-  'agent_text_chunk',
-  'main_tool_call',
-  'coder_text_chunk',
-  'coder_thought_chunk',
-  'coder_tool_call',
-  'ralph_task_update',
-  'ralph_loop_progress',
-  'plan_round_start',
-  'plan_session_update',
-  'plan_round_complete',
-  'coder_recovery_status',
-  'agent_liveness_status',
-  'coder_session_started',
-  'coder_session_completed',
-  'coder_session_failed',
-  'coder_session_cancelled',
-  'coder_session_status_changed',
-  'agent_paused',
-  'check_update',
-  'check_suite_status_changed',
-  'stage_task_update',
-  'agent_usage_update',
-]
+  ...AGENT_DETAIL_ROUTED_EVENT_TYPES,
+] as AgentEventName[]

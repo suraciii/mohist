@@ -79,6 +79,7 @@ public static class MohistServiceRegistration
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<ConnectionSubscriptionRegistry>();
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
+        services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddHostedService<IssueWorkflowReconciliationService>();
         services.AddSingleton<ConfigService>();
         services.AddSingleton<RuntimeBuildInfo>();

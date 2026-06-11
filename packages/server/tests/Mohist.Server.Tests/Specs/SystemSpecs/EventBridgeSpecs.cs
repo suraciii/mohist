@@ -120,6 +120,12 @@ public class EventBridgeSpecs
                 _context.Messages.Add(new RecordedHubEvent(_connectionId, eventName, data));
                 return Task.CompletedTask;
             }
+
+            public Task OnTranscriptEvent(TranscriptEnvelope envelope)
+            {
+                _context.Messages.Add(new RecordedHubEvent(_connectionId, envelope?.Type ?? string.Empty, envelope));
+                return Task.CompletedTask;
+            }
         }
 
         private sealed class NoopGroupManager : IGroupManager

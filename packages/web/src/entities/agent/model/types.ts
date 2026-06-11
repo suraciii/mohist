@@ -65,6 +65,10 @@ export type AgentDetailEventMap = {
   coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   coder_thought_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; coderSessionId?: string; model?: string }
+  agent_message_chunk: AgentDetailEventMap['coder_text_chunk']
+  agent_thought_chunk: AgentDetailEventMap['coder_thought_chunk']
+  tool_call: AgentDetailEventMap['coder_tool_call']
+  tool_call_update: AgentDetailEventMap['coder_tool_call']
   ralph_task_update: { issueId: string; projectId: string; executionId: string; taskId: string; taskIndex: number; totalTasks: number; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt?: number; error?: string }
   ralph_loop_progress: { issueId: string; projectId: string; executionId: string; completed: number; failed: number; total: number }
   plan_round_start: PlanRoundStartEvent
@@ -97,6 +101,12 @@ export type AgentDetailEventMap = {
     contextWindowSize?: number
     contextWindowUsed?: number
   }
+  agent_session_model_resolved: { issueId: string; projectId: string; executionId?: string; acpSessionId?: string; coderSessionId?: string; model: string }
+  'com.mohist.agent-session.started': { issueId: string; projectId: string }
+  'com.mohist.agent-session.completed': { issueId: string; projectId: string }
+  'com.mohist.agent-session.failed': { issueId: string; projectId: string }
+  'com.mohist.agent-session.cancelled': { issueId: string; projectId: string }
+  'com.mohist.agent-session.status-changed': { issueId: string; projectId: string; status: string }
 }
 
 export interface AgentSessionInfo {
