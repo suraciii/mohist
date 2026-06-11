@@ -29,6 +29,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
     public DbSet<AgentSessionRuntimeEventRow> AgentSessionRuntimeEvents { get; set; } = null!;
+    public DbSet<AgentSessionTranscriptSegmentRow> AgentSessionTranscriptSegments { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
@@ -136,6 +137,27 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
             entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
+        });
+
+        modelBuilder.Entity<AgentSessionTranscriptSegmentRow>(entity =>
+        {
+            entity.ToTable("AgentSessionTranscriptSegments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentSessionId).HasMaxLength(256);
+            entity.Property(e => e.WorkId).HasMaxLength(256);
+            entity.Property(e => e.WorkType).HasMaxLength(64);
+            entity.Property(e => e.Stage).HasMaxLength(64);
+            entity.Property(e => e.Kind).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.CorrelationId).HasMaxLength(256);
+            entity.Property(e => e.PayloadJson).IsRequired();
+            entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
+            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
+            entity.HasIndex(e => new { e.SessionId, e.Kind, e.CorrelationId });
         });
 
         modelBuilder.Entity<IssueCommentRow>(entity =>

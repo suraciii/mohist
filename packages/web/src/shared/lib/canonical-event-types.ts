@@ -47,6 +47,8 @@ export const TRANSCRIPT_EVENT_TYPES = [
   'coder_text_chunk',
   'coder_thought_chunk',
   'coder_tool_call',
+  'agent_message',
+  'agent_thought',
   'agent_message_chunk',
   'agent_thought_chunk',
   'tool_call',
@@ -56,6 +58,7 @@ export const TRANSCRIPT_EVENT_TYPES = [
   'agent_liveness_status',
   'agent_usage_update',
   'agent_session_model_resolved',
+  'agent_session_terminal',
 ] as const
 
 export type TranscriptEventType = (typeof TRANSCRIPT_EVENT_TYPES)[number]

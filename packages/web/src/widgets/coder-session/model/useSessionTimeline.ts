@@ -191,13 +191,13 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
       let changed = false
 
       for (const event of batch) {
-        if (event.sessionUpdate === 'agent_message_chunk') {
+        if (event.sessionUpdate === 'agent_message_chunk' || event.sessionUpdate === 'agent_message') {
           const textData = event.data as { text?: string }
           if (textData?.text) {
             lastRound.agentText += textData.text
             changed = true
           }
-        } else if (event.sessionUpdate === 'agent_thought_chunk') {
+        } else if (event.sessionUpdate === 'agent_thought_chunk' || event.sessionUpdate === 'agent_thought') {
           const textData = event.data as { text?: string }
           if (textData?.text) {
             lastRound.thoughtText += textData.text

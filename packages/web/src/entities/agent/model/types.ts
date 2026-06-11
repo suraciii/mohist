@@ -65,6 +65,8 @@ export type AgentDetailEventMap = {
   coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   coder_thought_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   coder_tool_call: { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; coderSessionId?: string; model?: string }
+  agent_message: AgentDetailEventMap['coder_text_chunk']
+  agent_thought: AgentDetailEventMap['coder_thought_chunk']
   agent_message_chunk: AgentDetailEventMap['coder_text_chunk']
   agent_thought_chunk: AgentDetailEventMap['coder_thought_chunk']
   tool_call: AgentDetailEventMap['coder_tool_call']

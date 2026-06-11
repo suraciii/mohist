@@ -40,10 +40,7 @@ public class AgentSessionQuerier
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName, ct);
         if (session is null) return null;
 
-        var events = await db.AgentSessionRuntimeEvents.AsNoTracking()
-            .Where(e => e.SessionId == session.Id)
-            .OrderBy(e => e.Sequence)
-            .ToListAsync(ct);
+        var events = await LoadPersistedEventsAsync(db, session.Id, ct);
         var domainSession = AgentSessionJson.Deserialize(session);
         return domainSession is null ? null : new WorkflowSessionDetailDto(ToWorkflowDto(domainSession), events.Select(ToEventDto).ToList());
     }
@@ -119,11 +116,10 @@ public class AgentSessionQuerier
         var domainSession = AgentSessionJson.Deserialize(session);
         if (domainSession is null) return null;
 
-        var eventQuery = db.AgentSessionRuntimeEvents.AsNoTracking()
-            .Where(e => e.SessionId == session.Id);
-        var eventCount = await eventQuery.CountAsync(ct);
-        var toolCount = await eventQuery.CountAsync(e => e.Type == "tool_call" || e.Type == "tool_call_update", ct);
-        var eventSummary = BuildEventSummary(await eventQuery.OrderBy(e => e.Sequence).ToListAsync(ct));
+        var persistedEvents = await LoadPersistedEventsAsync(db, session.Id, ct);
+        var eventCount = persistedEvents.Count;
+        var toolCount = persistedEvents.Count(e => e.Type == "tool_call" || e.Type == "tool_call_update");
+        var eventSummary = BuildEventSummary(persistedEvents);
         var usage = Usage(domainSession);
 
         return new AgentSessionMetadataDto(
@@ -158,10 +154,7 @@ public class AgentSessionQuerier
         var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
-        var events = await db.AgentSessionRuntimeEvents.AsNoTracking()
-            .Where(e => e.SessionId == session.Id)
-            .OrderBy(e => e.Sequence)
-            .ToListAsync(ct);
+        var events = await LoadPersistedEventsAsync(db, session.Id, ct);
 
         return new AgentSessionRuntimeEventsResponse(
             events.Select(e => new AgentSessionRuntimeEventDto(
@@ -269,21 +262,42 @@ public class AgentSessionQuerier
     {
         if (sessionIds.Length == 0) return [];
 
-        var latestSeqs = await db.AgentSessionRuntimeEvents.AsNoTracking()
+        var latestSegmentSeqs = await db.AgentSessionTranscriptSegments.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .GroupBy(e => e.SessionId)
             .Select(g => new { SessionId = g.Key, Sequence = g.Max(e => e.Sequence) })
             .ToListAsync(ct);
-        if (latestSeqs.Count == 0) return [];
 
-        var latestBySession = latestSeqs.ToDictionary(e => e.SessionId, e => e.Sequence);
+        var result = new Dictionary<string, AgentSessionRuntimeEventRow>(StringComparer.Ordinal);
+        if (latestSegmentSeqs.Count > 0)
+        {
+            var latestBySession = latestSegmentSeqs.ToDictionary(e => e.SessionId, e => e.Sequence);
+            var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+                .Where(e => sessionIds.Contains(e.SessionId))
+                .ToListAsync(ct);
+
+            foreach (var e in segments.Where(e => latestBySession.TryGetValue(e.SessionId, out var seq) && e.Sequence == seq))
+                result[e.SessionId] = ToRuntimeLike(e);
+        }
+
+        var latestRuntimeSeqs = await db.AgentSessionRuntimeEvents.AsNoTracking()
+            .Where(e => sessionIds.Contains(e.SessionId))
+            .GroupBy(e => e.SessionId)
+            .Select(g => new { SessionId = g.Key, Sequence = g.Max(e => e.Sequence) })
+            .ToListAsync(ct);
+        if (latestRuntimeSeqs.Count == 0) return result;
+
+        var latestRuntimeBySession = latestRuntimeSeqs.ToDictionary(e => e.SessionId, e => e.Sequence);
         var events = await db.AgentSessionRuntimeEvents.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .ToListAsync(ct);
 
-        return events
-            .Where(e => latestBySession.TryGetValue(e.SessionId, out var seq) && e.Sequence == seq)
-            .ToDictionary(e => e.SessionId);
+        foreach (var e in events.Where(e => latestRuntimeBySession.TryGetValue(e.SessionId, out var seq) && e.Sequence == seq))
+        {
+            if (!result.TryGetValue(e.SessionId, out var current) || e.Sequence >= current.Sequence)
+                result[e.SessionId] = e;
+        }
+        return result;
     }
 
     private static async Task<Dictionary<string, AgentSessionRuntimeEventSummary>> LoadEventSummariesAsync(
@@ -292,12 +306,19 @@ public class AgentSessionQuerier
         var ids = sessionIds.Distinct(StringComparer.Ordinal).ToArray();
         if (ids.Length == 0) return [];
 
+        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+            .Where(e => ids.Contains(e.SessionId))
+            .OrderBy(e => e.Sequence)
+            .ToListAsync(ct);
+
         var events = await db.AgentSessionRuntimeEvents.AsNoTracking()
             .Where(e => ids.Contains(e.SessionId))
             .OrderBy(e => e.Sequence)
             .ToListAsync(ct);
 
         return events
+            .Concat(segments.Select(ToRuntimeLike))
+            .OrderBy(e => e.Sequence)
             .GroupBy(e => e.SessionId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => BuildEventSummary(g), StringComparer.Ordinal);
     }
@@ -498,6 +519,43 @@ public class AgentSessionQuerier
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId,
         e.SessionName, e.AgentSessionId, e.WorkId, e.WorkType, e.Stage,
         e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"));
+
+    private static async Task<List<AgentSessionRuntimeEventRow>> LoadPersistedEventsAsync(MohistDbContext db, string sessionId, CancellationToken ct)
+    {
+        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+            .Where(e => e.SessionId == sessionId)
+            .OrderBy(e => e.Sequence)
+            .ToListAsync(ct);
+
+        var runtimeEvents = await db.AgentSessionRuntimeEvents.AsNoTracking()
+            .Where(e => e.SessionId == sessionId)
+            .OrderBy(e => e.Sequence)
+            .ToListAsync(ct);
+
+        return runtimeEvents
+            .Concat(segments.Select(ToRuntimeLike))
+            .OrderBy(e => e.Sequence)
+            .ThenBy(e => e.Id)
+            .ToList();
+    }
+
+    private static AgentSessionRuntimeEventRow ToRuntimeLike(AgentSessionTranscriptSegmentRow segment) => new()
+    {
+        Id = segment.Id,
+        SessionId = segment.SessionId,
+        ProjectId = segment.ProjectId,
+        IssueNumber = segment.IssueNumber,
+        WorkflowRunId = segment.WorkflowRunId,
+        SessionName = segment.SessionName,
+        AgentSessionId = segment.AgentSessionId,
+        WorkId = segment.WorkId,
+        WorkType = segment.WorkType,
+        Stage = segment.Stage,
+        Sequence = segment.Sequence,
+        Type = segment.Kind,
+        PayloadJson = segment.PayloadJson,
+        CreatedAt = segment.StartedAt,
+    };
 
     private static List<AgentSessionProjection> ToDomain(IEnumerable<AgentSessionRow> rows)
     {

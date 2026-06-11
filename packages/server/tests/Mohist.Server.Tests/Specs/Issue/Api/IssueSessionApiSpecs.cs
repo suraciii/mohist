@@ -132,7 +132,7 @@ public class IssueSessionApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task IssueSessionEventsEndpoint_ReturnsRawEventsInAscendingSequenceAcrossBatches()
+    public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequenceAcrossBatches()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events-ordering", sessionName: "build");
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
@@ -201,7 +201,7 @@ public class IssueSessionApiSpecs
 
         var types = response.Events.Select(e => e.Type).ToArray();
         Assert.Equal(
-            new[] { "mohist_prompt", "tool_call", "agent_message_chunk", "agent_thought_chunk", "tool_call_update", "agent_message_chunk", "agent_session_terminal" },
+            new[] { "mohist_prompt", "tool_call", "agent_message", "agent_thought", "tool_call_update", "agent_message", "agent_session_terminal" },
             types);
 
         var sequences = response.Events.Select(e => e.Sequence).ToArray();

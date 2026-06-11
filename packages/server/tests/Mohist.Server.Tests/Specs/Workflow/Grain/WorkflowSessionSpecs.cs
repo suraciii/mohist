@@ -73,7 +73,7 @@ public class WorkflowSessionSpecs
         Assert.Equal("completed", detail.Session.Status);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         Assert.Equal([1, 2, 3], detail.Events.Select(e => e.Sequence).ToArray());
-        Assert.Equal(["mohist_prompt", "agent_message_chunk", "agent_session_terminal"], detail.Events.Select(e => e.Type).ToArray());
+        Assert.Equal(["mohist_prompt", "agent_message", "agent_session_terminal"], detail.Events.Select(e => e.Type).ToArray());
         Assert.Equal("proposal", detail.Events[0].WorkId);
         Assert.Equal("proposal", detail.Events[1].WorkId);
     }

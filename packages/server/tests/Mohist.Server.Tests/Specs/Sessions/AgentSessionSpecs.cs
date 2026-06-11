@@ -164,7 +164,7 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task IssueSessionEventsEndpoint_ReturnsRawEventsInAscendingSequence()
+    public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequence()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events", sessionName: "plan");
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
@@ -187,8 +187,8 @@ public class AgentSessionSpecs
 
         var response = await _client.GetDataAsync<AgentSessionRuntimeEventsTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/events");
 
-        Assert.Equal(3, response.Events.Length);
-        Assert.Equal(new[] { "mohist_prompt", "agent_message_chunk", "agent_message_chunk" }, response.Events.Select(e => e.Type).ToArray());
+        Assert.Equal(2, response.Events.Length);
+        Assert.Equal(new[] { "mohist_prompt", "agent_message" }, response.Events.Select(e => e.Type).ToArray());
         var sequences = response.Events.Select(e => e.Sequence).ToArray();
         Assert.Equal(sequences.OrderBy(s => s).ToArray(), sequences);
 
@@ -199,9 +199,9 @@ public class AgentSessionSpecs
         Assert.Equal("do the thing", prompt.Payload?.GetProperty("text").GetString());
         Assert.False(string.IsNullOrEmpty(prompt.CreatedAt));
 
-        var second = response.Events[2];
-        Assert.Equal("agent_message_chunk", second.Type);
-        Assert.Equal("second message", second.Payload?.GetProperty("text").GetString());
+        var second = response.Events[1];
+        Assert.Equal("agent_message", second.Type);
+        Assert.Equal("first messagesecond message", second.Payload?.GetProperty("text").GetString());
 
         var serialized = JsonSerializer.Serialize(response);
         Assert.DoesNotContain("turns", serialized, StringComparison.OrdinalIgnoreCase);
@@ -241,7 +241,7 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task RunnerAppendsSessionEvents_ConcurrentBatches_AssignsMonotonicSequences()
+    public async Task RunnerAppendsSessionEvents_ConcurrentChunks_BuffersUntilFlush()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("sequence");
 
@@ -249,13 +249,50 @@ public class AgentSessionSpecs
             PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "first"),
             PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "second"));
 
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+            }
+        });
+
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var sequences = await db.AgentSessionRuntimeEvents.AsNoTracking()
+        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
-            .Select(e => e.Sequence)
             .ToArrayAsync();
-        Assert.Equal([1L, 2L], sequences);
+        Assert.Equal([1L, 2L], segments.Select(e => e.Sequence).ToArray());
+        Assert.Equal("agent_message", segments[0].Kind);
+        Assert.Equal("agent_session_terminal", segments[1].Kind);
+        Assert.Equal(0, await db.AgentSessionRuntimeEvents.AsNoTracking().CountAsync(e => e.SessionId == session.Id));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task RunnerAppendsManyChunks_PersistsAggregatedTranscriptSegmentsOnly()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("chunk-aggregation");
+        var events = Enumerable.Range(0, 96)
+            .Select(i => new { type = "agent_thought_chunk", payload = new { text = i.ToString("D2") } })
+            .Cast<object>()
+            .ToArray();
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new { events });
+
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        var rawCount = await db.AgentSessionRuntimeEvents.AsNoTracking()
+            .CountAsync(e => e.SessionId == session.Id);
+        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+            .Where(e => e.SessionId == session.Id)
+            .OrderBy(e => e.Sequence)
+            .ToArrayAsync();
+
+        Assert.Equal(0, rawCount);
+        Assert.Equal(3, segments.Length);
+        Assert.All(segments, segment => Assert.Equal("agent_thought", segment.Kind));
+        Assert.All(segments, segment => Assert.Equal(32, segment.RawEventCount));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -568,13 +605,14 @@ public class AgentSessionSpecs
         Assert.Null(grainSession.CostAmount);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var events = await db.AgentSessionRuntimeEvents
+        var events = await db.AgentSessionTranscriptSegments
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
         Assert.Equal(2, events.Count);
-        Assert.Equal("agent_session_terminal", events[0].Type);
-        Assert.Equal("agent_usage_update", events[1].Type);
+        Assert.Equal("agent_session_terminal", events[0].Kind);
+        Assert.Equal("agent_usage_update", events[1].Kind);
+        Assert.Equal(0, await db.AgentSessionRuntimeEvents.CountAsync(e => e.SessionId == session.Id));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
