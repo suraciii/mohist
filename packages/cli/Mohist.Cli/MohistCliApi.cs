@@ -17,24 +17,28 @@ internal sealed class MohistCliApi
     private readonly TextWriter _err;
     private readonly IFileSystem _fileSystem;
     private readonly ICommandExecutor _commandExecutor;
+    private readonly TextReader _standardInput;
 
     internal TextWriter Output => _out;
     internal TextWriter Error => _err;
     internal IFileSystem FileSystem => _fileSystem;
     internal ICommandExecutor CommandExecutor => _commandExecutor;
+    internal TextReader StandardInput => _standardInput;
 
     public MohistCliApi(
         HttpClient http,
         TextWriter output,
         TextWriter error,
         IFileSystem fileSystem,
-        ICommandExecutor commandExecutor)
+        ICommandExecutor commandExecutor,
+        TextReader? standardInput = null)
     {
         _http = http;
         _out = output;
         _err = error;
         _fileSystem = fileSystem;
         _commandExecutor = commandExecutor;
+        _standardInput = standardInput ?? Console.In;
     }
 
     public async Task<int> PrintGetAsync(string path) =>
@@ -62,6 +66,83 @@ internal sealed class MohistCliApi
     {
         using var response = await _http.GetAsync(path);
         return await ReadSuccessDataAsync(response);
+    }
+
+    public abstract record OutputModeResult
+    {
+        private OutputModeResult() { }
+
+        public sealed record Valid(string Mode) : OutputModeResult;
+
+        public sealed record Invalid(string Message) : OutputModeResult;
+    }
+
+    public static OutputModeResult ValidateOutputMode(string? mode)
+    {
+        if (string.IsNullOrWhiteSpace(mode) || string.Equals(mode, "json", StringComparison.Ordinal))
+            return new OutputModeResult.Valid("json");
+
+        if (string.Equals(mode, "table", StringComparison.Ordinal))
+            return new OutputModeResult.Valid("table");
+
+        return new OutputModeResult.Invalid(
+            $"--output must be 'table' or 'json' (got '{mode}')");
+    }
+
+    public async Task<int> PrintWithOutputAsync(string path, string mode, string? tableShape = null)
+    {
+        using var response = await _http.GetAsync(path);
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+            return await PrintResponseAsync(response);
+
+        var data = await ReadSuccessDataAsync(response);
+        var shape = ParseTableShape(tableShape);
+        return await RenderTableAsync(data, shape);
+    }
+
+    public enum TableShape
+    {
+        ProjectList,
+        ProjectShow,
+        IssueList,
+        IssueShow,
+        WorkflowStatus,
+        Sessions,
+        RepoList,
+    }
+
+    internal static TableShape ParseTableShape(string? shape)
+    {
+        if (string.IsNullOrWhiteSpace(shape))
+            return TableShape.ProjectList;
+        return Enum.TryParse<TableShape>(shape, ignoreCase: false, out var parsed)
+            ? parsed
+            : TableShape.ProjectList;
+    }
+
+    public async Task<int> RenderTableAsync(JsonNode? data, TableShape shape)
+    {
+        var activeProjectId = await TryReadActiveProjectIdAsync();
+        var renderer = new TableRenderer(_out, activeProjectId);
+        renderer.Render(data, shape);
+        return 0;
+    }
+
+    private async Task<string?> TryReadActiveProjectIdAsync()
+    {
+        if (!_fileSystem.Exists(ProjectStatePath))
+            return null;
+        try
+        {
+            var json = await _fileSystem.ReadAllTextAsync(ProjectStatePath);
+            var state = JsonNode.Parse(json);
+            return state?["activeProjectId"]?.GetValue<string>();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<JsonNode?> PostDataAsync(string path, object body)
@@ -98,22 +179,49 @@ internal sealed class MohistCliApi
         }
     }
 
-    public async Task<string?> ResolveProjectIdAsync(string? explicitProjectId)
+    public async Task<string?> ResolveProjectIdAsync(string? project, string? projectId)
     {
-        if (!string.IsNullOrWhiteSpace(explicitProjectId))
-            return explicitProjectId;
+        var hasProject = !string.IsNullOrWhiteSpace(project);
+        var hasProjectId = !string.IsNullOrWhiteSpace(projectId);
+
+        if (hasProject && hasProjectId)
+        {
+            if (string.Equals(project, projectId, StringComparison.Ordinal))
+                return project!;
+
+            _err.WriteLine(
+                $"--project and --project-id resolve to different values ('{project}' vs '{projectId}'). " +
+                "Pass only one of the two options, or pass matching values.");
+            return null;
+        }
+
+        if (hasProject)
+            return project!;
+
+        if (hasProjectId)
+            return projectId!;
 
         if (!_fileSystem.Exists(ProjectStatePath))
+        {
+            _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
             return null;
+        }
 
         try
         {
             var json = await _fileSystem.ReadAllTextAsync(ProjectStatePath);
             var state = JsonNode.Parse(json);
-            return state?["activeProjectId"]?.GetValue<string>();
+            var active = state?["activeProjectId"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(active))
+            {
+                _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
+                return null;
+            }
+            return active;
         }
         catch
         {
+            _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
             return null;
         }
     }

@@ -39,7 +39,27 @@ internal static class MohistCliCommands
         new("--follow", "-f") { Description = "Follow log output" };
 
     internal static Option<string?> ProjectIdOption() =>
-        new("--project-id") { Description = "Project ID" };
+        new("--project-id") { Description = ProjectRefOptionDescription };
+
+    internal static (Option<string?> Project, Option<string?> ProjectId) ProjectRefOption()
+    {
+        var project = new Option<string?>("--project") { Description = ProjectRefOptionDescription };
+        var projectId = new Option<string?>("--project-id") { Description = ProjectRefOptionDescription };
+        return (project, projectId);
+    }
+
+    internal static Option<string> OutputOption() =>
+        new("--output", "-o")
+        {
+            Description = "Output format (table, json)",
+            DefaultValueFactory = _ => "json",
+        };
+
+    internal const string NoActiveProjectMessage =
+        "Run 'mo project use <name-or-id>' or pass --project <name-or-id>";
+
+    private const string ProjectRefOptionDescription =
+        "Project name or id (canonical: --project; --project-id is a backwards-compatible alias)";
 
     internal static Option<string[]?> LabelOption() =>
         new("--label", "-l") { Description = "Filter by labels", AllowMultipleArgumentsPerToken = true };
@@ -54,10 +74,10 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null)
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null)
     {
         environment ??= SystemEnvironmentVariableProvider.Instance;
-        var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor);
+        var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor, standardInput);
         var services = new ServiceCollection();
         services.AddSingleton(api);
         services.AddSingleton(output);
