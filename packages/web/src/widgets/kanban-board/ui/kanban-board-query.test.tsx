@@ -540,7 +540,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(stageColumns.length).toBeGreaterThanOrEqual(3)
     })
 
-    it('reveals cancelled issues after clicking the show cancelled control', async () => {
+    it('cancelled toggle lives inside the Cancelled column and supports bidirectional show/hide', async () => {
       const issues = [
         makeIssue({ number: 1, title: 'Active work', status: IssueStatus.InProgress, health: IssueHealth.Active }),
         makeIssue({ number: 2, title: 'Cancelled work', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
@@ -555,15 +555,82 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         </QueryClientProvider>,
       )
 
-      expect(screen.queryByText('Cancelled work')).not.toBeInTheDocument()
+      const cancelledColumn = screen.getByTestId('stage-column-cancelled')
+      const toggle = within(cancelledColumn).getByTestId('cancelled-toggle')
 
-      fireEvent.click(screen.getByText('Show cancelled (1)'))
+      expect(toggle).toHaveTextContent('Show cancelled (1)')
+      expect(within(cancelledColumn).queryByText('Cancelled work')).not.toBeInTheDocument()
+
+      fireEvent.click(toggle)
 
       await waitFor(() => {
-        expect(screen.getByText('Cancelled work')).toBeInTheDocument()
-        expect(screen.getAllByText('Cancelled').length).toBeGreaterThan(0)
-        expect(screen.queryByText('Closed')).not.toBeInTheDocument()
+        expect(within(cancelledColumn).getByText('Cancelled work')).toBeInTheDocument()
       })
+      expect(within(cancelledColumn).getByTestId('cancelled-toggle')).toHaveTextContent('Hide cancelled')
+
+      fireEvent.click(within(cancelledColumn).getByTestId('cancelled-toggle'))
+
+      await waitFor(() => {
+        expect(within(cancelledColumn).queryByText('Cancelled work')).not.toBeInTheDocument()
+      })
+      expect(within(cancelledColumn).getByTestId('cancelled-toggle')).toHaveTextContent('Show cancelled (1)')
+    })
+  })
+
+  describe('Mobile cancelled tab count is independent of showCancelled', () => {
+    beforeEach(() => {
+      Object.defineProperty(window, 'location', {
+        value: { search: '', pathname: '/' },
+        writable: true,
+      })
+    })
+
+    afterEach(() => {
+      cleanup()
+      vi.clearAllMocks()
+    })
+
+    it('renders 8 in the Cancelled tab badge regardless of the toggle state', async () => {
+      const issues = Array.from({ length: 8 }, (_, i) =>
+        makeIssue({
+          number: i + 1,
+          title: `Cancelled issue ${i + 1}`,
+          status: IssueStatus.Cancelled,
+          health: IssueHealth.Cancelled,
+        }),
+      )
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const cancelledTab = screen.getByTestId('mobile-stage-tab-cancelled')
+      expect(within(cancelledTab).getByText('8')).toBeInTheDocument()
+
+      fireEvent.click(cancelledTab)
+
+      const inListToggle = screen.getByTestId('mobile-cancelled-toggle')
+      expect(inListToggle).toHaveTextContent('Show cancelled (8)')
+      fireEvent.click(inListToggle)
+
+      await waitFor(() => {
+        expect(screen.getByTestId('mobile-cancelled-toggle')).toHaveTextContent('Hide cancelled')
+      })
+
+      expect(within(screen.getByTestId('mobile-stage-tab-cancelled')).getByText('8')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('mobile-cancelled-toggle'))
+
+      await waitFor(() => {
+        expect(screen.getByTestId('mobile-cancelled-toggle')).toHaveTextContent('Show cancelled (8)')
+      })
+
+      expect(within(screen.getByTestId('mobile-stage-tab-cancelled')).getByText('8')).toBeInTheDocument()
     })
   })
 

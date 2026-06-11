@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/shared/ui/components/button'
@@ -20,6 +20,10 @@ interface Props {
   archivedCount?: number
   sort?: SortMode
   onSortChange?: (s: SortMode) => void
+  headerToggle?: ReactNode
+  footerToggle?: ReactNode
+  bodyHidden?: boolean
+  emptyState?: ReactNode
 }
 
 export function StageColumn({
@@ -30,6 +34,10 @@ export function StageColumn({
   archivedCount = 0,
   sort,
   onSortChange,
+  headerToggle,
+  footerToggle,
+  bodyHidden = false,
+  emptyState,
   status,
 }: Props & { status: IssueStatus }) {
   const queryClient = useQueryClient()
@@ -94,6 +102,7 @@ export function StageColumn({
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">
           {totalCount}
         </span>
+        {headerToggle}
       </div>
 
       {onSortChange && sort && (
@@ -117,30 +126,40 @@ export function StageColumn({
       )}
 
       <div className="flex-1 space-y-2 overflow-y-auto p-2 min-h-[120px]">
-        {totalCount === 0 && (
+        {bodyHidden ? (
           <div className="flex items-center justify-center py-8 text-xs text-muted-foreground/70">
-            No issues
+            {emptyState ?? 'No issues'}
           </div>
-        )}
-        {visibleIssues.map((issue) => (
-          <IssueCard
-            key={issue.id}
-            issue={issue}
-            agentStatus={agentStatus}
-            showArchiveButton={isDone}
-          />
-        ))}
-        {isDone && hiddenCount > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setExpanded(!expanded)}
-            className="w-full text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
-          >
-            {expanded ? 'Show less' : `${hiddenCount} more`}
-          </Button>
+        ) : (
+          <>
+            {totalCount === 0 && (
+              <div className="flex items-center justify-center py-8 text-xs text-muted-foreground/70">
+                No issues
+              </div>
+            )}
+            {visibleIssues.map((issue) => (
+              <IssueCard
+                key={issue.id}
+                issue={issue}
+                agentStatus={agentStatus}
+                showArchiveButton={isDone}
+              />
+            ))}
+            {isDone && hiddenCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setExpanded(!expanded)}
+                className="w-full text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+              >
+                {expanded ? 'Show less' : `${hiddenCount} more`}
+              </Button>
+            )}
+          </>
         )}
       </div>
+
+      {footerToggle}
 
       {isDone && totalCount > 0 && (
         <div className="mx-2 mb-2 px-2.5 py-2 rounded-md bg-muted/60 text-xs text-muted-foreground flex items-center justify-between">
