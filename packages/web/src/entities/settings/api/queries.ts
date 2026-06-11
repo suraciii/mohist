@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
-import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModels, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
   return useQuery<GeneralConfig, Error>({
@@ -56,18 +56,22 @@ export function useUpdateConfig() {
 }
 
 export function useOpencodeModel() {
+  const { projectId } = useProject()
   return useQuery<{ model: string | null }>({
-    queryKey: ['opencode-model'],
-    queryFn: () => getOpencodeModel(),
+    queryKey: ['opencode-model', projectId],
+    queryFn: () => getOpencodeModel(projectId),
+    enabled: !!projectId,
   })
 }
 
 export function useUpdateOpencodeModel() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation<{ model: string | null }, Error, string | null>({
-    mutationFn: (model) => updateOpencodeModel(model),
+    mutationFn: (model) => updateOpencodeModel(projectId, model),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-model'] })
+      queryClient.invalidateQueries({ queryKey: ['opencode-model', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
       toast.success('Model updated')
     },
     onError: (err: Error) => {
@@ -207,18 +211,21 @@ export function useSetAgentRuntime() {
 }
 
 export function useStageModels() {
+  const { projectId } = useProject()
   return useQuery<{ stageModels: Record<string, string> | null }>({
-    queryKey: ['stage-models'],
-    queryFn: () => getStageModels(),
+    queryKey: ['stage-models', projectId],
+    queryFn: () => getStageModels(projectId),
+    enabled: !!projectId,
   })
 }
 
 export function useSetStageModels() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation({
-    mutationFn: (stageModels: Record<string, string> | null) => setStageModels(stageModels),
+    mutationFn: ({ stage, model }: { stage: string; model: string | null }) => setStageModel(projectId, stage, model),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stage-models'] })
+      queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
       toast.success('Stage models updated')
     },
     onError: (err: Error) => {
