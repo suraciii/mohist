@@ -11,8 +11,8 @@ import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
   groupIssuesByStage,
-  filterClosedFromDone,
-  getDoneColumnCounts,
+  filterCancelledFromColumns,
+  getCancelledColumnCount,
   STAGES,
 } from '../model/kanban-grouping'
 import {
@@ -475,7 +475,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
 
   const allColumns = useMemo(() => groupIssuesByStage(issues), [issues])
 
-  const [showClosed, setShowClosed] = useState(false)
+  const [showCancelled, setShowCancelled] = useState(false)
   const [localState, setLocalState] = useState<BoardQueryState>(queryState)
 
   useEffect(() => {
@@ -489,9 +489,15 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
     [allColumns, localState],
   )
 
-  const { closedCount } = useMemo(
-    () => getDoneColumnCounts(filteredColumns),
-    [filteredColumns],
+  // Mobile tab badge counts and the in-list Show/Hide cancelled link read
+  // from `allColumns` (pre-filter, pre-toggle). The badge answers "how many
+  // cancelled issues exist?", not "how many are visible right now?", so it
+  // must stay stable when the user toggles `showCancelled` or applies a
+  // board query filter. The list body below still iterates `displayedColumns`
+  // so the toggle actually hides the cards in the mobile list.
+  const { cancelledCount } = useMemo(
+    () => getCancelledColumnCount(allColumns),
+    [allColumns],
   )
 
   const updateState = useCallback((newState: BoardQueryState) => {
@@ -502,8 +508,8 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
   }, [])
 
   const displayedColumns = useMemo(
-    () => filterClosedFromDone(filteredColumns, showClosed),
-    [filteredColumns, showClosed],
+    () => filterCancelledFromColumns(filteredColumns, showCancelled),
+    [filteredColumns, showCancelled],
   )
 
   const defaultStage = useMemo(() => {
@@ -518,6 +524,17 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
   }, [defaultStage])
 
   const selectedColumn = displayedColumns.find((c) => c.key === selectedStage) ?? displayedColumns[0]
+
+  // The mobile list body must respect `showCancelled` so the in-list toggle
+  // actually hides the cards. `displayedColumns` is now an identity seam
+  // (T-002), so the Cancelled column still carries its full issue set —
+  // we drop the body content here at the render seam only.
+  const visibleSelectedColumn = useMemo(() => {
+    if (selectedStage === IssueStatus.Cancelled && !showCancelled) {
+      return { ...selectedColumn, issues: [] }
+    }
+    return selectedColumn
+  }, [selectedColumn, selectedStage, showCancelled])
 
   const attentionItems = useMemo(
     () => deriveAttentionItems(issues, agentStatus),
@@ -538,7 +555,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
 
       <div className="md:hidden flex flex-col flex-1">
         <div className="flex overflow-x-auto snap-x snap-mandatory border-b bg-background px-2 shrink-0">
-          {displayedColumns.map((col) => {
+          {allColumns.map((col) => {
             const colors = getStageColors(col.key)
             const active = col.key === selectedStage
             return (
@@ -576,25 +593,28 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
           })}
         </div>
 
-        {selectedStage === IssueStatus.Cancelled && closedCount > 0 && !showClosed && (
+        {selectedStage === IssueStatus.Cancelled && cancelledCount > 0 && (
           <div className="px-4 py-2">
             <Button
               variant="link"
               size="xs"
-              onClick={() => setShowClosed(true)}
+              data-testid="mobile-cancelled-toggle"
+              onClick={() => setShowCancelled((value) => !value)}
             >
-              Show cancelled ({closedCount})
+              {showCancelled
+                ? 'Hide cancelled'
+                : `Show cancelled (${cancelledCount})`}
             </Button>
           </div>
         )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {selectedColumn.issues.length === 0 ? (
+          {visibleSelectedColumn.issues.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-sm text-muted-foreground/70">
-              No issues in {selectedColumn.label}
+              No issues in {visibleSelectedColumn.label}
             </div>
           ) : (
-            selectedColumn.issues.map((issue) => (
+            visibleSelectedColumn.issues.map((issue) => (
               <IssueCard key={issue.id} issue={issue} agentStatus={agentStatus} />
             ))
           )}
@@ -602,31 +622,42 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
       </div>
 
       <div className="hidden md:flex flex-row gap-4 overflow-x-auto p-4 flex-1">
-        {displayedColumns.map((col) => (
-          <StageColumn
-            key={col.key}
-            label={col.label}
-            status={col.key}
-            issues={col.issues}
-            agentStatus={agentStatus}
-            isDone={col.key === IssueStatus.Done}
-            archivedCount={col.key === IssueStatus.Done ? archivedCount : undefined}
-            sort={localState.sort}
-            onSortChange={(s) => updateState({ ...localState, sort: s })}
-          />
-        ))}
-        {closedCount > 0 && !showClosed && (
-          <div className="flex items-start pt-2">
-            <Button
-              variant="link"
-              size="xs"
-              onClick={() => setShowClosed(true)}
-              className="whitespace-nowrap"
-            >
-              Show cancelled ({closedCount})
-            </Button>
-          </div>
-        )}
+        {displayedColumns.map((col) => {
+          const isCancelled = col.key === IssueStatus.Cancelled
+          const cancelledColumnHidden = isCancelled && !showCancelled && col.issues.length > 0
+          return (
+            <StageColumn
+              key={col.key}
+              label={col.label}
+              status={col.key}
+              issues={col.issues}
+              agentStatus={agentStatus}
+              isDone={col.key === IssueStatus.Done}
+              archivedCount={col.key === IssueStatus.Done ? archivedCount : undefined}
+              sort={localState.sort}
+              onSortChange={(s) => updateState({ ...localState, sort: s })}
+              headerToggle={
+                isCancelled ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    data-testid="cancelled-toggle"
+                    onClick={() => setShowCancelled(!showCancelled)}
+                    className="h-auto px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+                  >
+                    {showCancelled ? 'Hide cancelled' : `Show cancelled (${col.issues.length})`}
+                  </Button>
+                ) : undefined
+              }
+              bodyHidden={cancelledColumnHidden}
+              emptyState={
+                isCancelled
+                  ? `Cancelled issues hidden — ${col.issues.length} not shown`
+                  : undefined
+              }
+            />
+          )
+        })}
       </div>
     </div>
   )

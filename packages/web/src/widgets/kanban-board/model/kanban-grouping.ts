@@ -26,23 +26,34 @@ export function groupIssuesByStage(issues: Issue[]): Column[] {
   }))
 }
 
-export function filterClosedFromDone(
+/**
+ * Render/decide-visibility seam for the Cancelled column.
+ *
+ * This helper is intentionally an identity function: it always returns the
+ * input `columns` array reference unchanged, regardless of `showCancelled`.
+ * The Cancelled column must carry its full set of issues through the
+ * grouping pipeline so that downstream consumers (mobile tab counts, the
+ * in-column renderer's "n hidden" affordance, etc.) can read the real
+ * number of cancelled issues.
+ *
+ * Visibility of the cancelled issues is a render-time concern owned by
+ * the Kanban renderer (`StageColumn` / the mobile list body) reading the
+ * `showCancelled` state. Do not reintroduce issue mutation here — that
+ * would make counts wrong, tests vacuous, and the toggle bidirectional.
+ *
+ * The helper is kept (rather than inlined away) as a documented seam so
+ * that any future move of the visibility decision back to the data layer
+ * (for example URL persistence) has a clear, intentional landing spot.
+ */
+export function filterCancelledFromColumns(
   columns: Column[],
-  showClosed: boolean,
+  _showCancelled: boolean,
 ): Column[] {
-  if (showClosed) return columns
-  return columns.map((col) =>
-    col.key === IssueStatus.Cancelled
-      ? {
-          ...col,
-          issues: [],
-        }
-      : col,
-  )
+  return columns
 }
 
-export function getDoneColumnCounts(columns: Column[]): {
-  closedCount: number
+export function getCancelledColumnCount(columns: Column[]): {
+  cancelledCount: number
   doneTotalCount: number
 } {
   const cancelledColumn = columns.find((c) => c.key === IssueStatus.Cancelled)
@@ -50,7 +61,7 @@ export function getDoneColumnCounts(columns: Column[]): {
   const doneColumn = columns.find((c) => c.key === IssueStatus.Done)
   const doneIssues = doneColumn?.issues ?? []
   return {
-    closedCount: cancelledIssues.length,
+    cancelledCount: cancelledIssues.length,
     doneTotalCount: doneIssues.length + cancelledIssues.length,
   }
 }

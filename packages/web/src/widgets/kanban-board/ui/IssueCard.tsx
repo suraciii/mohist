@@ -261,7 +261,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               {issue.blockedReason ? 'Integration Failed' : 'Integrating'}
             </span>
           )}
-          {indicator && indicator !== 'cancelled' && !isIntegrateWithFailure && (
+          {indicator && !isIntegrateWithFailure && (
             <StatusPill indicator={indicator} />
           )}
           {showArchiveButton && isDone && (
