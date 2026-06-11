@@ -372,7 +372,7 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
       current = makeInitialTurn()
     }
 
-    if (event.type === 'agent_message_chunk' || event.type === 'agent_output_chunk') {
+    if (event.type === 'agent_message_chunk' || event.type === 'agent_output_chunk' || event.type === 'agent_message') {
       const text = extractTextChunk(payload)
       if (text) {
         current = appendTextPart(current, text, counter, event.createdAt)
@@ -380,7 +380,7 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
       continue
     }
 
-    if (event.type === 'agent_thought_chunk') {
+    if (event.type === 'agent_thought_chunk' || event.type === 'agent_thought') {
       const text = extractTextChunk(payload)
       if (text) {
         current = appendReasoningPart(current, text, counter, event.createdAt)
@@ -480,13 +480,13 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
       }
     }
 
-    if (event.type === 'agent_message_chunk' || event.type === 'agent_output_chunk') {
+    if (event.type === 'agent_message_chunk' || event.type === 'agent_output_chunk' || event.type === 'agent_message') {
       const text = extractTextChunk(payload)
       if (text) current.agentText += text
       continue
     }
 
-    if (event.type === 'agent_thought_chunk') {
+    if (event.type === 'agent_thought_chunk' || event.type === 'agent_thought') {
       const text = extractTextChunk(payload)
       if (text) current.thoughtText += text
       continue
@@ -587,6 +587,7 @@ function buildCompactView(events: SessionEvent[]): SessionCompactView {
         break
       }
       case 'agent_message_chunk':
+      case 'agent_message':
       case 'agent_output_chunk': {
         messageChunkCount += 1
         if (preview === null) {
@@ -596,6 +597,10 @@ function buildCompactView(events: SessionEvent[]): SessionCompactView {
         break
       }
       case 'agent_thought_chunk': {
+        thoughtChunkCount += 1
+        break
+      }
+      case 'agent_thought': {
         thoughtChunkCount += 1
         break
       }

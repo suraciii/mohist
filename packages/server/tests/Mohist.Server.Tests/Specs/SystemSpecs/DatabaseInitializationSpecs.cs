@@ -25,6 +25,7 @@ public class DatabaseInitializationSpecs
 
         Assert.True(await TableExistsAsync(connection, "AgentSessions"));
         Assert.True(await TableExistsAsync(connection, "AgentSessionRuntimeEvents"));
+        Assert.True(await TableExistsAsync(connection, "AgentSessionTranscriptSegments"));
         Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
         Assert.True(await TableExistsAsync(connection, "OrleansQuery"));
         Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
@@ -32,6 +33,7 @@ public class DatabaseInitializationSpecs
         Assert.True(await IndexExistsAsync(connection, "IX_AgentSessions_WorkflowRunId_SessionName"));
         Assert.False(await IndexIsUniqueAsync(connection, "IX_AgentSessions_WorkflowRunId_WorkId"));
         Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionRuntimeEvents_SessionId_Sequence"));
+        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionTranscriptSegments_SessionId_Sequence"));
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
 

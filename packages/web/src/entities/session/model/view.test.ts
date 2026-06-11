@@ -135,6 +135,30 @@ describe('viewSessionEvents chat projection', () => {
     expect(textPart.completedAt).not.toBeNull()
   })
 
+  it('renders persisted transcript text segments', () => {
+    const view = viewSessionEvents([
+      makeEvent({
+        sequence: 1,
+        type: 'mohist_prompt',
+        payload: { text: 'Implement transcript aggregation', kind: 'task' },
+      }),
+      makeEvent({
+        sequence: 2,
+        type: 'agent_thought',
+        payload: { text: 'Planning the storage change' },
+      }),
+      makeEvent({
+        sequence: 3,
+        type: 'agent_message',
+        payload: { text: 'Added compact transcript segments.' },
+      }),
+    ], 'chat') as SessionChatView
+
+    const parts = view.turns[0].parts
+    expect(parts.find((p) => p.partType === 'reasoning')).toMatchObject({ text: 'Planning the storage change' })
+    expect(parts.find((p) => p.partType === 'text')).toMatchObject({ text: 'Added compact transcript segments.' })
+  })
+
   it('captures reasoning chunks in dedicated reasoning parts', () => {
     const view = viewSessionEvents(STREAM, 'chat') as SessionChatView
     const firstTurn = view.turns[0]

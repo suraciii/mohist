@@ -39,8 +39,10 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
 
 function routeTranscriptEventName(name: string): string {
   switch (name) {
+    case 'agent_message':
     case 'agent_message_chunk':
       return 'coder_text_chunk'
+    case 'agent_thought':
     case 'agent_thought_chunk':
       return 'coder_thought_chunk'
     case 'tool_call':
@@ -100,6 +102,42 @@ function readEnvelopeField(candidate: Record<string, unknown>, camelCase: string
   return candidate[camelCase] ?? candidate[pascalCase]
 }
 
+function normalizeTranscriptDetail(
+  candidate: Record<string, unknown>,
+  eventName: string,
+  innerPayload?: Record<string, unknown>,
+): Record<string, unknown> {
+  const issueNumber = readEnvelopeField(candidate, 'issueNumber', 'IssueNumber')
+    ?? readEnvelopeField(candidate, 'issueNo', 'IssueNo')
+  const agentSessionId = readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
+  const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
+  const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
+  const normalized: Record<string, unknown> = {
+    ...candidate,
+    ...(innerPayload ?? {}),
+    type: eventName,
+  }
+  if (innerPayload) {
+    normalized.payload = innerPayload
+  }
+  if (normalized.issueId === undefined && issueNumber !== undefined) {
+    normalized.issueId = String(issueNumber)
+  }
+  if (normalized.issueNumber === undefined && issueNumber !== undefined) {
+    normalized.issueNumber = issueNumber
+  }
+  if (normalized.acpSessionId === undefined) {
+    normalized.acpSessionId = agentSessionId ?? sessionId
+  }
+  if (normalized.executionId === undefined) {
+    normalized.executionId = workId
+  }
+  if (normalized.coderSessionId === undefined) {
+    normalized.coderSessionId = sessionId
+  }
+  return normalized
+}
+
 function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payload: unknown; detail: unknown } | null {
   if (!rawData || typeof rawData !== 'object') {
     return null
@@ -116,25 +154,21 @@ function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payloa
     || readEnvelopeField(candidate, 'sequence', 'Sequence') !== undefined
     || readEnvelopeField(candidate, 'createdAt', 'CreatedAt') !== undefined
   if (hasRuntimeRowMetadata && innerPayload && typeof innerPayload === 'object') {
+    const payload = innerPayload as Record<string, unknown>
     return {
       eventName,
-      payload: innerPayload,
-      detail: {
-        ...candidate,
-        ...(innerPayload as Record<string, unknown>),
-        type: eventName,
-        payload: innerPayload,
-      },
+      payload,
+      detail: normalizeTranscriptDetail(candidate, eventName, payload),
     }
   }
   return {
     eventName,
     payload: candidate,
-    detail: candidate,
+    detail: normalizeTranscriptDetail(candidate, eventName),
   }
 }
 
-export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope }
+export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName }
 
 
 function getCurrentIssueNumber(): number | null {
