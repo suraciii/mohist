@@ -916,13 +916,13 @@ function thoughtUpdate(sessionId: string, text: string) {
 function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-failed", options?: { sessionRecord?: { acpSessionId: string } }) {
   const agent = new FakeSharedAcpAgent(scenario)
   const [clientStream, agentStream] = linkedStreams()
-  let activeSessionUpdateHandler: (notification: SessionNotification) => Promise<void> = async () => {}
-  let activePermissionHandler: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse> = async () => ({ outcome: { outcome: "cancelled" } })
+  const sessionUpdateHandlers = new Map<string, (notification: SessionNotification) => Promise<void>>()
+  const permissionHandlers = new Map<string, (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>>()
   const clientConnection = new ClientSideConnection(() => ({
     sessionUpdate: async (notification) => {
-      await activeSessionUpdateHandler(notification)
+      await (sessionUpdateHandlers.get(notification.sessionId) ?? (async () => {}))(notification)
     },
-    requestPermission: async (params) => await activePermissionHandler(params),
+    requestPermission: async (params) => await (permissionHandlers.get(params.sessionId) ?? (async () => ({ outcome: { outcome: "cancelled" } } as RequestPermissionResponse)))(params),
   }), clientStream)
   const agentConnection = new AgentSideConnection(() => agent.handler(), agentStream)
   agent.bind(agentConnection)
@@ -943,13 +943,13 @@ function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-f
   const acpConnection: SharedAcpConnection = {
     connection,
     processPid: 4321,
-    setActiveHandlers(sessionUpdate, requestPermission) {
-      activeSessionUpdateHandler = sessionUpdate
-      activePermissionHandler = requestPermission
+    setSessionHandlers(sessionId, sessionUpdate, requestPermission) {
+      sessionUpdateHandlers.set(sessionId, sessionUpdate)
+      permissionHandlers.set(sessionId, requestPermission)
     },
-    clearActiveHandlers() {
-      activeSessionUpdateHandler = async () => {}
-      activePermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
+    clearSessionHandlers(sessionId) {
+      sessionUpdateHandlers.delete(sessionId)
+      permissionHandlers.delete(sessionId)
     },
     async shutdown() {},
   }
@@ -1055,14 +1055,14 @@ function createFakeProcess(agent: FakeAcpAgent): AcpProcessHandle {
 }
 
 function createSharedConnection(stream: Stream): SharedAcpConnection {
-  let activeSessionUpdateHandler: Parameters<SharedAcpConnection["setActiveHandlers"]>[0] = async () => {}
-  let activePermissionHandler: Parameters<SharedAcpConnection["setActiveHandlers"]>[1] = async () => ({ outcome: { outcome: "cancelled" } })
+  const sessionUpdateHandlers = new Map<string, Parameters<SharedAcpConnection["setSessionHandlers"]>[1]>()
+  const permissionHandlers = new Map<string, Parameters<SharedAcpConnection["setSessionHandlers"]>[2]>()
   const connection = new ClientSideConnection(
     () => ({
       sessionUpdate: async (notification) => {
-        await activeSessionUpdateHandler(notification)
+        await (sessionUpdateHandlers.get(notification.sessionId) ?? (async () => {}))(notification)
       },
-      requestPermission: async (params) => activePermissionHandler(params),
+      requestPermission: async (params) => (permissionHandlers.get(params.sessionId) ?? (async () => ({ outcome: { outcome: "cancelled" } } as RequestPermissionResponse)))(params),
     }),
     stream,
   )
@@ -1070,13 +1070,13 @@ function createSharedConnection(stream: Stream): SharedAcpConnection {
   return {
     connection,
     processPid: 12345,
-    setActiveHandlers(sessionUpdate, permission) {
-      activeSessionUpdateHandler = sessionUpdate
-      activePermissionHandler = permission
+    setSessionHandlers(sessionId, sessionUpdate, permission) {
+      sessionUpdateHandlers.set(sessionId, sessionUpdate)
+      permissionHandlers.set(sessionId, permission)
     },
-    clearActiveHandlers() {
-      activeSessionUpdateHandler = async () => {}
-      activePermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
+    clearSessionHandlers(sessionId) {
+      sessionUpdateHandlers.delete(sessionId)
+      permissionHandlers.delete(sessionId)
     },
     async shutdown() {
       await Promise.allSettled([stream.readable.cancel(), stream.writable.abort()])
