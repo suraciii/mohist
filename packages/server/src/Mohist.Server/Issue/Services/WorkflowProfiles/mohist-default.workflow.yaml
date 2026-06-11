@@ -232,6 +232,10 @@ stages:
           target: ${{ project.baseBranch }}
           strategy: squash
           message: Complete issue #${{ issue.number }}
+          conflictResolver:
+            title: Resolve merge conflicts
+            with:
+              description: "Resolve git merge conflicts, stage resolved files, and leave the merge commit to Mohist."
     checks:
       - name: health
         title: Health

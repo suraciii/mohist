@@ -128,7 +128,10 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         Assert.Equal("mohist/merge", merge.Uses);
-        Assert.Contains("mo/issue-${{ issue.number }}", JsonSerializer.Serialize(merge.With));
+        var mergeWithJson = JsonSerializer.Serialize(merge.With);
+        Assert.Contains("mo/issue-${{ issue.number }}", mergeWithJson);
+        Assert.Contains("\"conflictResolver\"", mergeWithJson);
+        Assert.Contains("Resolve merge conflicts", mergeWithJson);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

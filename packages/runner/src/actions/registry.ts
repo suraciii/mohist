@@ -1,15 +1,28 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult } from "../core/types.js"
-import { arrayInput, numberInput, stringInput } from "../core/json.js"
+import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import { arrayInput, numberInput, objectInput, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
-import { rebaseAction, rebaseStatusAction } from "./rebase.js"
-import { git } from "./git.js"
+import { applyWorkflowAgentDefault, rebaseAction, rebaseStatusAction } from "./rebase.js"
+import { git as defaultGit } from "./git.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
+type GitRunner = typeof defaultGit
+type ConflictResolverRunner = typeof acpAgentAction
+
+let git: GitRunner = defaultGit
+let mergeConflictResolverRunner: ConflictResolverRunner = acpAgentAction
+
+export function setMergeGitRunnerForTest(runner: GitRunner | null) {
+  git = runner ?? defaultGit
+}
+
+export function setMergeConflictResolverForTest(runner: ConflictResolverRunner | null) {
+  mergeConflictResolverRunner = runner ?? acpAgentAction
+}
 
 export class ActionRegistry {
   private readonly actions = new Map<string, ActionHandler>()
@@ -116,27 +129,208 @@ async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
     : mergeReadyResult(false, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBase.success ? mergeBase.stdout.trim() : null, mergeTree.combinedOutput, mergeTree.exitCode)
 }
 
-async function mergeAction(context: ActionContext): Promise<ActionResult> {
+export async function mergeAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? "HEAD"
   const target = stringInput(context.with, "target")
   const strategy = stringInput(context.with, "strategy") ?? "squash"
   const message = stringInput(context.with, "message") ?? "Mohist merge"
+  const maxRetries = numberInput(context.with, "maxConflictRetries") ?? 3
+  const conflictResolver = objectInput(context.with, "conflictResolver") ?? {}
   const mergeWorkDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
 
   const sourceCommit = await commitPendingSourceChanges(context.workDir, message, context.signal)
   if (!sourceCommit.success) return mergeFailure(source, target, strategy, sourceCommit.combinedOutput, sourceCommit.exitCode)
 
+  const existingConflicts = await mergeConflictFiles(mergeWorkDir, context.signal)
+  if (existingConflicts.length > 0) {
+    return resolveMergeConflict(context, {
+      source,
+      target,
+      strategy,
+      message,
+      mergeWorkDir,
+      initialOutput: `Existing merge conflicts detected:\n${existingConflicts.join("\n")}`,
+      initialExitCode: 1,
+      conflictResolver,
+      maxRetries,
+    })
+  }
+
   if (target?.trim()) {
     const checkout = await git(mergeWorkDir, ["checkout", target], context.signal)
-    if (!checkout.success) return mergeFailure(source, target, strategy, checkout.combinedOutput, checkout.exitCode)
+    if (!checkout.success) {
+      const checkoutConflicts = await mergeConflictFiles(mergeWorkDir, context.signal)
+      if (checkoutConflicts.length > 0) {
+        return resolveMergeConflict(context, {
+          source,
+          target,
+          strategy,
+          message,
+          mergeWorkDir,
+          initialOutput: checkout.combinedOutput,
+          initialExitCode: checkout.exitCode,
+          conflictResolver,
+          maxRetries,
+        })
+      }
+
+      return mergeFailure(source, target, strategy, checkout.combinedOutput, checkout.exitCode)
+    }
   }
 
   const result = strategy.toLowerCase() === "squash"
     ? await squashMerge(mergeWorkDir, source, target ?? "", message, context)
     : await git(mergeWorkDir, ["merge", source], context.signal)
+  if (!result.success && conflictResolver) {
+    return resolveMergeConflict(context, {
+      source,
+      target,
+      strategy,
+      message,
+      mergeWorkDir,
+      initialOutput: result.combinedOutput,
+      initialExitCode: result.exitCode,
+      conflictResolver,
+      maxRetries,
+    })
+  }
+
   const head = result.success ? await git(mergeWorkDir, ["rev-parse", "HEAD"], context.signal) : null
   const output = JSON.stringify({ kind: "merge", source, target, strategy, workDir: mergeWorkDir, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: result.combinedOutput })
   return result.success ? { status: "success", message: "Merge completed", output, exitCode: result.exitCode } : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
+}
+
+async function resolveMergeConflict(
+  context: ActionContext,
+  input: {
+    source: string
+    target?: string
+    strategy: string
+    message: string
+    mergeWorkDir: string
+    initialOutput: string
+    initialExitCode: number
+    conflictResolver: JsonObject
+    maxRetries: number
+  },
+): Promise<ActionResult> {
+  let conflicts = await mergeConflictFiles(input.mergeWorkDir, context.signal)
+  if (conflicts.length === 0) {
+    return mergeFailure(input.source, input.target, input.strategy, input.initialOutput, input.initialExitCode)
+  }
+
+  const allConflicts: string[][] = [conflicts]
+  const outputs: string[] = [input.initialOutput]
+  let attempts = 0
+
+  while (attempts < input.maxRetries) {
+    attempts++
+    const agentResult = await runMergeConflictResolver(context, input.conflictResolver, input.mergeWorkDir, input.source, input.target, conflicts, attempts)
+    if (agentResult.output) outputs.push(agentResult.output)
+    if (agentResult.status !== "success") {
+      return mergeConflictFailure(input, conflicts, attempts, outputs, agentResult.exitCode ?? 1)
+    }
+
+    conflicts = await mergeConflictFiles(input.mergeWorkDir, context.signal)
+    if (conflicts.length > 0) {
+      allConflicts.push(conflicts)
+      continue
+    }
+
+    const finish = input.strategy.toLowerCase() === "squash"
+      ? await finishSquashMerge(input.mergeWorkDir, input.source, input.target ?? "", input.message, context)
+      : await finishRegularMerge(input.mergeWorkDir, input.message, context.signal)
+    outputs.push(finish.combinedOutput)
+    const head = finish.success ? await git(input.mergeWorkDir, ["rev-parse", "HEAD"], context.signal) : null
+    if (head?.combinedOutput) outputs.push(head.combinedOutput)
+    const output = JSON.stringify({
+      kind: "merge",
+      source: input.source,
+      target: input.target,
+      strategy: input.strategy,
+      workDir: input.mergeWorkDir,
+      commit: head?.success ? head.stdout.trim() : null,
+      conflicts: allConflicts.flat(),
+      resolveAttempts: attempts,
+      output: combinedGitOutput(outputs),
+    })
+    return finish.success
+      ? { status: "success", message: "Merge completed", output, exitCode: finish.exitCode }
+      : { status: "failure", message: finish.combinedOutput, output, exitCode: finish.exitCode }
+  }
+
+  return mergeConflictFailure(input, allConflicts.flat(), attempts, outputs, 1)
+}
+
+async function runMergeConflictResolver(
+  context: ActionContext,
+  conflictResolver: JsonObject,
+  mergeWorkDir: string,
+  source: string,
+  target: string | undefined,
+  conflicts: string[],
+  attempt: number,
+): Promise<ActionResult> {
+  const resolverWith: JsonObject = {
+    prompt: buildMergeConflictPrompt(conflicts, source, target, attempt),
+    ...objectInput(conflictResolver, "with"),
+  }
+  applyWorkflowAgentDefault(resolverWith, context.variables)
+
+  return mergeConflictResolverRunner({
+    ...context,
+    workDir: mergeWorkDir,
+    workId: `${context.workId}-conflict-resolve-${attempt}`,
+    workType: "task",
+    title: stringInput(conflictResolver, "title") ?? "Resolve merge conflicts",
+    with: resolverWith,
+  })
+}
+
+function buildMergeConflictPrompt(conflicts: string[], source: string, target: string | undefined, attempt: number) {
+  const fileList = conflicts.map((f) => `- ${f}`).join("\n")
+  return [
+    `## Complete Git Merge Conflict Resolution (attempt ${attempt})`,
+    "",
+    `A merge from \`${source}\`${target ? ` into \`${target}\`` : ""} produced conflicts.`,
+    "",
+    "Current conflict files:",
+    fileList,
+    "",
+    "Resolution rules:",
+    "1. Preserve both sides. Never drop or overwrite either side's intentional changes.",
+    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>`; no markers may remain.",
+    "3. Stage resolved files with `git add`.",
+    "4. Do not create the merge commit. The runner will commit after verifying the conflict is resolved.",
+    "5. If verification fails because of your resolution, fix it before finishing.",
+  ].join("\n")
+}
+
+async function mergeConflictFiles(workDir: string, signal: AbortSignal) {
+  const status = await git(workDir, ["diff", "--name-only", "--diff-filter=U"], signal)
+  if (!status.success || !status.stdout.trim()) return []
+  return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
+}
+
+function mergeConflictFailure(
+  input: { source: string; target?: string; strategy: string; mergeWorkDir: string },
+  conflicts: string[],
+  attempts: number,
+  outputs: string[],
+  exitCode: number,
+): ActionResult {
+  const output = JSON.stringify({
+    kind: "merge",
+    source: input.source,
+    target: input.target,
+    strategy: input.strategy,
+    workDir: input.mergeWorkDir,
+    commit: null,
+    conflicts,
+    resolveAttempts: attempts,
+    output: combinedGitOutput(outputs),
+  })
+  return { status: "failure", message: combinedGitOutput(outputs), output, exitCode }
 }
 
 function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null): ActionResult {
@@ -155,7 +349,10 @@ async function commitPendingSourceChanges(workDir: string, message: string, sign
 async function squashMerge(workDir: string, source: string, target: string, message: string, context: ActionContext) {
   const merge = await git(workDir, ["merge", "--squash", source], context.signal)
   if (!merge.success) return merge
+  return finishSquashMerge(workDir, source, target, message, context)
+}
 
+async function finishSquashMerge(workDir: string, source: string, target: string, message: string, context: ActionContext) {
   const title = stringAt(context.variables, ["issue", "title"]) ?? message
   const numberStr = typeof context.issueNumber === "number" && context.issueNumber > 0
     ? String(context.issueNumber)
@@ -170,6 +367,10 @@ async function squashMerge(workDir: string, source: string, target: string, mess
     : await git(workDir, ["commit", "-m", header], context.signal)
 }
 
+async function finishRegularMerge(workDir: string, message: string, signal: AbortSignal) {
+  return await git(workDir, ["commit", "-m", message], signal)
+}
+
 function mergeFailure(source: string, target: string | undefined, strategy: string, outputText: string, exitCode: number): ActionResult {
   return { status: "failure", message: outputText, output: JSON.stringify({ kind: "merge", source, target, strategy, commit: null, output: outputText }), exitCode }
 }
@@ -180,6 +381,10 @@ function firstLine(value: string) {
 
 function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
+}
+
+function combinedGitOutput(outputs: string[]) {
+  return outputs.map((output) => output.trim()).filter(Boolean).join("\n\n")
 }
 
 function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
