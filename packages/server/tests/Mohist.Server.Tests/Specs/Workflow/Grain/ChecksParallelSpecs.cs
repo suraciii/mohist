@@ -99,7 +99,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("CheckUnrepaired", status.Failure.Reason);
         Assert.Equal("lint", status.Failure.CheckName);
@@ -155,7 +155,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("typecheck", status.Failure.CheckName);
     }
@@ -222,7 +222,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        Assert.Equal("running", status.Status);
         Assert.Null(status.Failure);
 
         await ReportAsync(r3, repair.WorkId, "completed");

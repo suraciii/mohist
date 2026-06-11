@@ -198,7 +198,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal("failed", status.Status);
         Assert.Null(status.PendingWork);
         var build = Assert.Single(status.Stages);
         Assert.DoesNotContain(build.Tasks, t => t.Id.StartsWith("fix-check:3."));
@@ -237,9 +237,9 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("fix-check:3.1", manualFix.WorkId);
         Assert.Equal("spec/fix", manualFix.Uses);
 
-        var status = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status2 = await GetQuerier().GetStatusAsync(_workflowId!);
+        Assert.NotNull(status2);
+        Assert.Equal("running", status2.Status);
 
         await using var db = new MohistDbContext(
             new DbContextOptionsBuilder<MohistDbContext>()

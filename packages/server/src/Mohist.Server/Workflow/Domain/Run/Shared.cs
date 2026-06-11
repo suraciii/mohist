@@ -2,7 +2,7 @@ using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum FailureReason { TaskFailed, CheckUnrepaired, ApprovalRejected, LeaseExpired }
+public enum FailureReason { TaskFailed, CheckUnrepaired, ApprovalRejected }
 
 public sealed record FailureDetails(
     FailureReason Reason,

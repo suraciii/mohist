@@ -337,14 +337,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (check, checkRunnerId) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(checkRunnerId, check, "check-1");
         var awaiting = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.Equal("AwaitingApproval", awaiting!.Status);
-        Assert.Equal("Passed", awaiting.Stages[0].Checks[0].Status);
+        Assert.Equal("awaiting-approval", awaiting!.Status);
+        Assert.Equal("passed", awaiting.Stages[0].Checks[0].Status);
 
         await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
 
         var afterAdd = await GetQuerier().GetStatusAsync(_workflowId!);
-        Assert.Equal("Running", afterAdd!.Status);
-        Assert.Equal("Pending", afterAdd.Stages[0].Checks[0].Status);
+        Assert.Equal("running", afterAdd!.Status);
+        Assert.Equal("pending", afterAdd.Stages[0].Checks[0].Status);
 
         var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
         Assert.StartsWith("rebase.", rebase.WorkId);

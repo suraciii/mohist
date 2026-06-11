@@ -233,13 +233,13 @@ public class IssueQuerier
         if (userTasks.Count == 0) return null;
 
         var total = userTasks.Count;
-        var completed = userTasks.Count(t => t.Status == "Completed");
-        var running = userTasks.Count(t => t.Status == "Running");
-        var failed = userTasks.Count(t => t.Status == "Failed");
+        var completed = userTasks.Count(t => t.Status == "completed");
+        var running = userTasks.Count(t => t.Status == "running");
+        var failed = userTasks.Count(t => t.Status == "failed");
 
         if (total == 0) return null;
 
-        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "Running" or "Pending")?.Title;
+        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "running" or "pending")?.Title;
 
         return new WorkflowStageProgress(
             status.CurrentStage!,
@@ -252,17 +252,15 @@ public class IssueQuerier
 
     private static bool IsNonMeaningfulProgressState(WorkflowStatusView status)
     {
-        if (status.Status is "Completed" or "Failed" or "AwaitingApproval" or "Paused")
+        if (status.Status is "completed" or "failed" or "awaiting-approval" or "paused")
             return true;
 
         var currentStage = status.Stages.FirstOrDefault(s => s.Stage == status.CurrentStage);
         if (currentStage is null)
             return true;
 
-        // Approval-only waiting should be omitted from the board API even if the run-level status
-        // still looks active after projection/materialization.
         return currentStage.ApprovalStatus is { Result: null }
-            || (currentStage.Tasks.All(t => t.Status == "Completed") && currentStage.Checks.All(c => c.Status == "Completed"));
+            || (currentStage.Tasks.All(t => t.Status == "completed") && currentStage.Checks.All(c => c.Status == "completed"));
     }
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)

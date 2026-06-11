@@ -79,7 +79,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         Assert.NotNull(buildStage);
         var task1 = buildStage.Tasks.Find(t => t.Id == "task-1.1");
         Assert.NotNull(task1);
-        Assert.Equal("Failed", task1.Status);
+        Assert.Equal("failed", task1.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -96,7 +96,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        Assert.Equal("running", status.Status);
         Assert.Null(status.Failure);
         var buildStage = Assert.Single(status.Stages, s => s.Stage == "build");
         Assert.Null(buildStage.Failure);
@@ -213,7 +213,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("ApprovalRejected", status.Failure.Reason);
 
@@ -305,7 +305,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("TaskFailed", status.Failure.Reason);
         Assert.Equal("task-1.1", status.Failure.TaskId);
@@ -334,7 +334,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        Assert.Equal("failed", status.Status);
         Assert.NotNull(status.Failure);
         Assert.Equal("CheckUnrepaired", status.Failure.Reason);
         Assert.Equal("check-1", status.Failure.CheckName);
@@ -361,7 +361,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("AwaitingApproval", status.Status);
+        Assert.Equal("awaiting-approval", status.Status);
 
         var approveAction = status.AvailableActions.Find(a => a.Name == "approve");
         Assert.NotNull(approveAction);
@@ -380,7 +380,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        Assert.Equal("running", status.Status);
 
         var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
         Assert.Null(retryAction);

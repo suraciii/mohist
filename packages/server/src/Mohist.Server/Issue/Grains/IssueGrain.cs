@@ -112,6 +112,12 @@ public class IssueGrain : Grain, IIssueGrain
         if (!eligibility.Startable)
             throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
 
+        await EnsureNoActiveWorkflowAsync();
+        return await StartWorkflowAsync(project);
+    }
+
+    private async Task<string> StartWorkflowAsync(WorkflowProjectContext? project)
+    {
         var issue = _issue!;
 
         var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(issue));
@@ -160,6 +166,52 @@ public class IssueGrain : Grain, IIssueGrain
         return wrId;
     }
 
+    private async Task EnsureNoActiveWorkflowAsync()
+    {
+        var issue = _issue!;
+        var activeWorkflowRunId = issue.ActiveWorkflowRunId;
+        if (activeWorkflowRunId is null) return;
+
+        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(activeWorkflowRunId);
+        try
+        {
+            if (!await workflow.IsStoppedOrTerminalAsync())
+                await workflow.StopAsync("issue-start-workflow");
+        }
+        catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
+        {
+            _log.LogWarning(ex,
+                "Issue {IssueId} active workflow {WorkflowRunId} cannot be loaded while starting a new workflow; clearing active workflow reference",
+                issue.Id,
+                activeWorkflowRunId);
+        }
+
+        try
+        {
+            if (!await workflow.IsStoppedOrTerminalAsync())
+                throw new InvalidOperationException($"Issue #{issue.Number} already has active workflow {activeWorkflowRunId}");
+        }
+        catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
+        {
+            // The old run cannot be resumed or stopped through the domain model.
+            // Treat it as historical state and let Start Workflow create a new run.
+        }
+
+        issue.ClearStoppedWorkflow(activeWorkflowRunId);
+    }
+
+    private static bool IsWorkflowRunStateCorruption(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current is InvalidOperationException
+                && current.Message.Contains("Failed to deserialize workflow run state", StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     private static WorkflowProjectContext BuildWorkflowProjectContext(
         Domain.Issue issue,
         WorkflowProjectContext? overrideContext,
@@ -192,7 +244,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue!.ActiveWorkflowRunId is { } wrId)
         {
             var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
-            if (wfStatus?.Status is "Running" or "Paused" or "AwaitingApproval")
+            if (wfStatus?.Status is "running" or "paused" or "awaiting-approval")
                 throw new InvalidOperationException($"Cannot close issue while workflow is {wfStatus.Status}. Stop the workflow first.");
         }
         _issue.Close("user-cancelled");
@@ -276,7 +328,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue.Status != Domain.IssueStatus.InProgress) return;
         if (_issue.ActiveWorkflowRunId != workflowRunId) return;
 
-        if (wfStatus.Status == "Completed")
+        if (wfStatus.Status == "completed")
             await CompleteWorkAsync(workflowRunId);
     }
 

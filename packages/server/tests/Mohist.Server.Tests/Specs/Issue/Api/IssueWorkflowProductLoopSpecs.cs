@@ -65,7 +65,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
         var planStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var planStage = Assert.Single(planStatus.Workflow!.Stages, s => s.Stage == "plan");
-        Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "Completed");
+        Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "completed");
         Assert.Null(planStage.ApprovalStatus?.Result);
 
         var planEvents = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
@@ -75,7 +75,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.Equal("in_progress", listedAtApproval.Status);
         Assert.Equal("plan", listedAtApproval.WorkflowStage);
-        Assert.Equal("AwaitingApproval", listedAtApproval.WorkflowStatus);
+        Assert.Equal("awaiting-approval", listedAtApproval.WorkflowStatus);
         Assert.Equal("attention", listedAtApproval.Health);
         Assert.Equal("review_required", listedAtApproval.Attention?.Reason);
         Assert.Equal("awaiting", listedAtApproval.ApprovalState?.Status);
@@ -291,7 +291,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         for (var i = 0; i < 100; i++)
         {
             var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
-            if (status.Workflow?.Status == "AwaitingApproval" && status.Workflow.CurrentStage == stage)
+            if (status.Workflow?.Status == "awaiting-approval" && status.Workflow.CurrentStage == stage)
                 return;
             await CompleteNextWorkAsync();
         }
@@ -304,7 +304,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         for (var i = 0; i < 100; i++)
         {
             var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
-            if (status.Workflow?.Status == "Completed")
+            if (status.Workflow?.Status == "completed")
                 return;
             await CompleteNextWorkAsync();
         }

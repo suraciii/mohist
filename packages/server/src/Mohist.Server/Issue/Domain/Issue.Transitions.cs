@@ -72,6 +72,13 @@ public sealed partial class Issue
         RecordEvent(new IssueWorkStarted(wrId));
     }
 
+    public void ClearStoppedWorkflow(string workflowRunId, DateTime? now = null)
+    {
+        if (_activeWorkflowRunId != workflowRunId) return;
+        _activeWorkflowRunId = null;
+        Touch(now);
+    }
+
     public bool Complete(string workflowRunId, DateTime? now = null)
     {
         if (_activeWorkflowRunId != workflowRunId) return false;
