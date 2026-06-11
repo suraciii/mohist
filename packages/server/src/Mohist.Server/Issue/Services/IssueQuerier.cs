@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -285,6 +286,15 @@ public class IssueQuerier
             }
         }
 
+        var profileRows = await db.IssueWorkflowProfiles.AsNoTracking()
+            .Where(profile => issueIds.Contains(profile.IssueId))
+            .ToListAsync();
+        foreach (var profile in profileRows)
+        {
+            if (!byId.TryGetValue(profile.IssueId, out var issue)) continue;
+            ApplyIssueWorkflowVariables(issue, profile.Variables);
+        }
+
         var persistedRows = await db.IssuePrerequisites.AsNoTracking()
             .Where(p => p.ProjectId == projectId && numbers.Contains(p.IssueNumber))
             .ToListAsync();
@@ -360,6 +370,51 @@ public class IssueQuerier
 
     public static IssueCommentDto ToCommentDto(IssueCommentRow comment) =>
         new(comment.Id, comment.IssueId, comment.Body, comment.CreatedAt.ToString("o"));
+
+    private static void ApplyIssueWorkflowVariables(IssueReadModel issue, string? variablesJson)
+    {
+        var bundle = VariableBundle.FromJson(variablesJson);
+        var agentConfig = ReadAgentConfig(bundle.Vars);
+        issue.AgentConfig = agentConfig;
+        issue.Model = ReadAgentModel(agentConfig);
+
+        if (bundle.Stages is null || bundle.Stages.Count == 0)
+        {
+            issue.StageModels = null;
+            return;
+        }
+
+        var stageModels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (stage, variables) in bundle.Stages)
+        {
+            var model = ReadAgentModel(ReadAgentConfig(variables.Vars));
+            if (!string.IsNullOrWhiteSpace(model))
+                stageModels[stage] = model;
+        }
+
+        issue.StageModels = stageModels.Count > 0 ? stageModels : null;
+    }
+
+    private static Dictionary<string, object?>? ReadAgentConfig(JsonElement? vars)
+    {
+        if (!vars.HasValue || vars.Value.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!vars.Value.TryGetProperty("agent", out var agent) || agent.ValueKind != JsonValueKind.Object)
+            return null;
+
+        return JsonSerializer.Deserialize<Dictionary<string, object?>>(agent.GetRawText(), RunJsonOptions);
+    }
+
+    private static string? ReadAgentModel(Dictionary<string, object?>? agentConfig)
+    {
+        if (agentConfig is null || !agentConfig.TryGetValue("model", out var raw) || raw is null)
+            return null;
+        if (raw is string model)
+            return string.IsNullOrWhiteSpace(model) ? null : model;
+        if (raw is JsonElement { ValueKind: JsonValueKind.String } element)
+            return element.GetString();
+        return null;
+    }
 
     private static WorkflowRun? DeserializeRun(string json)
     {
