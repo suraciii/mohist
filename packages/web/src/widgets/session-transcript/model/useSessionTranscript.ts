@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../../../entities/agent'
-import type { SessionTurn, SessionPart, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../../../entities/coder-session'
-import type { SessionEvent, SessionChatPart } from '../../../entities/session/model/view'
-import { viewSessionEvents } from '../../../entities/session/model/view'
+import type { AgentDetailEventMap } from '../../../entities/agent'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, PromptKind } from '../../../entities/coder-session'
 import { parseEditInput, parsePatchOperations, parseJsonSafely } from './transcript-tool-utils'
 import {
   normalizeToolName,
@@ -19,7 +18,6 @@ interface UseSessionTranscriptOptions {
   sessionId: string
   acpSessionId: string
   initialTurns?: SessionTurn[]
-  initialEvents?: SessionEvent[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
   isRunning: boolean
 }
@@ -62,95 +60,6 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 11)
 }
 
-function isSessionChatPart(part: unknown): part is SessionChatPart {
-  if (!part || typeof part !== 'object') return false
-  const candidate = part as { partType?: unknown }
-  return candidate.partType === 'text'
-    || candidate.partType === 'reasoning'
-    || candidate.partType === 'tool'
-    || candidate.partType === 'error'
-}
-
-function chatPartToAssistantPart(
-  part: SessionChatPart,
-): SessionPart {
-  if (part.partType === 'text') {
-    const textPart: TextPart = {
-      id: part.id,
-      type: 'text',
-      text: part.text,
-      startedAt: part.startedAt,
-      completedAt: part.completedAt,
-    }
-    return textPart
-  }
-  if (part.partType === 'reasoning') {
-    const reasoningPart: ReasoningPart = {
-      id: part.id,
-      type: 'reasoning',
-      text: part.text,
-      startedAt: part.startedAt,
-      completedAt: part.completedAt,
-    }
-    return reasoningPart
-  }
-  if (part.partType === 'error') {
-    const errorPart: ErrorPart = {
-      id: part.id,
-      type: 'error',
-      message: part.message,
-      kind: part.kind,
-      at: part.at,
-    }
-    return errorPart
-  }
-  const toolInput = part.input
-  const toolOutput = part.output
-  const tool: ToolPart['tool'] = {
-    toolCallId: part.toolCallId,
-    normalizedName: part.normalizedName,
-    toolName: part.toolName,
-    status: part.status,
-    title: part.title,
-    input: toolInput,
-    output: toolOutput,
-    error: part.error,
-    startedAt: part.startedAt,
-    completedAt: part.completedAt,
-    rawInput: toolInput,
-    rawOutput: toolOutput,
-  }
-  const toolPart: ToolPart = { id: part.id, type: 'tool', tool }
-  return toolPart
-}
-
-function projectHistoricalEvents(events: SessionEvent[]): SessionTurn[] {
-  if (events.length === 0) return []
-  const chat = viewSessionEvents(events, 'chat')
-  return chat.turns.map((turn, index) => {
-    const assistant: SessionPart[] = []
-    for (const part of turn.parts) {
-      if (isSessionChatPart(part)) {
-        assistant.push(chatPartToAssistantPart(part))
-      }
-    }
-    const projected: SessionTurn = {
-      id: turn.id || `turn-${index}`,
-      startedAt: turn.startedAt,
-      completedAt: turn.completedAt,
-      incomplete: turn.incomplete,
-      user: {
-        role: 'mohist',
-        text: turn.prompt.text,
-        kind: turn.prompt.kind,
-        sentAt: turn.prompt.sentAt,
-      },
-      assistant,
-    }
-    return projected
-  })
-}
-
 function createTextPart(text: string, startedAt: string): TextPart {
   return { id: generateId(), type: 'text', text, startedAt, completedAt: null }
 }
@@ -161,6 +70,19 @@ function createReasoningPart(text: string, startedAt: string): ReasoningPart {
 
 function createErrorPart(message: string, kind: ErrorPart['kind'], at: string): ErrorPart {
   return { id: generateId(), type: 'error', message, kind, at }
+}
+
+function normalizePromptKind(kind?: string): PromptKind {
+  switch (kind) {
+    case 'initial':
+    case 'task':
+    case 'retry':
+    case 'followup':
+    case 'recovery':
+      return kind
+    default:
+      return 'legacy-missing'
+  }
 }
 
 function createToolPart(tool: LiveToolCall): ToolPart {
@@ -236,8 +158,82 @@ function createTemporaryTurn(at: string): SessionTurn {
   }
 }
 
+function createInputTurn(detail: {
+  text: string
+  kind?: string
+  sentAt?: string
+}): SessionTurn {
+  const sentAt = detail.sentAt ?? new Date().toISOString()
+  return {
+    id: `live-${generateId()}`,
+    startedAt: sentAt,
+    completedAt: null,
+    incomplete: true,
+    user: {
+      role: 'mohist',
+      text: detail.text,
+      kind: normalizePromptKind(detail.kind),
+      sentAt,
+    },
+    assistant: [],
+  }
+}
+
 function ensureLiveTurn(turns: SessionTurn[], at: string): SessionTurn[] {
   return turns.length > 0 ? [...turns] : [createTemporaryTurn(at)]
+}
+
+function appendInputTurn(turns: SessionTurn[], detail: { text: string; kind?: string; sentAt?: string }): SessionTurn[] {
+  const next = [...turns]
+  const sentAt = detail.sentAt ?? new Date().toISOString()
+  const lastTurn = next[next.length - 1]
+  if (
+    lastTurn
+    && lastTurn.user.text === detail.text
+    && lastTurn.assistant.length === 0
+    && lastTurn.completedAt === null
+  ) {
+    next[next.length - 1] = {
+      ...lastTurn,
+      startedAt: lastTurn.startedAt ?? sentAt,
+      user: {
+        ...lastTurn.user,
+        kind: detail.kind ? normalizePromptKind(detail.kind) : lastTurn.user.kind,
+        sentAt,
+      },
+    }
+    return next
+  }
+  if (lastTurn && lastTurn.completedAt === null && lastTurn.assistant.length > 0) {
+    next[next.length - 1] = {
+      ...lastTurn,
+      completedAt: sentAt,
+      incomplete: false,
+    }
+  }
+  next.push(createInputTurn({ ...detail, sentAt }))
+  return next
+}
+
+function closeLatestTurn(turns: SessionTurn[], completedAt: string): SessionTurn[] {
+  const next = ensureLiveTurn(turns, completedAt)
+  const lastTurn = next[next.length - 1]
+  const closedAssistant = lastTurn.assistant.map((part) => {
+    if (part.type === 'text' && part.completedAt === null) {
+      return { ...part, completedAt }
+    }
+    if (part.type === 'reasoning' && part.completedAt === null) {
+      return { ...part, completedAt }
+    }
+    return part
+  })
+  next[next.length - 1] = {
+    ...lastTurn,
+    assistant: closedAssistant,
+    completedAt,
+    incomplete: false,
+  }
+  return next
 }
 
 function appendTextToTurn(turn: SessionTurn, text: string): SessionTurn {
@@ -301,7 +297,7 @@ function findToolByCorrelation(
 ): number {
   return turn.assistant.findIndex((p): p is ToolPart => {
     if (p.type !== 'tool') return false
-    if (toolCallId && p.tool.toolCallId === toolCallId) return false
+    if (toolCallId && p.tool.toolCallId && p.tool.toolCallId !== toolCallId) return false
     const toolNormalized = normalizeToolName(p.tool.toolName, p.tool.title, p.tool.rawInput, p.tool.rawOutput)
     if (toolNormalized !== normalizedName) return false
     if (isTerminalState(p.tool.status)) return false
@@ -620,15 +616,11 @@ export function useSessionTranscript({
   sessionId,
   acpSessionId,
   initialTurns,
-  initialEvents,
   sessionQueryKeys,
   isRunning,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
   const initialState = useMemo<SessionTurn[]>(() => {
-    if (initialEvents && initialEvents.length > 0) {
-      return projectHistoricalEvents(initialEvents)
-    }
     return initialTurns ?? []
   }, [])
   const [turns, setTurns] = useState<SessionTurn[]>(initialState)
@@ -706,11 +698,7 @@ export function useSessionTranscript({
     if (hasLiveTailRef.current && isRunning) {
       return
     }
-    if (initialEvents && initialEvents.length > 0) {
-      setTurns(projectHistoricalEvents(initialEvents))
-    } else {
-      setTurns(initialTurns ?? [])
-    }
+    setTurns(initialTurns ?? [])
     hasLiveTailRef.current = false
     liveToolCallMapRef.current.clear()
     pendingCorrelationRef.current.clear()
@@ -718,7 +706,7 @@ export function useSessionTranscript({
     setIsThinking(false)
     setIsStreaming(false)
     setTranscriptVersion((version) => version + 1)
-  }, [initialEvents, initialTurns, isRunning])
+  }, [initialTurns, isRunning])
 
   useEffect(() => {
     if (!isRunning) {
@@ -738,9 +726,169 @@ export function useSessionTranscript({
 
     mountedRef.current = true
     const unsubs: Array<() => void> = []
+    const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
+      if (detail.issueId !== issueId || !mountedRef.current) return
+      if (detail.acpSessionId !== acpSessionId) return
+
+      hasLiveTailRef.current = true
+      const now = new Date().toISOString()
+      const toolCallId = detail.toolCallId
+      const normalizedName = getNormalizedName(detail)
+      const pendingCorrelation = pendingCorrelationRef.current.get(toolCallId)
+      const target = deriveToolTarget(detail.toolName, detail.rawInput, detail.title) ?? pendingCorrelation?.target
+      const correlationKey = getCorrelationKey(detail.toolName, detail.title, target)
+      const metadata = detail.metadata ?? detail.rawOutputMetadata
+      const detailsMetadata = asRecord(metadata)
+      const liveDetails = detail.details ?? buildLiveToolDetails(normalizedName, detail.rawInput, detail.rawOutput, detailsMetadata ?? undefined)
+      const { displayTitle, displaySubtitle } = getDisplayFields(detail)
+
+      if (detail.state === 'started') {
+        liveToolCallMapRef.current.set(toolCallId, {
+          toolCallId,
+          toolName: detail.toolName,
+          normalizedName,
+          displayTitle,
+          displaySubtitle,
+          category: detail.category,
+          status: 'started',
+          title: detail.title,
+          target,
+          input: stringifyPayload(detail.rawInput),
+          output: stringifyPayload(detail.rawOutput),
+          error: '',
+          rawInput: detail.rawInput,
+          rawOutput: detail.rawOutput,
+          metadata: detailsMetadata ?? undefined,
+          details: liveDetails,
+          startedAt: now,
+          completedAt: null,
+        })
+
+        pendingCorrelationRef.current.set(toolCallId, { normalizedName, target, turnIndex: -1 })
+
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
+            toolName: detail.toolName,
+            normalizedName,
+            displayTitle,
+            displaySubtitle,
+            category: detail.category,
+            status: 'started',
+            title: detail.title,
+            target,
+            input: stringifyPayload(detail.rawInput),
+            output: stringifyPayload(detail.rawOutput),
+            rawInput: detail.rawInput,
+            rawOutput: detail.rawOutput,
+            metadata: detailsMetadata ?? undefined,
+            details: liveDetails,
+            startedAt: now,
+          }, correlationKey)
+          return next
+        })
+        setIsThinking(false)
+        markNewContentRef.current()
+        return
+      }
+
+      if (!isTerminalState(detail.state)) {
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
+            status: detail.state as LiveToolCall['status'],
+            toolName: detail.toolName,
+            normalizedName,
+            displayTitle,
+            displaySubtitle,
+            category: detail.category,
+            title: detail.title,
+            target,
+            input: stringifyPayload(detail.rawInput),
+            output: stringifyPayload(detail.rawOutput),
+            rawInput: detail.rawInput,
+            rawOutput: detail.rawOutput,
+            metadata: detailsMetadata ?? undefined,
+            details: liveDetails,
+          }, correlationKey)
+          return next
+        })
+        setIsThinking(false)
+        markNewContentRef.current()
+        return
+      }
+
+      const existing = liveToolCallMapRef.current.get(toolCallId)
+      if (existing) {
+        existing.status = detail.state as LiveToolCall['status']
+        existing.normalizedName = normalizedName
+        existing.displayTitle = displayTitle
+        existing.displaySubtitle = displaySubtitle
+        existing.category = detail.category ?? existing.category
+        existing.input = stringifyPayload(detail.rawInput) ?? existing.input
+        existing.output = stringifyPayload(detail.rawOutput)
+        existing.rawInput = detail.rawInput ?? existing.rawInput
+        existing.rawOutput = detail.rawOutput
+        existing.metadata = detailsMetadata ?? existing.metadata
+        existing.details = liveDetails ?? existing.details
+        existing.completedAt = now
+        existing.error = detail.state === 'failed'
+          ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed'))
+          : existing.error
+      }
+
+      setTurns((prev) => {
+        const next = ensureLiveTurn(prev, now)
+        const lastTurn = next[next.length - 1]
+        const error = detail.state === 'failed'
+          ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed'))
+          : undefined
+        next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
+          status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
+          toolName: detail.toolName,
+          normalizedName,
+          displayTitle,
+          displaySubtitle,
+          category: detail.category,
+          title: detail.title,
+          target,
+          input: stringifyPayload(detail.rawInput),
+          output: stringifyPayload(detail.rawOutput),
+          rawInput: detail.rawInput,
+          rawOutput: detail.rawOutput,
+          metadata: detailsMetadata ?? undefined,
+          details: liveDetails,
+          completedAt: now,
+          error,
+        }, correlationKey)
+        return next
+      })
+      liveToolCallMapRef.current.delete(toolCallId)
+      pendingCorrelationRef.current.delete(toolCallId)
+      markNewContentRef.current()
+      invalidateAndRefetch()
+    }
 
     unsubs.push(
-      onAgentEvent('coder_text_chunk', (detail) => {
+      onAgentEvent('session.input', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.acpSessionId !== acpSessionId) return
+
+        hasLiveTailRef.current = true
+        setTurns((prev) => appendInputTurn(prev, {
+          text: detail.text,
+          kind: detail.kind,
+          sentAt: detail.sentAt,
+        }))
+        setIsThinking(true)
+        markNewContentRef.current()
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('message.delta', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
@@ -758,7 +906,7 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('coder_thought_chunk', (detail) => {
+      onAgentEvent('reasoning.delta', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
@@ -778,218 +926,45 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('coder_tool_call', (detail) => {
+      onAgentEvent('tool_call.started', handleToolDetail),
+    )
+
+    unsubs.push(
+      onAgentEvent('tool_call.updated', handleToolDetail),
+    )
+
+    unsubs.push(
+      onAgentEvent('tool_call.completed', handleToolDetail),
+    )
+
+    unsubs.push(
+      onAgentEvent('session.closed', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 
         hasLiveTailRef.current = true
         const now = new Date().toISOString()
-        const toolCallId = detail.toolCallId
-        const normalizedName = getNormalizedName(detail)
-        const pendingCorrelation = pendingCorrelationRef.current.get(toolCallId)
-        const target = deriveToolTarget(detail.toolName, detail.rawInput, detail.title) ?? pendingCorrelation?.target
-        const correlationKey = getCorrelationKey(detail.toolName, detail.title, target)
-        const metadata = detail.metadata ?? detail.rawOutputMetadata
-        const detailsMetadata = asRecord(metadata)
-        const liveDetails = detail.details ?? buildLiveToolDetails(normalizedName, detail.rawInput, detail.rawOutput, detailsMetadata ?? undefined)
-        const { displayTitle, displaySubtitle } = getDisplayFields(detail)
+        setTurns((prev) => closeLatestTurn(prev, now))
 
-        if (detail.state === 'started') {
-          liveToolCallMapRef.current.set(toolCallId, {
-            toolCallId,
-            toolName: detail.toolName,
-            normalizedName,
-            displayTitle,
-            displaySubtitle,
-            category: detail.category,
-            status: 'started',
-            title: detail.title,
-            target,
-            input: stringifyPayload(detail.rawInput),
-            output: stringifyPayload(detail.rawOutput),
-            error: '',
-            rawInput: detail.rawInput,
-            rawOutput: detail.rawOutput,
-            metadata: detailsMetadata ?? undefined,
-            details: liveDetails,
-            startedAt: now,
-            completedAt: null,
-          })
-
-          pendingCorrelationRef.current.set(toolCallId, { normalizedName, target, turnIndex: -1 })
-
+        if (detail.status === 'failed' || detail.status === 'cancelled') {
+          const errorPart = createErrorPart(
+            detail.failureReason ?? `Session ${detail.status}`,
+            detail.status === 'cancelled' ? 'cancelled' : 'failed',
+            now,
+          )
           setTurns((prev) => {
             const next = ensureLiveTurn(prev, now)
             const lastTurn = next[next.length - 1]
-            next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-              toolName: detail.toolName,
-              normalizedName,
-              displayTitle,
-              displaySubtitle,
-              category: detail.category,
-              status: 'started',
-              title: detail.title,
-              target,
-              input: stringifyPayload(detail.rawInput),
-              output: stringifyPayload(detail.rawOutput),
-              rawInput: detail.rawInput,
-              rawOutput: detail.rawOutput,
-              metadata: detailsMetadata ?? undefined,
-              details: liveDetails,
-              startedAt: now,
-            }, correlationKey)
+            next[next.length - 1] = {
+              ...lastTurn,
+              assistant: [...lastTurn.assistant, errorPart],
+            }
             return next
           })
-          setIsThinking(false)
-          markNewContentRef.current()
-        } else if (isTerminalState(detail.state)) {
-          const existing = liveToolCallMapRef.current.get(toolCallId)
-          if (existing) {
-            existing.status = detail.state as LiveToolCall['status']
-            existing.normalizedName = normalizedName
-            existing.displayTitle = displayTitle
-            existing.displaySubtitle = displaySubtitle
-            existing.category = detail.category ?? existing.category
-            existing.input = stringifyPayload(detail.rawInput) ?? existing.input
-            existing.output = stringifyPayload(detail.rawOutput)
-            existing.rawInput = detail.rawInput ?? existing.rawInput
-            existing.rawOutput = detail.rawOutput
-            existing.metadata = detailsMetadata ?? existing.metadata
-            existing.details = liveDetails ?? existing.details
-            existing.completedAt = now
-            existing.error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : existing.error
-          }
-
-          setTurns((prev) => {
-            const next = ensureLiveTurn(prev, now)
-            const lastTurn = next[next.length - 1]
-            const error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : undefined
-            next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
-              status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
-              toolName: detail.toolName,
-              normalizedName,
-              displayTitle,
-              displaySubtitle,
-              category: detail.category,
-              title: detail.title,
-              target,
-              input: stringifyPayload(detail.rawInput),
-              output: stringifyPayload(detail.rawOutput),
-              rawInput: detail.rawInput,
-              rawOutput: detail.rawOutput,
-              metadata: detailsMetadata ?? undefined,
-              details: liveDetails,
-              completedAt: now,
-              error,
-            }, correlationKey)
-            return next
-          })
-          markNewContentRef.current()
-
-          if (isTerminalState(detail.state)) {
-            invalidateAndRefetch()
-          }
         }
-      }),
-    )
 
-    unsubs.push(
-      onAgentEvent('coder_session_completed', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.coderSessionId !== sessionId) return
-
-        hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          next[next.length - 1] = {
-            ...lastTurn,
-            completedAt: now,
-          }
-          return next
-        })
-        invalidateAndRefetch()
-        markNewContentRef.current()
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_session_failed', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.coderSessionId !== sessionId) return
-
-        hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          next[next.length - 1] = {
-            ...lastTurn,
-            completedAt: now,
-          }
-          return next
-        })
-
-        const errorPart = createErrorPart(
-          detail.reason ?? 'Session failed',
-          'failed',
-          now,
-        )
-        setTurns((prev) => {
-          const next = [...prev]
-          if (next.length > 0) {
-            const lastTurn = next[next.length - 1]
-            next[next.length - 1] = {
-              ...lastTurn,
-              assistant: [...lastTurn.assistant, errorPart],
-            }
-          }
-          return next
-        })
-
-        invalidateAndRefetch()
-        markNewContentRef.current()
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('coder_session_cancelled', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.coderSessionId !== sessionId) return
-
-        hasLiveTailRef.current = true
-        const now = new Date().toISOString()
-
-        setTurns((prev) => {
-          const next = ensureLiveTurn(prev, now)
-          const lastTurn = next[next.length - 1]
-          next[next.length - 1] = {
-            ...lastTurn,
-            completedAt: now,
-          }
-          return next
-        })
-
-        const errorPart = createErrorPart(
-          detail.reason ?? 'Session cancelled',
-          'cancelled',
-          now,
-        )
-        setTurns((prev) => {
-          const next = [...prev]
-          if (next.length > 0) {
-            const lastTurn = next[next.length - 1]
-            next[next.length - 1] = {
-              ...lastTurn,
-              assistant: [...lastTurn.assistant, errorPart],
-            }
-          }
-          return next
-        })
-
+        setIsThinking(false)
+        clearStreaming()
         invalidateAndRefetch()
         markNewContentRef.current()
       }),
@@ -1032,7 +1007,7 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('agent_liveness_status', (detail) => {
+      onAgentEvent('session.liveness', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         if (detail.acpSessionId !== acpSessionId) return
 

@@ -21,25 +21,25 @@ function makeEvent(overrides: Partial<SessionEvent> & { type: SessionEvent['type
 const STREAM: SessionEvent[] = [
   makeEvent({
     sequence: 0,
-    type: 'mohist_prompt',
+    type: 'input',
     payload: { text: 'Fix the login bug', kind: 'initial' },
     createdAt: '2024-01-01T10:00:00.000Z',
   }),
   makeEvent({
     sequence: 1,
-    type: 'agent_thought_chunk',
+    type: 'assistant_reasoning',
     payload: { text: 'Inspecting the auth handler' },
     createdAt: '2024-01-01T10:00:01.000Z',
   }),
   makeEvent({
     sequence: 2,
-    type: 'agent_message_chunk',
+    type: 'assistant_text',
     payload: { text: 'Reading the source ' },
     createdAt: '2024-01-01T10:00:02.000Z',
   }),
   makeEvent({
     sequence: 3,
-    type: 'agent_message_chunk',
+    type: 'assistant_text',
     payload: { text: 'to find the cause.' },
     createdAt: '2024-01-01T10:00:03.000Z',
   }),
@@ -56,7 +56,7 @@ const STREAM: SessionEvent[] = [
   }),
   makeEvent({
     sequence: 5,
-    type: 'tool_call_update',
+    type: 'tool_call',
     payload: {
       toolCallId: 'tc-1',
       status: 'completed',
@@ -66,13 +66,13 @@ const STREAM: SessionEvent[] = [
   }),
   makeEvent({
     sequence: 6,
-    type: 'mohist_prompt',
+    type: 'input',
     payload: { text: 'Apply the fix', kind: 'task' },
     createdAt: '2024-01-01T10:00:06.000Z',
   }),
   makeEvent({
     sequence: 7,
-    type: 'agent_thought_chunk',
+    type: 'assistant_reasoning',
     payload: { text: 'Drafting a minimal patch' },
     createdAt: '2024-01-01T10:00:07.000Z',
   }),
@@ -89,7 +89,7 @@ const STREAM: SessionEvent[] = [
   }),
   makeEvent({
     sequence: 9,
-    type: 'tool_call_update',
+    type: 'tool_call',
     payload: {
       toolCallId: 'tc-2',
       status: 'completed',
@@ -99,13 +99,13 @@ const STREAM: SessionEvent[] = [
   }),
   makeEvent({
     sequence: 10,
-    type: 'agent_message_chunk',
+    type: 'assistant_text',
     payload: { text: 'Fix is in place.' },
     createdAt: '2024-01-01T10:00:10.000Z',
   }),
   makeEvent({
     sequence: 11,
-    type: 'agent_session_terminal',
+    type: 'session_closed',
     payload: { status: 'completed' },
     createdAt: '2024-01-01T10:00:11.000Z',
   }),
@@ -139,17 +139,17 @@ describe('viewSessionEvents chat projection', () => {
     const view = viewSessionEvents([
       makeEvent({
         sequence: 1,
-        type: 'mohist_prompt',
+        type: 'input',
         payload: { text: 'Implement transcript aggregation', kind: 'task' },
       }),
       makeEvent({
         sequence: 2,
-        type: 'agent_thought',
+        type: 'assistant_reasoning',
         payload: { text: 'Planning the storage change' },
       }),
       makeEvent({
         sequence: 3,
-        type: 'agent_message',
+        type: 'assistant_text',
         payload: { text: 'Added compact transcript segments.' },
       }),
     ], 'chat') as SessionChatView
@@ -169,7 +169,7 @@ describe('viewSessionEvents chat projection', () => {
     expect(reasoning.startedAt).toBe('2024-01-01T10:00:01.000Z')
   })
 
-  it('merges tool_call and tool_call_update into a single tool part with terminal status', () => {
+  it('merges tool_call and tool_call into a single tool part with terminal status', () => {
     const view = viewSessionEvents(STREAM, 'chat') as SessionChatView
     const firstTurn = view.turns[0]
     const toolParts = firstTurn.parts.filter((p) => p.partType === 'tool')
@@ -221,7 +221,7 @@ describe('viewSessionEvents chat projection', () => {
 })
 
 describe('viewSessionEvents timeline projection', () => {
-  it('returns timeline rounds grouped per mohist_prompt', () => {
+  it('returns timeline rounds grouped per input', () => {
     const view = viewSessionEvents(STREAM, 'timeline')
     expect(view.kind).toBe('timeline')
     expect(view.rounds).toHaveLength(2)
@@ -241,7 +241,7 @@ describe('viewSessionEvents timeline projection', () => {
     expect(view.rounds[1].thoughtText).toBe('Drafting a minimal patch')
   })
 
-  it('merges tool_call and tool_call_update by toolCallId with terminal state', () => {
+  it('merges tool_call and tool_call by toolCallId with terminal state', () => {
     const view = viewSessionEvents(STREAM, 'timeline') as SessionTimelineView
     expect(view.rounds[0].toolCalls).toHaveLength(1)
     const tool = view.rounds[0].toolCalls[0]
@@ -282,12 +282,12 @@ describe('viewSessionEvents compact projection', () => {
     expect(view.thoughtChunkCount).toBe(2)
   })
 
-  it('counts unique tool calls across tool_call and tool_call_update events', () => {
+  it('counts unique tool calls across tool_call and tool_call events', () => {
     const view = viewSessionEvents(STREAM, 'compact') as SessionCompactView
     expect(view.toolCount).toBe(2)
   })
 
-  it('records terminal status and failure reason from agent_session_terminal', () => {
+  it('records terminal status and failure reason from session_closed', () => {
     const view = viewSessionEvents(STREAM, 'compact') as SessionCompactView
     expect(view.terminalStatus).toBe('completed')
     expect(view.failureReason).toBeUndefined()
@@ -306,17 +306,17 @@ describe('viewSessionEvents compact projection', () => {
     expect(view.lastActivityAt).toBe('2024-01-01T10:00:11.000Z')
   })
 
-  it('reports failure reason when agent_session_terminal fails', () => {
+  it('reports failure reason when session_closed fails', () => {
     const failedStream: SessionEvent[] = [
       makeEvent({
         sequence: 0,
-        type: 'mohist_prompt',
+        type: 'input',
         payload: { text: 'Do the thing', kind: 'task' },
         createdAt: '2024-02-01T00:00:00.000Z',
       }),
       makeEvent({
         sequence: 1,
-        type: 'agent_session_terminal',
+        type: 'session_closed',
         payload: { status: 'failed', failureReason: 'out of memory' },
         createdAt: '2024-02-01T00:00:01.000Z',
       }),
@@ -352,18 +352,18 @@ describe('viewSessionEvents centralization', () => {
           assistant: [{ partType: 'text', text: 'Server-side projection' }],
         },
       ],
-      workflowLogs: [{ type: 'agent_message_chunk', text: 'Server-side log' }],
+      workflowLogs: [{ type: 'assistant_text', text: 'Server-side log' }],
     }
     const streamWithProjection: SessionEvent[] = [
       makeEvent({
         sequence: 0,
-        type: 'mohist_prompt',
+        type: 'input',
         payload: { text: 'Real prompt', kind: 'initial' },
         createdAt: '2024-03-01T00:00:00.000Z',
       }),
       makeEvent({
         sequence: 1,
-        type: 'agent_message_chunk',
+        type: 'assistant_text',
         payload: projectedPayload,
         createdAt: '2024-03-01T00:00:01.000Z',
       }),
@@ -393,12 +393,12 @@ describe('viewSessionEvents centralization', () => {
       text: 'Pre-projected',
       turns: [{ id: 'server-turn-1' }],
       assistant: [{ partType: 'text', text: 'Server-side projection' }],
-      workflowLogs: [{ type: 'agent_message_chunk' }],
+      workflowLogs: [{ type: 'assistant_text' }],
     }
     const stream: SessionEvent[] = [
       makeEvent({
         sequence: 0,
-        type: 'mohist_prompt',
+        type: 'input',
         payload: projectedPayload,
         createdAt: '2024-04-01T00:00:00.000Z',
       }),

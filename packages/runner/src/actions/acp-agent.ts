@@ -50,8 +50,11 @@ const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
   "usage_update",
 ])
 
-const RESOLVED_MODEL_EVENT = "agent_session_model_resolved"
-const USAGE_UPDATE_EVENT = "agent_usage_update"
+const SESSION_INPUT_EVENT = "session.input"
+const SESSION_CLOSED_EVENT = "session.closed"
+const SESSION_LIVENESS_EVENT = "session.liveness"
+const MODEL_RESOLVED_EVENT = "model.resolved"
+const USAGE_UPDATED_EVENT = "usage.updated"
 
 type AcpLivenessActivity =
   | { isActivity: false }
@@ -190,12 +193,13 @@ function createObservabilityAwareEmitter(
 ): (type: string, update: SessionNotification["update"]) => Promise<void> {
   return async (type, update) => {
     const acpSessionId = getAcpSessionId()
-    await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
+    const normalized = normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds)
+    await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized)
 
     if (type === "config_option_update") {
       const resolvedModel = extractResolvedModelFromConfigUpdate(update as unknown)
       if (resolvedModel) {
-        await emitSessionEvent(context, RESOLVED_MODEL_EVENT, buildResolvedModelEventPayload(context, acpSessionId, resolvedModel, "config_option_update"))
+        await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, acpSessionId, resolvedModel, "config_option_update"))
       }
     }
 
@@ -207,7 +211,7 @@ function createObservabilityAwareEmitter(
         used: u.used,
       })
       if (hasUsageUpdateContent(payload)) {
-        await emitSessionEvent(context, USAGE_UPDATE_EVENT, payload)
+        await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
       }
     }
   }
@@ -338,7 +342,7 @@ async function emitLivenessStatusEvent(context: ActionContext, state: SessionLiv
   providerError?: OpencodeProviderErrorDiagnostic
   postProbeActivity?: boolean
 }) {
-  await emitSessionEvent(context, "agent_liveness_status", buildLivenessEventPayload(context, state, status, extras))
+  await emitSessionEvent(context, SESSION_LIVENESS_EVENT, buildLivenessEventPayload(context, state, status, extras))
 }
 
 interface AcpSessionResult {
@@ -364,7 +368,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const ok = result.success && verification.satisfied
   const agentConfig = resolveAgentConfig(context.with)
   const failureCategory = ok ? null : result.failureCategory ?? null
-  await emitSessionEvent(context, "agent_session_terminal", { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
+  await emitSessionEvent(context, SESSION_CLOSED_EVENT, { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
@@ -567,7 +571,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   )
 
   await emitSessionStarted(context, entry.sessionId, acp.processPid, agentConfig)
-  await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, entry.sessionId))
+  await emitSessionEvent(context, SESSION_INPUT_EVENT, buildPromptEvent(context, prompt, entry.sessionId))
 
   try {
     const promptResult = await monitorPrompt(context, connection, entry.sessionId, prompt, {
@@ -657,7 +661,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     )
 
     await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig, resolvedModel, "resumeSession")
-    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
+    await emitSessionEvent(context, SESSION_INPUT_EVENT, buildPromptEvent(context, prompt, acpSessionId))
 
     const promptResult = await monitorPrompt(context, connection, acpSessionId, prompt, {
       timeoutMs,
@@ -750,7 +754,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       }
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
-    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
+    await emitSessionEvent(context, SESSION_INPUT_EVENT, buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
       timeoutMs,
@@ -855,7 +859,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       }
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
-    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
+    await emitSessionEvent(context, SESSION_INPUT_EVENT, buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
       timeoutMs,
@@ -900,7 +904,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     if (!promptUsage || typeof promptUsage !== "object") return
     const payload = buildUsageUpdatePayload(context, sessionId, "prompt_response", promptUsage)
     if (!hasUsageUpdateContent(payload)) return
-    await emitSessionEvent(context, USAGE_UPDATE_EVENT, payload)
+    await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
   }
 
   while (true) {
@@ -1034,7 +1038,7 @@ async function attachSessionToServer(context: ActionContext, agentSessionId: str
 async function emitResolvedModelEvent(context: ActionContext, agentSessionId: string, resolvedModel: string | undefined, resolvedModelSource: "newSession" | "resumeSession" | "config_option_update") {
   const sessionName = sessionNameFromContext(context)
   if (resolvedModel && sessionName) {
-    await emitSessionEvent(context, RESOLVED_MODEL_EVENT, buildResolvedModelEventPayload(context, agentSessionId, resolvedModel, resolvedModelSource))
+    await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, agentSessionId, resolvedModel, resolvedModelSource))
   }
 }
 
@@ -1111,6 +1115,27 @@ function normalizeSessionUpdate(update: JsonObject, sessionId: string, ids: Tool
       output: nested.output ?? update.output ?? update.rawOutput,
       metadata: nested.metadata ?? update.metadata ?? null,
     }),
+  }
+}
+
+function genericSessionEventType(type: string, payload: JsonObject): string {
+  switch (type) {
+    case "agent_message_chunk":
+    case "agent_output_chunk":
+      return "message.delta"
+    case "agent_thought_chunk":
+      return "reasoning.delta"
+    case "tool_call":
+      return "tool_call.started"
+    case "tool_call_update": {
+      const nested = objectField(payload, "toolCall") ?? {}
+      const status = stringField(nested, "status") ?? stringField(payload, "status")
+      return status && ["completed", "failed", "cancelled", "timeout"].includes(status)
+        ? "tool_call.completed"
+        : "tool_call.updated"
+    }
+    default:
+      return type
   }
 }
 

@@ -127,28 +127,33 @@ describe('LiveTaskProvider transcript routing', () => {
 
   it('unwraps transcript envelopes without dropping runtime row metadata', () => {
     const transcript = unwrapTranscriptEnvelope({
-      Type: 'ralph_task_update',
+      Type: 'tool_call.started',
       SessionId: 'session-1',
       Sequence: 12,
       CreatedAt: '2026-06-11T00:00:00.0000000Z',
       WorkId: 'work-1',
-      Payload: { taskId: 'task-1', status: 'started' },
+      Payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
     })
 
-    expect(transcript).toEqual({
-      eventName: 'ralph_task_update',
-      payload: { taskId: 'task-1', status: 'started' },
+    expect(transcript).toMatchObject({
+      eventName: 'tool_call.started',
+      payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
       detail: {
-        Type: 'ralph_task_update',
+        Type: 'tool_call.started',
         SessionId: 'session-1',
         Sequence: 12,
         CreatedAt: '2026-06-11T00:00:00.0000000Z',
         WorkId: 'work-1',
-        Payload: { taskId: 'task-1', status: 'started' },
-        type: 'ralph_task_update',
-        taskId: 'task-1',
+        Payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
+        type: 'tool_call.started',
+        toolCallId: 'tool-1',
+        toolName: 'Read',
+        state: 'started',
         status: 'started',
-        payload: { taskId: 'task-1', status: 'started' },
+        acpSessionId: 'session-1',
+        coderSessionId: 'session-1',
+        executionId: 'work-1',
+        payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
       },
     })
   })
@@ -172,75 +177,25 @@ describe('LiveTaskProvider transcript routing', () => {
     const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
 
     onTranscriptEvent({
-      Type: 'ralph_task_update',
+      Type: 'tool_call.started',
       SessionId: 'session-1',
       Sequence: 1,
-      Payload: { taskId: 'task-1', status: 'started' },
+      Payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
     })
 
     await waitFor(() => {
-      expect(document.querySelector('[data-testid="active-task"]')?.textContent).toBe('task-1')
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
     })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(document.querySelector('[data-testid="active-task"]')?.textContent).toBe('')
   })
 
   it.each([
-    ['ralph_task_update', { taskId: 'task-1', status: 'started' }],
-    ['coder_text_chunk', { text: 'hello' }],
-    ['coder_tool_call', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
-  ] as const)('forwards %s transcript events to Agent activity subscribers', async (eventName, partialPayload) => {
-    const queryClient = new QueryClient()
-    const received: unknown[] = []
-    const off = onAgentEvent(eventName, (detail) => received.push(detail))
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
-            <LiveTaskProbe />
-          </LiveTaskProvider>
-        </ProjectProvider>
-      </QueryClientProvider>,
-    )
-
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
-    const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
-    const payload = {
-      issueId: 'issue-1',
-      projectId: 'project-1',
-      executionId: 'execution-1',
-      acpSessionId: 'acp-1',
-      ...partialPayload,
-    }
-
-    onTranscriptEvent({
-      Type: eventName,
-      SessionId: 'session-1',
-      Sequence: 1,
-      CreatedAt: '2026-06-11T00:00:00.0000000Z',
-      Payload: payload,
-    })
-
-    await waitFor(() => {
-      expect(received).toEqual([{
-        Type: eventName,
-        SessionId: 'session-1',
-        Sequence: 1,
-        CreatedAt: '2026-06-11T00:00:00.0000000Z',
-        Payload: payload,
-        type: eventName,
-        payload,
-        ...payload,
-      }])
-    })
-    off()
-  })
-
-  it.each([
-    ['agent_message_chunk', 'coder_text_chunk', { text: 'hello' }],
-    ['tool_call', 'coder_tool_call', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
-    ['tool_call_update', 'coder_tool_call', { toolName: 'Read', state: 'completed', toolCallId: 'tool-1' }],
-  ] as const)('routes runner %s transcript events to %s subscribers', async (eventName, routedName, partialPayload) => {
+    ['message.delta', 'coder_text_chunk', { text: 'hello' }],
+    ['reasoning.delta', 'coder_thought_chunk', { text: 'thinking' }],
+    ['tool_call.started', 'coder_tool_call', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
+    ['session.input', 'session.input', { text: 'prompt', kind: 'task' }],
+    ['session.closed', 'session.closed', { status: 'completed' }],
+  ] as const)('forwards %s transcript events to %s subscribers', async (eventName, routedName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
     const off = onAgentEvent(routedName, (detail) => received.push(detail))
@@ -274,7 +229,8 @@ describe('LiveTaskProvider transcript routing', () => {
     })
 
     await waitFor(() => {
-      expect(received).toEqual([{
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({
         Type: eventName,
         SessionId: 'session-1',
         Sequence: 1,
@@ -283,7 +239,59 @@ describe('LiveTaskProvider transcript routing', () => {
         type: eventName,
         payload,
         ...payload,
-      }])
+      })
+    })
+    off()
+  })
+
+  it.each([
+    ['tool_call.updated', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
+    ['tool_call.completed', { toolName: 'Read', state: 'completed', toolCallId: 'tool-1' }],
+  ] as const)('routes %s transcript events to coder_tool_call subscribers', async (eventName, partialPayload) => {
+    const queryClient = new QueryClient()
+    const received: unknown[] = []
+    const off = onAgentEvent('coder_tool_call', (detail) => received.push(detail))
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <LiveTaskProvider>
+            <LiveTaskProbe />
+          </LiveTaskProvider>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onTranscriptEvent = connectionCall[2] as (envelope: unknown) => void
+    const payload = {
+      issueId: 'issue-1',
+      projectId: 'project-1',
+      executionId: 'execution-1',
+      acpSessionId: 'acp-1',
+      ...partialPayload,
+    }
+
+    onTranscriptEvent({
+      Type: eventName,
+      SessionId: 'session-1',
+      Sequence: 1,
+      CreatedAt: '2026-06-11T00:00:00.0000000Z',
+      Payload: payload,
+    })
+
+    await waitFor(() => {
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({
+        Type: eventName,
+        SessionId: 'session-1',
+        Sequence: 1,
+        CreatedAt: '2026-06-11T00:00:00.0000000Z',
+        Payload: payload,
+        type: eventName,
+        payload,
+        ...payload,
+      })
     })
     off()
   })

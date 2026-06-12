@@ -9,8 +9,7 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 public interface IAgentSessionStore : IStateStore<AgentSession>
 {
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
-    Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, IReadOnlyList<AgentSessionRuntimeEventRow> runtimeEvents, CancellationToken ct = default);
-    Task SaveTranscriptAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, IReadOnlyList<AgentSessionTranscriptSegmentRow> transcriptSegments, CancellationToken ct = default);
+    Task SaveTranscriptAsync(string key, AgentSession state, IReadOnlyList<AgentSessionTranscriptSegmentRow> transcriptSegments, CancellationToken ct = default);
 }
 
 public class AgentSessionStore : IAgentSessionStore
@@ -60,25 +59,7 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
-    public async Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, IReadOnlyList<AgentSessionRuntimeEventRow> runtimeEvents, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        try
-        {
-            db.AgentSessionRuntimeEvents.AddRange(runtimeEvents);
-            await StageSessionAsync(db, key, state, ct);
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            await transaction.RollbackAsync(ct);
-            throw;
-        }
-    }
-
-    public async Task SaveTranscriptAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, IReadOnlyList<AgentSessionTranscriptSegmentRow> transcriptSegments, CancellationToken ct = default)
+    public async Task SaveTranscriptAsync(string key, AgentSession state, IReadOnlyList<AgentSessionTranscriptSegmentRow> transcriptSegments, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);

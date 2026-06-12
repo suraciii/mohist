@@ -59,7 +59,7 @@ function makeSessionEvent(overrides: Partial<{
   return {
     id: overrides.id ?? sequence,
     sequence,
-    type: overrides.type ?? 'mohist_prompt',
+    type: overrides.type ?? 'input',
     payload: overrides.payload,
     createdAt: overrides.createdAt ?? '2024-01-01T00:00:00.000Z',
   }
@@ -74,7 +74,7 @@ describe('reconstructRoundsFromEvents', () => {
     const viewModule = await import('../../../entities/session/model/view')
     const spy = vi.spyOn(viewModule, 'viewSessionEvents')
     try {
-      const events = [makeSessionEvent({ type: 'mohist_prompt', payload: { text: 'hello' } })]
+      const events = [makeSessionEvent({ type: 'input', payload: { text: 'hello' } })]
       reconstructRoundsFromEvents(events)
       expect(spy).toHaveBeenCalledWith(events, 'timeline')
     } finally {
@@ -82,14 +82,14 @@ describe('reconstructRoundsFromEvents', () => {
     }
   })
 
-  it('creates one round per mohist_prompt with assistant and thought content grouped', () => {
+  it('creates one round per input with assistant and thought content grouped', () => {
     const events = [
-      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'first prompt', kind: 'initial' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'agent_message_chunk', payload: { text: 'Hello' }, createdAt: '2024-01-01T00:00:01Z' }),
-      makeSessionEvent({ sequence: 2, type: 'agent_message_chunk', payload: { text: ' world' }, createdAt: '2024-01-01T00:00:02Z' }),
-      makeSessionEvent({ sequence: 3, type: 'agent_thought_chunk', payload: { text: 'thinking' }, createdAt: '2024-01-01T00:00:03Z' }),
-      makeSessionEvent({ sequence: 4, type: 'mohist_prompt', payload: { text: 'second prompt', kind: 'task' }, createdAt: '2024-01-01T00:00:04Z' }),
-      makeSessionEvent({ sequence: 5, type: 'agent_message_chunk', payload: { text: 'second' }, createdAt: '2024-01-01T00:00:05Z' }),
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'first prompt', kind: 'initial' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'assistant_text', payload: { text: 'Hello' }, createdAt: '2024-01-01T00:00:01Z' }),
+      makeSessionEvent({ sequence: 2, type: 'assistant_text', payload: { text: ' world' }, createdAt: '2024-01-01T00:00:02Z' }),
+      makeSessionEvent({ sequence: 3, type: 'assistant_reasoning', payload: { text: 'thinking' }, createdAt: '2024-01-01T00:00:03Z' }),
+      makeSessionEvent({ sequence: 4, type: 'input', payload: { text: 'second prompt', kind: 'task' }, createdAt: '2024-01-01T00:00:04Z' }),
+      makeSessionEvent({ sequence: 5, type: 'assistant_text', payload: { text: 'second' }, createdAt: '2024-01-01T00:00:05Z' }),
     ]
 
     const rounds = reconstructRoundsFromEvents(events)
@@ -106,11 +106,11 @@ describe('reconstructRoundsFromEvents', () => {
     expect(rounds[1].thoughtText).toBe('')
   })
 
-  it('groups tool_call and tool_call_update by toolCallId with updated status', () => {
+  it('groups tool_call and tool_call by toolCallId with updated status', () => {
     const events = [
-      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'use tools' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'use tools' }, createdAt: '2024-01-01T00:00:00Z' }),
       makeSessionEvent({ sequence: 1, type: 'tool_call', payload: { toolCallId: 'call-1', kind: 'bash', title: 'bash', rawInput: '{"command":"ls"}' }, createdAt: '2024-01-01T00:00:01Z' }),
-      makeSessionEvent({ sequence: 2, type: 'tool_call_update', payload: { toolCallId: 'call-1', status: 'completed', rawOutput: 'file.txt' }, createdAt: '2024-01-01T00:00:02Z' }),
+      makeSessionEvent({ sequence: 2, type: 'tool_call', payload: { toolCallId: 'call-1', status: 'completed', rawOutput: 'file.txt' }, createdAt: '2024-01-01T00:00:02Z' }),
     ]
 
     const rounds = reconstructRoundsFromEvents(events)
@@ -124,11 +124,11 @@ describe('reconstructRoundsFromEvents', () => {
     expect(rounds[0].toolCalls[0].rawInput).toBe('{"command":"ls"}')
   })
 
-  it('maps agent_liveness_status events to recovery events on the active round', () => {
+  it('maps session.liveness events to recovery events on the active round', () => {
     const events = [
-      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'agent_liveness_status', payload: { status: 'probing', activeProbeVersion: 2 }, createdAt: '2024-01-01T00:00:01Z' }),
-      makeSessionEvent({ sequence: 2, type: 'agent_liveness_status', payload: { status: 'failed', failureReason: 'timeout' }, createdAt: '2024-01-01T00:00:02Z' }),
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'session.liveness', payload: { status: 'probing', activeProbeVersion: 2 }, createdAt: '2024-01-01T00:00:01Z' }),
+      makeSessionEvent({ sequence: 2, type: 'session.liveness', payload: { status: 'failed', failureReason: 'timeout' }, createdAt: '2024-01-01T00:00:02Z' }),
     ]
 
     const rounds = reconstructRoundsFromEvents(events)
@@ -143,8 +143,8 @@ describe('reconstructRoundsFromEvents', () => {
 
   it('infers round labels from total count', () => {
     const events = [
-      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'p1' }, createdAt: '2024-01-01T00:00:00Z' }),
-      makeSessionEvent({ sequence: 1, type: 'mohist_prompt', payload: { text: 'p2' }, createdAt: '2024-01-01T00:00:01Z' }),
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p1' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'input', payload: { text: 'p2' }, createdAt: '2024-01-01T00:00:01Z' }),
     ]
 
     const rounds = reconstructRoundsFromEvents(events)

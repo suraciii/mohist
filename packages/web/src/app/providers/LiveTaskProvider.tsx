@@ -29,28 +29,10 @@ type _AssertEventNameSubscribed = [Exclude<EventName, (typeof EVENT_TYPES)[numbe
 const _subscriptionCoversSwitch: _AssertEventNameSubscribed = true
 void _subscriptionCoversSwitch
 
-const LIVE_TIMER_INTERVAL = 500
-
 type AgentDetailEventName = keyof AgentDetailEventMap
 
 function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
-}
-
-function routeTranscriptEventName(name: string): string {
-  switch (name) {
-    case 'agent_message':
-    case 'agent_message_chunk':
-      return 'coder_text_chunk'
-    case 'agent_thought':
-    case 'agent_thought_chunk':
-      return 'coder_thought_chunk'
-    case 'tool_call':
-    case 'tool_call_update':
-      return 'coder_tool_call'
-    default:
-      return name
-  }
 }
 
 /**
@@ -102,6 +84,34 @@ function readEnvelopeField(candidate: Record<string, unknown>, camelCase: string
   return candidate[camelCase] ?? candidate[pascalCase]
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function normalizeToolState(value: unknown, eventName: string): string | undefined {
+  if (typeof value === 'string' && value) {
+    switch (value) {
+      case 'completed':
+      case 'failed':
+      case 'timeout':
+      case 'cancelled':
+      case 'started':
+        return value
+      case 'running':
+      case 'in_progress':
+      case 'pending':
+        return 'started'
+      default:
+        return value
+    }
+  }
+  if (eventName === 'tool_call.completed') return 'completed'
+  if (eventName === 'tool_call.started') return 'started'
+  return undefined
+}
+
 function normalizeTranscriptDetail(
   candidate: Record<string, unknown>,
   eventName: string,
@@ -116,6 +126,27 @@ function normalizeTranscriptDetail(
     ...candidate,
     ...(innerPayload ?? {}),
     type: eventName,
+  }
+  const toolCall = asRecord(normalized.toolCall)
+  if (toolCall) {
+    normalized.toolCallId ??= toolCall.toolCallId ?? toolCall.id
+    normalized.toolName ??= toolCall.toolName ?? toolCall.name
+    normalized.title ??= toolCall.title
+    normalized.rawInput ??= toolCall.input ?? toolCall.rawInput
+    normalized.rawOutput ??= toolCall.output ?? toolCall.rawOutput
+    normalized.rawOutputMetadata ??= toolCall.outputMetadata ?? toolCall.rawOutputMetadata
+    normalized.metadata ??= toolCall.metadata
+    normalized.details ??= toolCall.details
+    normalized.normalizedName ??= toolCall.normalizedName
+    normalized.displayTitle ??= toolCall.displayTitle
+    normalized.displaySubtitle ??= toolCall.displaySubtitle
+    normalized.category ??= toolCall.category
+  }
+  if (eventName.startsWith('tool_call.')) {
+    normalized.state = normalizeToolState(
+      normalized.state ?? normalized.status ?? toolCall?.state ?? toolCall?.status,
+      eventName,
+    )
   }
   if (innerPayload) {
     normalized.payload = innerPayload
@@ -168,7 +199,7 @@ function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payloa
   }
 }
 
-export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName }
+export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope }
 
 
 function getCurrentIssueNumber(): number | null {
@@ -284,11 +315,9 @@ function handleReverseDnsIntegrationOutcome(
 
 function useLiveEvents(projectId: string | null): LiveTaskState {
   const queryClient = useQueryClient()
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
-  const [activeTaskElapsedMs, setActiveTaskElapsedMs] = useState<number | null>(null)
+  const [activeTaskId] = useState<string | null>(null)
+  const [activeTaskElapsedMs] = useState<number | null>(null)
   const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
-  const taskStartRef = useRef<number | null>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const viewedIssueRef = useRef<number | null>(getCurrentIssueNumber())
 
   useEffect(() => {
@@ -313,14 +342,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
     }
   }, [])
 
-  const clearLiveTimer = useCallback(() => {
-    if (timerRef.current !== null) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    taskStartRef.current = null
-  }, [])
-
   const handleEvent = useCallback(
     (eventName: string, rawData: unknown, options?: { dispatchAgentDetail?: boolean }) => {
       try {
@@ -330,37 +351,19 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           dispatchAgentEvent(eventName, parsed as AgentDetailEventMap[typeof eventName])
         }
 
-        if (eventName === 'ralph_task_update') {
-          const taskEvt = parsed as AgentDetailEventMap['ralph_task_update']
-          if (taskEvt.status === 'started') {
-            clearLiveTimer()
-            taskStartRef.current = Date.now()
-            setActiveTaskId(taskEvt.taskId)
-            setActiveTaskElapsedMs(0)
-            timerRef.current = setInterval(() => {
-              if (taskStartRef.current !== null) {
-                setActiveTaskElapsedMs(Date.now() - taskStartRef.current)
-              }
-            }, LIVE_TIMER_INTERVAL)
-          } else if (taskEvt.status === 'completed' || taskEvt.status === 'failed') {
-            clearLiveTimer()
-            setActiveTaskId(taskEvt.taskId)
-            setActiveTaskElapsedMs(null)
-          }
-        }
-
         if (
-          eventName === 'coder_text_chunk' ||
-          eventName === 'coder_tool_call' ||
-          eventName === 'ralph_task_update' ||
-          eventName === 'ralph_loop_progress' ||
+          eventName === 'message.delta' ||
+          eventName === 'reasoning.delta' ||
+          eventName === 'tool_call.started' ||
+          eventName === 'tool_call.updated' ||
+          eventName === 'tool_call.completed' ||
           eventName === 'coder_session_started' ||
           eventName === 'coder_session_completed' ||
           eventName === 'coder_session_failed' ||
           eventName === 'coder_session_cancelled' ||
           eventName === 'coder_session_status_changed' ||
-          eventName === 'agent_liveness_status' ||
-          eventName === 'agent_usage_update'
+          eventName === 'session.liveness' ||
+          eventName === 'usage.updated'
         ) {
           queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
         }
@@ -608,32 +611,25 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
         // ignore malformed events
       }
     },
-    [queryClient, clearLiveTimer],
+    [queryClient],
   )
 
   const handleTranscriptEvent = useCallback(
     (rawData: unknown) => {
       const transcript = unwrapTranscriptEnvelope(rawData)
       if (!transcript) return
-      const routedName = routeTranscriptEventName(transcript.eventName)
-      if (isAgentDetailEvent(routedName)) {
+      if (isAgentDetailEvent(transcript.eventName)) {
         dispatchAgentEvent(
-          routedName,
-          transcript.detail as AgentDetailEventMap[typeof routedName],
+          transcript.eventName,
+          transcript.detail as AgentDetailEventMap[typeof transcript.eventName],
         )
       }
-      handleEvent(routedName, transcript.payload, { dispatchAgentDetail: false })
+      handleEvent(transcript.eventName, transcript.payload, { dispatchAgentDetail: false })
     },
     [handleEvent],
   )
 
   useEventsConnection(projectId, handleEvent, handleTranscriptEvent)
-
-  useEffect(() => {
-    return () => {
-      clearLiveTimer()
-    }
-  }, [clearLiveTimer])
 
   return { activeTaskId, activeTaskElapsedMs, rebaseConflict }
 }

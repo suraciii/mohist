@@ -44,21 +44,16 @@ export const REVERSE_DNS_AGENT_SESSION_EVENT_TYPES = [
 ] as const
 
 export const TRANSCRIPT_EVENT_TYPES = [
-  'coder_text_chunk',
-  'coder_thought_chunk',
-  'coder_tool_call',
-  'agent_message',
-  'agent_thought',
-  'agent_message_chunk',
-  'agent_thought_chunk',
-  'tool_call',
-  'tool_call_update',
-  'ralph_task_update',
-  'ralph_loop_progress',
-  'agent_liveness_status',
-  'agent_usage_update',
-  'agent_session_model_resolved',
-  'agent_session_terminal',
+  'session.input',
+  'message.delta',
+  'reasoning.delta',
+  'tool_call.started',
+  'tool_call.updated',
+  'tool_call.completed',
+  'session.liveness',
+  'usage.updated',
+  'model.resolved',
+  'session.closed',
 ] as const
 
 export type TranscriptEventType = (typeof TRANSCRIPT_EVENT_TYPES)[number]

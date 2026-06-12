@@ -3,15 +3,15 @@ import { __testing__ } from './LiveTaskProvider'
 
 describe('LiveTaskProvider transcript routing', () => {
   it('routes persisted transcript segments through the same live detail events as chunks', () => {
-    expect(__testing__.routeTranscriptEventName('agent_message')).toBe('coder_text_chunk')
-    expect(__testing__.routeTranscriptEventName('agent_thought')).toBe('coder_thought_chunk')
-    expect(__testing__.routeTranscriptEventName('agent_message_chunk')).toBe('coder_text_chunk')
-    expect(__testing__.routeTranscriptEventName('agent_thought_chunk')).toBe('coder_thought_chunk')
+    expect(__testing__.routeTranscriptEventName('message.delta')).toBe('coder_text_chunk')
+    expect(__testing__.routeTranscriptEventName('reasoning.delta')).toBe('coder_thought_chunk')
+    expect(__testing__.routeTranscriptEventName('tool_call.started')).toBe('coder_tool_call')
+    expect(__testing__.routeTranscriptEventName('session.input')).toBe('session.input')
   })
 
   it('unwraps transcript envelopes with runtime metadata and payload', () => {
     const envelope = {
-      type: 'agent_message',
+      type: 'message.delta',
       sessionId: 'session-1',
       sequence: 12,
       createdAt: '2026-06-12T00:00:00.000Z',
@@ -20,10 +20,10 @@ describe('LiveTaskProvider transcript routing', () => {
 
     const unwrapped = __testing__.unwrapTranscriptEnvelope(envelope)
 
-    expect(unwrapped?.eventName).toBe('agent_message')
+    expect(unwrapped?.eventName).toBe('message.delta')
     expect(unwrapped?.payload).toEqual({ text: 'persisted segment' })
     expect(unwrapped?.detail).toMatchObject({
-      type: 'agent_message',
+      type: 'message.delta',
       text: 'persisted segment',
       payload: { text: 'persisted segment' },
       sequence: 12,
@@ -32,7 +32,7 @@ describe('LiveTaskProvider transcript routing', () => {
 
   it('normalizes server transcript metadata into live agent detail fields', () => {
     const unwrapped = __testing__.unwrapTranscriptEnvelope({
-      type: 'agent_thought',
+      type: 'reasoning.delta',
       sessionId: 'proj/wr/plan',
       issueNumber: 84,
       agentSessionId: 'acp-84',

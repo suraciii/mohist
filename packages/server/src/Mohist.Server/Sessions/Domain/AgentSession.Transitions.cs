@@ -39,14 +39,21 @@ public static partial class AgentSessionExtensions
             _ = changeDir;
             _ = processPid;
             var oldModel = session.Settings.Model;
+            var existingAgentSessionId = session.Status.AgentRuntimeSessionId;
+            if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
+                && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Agent session {session.Id} is already attached to physical ACP session {existingAgentSessionId}; cannot attach {agentSessionId}.");
 
             session.Runtime = session.Runtime with
             {
                 WorkDir = session.Runtime.WorkDir ?? workDir
             };
-            session.Status = session.Status with { AgentRuntimeSessionId = agentSessionId };
+            session.Status = session.Status with { AgentRuntimeSessionId = existingAgentSessionId ?? agentSessionId };
             session.Start(model, now);
-            var events = new List<AgentSessionEvent> { new AgentSessionStarted(agentSessionId) };
+            var events = new List<AgentSessionEvent>();
+            if (string.IsNullOrWhiteSpace(existingAgentSessionId))
+                events.Add(new AgentSessionStarted(agentSessionId));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;

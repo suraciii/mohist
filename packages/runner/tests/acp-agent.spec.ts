@@ -174,7 +174,7 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
     expect(fixture.server.events.map((entry) => entry.type)).toEqual(
-      expect.arrayContaining(["agent_thought_chunk", "tool_call", "tool_call_update", "agent_session_terminal"]),
+      expect.arrayContaining(["reasoning.delta", "tool_call.started", "tool_call.completed", "session.closed"]),
     )
   })
 
@@ -218,8 +218,8 @@ describe("mohist/acp-agent", () => {
     expect(shared.agent.calls.some((entry) => entry.event === "thought")).toBe(true)
     expect(shared.serverConnection.calls.some((entry) => entry.event === "ensureWorkflowAgentSession")).toBe(true)
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_thought_chunk")).toBe(true)
-    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "reasoning.delta")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
     expect(result.message ?? "").not.toContain("Session liveness probe timed out")
     expect(JSON.parse(result.output ?? "{}").text).toBe("")
   })
@@ -240,8 +240,8 @@ describe("mohist/acp-agent", () => {
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession" && entry.sessionId === "server-session-1")).toBe(true)
     expect(shared.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
     expect(shared.agent.calls.some((entry) => entry.event === "thought")).toBe(true)
-    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_thought_chunk")).toBe(true)
-    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "reasoning.delta")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
     expect(result.message ?? "").not.toContain("Session liveness probe timed out")
     expect(JSON.parse(result.output ?? "{}").text).toBe("")
   })
@@ -260,7 +260,7 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("success")
 
     const livenessEvents = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
       .map((entry) => entry.payload as Record<string, unknown>)
 
     const probing = livenessEvents.find((payload) => payload.status === "probing")
@@ -277,8 +277,8 @@ describe("mohist/acp-agent", () => {
     expect(["tool_call", "tool_call_update", "tool_result", "tool_result_update"]).toContain(recovered?.lastActivityType)
     expect(recovered?.satisfiedProbeVersion).toBe(probing?.activeProbeVersion)
 
-    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "tool_call")).toBe(true)
-    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "tool_call_update")).toBe(true)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "tool_call.started")).toBe(true)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "tool_call.completed")).toBe(true)
     expect(result.message ?? "").not.toContain("Session liveness probe timed out")
   })
 
@@ -297,7 +297,7 @@ describe("mohist/acp-agent", () => {
     expect(result.message ?? "").toContain("Session liveness probe timed out")
 
     const livenessEvents = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
       .map((entry) => entry.payload as Record<string, unknown>)
 
     const probing = livenessEvents.find((payload) => payload.status === "probing")
@@ -345,11 +345,11 @@ describe("mohist/acp-agent", () => {
       expect(result.message ?? "").toContain("Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded")
 
       const failed = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
         .map((entry) => entry.payload as Record<string, unknown>)
         .find((payload) => payload.status === "failed")
       const terminal = fixture.serverConnection.calls
-        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
         .map((entry) => entry.payload as Record<string, unknown>)
         .at(-1)
 
@@ -378,7 +378,7 @@ describe("mohist/acp-agent", () => {
     expect(result.message ?? "").not.toContain("Session liveness probe timed out")
 
     const livenessEvents = shared.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
       .map((entry) => entry.payload as Record<string, unknown>)
 
     const probing = livenessEvents.find((payload) => payload.status === "probing")
@@ -408,7 +408,7 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
     expect(fixture.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
-    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
   })
 
   it("AbortSignalFires_PromptRunning_SendsSessionCancelBeforeCleanup", async () => {
@@ -600,7 +600,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const resolvedModelEvent = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "model.resolved")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(resolvedModelEvent).toBeTruthy()
@@ -615,7 +615,7 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("success")
-    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")).toBe(false)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "model.resolved")).toBe(false)
   })
 
   it("ConfigOptionUpdateChangesModel_RunnerEmitsResolvedModelEvent", async () => {
@@ -625,7 +625,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const resolvedModelEvent = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "model.resolved")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(resolvedModelEvent).toBeTruthy()
@@ -640,7 +640,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const usageEvent = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_usage_update")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "usage.updated")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(usageEvent).toBeTruthy()
@@ -649,7 +649,7 @@ describe("mohist/acp-agent", () => {
     expect(usageEvent?.contextWindowUsed).toBe(15000)
     expect(usageEvent?.costAmount).toBe(0.0012)
     expect(usageEvent?.costCurrency).toBe("USD")
-    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
   })
 
   it("PromptResponseCarriesUsage_RunnerEmitsAgentUsageUpdateAfterCompletion", async () => {
@@ -659,7 +659,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const usageEvent = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_usage_update")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "usage.updated")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(usageEvent).toBeTruthy()
@@ -670,9 +670,9 @@ describe("mohist/acp-agent", () => {
     expect(usageEvent?.cachedReadTokens).toBe(80)
     expect(usageEvent?.thoughtTokens).toBe(5)
 
-    const promptEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "mohist_prompt")
-    const usageEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_usage_update")
-    const terminalEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+    const promptEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.input")
+    const usageEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "usage.updated")
+    const terminalEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
     expect(promptEventIndex).toBeGreaterThanOrEqual(0)
     expect(usageEventIndex).toBeGreaterThan(promptEventIndex)
     expect(terminalEventIndex).toBeGreaterThan(usageEventIndex)
@@ -691,7 +691,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("failure")
     const terminalEvent = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(terminalEvent).toBeTruthy()
@@ -706,7 +706,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const terminalEvent = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(terminalEvent).toBeTruthy()
@@ -730,7 +730,7 @@ describe("mohist/acp-agent shared session observability", () => {
 
     expect(result.status).toBe("success")
     const resolvedModelEvent = shared.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "model.resolved")
       .map((entry) => entry.payload as Record<string, unknown>)
       .at(-1)
     expect(resolvedModelEvent).toBeTruthy()

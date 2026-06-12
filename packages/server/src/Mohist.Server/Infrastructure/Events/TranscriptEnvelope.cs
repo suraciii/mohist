@@ -4,11 +4,9 @@ using System.Text.Json.Serialization;
 namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
-/// Wire shape for a single runtime event or transcript segment carried to the
-/// Web over the dedicated non-domain transcript channel
-/// (<c>OnTranscriptEvent</c>). Realtime delivery carries the raw runtime event
-/// payload the runner POSTed; durable history is queried from compact
-/// transcript segments.
+/// Wire shape for a generic session event carried to the Web over the
+/// dedicated non-domain transcript channel (<c>OnTranscriptEvent</c>).
+/// Durable history is queried from compact transcript segments.
 ///
 /// <para>
 /// This is a <i>non-domain</i> envelope: it is observation data, not a

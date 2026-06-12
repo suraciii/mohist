@@ -179,6 +179,61 @@ function mapTerminalStatus(status: string | undefined): 'completed' | 'failed' |
   return 'running'
 }
 
+function isInputEvent(type: string): boolean {
+  return type === 'session.input' || type === 'input'
+}
+
+function isAssistantTextEvent(type: string): boolean {
+  return type === 'message.delta' || type === 'assistant_text'
+}
+
+function isAssistantReasoningEvent(type: string): boolean {
+  return type === 'reasoning.delta' || type === 'assistant_reasoning'
+}
+
+function isToolEvent(type: string): boolean {
+  return type === 'tool_call' || type === 'tool_call.started' || type === 'tool_call.updated' || type === 'tool_call.completed'
+}
+
+function isSessionClosedEvent(type: string): boolean {
+  return type === 'session.closed' || type === 'session_closed'
+}
+
+function isLivenessEvent(type: string): boolean {
+  return type === 'session.liveness' || type === 'status'
+}
+
+function defaultToolStatus(type: string): string {
+  if (type === 'tool_call.completed') return 'completed'
+  if (type === 'tool_call.started') return 'started'
+  return 'running'
+}
+
+function toolRecord(payload: Record<string, unknown>): Record<string, unknown> {
+  const nested = payload.toolCall
+  return nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : payload
+}
+
+function readToolString(payload: Record<string, unknown>, ...keys: string[]): string | undefined {
+  const nested = toolRecord(payload)
+  for (const key of keys) {
+    const value = payload[key] ?? nested[key]
+    if (typeof value === 'string' && value) return value
+  }
+  return undefined
+}
+
+function readToolValue(payload: Record<string, unknown>, ...keys: string[]): unknown {
+  const nested = toolRecord(payload)
+  for (const key of keys) {
+    const value = payload[key] ?? nested[key]
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
 function nextPartId(turnId: string, counter: { value: number }): string {
   counter.value += 1
   return `${turnId}-p${counter.value}`
@@ -359,10 +414,10 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
     const payload = narrowPayload(event)
     lastTimestamp = event.createdAt
 
-    if (event.type === 'mohist_prompt') {
+    if (isInputEvent(event.type)) {
       finalizeCurrent(event.createdAt)
       const text = getStringProp(payload, 'text') ?? ''
-      const kind = getStringProp(payload, 'kind') ?? 'task'
+      const kind = getStringProp(payload, 'kind') ?? getStringProp(payload, 'source') ?? 'task'
       current = makePromptTurn(turnIndex, text, kind, event.createdAt)
       turnIndex += 1
       continue
@@ -372,7 +427,7 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
       current = makeInitialTurn()
     }
 
-    if (event.type === 'agent_message_chunk' || event.type === 'agent_output_chunk' || event.type === 'agent_message') {
+    if (isAssistantTextEvent(event.type)) {
       const text = extractTextChunk(payload)
       if (text) {
         current = appendTextPart(current, text, counter, event.createdAt)
@@ -380,7 +435,7 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
       continue
     }
 
-    if (event.type === 'agent_thought_chunk' || event.type === 'agent_thought') {
+    if (isAssistantReasoningEvent(event.type)) {
       const text = extractTextChunk(payload)
       if (text) {
         current = appendReasoningPart(current, text, counter, event.createdAt)
@@ -388,20 +443,20 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
       continue
     }
 
-    if (event.type === 'tool_call' || event.type === 'tool_call_update') {
-      const toolCallId = getStringProp(payload, 'toolCallId') ?? getStringProp(payload, 'id') ?? getStringProp(payload, 'callId')
+    if (isToolEvent(event.type)) {
+      const toolCallId = readToolString(payload, 'toolCallId', 'id', 'callId')
       if (!toolCallId) continue
-      const toolName = getStringProp(payload, 'toolName') ?? getStringProp(payload, 'kind') ?? getStringProp(payload, 'name') ?? 'unknown'
-      const title = getStringProp(payload, 'title')
-      const status = mapToolState(getStringProp(payload, 'status') ?? (event.type === 'tool_call_update' ? 'completed' : 'started'))
-      const rawInput = normalizeRaw(payload.rawInput ?? payload.input)
-      const rawOutput = normalizeRaw(payload.rawOutput ?? payload.output)
+      const toolName = readToolString(payload, 'toolName', 'kind', 'name') ?? 'unknown'
+      const title = readToolString(payload, 'title')
+      const status = mapToolState(readToolString(payload, 'status', 'state') ?? defaultToolStatus(event.type))
+      const rawInput = normalizeRaw(readToolValue(payload, 'rawInput', 'input'))
+      const rawOutput = normalizeRaw(readToolValue(payload, 'rawOutput', 'output'))
       const error = status === 'failed' ? rawOutput : undefined
       current = upsertToolPart(current, toolCallId, toolName, title, status, rawInput, rawOutput, error, event.createdAt, counter)
       continue
     }
 
-    if (event.type === 'agent_session_terminal') {
+    if (isSessionClosedEvent(event.type)) {
       const status = getStringProp(payload, 'status') ?? 'completed'
       if (current) {
         current = { ...current, completedAt: event.createdAt }
@@ -413,7 +468,7 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
       continue
     }
 
-    if (event.type === 'agent_liveness_status') {
+    if (isLivenessEvent(event.type)) {
       const status = getStringProp(payload, 'status') ?? 'running'
       if (status === 'failed') {
         const reason = getStringProp(payload, 'failureReason') ?? 'Liveness failed'
@@ -449,7 +504,7 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
   for (const event of events) {
     const payload = narrowPayload(event)
 
-    if (event.type === 'mohist_prompt') {
+    if (isInputEvent(event.type)) {
       finalizeCurrent(event.createdAt)
       toolCallMap.clear()
       const text = getStringProp(payload, 'text') ?? ''
@@ -480,26 +535,26 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
       }
     }
 
-    if (event.type === 'agent_message_chunk' || event.type === 'agent_output_chunk' || event.type === 'agent_message') {
+    if (isAssistantTextEvent(event.type)) {
       const text = extractTextChunk(payload)
       if (text) current.agentText += text
       continue
     }
 
-    if (event.type === 'agent_thought_chunk' || event.type === 'agent_thought') {
+    if (isAssistantReasoningEvent(event.type)) {
       const text = extractTextChunk(payload)
       if (text) current.thoughtText += text
       continue
     }
 
-    if (event.type === 'tool_call' || event.type === 'tool_call_update') {
-      const toolCallId = getStringProp(payload, 'toolCallId') ?? getStringProp(payload, 'id')
+    if (isToolEvent(event.type)) {
+      const toolCallId = readToolString(payload, 'toolCallId', 'id')
       if (!toolCallId) continue
-      const status = getStringProp(payload, 'status') ?? (event.type === 'tool_call_update' ? 'completed' : 'started')
-      const toolName = getStringProp(payload, 'toolName') ?? getStringProp(payload, 'kind') ?? getStringProp(payload, 'name') ?? 'unknown'
-      const title = getStringProp(payload, 'title')
-      const rawInput = normalizeRaw(payload.rawInput ?? payload.input)
-      const rawOutput = normalizeRaw(payload.rawOutput ?? payload.output)
+      const status = readToolString(payload, 'status', 'state') ?? defaultToolStatus(event.type)
+      const toolName = readToolString(payload, 'toolName', 'kind', 'name') ?? 'unknown'
+      const title = readToolString(payload, 'title')
+      const rawInput = normalizeRaw(readToolValue(payload, 'rawInput', 'input'))
+      const rawOutput = normalizeRaw(readToolValue(payload, 'rawOutput', 'output'))
 
       if (status === 'completed' || status === 'failed' || status === 'cancelled') {
         const existing = toolCallMap.get(toolCallId)
@@ -536,7 +591,7 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
       continue
     }
 
-    if (event.type === 'agent_liveness_status') {
+    if (isLivenessEvent(event.type)) {
       const status = getStringProp(payload, 'status') ?? 'running'
       const mapped = status === 'probing' ? 'recovering' : status === 'running' ? 'recovered' : status === 'failed' ? 'failed' : 'detected'
       current.recovery.push({
@@ -577,62 +632,56 @@ function buildCompactView(events: SessionEvent[]): SessionCompactView {
     lastActivityAt = event.createdAt
     const payload = narrowPayload(event)
 
-    switch (event.type) {
-      case 'mohist_prompt': {
-        promptCount += 1
-        if (firstPromptText === null) {
-          firstPromptText = getStringProp(payload, 'text') ?? null
-          firstPromptKind = getStringProp(payload, 'kind') ?? null
-        }
-        break
+    if (isInputEvent(event.type)) {
+      promptCount += 1
+      if (firstPromptText === null) {
+        firstPromptText = getStringProp(payload, 'text') ?? null
+        firstPromptKind = getStringProp(payload, 'kind') ?? getStringProp(payload, 'source') ?? null
       }
-      case 'agent_message_chunk':
-      case 'agent_message':
-      case 'agent_output_chunk': {
-        messageChunkCount += 1
-        if (preview === null) {
-          const text = extractTextChunk(payload)
-          if (text) preview = text.length > 200 ? `${text.slice(0, 200)}…` : text
-        }
-        break
+      continue
+    }
+
+    if (isAssistantTextEvent(event.type)) {
+      messageChunkCount += 1
+      if (preview === null) {
+        const text = extractTextChunk(payload)
+        if (text) preview = text.length > 200 ? `${text.slice(0, 200)}…` : text
       }
-      case 'agent_thought_chunk': {
-        thoughtChunkCount += 1
-        break
+      continue
+    }
+
+    if (isAssistantReasoningEvent(event.type)) {
+      thoughtChunkCount += 1
+      continue
+    }
+
+    if (isToolEvent(event.type)) {
+      const toolCallId = readToolString(payload, 'toolCallId', 'id')
+      if (toolCallId && !seenToolCallIds.has(toolCallId)) {
+        seenToolCallIds.add(toolCallId)
+        toolCount += 1
+      } else if (!toolCallId) {
+        toolCount += 1
       }
-      case 'agent_thought': {
-        thoughtChunkCount += 1
-        break
+      continue
+    }
+
+    if (isSessionClosedEvent(event.type)) {
+      const status = mapTerminalStatus(getStringProp(payload, 'status'))
+      terminalStatus = status
+      if (status === 'failed' || status === 'cancelled') {
+        failureReason = getStringProp(payload, 'failureReason')
       }
-      case 'tool_call':
-      case 'tool_call_update': {
-        const toolCallId = getStringProp(payload, 'toolCallId') ?? getStringProp(payload, 'id')
-        if (toolCallId && !seenToolCallIds.has(toolCallId)) {
-          seenToolCallIds.add(toolCallId)
-          toolCount += 1
-        } else if (!toolCallId) {
-          toolCount += 1
-        }
-        break
+      continue
+    }
+
+    if (isLivenessEvent(event.type)) {
+      const status = getStringProp(payload, 'status')
+      if (status === 'failed') {
+        terminalStatus = 'failed'
+        failureReason = getStringProp(payload, 'failureReason') ?? failureReason
       }
-      case 'agent_session_terminal': {
-        const status = mapTerminalStatus(getStringProp(payload, 'status'))
-        terminalStatus = status
-        if (status === 'failed' || status === 'cancelled') {
-          failureReason = getStringProp(payload, 'failureReason')
-        }
-        break
-      }
-      case 'agent_liveness_status': {
-        const status = getStringProp(payload, 'status')
-        if (status === 'failed') {
-          terminalStatus = 'failed'
-          failureReason = getStringProp(payload, 'failureReason') ?? failureReason
-        }
-        break
-      }
-      default:
-        break
+      continue
     }
   }
 

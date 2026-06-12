@@ -10,13 +10,14 @@ public static class EventCatalog
     /// <summary>
     /// All registered CloudEvents <c>type</c> values. New events must be added here
     /// AND must have a producer that calls <c>bus.Emit</c> with that exact type string.
-    /// Includes both legacy snake_case names (kept for back-compat with the Web) and
-    /// the new reverse-DNS names. The EventBridge subscribes to the union so both
-    /// legacy Web consumers and new reverse-DNS producers see fan-out.
+    /// Includes legacy domain names, generic session observation names, and
+    /// reverse-DNS names. Generic session observation names are listed here for
+    /// subscription discovery, but they flow through the dedicated transcript
+    /// SignalR channel instead of the domain EventBridge path.
     /// </summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
-        // === Legacy names kept for back-compat with the Web (snake_case) ===
+        // === Legacy domain names kept for existing Web/domain consumers ===
         "stage_changed",
         "comment_added",
         "agent_started",
@@ -27,27 +28,27 @@ public static class EventCatalog
         "tool_call",
         "agent_text_chunk",
         "main_tool_call",
-        "coder_text_chunk",
-        "coder_thought_chunk",
-        "coder_tool_call",
-        "agent_message",
-        "agent_thought",
-        "agent_message_chunk",
-        "agent_thought_chunk",
-        "agent_session_terminal",
         "coder_session_started",
         "coder_session_completed",
         "coder_session_failed",
         "coder_session_cancelled",
         "coder_session_status_changed",
         "coder_recovery_status",
-        "ralph_task_update",
-        "ralph_loop_progress",
         "plan_session_update",
         "plan_round_start",
         "plan_round_complete",
-        "agent_liveness_status",
-        "agent_usage_update",
+        // === Generic session observation names (transcript channel) ===
+        "session.input",
+        "message.delta",
+        "reasoning.delta",
+        "tool_call.started",
+        "tool_call.updated",
+        "tool_call.completed",
+        "session.closed",
+        "session.liveness",
+        "usage.updated",
+        "model.resolved",
+        // === Remaining workflow/integration legacy names ===
         "merge_queued",
         "merge_started",
         "merge_completed",

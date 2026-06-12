@@ -1,10 +1,8 @@
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface AgentSessionMetadataCounts {
-  eventCount: number
+  segmentCount: number
   toolCount: number
-  messageChunkCount?: number
-  thoughtChunkCount?: number
   promptCount?: number
 }
 
@@ -40,18 +38,6 @@ export interface AgentSessionMetadata {
   failureCategory?: string | null
   toolCallCount?: number | null
   toolErrorCount?: number | null
-}
-
-export interface AgentSessionEvent {
-  id: number
-  sequence: number
-  type: string
-  payload: unknown
-  createdAt: string
-}
-
-export interface AgentSessionEventsResponse {
-  events: AgentSessionEvent[]
 }
 
 export interface FileChangeSummary {
@@ -135,7 +121,7 @@ export interface SessionMetadata {
   probeSentAt?: string | null
   probeDeadlineAt?: string | null
   failureReason?: string | null
-  eventCount?: number
+  segmentCount?: number
   toolCount?: number
   turnCount?: number
   changedFiles?: FileChangeSummary[]
@@ -240,6 +226,12 @@ export interface CoderSessionDetail {
   metadata: SessionMetadata
   turns: SessionTurn[]
   incomplete: boolean
+}
+
+export interface AgentSessionTranscriptResponse {
+  turns: SessionTurn[]
+  segmentCount: number
+  lastActivityAt: string | null
 }
 
 export interface ToolCallEntry {
