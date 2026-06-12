@@ -26,6 +26,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> IsStoppedOrTerminalAsync();
     Task<string?> GetClaimedRunnerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();
+    Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId);
     Task DeactivateForTestAsync();
 }
 
@@ -79,3 +80,19 @@ public enum WorkflowAssignmentStatus
     Assigned,
     Rejected
 }
+
+/// <summary>
+/// Read-only snapshot of the active workflow work item. The upload
+/// endpoint uses this to derive the server-side task run binding
+/// context (<see cref="TaskRunId"/>) for a pending artifact upload
+/// without trusting runner-supplied identifiers.
+/// </summary>
+[GenerateSerializer]
+public sealed record WorkflowActiveWorkView(
+    [property: Id(0)] string WorkId,
+    [property: Id(1)] string WorkType,
+    [property: Id(2)] string Stage,
+    [property: Id(3)] string TaskRunId,
+    [property: Id(4)] string? Title,
+    [property: Id(5)] string? ProjectId = null,
+    [property: Id(6)] string? IssueId = null);

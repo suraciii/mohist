@@ -10,6 +10,7 @@ using Issue = Mohist.Server.Issue.Domain.Issue;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -520,6 +521,349 @@ public class MohistDefaultWorkflowProfileSpecs
                 Assert.DoesNotContain("\"FAIL\"", withJson);
             }
         }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_PreservesTaskArtifactCapturePaths()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: proposal
+                title: Generate proposal
+                uses: mohist/acp-agent
+                with:
+                  prompt: ${{ prompts.proposal }}
+                  expect:
+                    files:
+                      - path: ${{ openspecChangeDir }}/proposal.md
+                artifacts:
+                  files:
+                    - path: ${{ openspecChangeDir }}/proposal.md
+                    - path: ${{ openspecChangeDir }}/specs
+              - id: design
+                title: Design
+                uses: mohist/acp-agent
+                with:
+                  prompt: ${{ prompts.design }}
+                artifacts:
+                  files:
+                    - path: ${{ openspecChangeDir }}/design.md
+            checks: []
+        """);
+
+        var proposal = definition.Stages.Single().Tasks.Single(t => t.Id == "proposal");
+        Assert.NotNull(proposal.Artifacts);
+        Assert.Equal(
+            new[]
+            {
+                "${{ openspecChangeDir }}/proposal.md",
+                "${{ openspecChangeDir }}/specs",
+            },
+            proposal.Artifacts!.Files.Select(f => f.Path).ToArray());
+
+        var design = definition.Stages.Single().Tasks.Single(t => t.Id == "design");
+        Assert.NotNull(design.Artifacts);
+        Assert.Equal(
+            new[] { "${{ openspecChangeDir }}/design.md" },
+            design.Artifacts!.Files.Select(f => f.Path).ToArray());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_TaskArtifactsAreNotMergedIntoWith()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: declare-task
+                title: Declare artifacts
+                uses: mohist/acp-agent
+                with:
+                  prompt: hello
+                artifacts:
+                  files:
+                    - path: docs/out.md
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.NotNull(task.With);
+        var withJson = JsonSerializer.Serialize(task.With);
+        Assert.DoesNotContain("artifacts", withJson);
+        Assert.DoesNotContain("docs/out.md", withJson);
+
+        Assert.NotNull(task.Artifacts);
+        Assert.Equal(new[] { "docs/out.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_WithExpectFilesAloneDoesNotCreateArtifactCapture()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: expect-only
+                title: Expect files only
+                uses: mohist/acp-agent
+                with:
+                  prompt: hello
+                  expect:
+                    files:
+                      - path: docs/expected.md
+                    markers:
+                      - path: docs/expected.md
+                        contains: "# Done"
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.Null(task.Artifacts);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_AcceptsSamePathInExpectMarkersAndArtifacts()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: review
+                title: Review
+                uses: mohist/acp-agent
+                with:
+                  prompt: Review
+                  expect:
+                    markers:
+                      - path: ${{ openspecChangeDir }}/review.md
+                        oneOf:
+                          - <promise>PASS</promise>
+                          - <promise>FAIL</promise>
+                artifacts:
+                  files:
+                    - path: ${{ openspecChangeDir }}/review.md
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.NotNull(task.Artifacts);
+        Assert.Equal(new[] { "${{ openspecChangeDir }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
+        var withJson = JsonSerializer.Serialize(task.With);
+        Assert.Contains("expect", withJson);
+        Assert.Contains("markers", withJson);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_TaskArtifactFileEntryWithoutPathThrows()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: bad
+                title: Bad
+                uses: mohist/acp-agent
+                with:
+                  prompt: hi
+                artifacts:
+                  files:
+                    - other: docs/out.md
+            checks: []
+        """));
+
+        Assert.Contains("artifacts.files", ex.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_RepairTaskArtifactsAreIsolated()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: check
+            tasks:
+              - id: ai-review
+                title: AI review
+                uses: mohist/acp-agent
+                with:
+                  prompt: review
+                artifacts:
+                  files:
+                    - path: review.md
+            checks:
+              - name: review-passed
+                title: Review passed
+                uses: core/marker
+                with:
+                  path: review.md
+                  expect: <promise>PASS</promise>
+                repairLimit: 1
+                repairTask:
+                  id: fix-review
+                  title: Fix review
+                  uses: mohist/acp-agent
+                  with:
+                    prompt: fix
+                verifyTask:
+                  id: re-review
+                  title: Re review
+                  uses: mohist/acp-agent
+                  with:
+                    prompt: re
+                  artifacts:
+                    files:
+                      - path: review.md
+        """);
+
+        var stage = definition.Stages.Single();
+        var review = stage.Tasks.Single();
+        Assert.NotNull(review.Artifacts);
+
+        var repairCheck = stage.Checks.Single();
+        Assert.Null(repairCheck.OnFailure?.Repair?.Task.Artifacts);
+        var verify = repairCheck.OnFailure?.Repair?.VerifyTask;
+        Assert.NotNull(verify);
+        Assert.NotNull(verify!.Artifacts);
+        Assert.Equal(new[] { "review.md" }, verify.Artifacts!.Files.Select(f => f.Path).ToArray());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlSerializer_RoundTripsTaskArtifactCapture()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: declare
+                title: Declare
+                uses: mohist/acp-agent
+                with:
+                  prompt: hi
+                artifacts:
+                  files:
+                    - path: docs/a.md
+                    - path: docs/b.md
+            checks: []
+        """);
+
+        var yaml = WorkflowYamlSerializer.ToYaml(definition);
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
+
+        var task = reparsed.Stages.Single().Tasks.Single();
+        Assert.NotNull(task.Artifacts);
+        Assert.Equal(
+            new[] { "docs/a.md", "docs/b.md" },
+            task.Artifacts!.Files.Select(f => f.Path).ToArray());
+        Assert.Contains("artifacts:", yaml);
+        Assert.Contains("docs/a.md", yaml);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void DefaultWorkflowDefinition_DeclaresExpectedArtifactCapturePaths()
+    {
+        var definition = MohistWorkflow.Definition;
+
+        var plan = definition.Stages[0];
+        AssertArtifactPaths(plan.Tasks.Single(t => t.Id == "proposal"), "proposal.md");
+        AssertArtifactPaths(plan.Tasks.Single(t => t.Id == "specs"), "specs");
+        AssertArtifactPaths(plan.Tasks.Single(t => t.Id == "design"), "design.md");
+        AssertArtifactPaths(plan.Tasks.Single(t => t.Id == "tasks"), "tasks.json");
+        AssertArtifactPaths(plan.Tasks.Single(t => t.Id == "self-review"), "self-review.md");
+
+        var check = definition.Stages[2];
+        AssertArtifactPaths(check.Tasks.Single(t => t.Id == "ai-review"), "review.md");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void DefaultWorkflowDefinition_AiReviewTaskDeclaresMarkerExpectationWithOneOf()
+    {
+        // The default workflow's ai-review task must declare a
+        // with.expect.markers entry that accepts both PASS and FAIL
+        // verdicts so a failing review does not loop the action
+        // forever. This is the spec's canonical YAML shape for the
+        // check repair loop motivating scenario.
+        var definition = MohistWorkflow.Definition;
+        var check = definition.Stages[2];
+        var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
+
+        AssertMarkerOneOf(aiReview);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void DefaultWorkflowDefinition_ReviewPassedRepairVerifyTaskDeclaresMarkerOneOf()
+    {
+        // The repair-loop verify task reuses the ai-review task; its
+        // action input must also accept either verdict marker.
+        var definition = MohistWorkflow.Definition;
+        var check = definition.Stages[2];
+        var reviewPassed = check.Checks.Single(c => c.Name == "review-passed");
+        var verify = reviewPassed.OnFailure?.Repair?.VerifyTask;
+        Assert.NotNull(verify);
+
+        AssertMarkerOneOf(verify!);
+    }
+
+    private static void AssertMarkerOneOf(TaskDefinition task)
+    {
+        Assert.NotNull(task.With);
+        Assert.True(task.With!.ContainsKey("expect"), "task is missing 'expect' input");
+
+        var expectElement = JsonSerializer.SerializeToElement(task.With["expect"]);
+        Assert.Equal(JsonValueKind.Object, expectElement.ValueKind);
+        Assert.True(expectElement.TryGetProperty("markers", out var markers),
+            "task 'expect' is missing the 'markers' entry");
+        Assert.Equal(JsonValueKind.Array, markers.ValueKind);
+        Assert.True(markers.GetArrayLength() > 0, "'markers' must declare at least one entry");
+
+        var first = markers[0];
+        Assert.Equal(JsonValueKind.Object, first.ValueKind);
+        Assert.True(first.TryGetProperty("path", out _), "marker entry is missing 'path'");
+        Assert.True(first.TryGetProperty("oneOf", out var oneOf),
+            "marker entry is missing the 'oneOf' verdicts list");
+        Assert.Equal(JsonValueKind.Array, oneOf.ValueKind);
+
+        var verdicts = oneOf.EnumerateArray()
+            .Select(v => v.GetString())
+            .Where(v => v is not null)
+            .ToList();
+        Assert.Contains("<promise>PASS</promise>", verdicts);
+        Assert.Contains("<promise>FAIL</promise>", verdicts);
+
+        // Files-style expectations are intentionally absent so the
+        // artifact declaration surface is not the same as the action
+        // completion contract.
+        Assert.False(expectElement.TryGetProperty("files", out _),
+            "ai-review expect must use markers, not files");
+    }
+
+    private static void AssertArtifactPaths(TaskDefinition task, params string[] expectedPathSuffixes)
+    {
+        Assert.NotNull(task.Artifacts);
+        var actual = task.Artifacts!.Files.Select(f => f.Path).ToList();
+        Assert.Equal(expectedPathSuffixes.Length, actual.Count);
+        foreach (var suffix in expectedPathSuffixes)
+            Assert.Contains(actual, p => p.EndsWith(suffix, StringComparison.Ordinal));
     }
 }
 

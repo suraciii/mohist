@@ -20,7 +20,7 @@ public class RecordingEventStore : IEventStore
     {
         lock (_gate)
         {
-            var source = $"/workflow-runs/{workflowRunId}";
+            var source = $"/mohist/workflow-runs/{workflowRunId}";
             return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
                 .Where(e => e.Envelope.Source.ToString() == source)
                 .TakeLast(limit)

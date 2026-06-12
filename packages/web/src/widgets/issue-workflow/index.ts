@@ -1,5 +1,7 @@
+export { ArtifactContentViewer } from './ui/ArtifactContentViewer'
 export { BranchBar } from './ui/BranchBar'
 export { FullReportModal, ResultBadge } from './ui/ReviewReportModal'
+export { LatestArtifactsPanel } from './ui/LatestArtifactsPanel'
 export { TaskProgressPanel } from './ui/TaskProgressPanel'
 export { WorkflowSessionsPanel } from './ui/WorkflowSessionsPanel'
 export { WorkflowConvergencePanel } from './ui/WorkflowConvergencePanel'

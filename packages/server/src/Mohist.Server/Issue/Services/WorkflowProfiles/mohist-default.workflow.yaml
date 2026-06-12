@@ -16,6 +16,9 @@ stages:
           expect:
             files:
               - path: ${{ openspecChangeDir }}/proposal.md
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/proposal.md
       - id: specs
         title: Write specs
         uses: mohist/acp-agent
@@ -26,6 +29,9 @@ stages:
           expect:
             files:
               - path: ${{ openspecChangeDir }}/specs
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/specs
       - id: design
         title: Create design
         uses: mohist/acp-agent
@@ -36,6 +42,9 @@ stages:
           expect:
             files:
               - path: ${{ openspecChangeDir }}/design.md
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/design.md
       - id: tasks
         title: Generate tasks
         uses: mohist/acp-agent
@@ -46,6 +55,9 @@ stages:
           expect:
             files:
               - path: ${{ openspecChangeDir }}/tasks.json
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/tasks.json
       - id: self-review
         title: Self review
         uses: mohist/acp-agent
@@ -56,6 +68,9 @@ stages:
           expect:
             files:
               - path: ${{ openspecChangeDir }}/self-review.md
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/self-review.md
     checks:
       - name: proposal-complete
         title: Proposal complete
@@ -148,8 +163,14 @@ stages:
           prompt: ${{ prompts.review }}
           agent: ${{ vars.agent }}
           expect:
-            files:
+            markers:
               - path: ${{ openspecChangeDir }}/review.md
+                oneOf:
+                  - <promise>PASS</promise>
+                  - <promise>FAIL</promise>
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/review.md
     checks:
       - name: health
         title: Health
@@ -192,8 +213,11 @@ stages:
             prompt: ${{ prompts.review }}
             agent: ${{ vars.agent }}
             expect:
-              files:
+              markers:
                 - path: ${{ openspecChangeDir }}/review.md
+                  oneOf:
+                    - <promise>PASS</promise>
+                    - <promise>FAIL</promise>
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready

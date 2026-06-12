@@ -14,6 +14,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssueSessions();
         projectIssues.MapIssueWorkflowProfile();
         projectIssues.MapIssueRebase();
+        projectIssues.MapIssueWorkflowArtifacts();
 
         return app;
     }

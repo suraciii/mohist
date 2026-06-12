@@ -26,6 +26,8 @@ using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
+using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Services.Artifacts;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -105,6 +107,11 @@ public static class MohistServiceRegistration
             client.Timeout = TimeSpan.FromSeconds(5);
         });
         services.AddSingleton<SystemUpdateService>();
+        services.AddSingleton<IWorkflowArtifactStorage, FileSystemWorkflowArtifactStorage>();
+        services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
+        services.AddScoped<WorkflowArtifactUploadService>();
+        services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
+        services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<RunnerConnectionTracker>();

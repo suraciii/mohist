@@ -45,6 +45,8 @@ public class MohistDbContext : DbContext
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
     public DbSet<ProjectPromptTemplateRow> ProjectPromptTemplates { get; set; } = null!;
     public DbSet<EpicCounterRow> EpicCounters { get; set; } = null!;
+    public DbSet<WorkflowArtifactRow> WorkflowArtifacts { get; set; } = null!;
+    public DbSet<WorkflowArtifactPendingUploadRow> WorkflowArtifactPendingUploads { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -334,6 +336,62 @@ public class MohistDbContext : DbContext
         {
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<WorkflowArtifactRow>(entity =>
+        {
+            entity.ToTable("WorkflowArtifacts");
+            entity.HasKey(e => e.ArtifactId);
+            entity.Property(e => e.ArtifactId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.TaskRunId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Path).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.RecordedAt).IsRequired();
+            entity.Property(e => e.ArtifactStoragePath).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired().HasDefaultValue("file");
+            entity.Property(e => e.ContentType).HasMaxLength(128);
+            entity.Property(e => e.ContentHash).HasMaxLength(128);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.IssueId).HasMaxLength(256);
+            entity.Property(e => e.DisplayName).HasMaxLength(512);
+
+            // Latest per path within a workflow run, plus history scans.
+            entity.HasIndex(e => new { e.WorkflowRunId, e.Path, e.RecordedAt })
+                .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_Path_RecordedAt");
+            // Task-run filter and history ordering.
+            entity.HasIndex(e => new { e.WorkflowRunId, e.TaskRunId, e.RecordedAt })
+                .HasDatabaseName("IX_WorkflowArtifacts_WorkflowRunId_TaskRunId_RecordedAt");
+            // Issue-scoped latest projection support.
+            entity.HasIndex(e => new { e.IssueId, e.RecordedAt })
+                .HasDatabaseName("IX_WorkflowArtifacts_IssueId_RecordedAt");
+        });
+
+        modelBuilder.Entity<WorkflowArtifactPendingUploadRow>(entity =>
+        {
+            entity.ToTable("WorkflowArtifactPendingUploads");
+            entity.HasKey(e => e.UploadId);
+            entity.Property(e => e.UploadId).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.TaskRunId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Path).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(16).IsRequired().HasDefaultValue("file");
+            entity.Property(e => e.FileCount);
+            entity.Property(e => e.ContentType).HasMaxLength(128);
+            entity.Property(e => e.ContentHash).HasMaxLength(128);
+            entity.Property(e => e.StoragePath).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.ExpiresAt).IsRequired();
+
+            // Idempotency: same workflow run, work item, task run, and
+            // path resolves to a single pending upload. Conflicts on
+            // content hash reject the retry without mutating the row.
+            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId, e.TaskRunId, e.Path })
+                .IsUnique()
+                .HasDatabaseName("UX_WorkflowArtifactPendingUploads_IdempotencyKey");
+            // TTL cleanup walks by expiry.
+            entity.HasIndex(e => e.ExpiresAt)
+                .HasDatabaseName("IX_WorkflowArtifactPendingUploads_ExpiresAt");
         });
     }
 

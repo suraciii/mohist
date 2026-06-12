@@ -85,6 +85,99 @@ describe("verifyExpectations", () => {
 
     expect(result.satisfied).toBe(true)
   })
+
+  it("OneOfMarkers_PASSValue_SatisfiesExpectation", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "Looks good.\n<promise>PASS</promise>\n")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(true)
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+    expect(result.message).toContain("satisfied")
+  })
+
+  it("OneOfMarkers_FAILValue_SatisfiesExpectation", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "Issues found.\n<promise>FAIL</promise>\n")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(true)
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+    expect(result.message).toContain("satisfied")
+  })
+
+  it("OneOfMarkers_NeitherValuePresent_KeepsAskingForRequiredFormat", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "Still drafting the review.")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.missingArtifactMarkers).toHaveLength(1)
+    expect(result.missingArtifactMarkers[0].path).toContain("review.md")
+    expect(result.missingArtifactMarkers[0].contains).toContain("oneOf")
+    expect(result.missingArtifactMarkers[0].contains).toContain("<promise>PASS</promise>")
+    expect(result.missingArtifactMarkers[0].contains).toContain("<promise>FAIL</promise>")
+    expect(result.message).toContain("missing artifact marker")
+    expect(result.message).not.toContain("verdict")
+  })
+
+  it("OneOfMarkers_TargetFileMissing_ReportsMissingFileMarker", async () => {
+    const dir = mkTestDir()
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.missingArtifactMarkers).toHaveLength(1)
+    expect(result.missingArtifactMarkers[0].contains).toContain("oneOf")
+  })
+
+  it("OneOfMarkers_BeatsContainsFallback_AcceptsListedValue", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "<promise>FAIL</promise>")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          contains: "<promise>PASS</promise>",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(true)
+  })
 })
 
 function mkTestDir(): string {

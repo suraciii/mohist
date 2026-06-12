@@ -54,6 +54,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
             Directory.Delete(_runnerRoot, recursive: true);
         if (!string.IsNullOrWhiteSpace(_systemUpdateStatePath) && File.Exists(_systemUpdateStatePath))
             File.Delete(_systemUpdateStatePath);
+        if (!string.IsNullOrWhiteSpace(_factory?.ArtifactStorageRoot) && Directory.Exists(_factory.ArtifactStorageRoot))
+            Directory.Delete(_factory.ArtifactStorageRoot, recursive: true);
     }
 }
 
@@ -63,7 +65,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _runnerRoot;
     private readonly string _systemUpdateStatePath;
     private readonly string _configPath;
+    private readonly string _artifactStorageRoot;
     private string? _webRoot;
+
+    public string ArtifactStorageRoot => _artifactStorageRoot;
 
     public MohistWebApplicationFactory(string connectionString, string runnerRoot, string systemUpdateStatePath)
     {
@@ -71,6 +76,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _runnerRoot = runnerRoot;
         _systemUpdateStatePath = systemUpdateStatePath;
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
+        _artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_artifactStorageRoot);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -80,6 +87,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
         builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
+        builder.UseSetting("Mohist:ArtifactStorage:Root", _artifactStorageRoot);
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -89,6 +97,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
+                ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
             });
         });
 

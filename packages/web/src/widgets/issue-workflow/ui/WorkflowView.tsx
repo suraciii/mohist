@@ -11,9 +11,11 @@ import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepai
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import { useWorkflowTimeline } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
+import { ArtifactContentViewer } from './ArtifactContentViewer'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
+import type { WorkflowArtifactSummary } from '../../../entities/issue'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -91,6 +93,7 @@ function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflow
         attempts: task.attempts,
         duration: task.durationMs ?? 0,
         artifacts: [],
+        artifactSummaries: task.artifactSummaries,
         output: task.message,
         startedAt: task.startedAt,
         completedAt: task.completedAt,
@@ -362,6 +365,35 @@ function TaskSessionChip({ issueNumber, sessionName }: { issueNumber: number; se
   )
 }
 
+function TaskArtifactSummaryChip({
+  summary,
+  onClick,
+}: {
+  summary: WorkflowArtifactSummary
+  onClick: () => void
+}) {
+  const isDirectory = summary.kind === 'directory'
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+      title={`Open recorded ${summary.path}`}
+    >
+      {isDirectory ? (
+        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-3.586l-1.707-1.707A1 1 0 009.586 3H4z" />
+        </svg>
+      ) : (
+        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
+        </svg>
+      )}
+      <span className="font-mono truncate">{summary.path}</span>
+    </button>
+  )
+}
+
 function TaskItem({
   task,
   issueNumber,
@@ -374,13 +406,16 @@ function TaskItem({
   liveElapsed?: number | null
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [selectedArtifact, setSelectedArtifact] = useState<WorkflowArtifactSummary | null>(null)
   const isPending = task.status === 'pending'
   const isRunning = task.status === 'running'
   const isFailed = task.status === 'failed'
   const taskOutput = task.output
   const hasOutput = taskOutput != null
   const hasRequiredFiles = (task.requiredFiles?.length ?? 0) > 0
-  const canExpand = task.artifacts.length > 0 || hasRequiredFiles || isFailed || hasOutput
+  const artifactSummaries = task.artifactSummaries ?? []
+  const hasArtifacts = artifactSummaries.length > 0
+  const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
@@ -446,10 +481,24 @@ function TaskItem({
       </Button>
       {expanded && canExpand && (
         <div className="px-3 pb-2 border-t bg-muted">
-          <div className="mt-2 space-y-1">
+          <div className="mt-2 space-y-2">
             {hasReason && (
               <div className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
                 {task.reason}
+              </div>
+            )}
+            {hasArtifacts && (
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Artifacts</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {artifactSummaries.map((summary) => (
+                    <TaskArtifactSummaryChip
+                      key={summary.artifactId}
+                      summary={summary}
+                      onClick={() => setSelectedArtifact(summary)}
+                    />
+                  ))}
+                </div>
               </div>
             )}
             {task.requiredFiles?.map((rf) => (
@@ -462,6 +511,17 @@ function TaskItem({
             )}
           </div>
         </div>
+      )}
+      {selectedArtifact && (
+        <ArtifactContentViewer
+          issueNumber={issueNumber}
+          artifactId={selectedArtifact.artifactId}
+          path={selectedArtifact.path}
+          open={selectedArtifact !== null}
+          onOpenChange={(open) => {
+            if (!open) setSelectedArtifact(null)
+          }}
+        />
       )}
     </div>
   )

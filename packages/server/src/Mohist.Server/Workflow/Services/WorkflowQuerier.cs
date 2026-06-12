@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -12,6 +13,7 @@ public class WorkflowQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
     private readonly WorkflowProfileManager _profileManager;
+    private readonly IWorkflowArtifactQuerier _artifactQuerier;
 
     private static readonly JsonSerializerOptions RunJsonOptions = new()
     {
@@ -26,10 +28,14 @@ public class WorkflowQuerier
         PropertyNameCaseInsensitive = true,
     };
 
-    public WorkflowQuerier(IDbContextFactory<MohistDbContext> db, WorkflowProfileManager profileManager)
+    public WorkflowQuerier(
+        IDbContextFactory<MohistDbContext> db,
+        WorkflowProfileManager profileManager,
+        IWorkflowArtifactQuerier artifactQuerier)
     {
         _db = db;
         _profileManager = profileManager;
+        _artifactQuerier = artifactQuerier;
     }
 
     public async Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId)
@@ -47,7 +53,51 @@ public class WorkflowQuerier
 
         var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
 
-        return WorkflowStatusMapper.BuildStatusView(run, definition);
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition);
+        if (view is null) return null;
+
+        await AttachArtifactSummariesAsync(view, workflowRunId);
+
+        return view;
+    }
+
+    private async Task AttachArtifactSummariesAsync(WorkflowStatusView view, string workflowRunId)
+    {
+        var artifacts = await _artifactQuerier.ListAsync(workflowRunId);
+        if (artifacts.Count == 0) return;
+
+        var byTaskRun = artifacts
+            .GroupBy(a => a.TaskRunId)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        foreach (var stage in view.Stages)
+        {
+            for (var i = 0; i < stage.Tasks.Count; i++)
+            {
+                var task = stage.Tasks[i];
+                if (!byTaskRun.TryGetValue(task.Id, out var taskArtifacts)) continue;
+
+                var summaries = taskArtifacts
+                    .Select(a => new ArtifactSummaryView(
+                        a.ArtifactId,
+                        a.Path,
+                        a.Kind,
+                        a.DisplayName,
+                        a.RecordedAt,
+                        a.Size))
+                    .ToList();
+
+                stage.Tasks[i] = new TaskStatusView(
+                    task.Id,
+                    task.Title,
+                    task.Uses,
+                    task.Status,
+                    task.RequiredFiles,
+                    task.Classification,
+                    SessionName: task.SessionName,
+                    ArtifactSummaries: summaries);
+            }
+        }
     }
 
     public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)

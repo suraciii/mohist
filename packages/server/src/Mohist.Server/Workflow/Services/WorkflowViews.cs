@@ -64,6 +64,15 @@ public sealed record WorkflowStageProgress(
     string? CurrentTaskTitle = null);
 
 [GenerateSerializer]
+public sealed record ArtifactSummaryView(
+    string ArtifactId,
+    string Path,
+    string Kind,
+    string? DisplayName,
+    DateTimeOffset RecordedAt,
+    long? Size);
+
+[GenerateSerializer]
 public sealed record TaskStatusView(
     string Id,
     string Title,
@@ -71,7 +80,8 @@ public sealed record TaskStatusView(
     string Status,
     IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles = null,
     TaskClassification Classification = TaskClassification.UserFacing,
-    string? SessionName = null);
+    string? SessionName = null,
+    IReadOnlyList<ArtifactSummaryView>? ArtifactSummaries = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

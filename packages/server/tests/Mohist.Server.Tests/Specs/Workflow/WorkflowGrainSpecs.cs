@@ -17,6 +17,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Services.Prompts;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;
@@ -49,7 +50,10 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        return new WorkflowQuerier(factory, new Mohist.Server.Workflow.Services.WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
+        return new WorkflowQuerier(
+            factory,
+            new Mohist.Server.Workflow.Services.WorkflowProfileManager(factory, null!, new PromptTemplateEngine()),
+            new WorkflowArtifactQuerier(factory));
     }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)

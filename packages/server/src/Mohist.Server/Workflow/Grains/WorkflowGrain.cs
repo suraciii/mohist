@@ -6,9 +6,11 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Orleans.Runtime;
 
@@ -29,6 +31,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IPersistentState<WorkLease> _leaseState;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
+    private readonly IWorkflowArtifactBindService _artifactBindService;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
@@ -36,12 +39,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         [PersistentState("lease")] IPersistentState<WorkLease> leaseState,
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
+        IWorkflowArtifactBindService artifactBindService,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _leaseState = leaseState;
         _backlogs = backlogs;
         _profileManager = profileManager;
+        _artifactBindService = artifactBindService;
         _log = log;
     }
 
@@ -346,13 +351,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
+        var capturedWorkType = lease.WorkType;
+        var capturedLogicalId = lease.LogicalId;
+        var capturedWorkId = lease.WorkId;
+
         await ClearAndDeleteLeaseAsync();
         IReadOnlyList<WorkflowEvent> events = [];
 
-        switch (lease.WorkType)
+        switch (capturedWorkType)
         {
             case "task":
-                events = ProcessTaskResult(result);
+                events = await ProcessTaskResultAsync(result, capturedLogicalId, capturedWorkId);
                 break;
             case "check":
             case "checks":
@@ -388,6 +397,29 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public async Task<string?> GetCurrentWorkIdAsync()
     {
         return _leaseState?.State is { WorkId: not null and not "" } l ? l.WorkId : null;
+    }
+
+    public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
+    {
+        if (string.IsNullOrWhiteSpace(workId)) return Task.FromResult<WorkflowActiveWorkView?>(null);
+        var lease = _leaseState?.State;
+        if (lease is null
+            || string.IsNullOrWhiteSpace(lease.WorkId)
+            || !string.Equals(lease.WorkId, workId, StringComparison.Ordinal))
+        {
+            return Task.FromResult<WorkflowActiveWorkView?>(null);
+        }
+
+        var projectId = GetProjectId();
+        var issueId = GetIssueId();
+        return Task.FromResult<WorkflowActiveWorkView?>(new WorkflowActiveWorkView(
+            WorkId: lease.WorkId,
+            WorkType: lease.WorkType,
+            Stage: lease.Stage,
+            TaskRunId: lease.LogicalId,
+            Title: lease.Title,
+            ProjectId: string.IsNullOrWhiteSpace(projectId) ? null : projectId,
+            IssueId: issueId));
     }
 
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
@@ -498,7 +530,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 var taskWith = t.With is not null
                     ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
                     : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
-                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId);
+                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId, t.Artifacts);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -516,7 +548,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
-    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId)
+    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
@@ -597,6 +629,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         // --- 4. Extract issueRef from context (issue/project from _variables.Json) ---
         WorkIssueRef? issueRef = BuildIssueRef(payload);
 
+        var artifactsStr = artifacts is not null && !artifacts.IsEmpty
+            ? JsonSerializer.Serialize(artifacts)
+            : null;
+
         var dispatch = new WorkDispatch(
             WorkflowRunId: GrainKey,
             WorkId: workId,
@@ -606,7 +642,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             WorkType: workType,
             Stage: stage,
             Title: title,
-            Issue: issueRef);
+            Issue: issueRef,
+            Artifacts: artifactsStr);
         _leaseState.State = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
         _lastRunnerId = runnerId;
         return dispatch;
@@ -813,11 +850,118 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             await ClearAndDeleteLeaseAsync();
     }
 
-    private IReadOnlyList<WorkflowEvent> ProcessTaskResult(WorkResult result)
+    private async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskResultAsync(WorkResult result, string taskRunId, string workId)
     {
-        return result.Status == "completed"
-            ? _run!.CompleteTask()
-            : _run!.FailTask(new TaskResult("failed", result.Message));
+        var run = _run!;
+        var currentStage = run.CurrentStage();
+        var currentTask = currentStage?.Tasks.FirstOrDefault(t => t.Id == taskRunId);
+        var events = new List<WorkflowEvent>();
+
+        if (result.ArtifactUploadIds is { Length: > 0 })
+        {
+            var artifactEvents = await BindArtifactUploadsAsync(
+                taskRunId, workId, result.ArtifactUploadIds, currentTask?.Artifacts);
+
+            if (artifactEvents is not null)
+            {
+                events.AddRange(artifactEvents);
+            }
+            else if (result.Status == "completed")
+            {
+                _log.LogWarning(
+                    "Workflow {Id} task {TaskId}: artifact binding failed, failing task",
+                    GrainKey, currentTask?.Id);
+                events.AddRange(run.FailTask(
+                    new TaskResult("failed", "Required declared artifacts were not uploaded or validated")));
+                return events;
+            }
+        }
+        else if (result.Status == "completed"
+            && currentTask?.Artifacts is { IsEmpty: false })
+        {
+            events.AddRange(run.FailTask(
+                new TaskResult("failed", "Required declared artifacts were not uploaded")));
+            return events;
+        }
+
+        if (result.Status == "completed")
+        {
+            events.AddRange(run.CompleteTask());
+        }
+        else
+        {
+            events.AddRange(run.FailTask(new TaskResult("failed", result.Message)));
+        }
+
+        return events;
+    }
+
+    private async Task<IReadOnlyList<WorkflowEvent>?> BindArtifactUploadsAsync(
+        string taskRunId,
+        string workId,
+        string[] artifactUploadIds,
+        TaskArtifactCapture? declaredArtifacts)
+    {
+        // The runner renders declared artifact `path` strings against
+        // the workflow variables before upload. Render the declared
+        // paths with the same variables here so the bind service
+        // compares resolved paths against resolved paths, not
+        // templates against resolved paths.
+        var variables = await ResolveBindVariablesAsync();
+
+        var bindResult = await _artifactBindService.BindAsync(
+            GrainKey,
+            workId,
+            taskRunId,
+            artifactUploadIds,
+            declaredArtifacts,
+            variables: variables,
+            projectId: GetProjectId(),
+            issueId: GetIssueId());
+
+        if (!bindResult.IsSuccess)
+        {
+            _log.LogWarning(
+                "Workflow {Id} artifact binding failed: {Error}",
+                GrainKey, bindResult.Error);
+            return null;
+        }
+
+        return bindResult.ArtifactRecordedEvents
+            .Select(a => (WorkflowEvent)a)
+            .ToList();
+    }
+
+    private async Task<JsonElement?> ResolveBindVariablesAsync()
+    {
+        // Mirror the variable resolution path used at dispatch time
+        // (MakeDispatchAsync) so the bind service sees the same
+        // resolved variables the runner used. Stage-scoped vars from
+        // the current stage overlay on top of the workflow-level
+        // vars.
+        var template = await _profileManager.LoadTemplateAsync(GrainKey);
+        var independent = await _profileManager.LoadVariablesAsync(GrainKey);
+        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
+        var resolved = VariableBundle.Patch(embedded, independent);
+
+        if (!resolved.Vars.HasValue && resolved.Stages is null) return null;
+
+        JsonElement effective = resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object
+            ? resolved.Vars.Value
+            : JsonSerializer.Deserialize<JsonElement>("{}");
+
+        var currentStage = _run?.CurrentStageId;
+        if (currentStage is not null
+            && resolved.Stages is not null
+            && resolved.Stages.TryGetValue(currentStage, out var stageVars)
+            && stageVars.Vars.HasValue
+            && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
+        {
+            var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
+            effective = VariableBundle.DeepMerge(effective, stageOverlay) ?? stageOverlay;
+        }
+
+        return effective;
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>> ProcessCheckResultAsync(WorkResult result)
@@ -1010,6 +1154,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             CheckFailed => Task.CompletedTask,
             CheckPending => EnsureWorkHeartbeatAsync(),
             RepairScheduled => Task.CompletedTask,
+            WorkflowArtifactRecorded => Task.CompletedTask,
         };
 
     private async Task OnWorkflowStartedAsync()

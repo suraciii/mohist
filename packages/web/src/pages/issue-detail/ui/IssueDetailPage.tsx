@@ -12,7 +12,7 @@ import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
-import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor } from '../../../widgets/issue-workflow'
+import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel } from '../../../widgets/issue-workflow'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -765,6 +765,8 @@ export function IssueDetailPage() {
                   )}
                 </dl>
               </CardSection>
+
+              <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
 
               {issue.drift?.drifted && (
                 <CardSection title="Base Drift Detected" tone="amber">

@@ -2,7 +2,26 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import type { IssueWorkflowProfileYamlResponse } from '../model/types'
-import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue, getIssueWorkflowProfileYaml, updateIssueWorkflowProfileYaml, deleteIssueWorkflowProfileTemplate } from './client'
+import type { IssueWorkflowArtifactListParams } from './client'
+import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue, getIssueWorkflowProfileYaml, updateIssueWorkflowProfileYaml, deleteIssueWorkflowProfileTemplate, getIssueWorkflowArtifacts, getIssueWorkflowArtifactContent } from './client'
+
+export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', params],
+    queryFn: () => getIssueWorkflowArtifacts(issueNumber, params, projectId),
+    enabled: enabled && issueNumber > 0 && !!projectId,
+  })
+}
+
+export function useIssueWorkflowArtifactContent(issueNumber: number, artifactId: string | null, options: { file?: string } = {}, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: ['issues', issueNumber, projectId, 'workflow-artifacts', artifactId, 'content', options],
+    queryFn: () => getIssueWorkflowArtifactContent(issueNumber, artifactId!, options, projectId),
+    enabled: enabled && issueNumber > 0 && !!artifactId && !!projectId,
+  })
+}
 
 export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   return useQuery({
