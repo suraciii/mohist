@@ -62,6 +62,9 @@ export type PlanRoundCompleteEvent = {
 export type AgentDetailEventMap = {
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
+  coder_text_chunk: { issueId: string; projectId: string; executionId?: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
+  coder_thought_chunk: { issueId: string; projectId: string; executionId?: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
+  coder_tool_call: { issueId: string; projectId: string; executionId?: string; acpSessionId: string; toolName: string; state?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; status?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; coderSessionId?: string; model?: string }
   'session.input': { issueId: string; projectId: string; executionId?: string; acpSessionId: string; coderSessionId?: string; text: string; kind?: string; sentAt?: string; sessionName?: string; workId?: string; workType?: string; stage?: string | null }
   'message.delta': { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   'reasoning.delta': { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }

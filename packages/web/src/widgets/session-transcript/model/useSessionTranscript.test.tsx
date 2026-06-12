@@ -2,21 +2,21 @@ import { act, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import { dispatchAgentEvent } from '../../../entities/agent'
-import type { SessionEvent } from '../../../entities/session/model/view'
+import type { SessionTurn } from '../../../entities/coder-session'
 import { useSessionTranscript } from './useSessionTranscript'
 
 function Wrapper({
   events,
   isRunning = true,
 }: {
-  events: SessionEvent[]
+  events: SessionTurn[]
   isRunning?: boolean
 }) {
   const result = useSessionTranscript({
     issueNumber: 84,
     sessionId: 'session-84',
     acpSessionId: 'acp-84',
-    initialEvents: events,
+    initialTurns: events,
     isRunning,
   })
   const text = result.turns
@@ -27,7 +27,7 @@ function Wrapper({
   return <div data-testid="transcript">{text}</div>
 }
 
-function renderHookHarness(events: SessionEvent[], isRunning = true) {
+function renderHookHarness(events: SessionTurn[], isRunning = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -36,7 +36,7 @@ function renderHookHarness(events: SessionEvent[], isRunning = true) {
   )
   return {
     ...result,
-    rerenderWith: (nextEvents: SessionEvent[], nextIsRunning = true) =>
+    rerenderWith: (nextEvents: SessionTurn[], nextIsRunning = true) =>
       result.rerender(
         <QueryClientProvider client={queryClient}>
           <Wrapper events={nextEvents} isRunning={nextIsRunning} />
@@ -45,13 +45,27 @@ function renderHookHarness(events: SessionEvent[], isRunning = true) {
   }
 }
 
-function persistedEvent(text: string): SessionEvent {
+function persistedEvent(text: string): SessionTurn {
   return {
-    id: 1,
-    sequence: 1,
-    type: 'assistant_text',
-    payload: { text },
-    createdAt: '2026-06-12T00:00:00.000Z',
+    id: 'turn-1',
+    startedAt: '2026-06-12T00:00:00.000Z',
+    completedAt: null,
+    incomplete: false,
+    user: {
+      role: 'mohist',
+      text: '',
+      kind: 'task',
+      sentAt: '2026-06-12T00:00:00.000Z',
+    },
+    assistant: [
+      {
+        id: 'part-1',
+        type: 'text',
+        text,
+        startedAt: '2026-06-12T00:00:00.000Z',
+        completedAt: null,
+      },
+    ],
   }
 }
 
@@ -62,7 +76,7 @@ describe('useSessionTranscript', () => {
     expect(screen.getByTestId('transcript').textContent).toBe('persisted')
 
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', {
+      dispatchAgentEvent('message.delta', {
         issueId: '84',
         projectId: 'project',
         executionId: 'work',
@@ -83,7 +97,7 @@ describe('useSessionTranscript', () => {
     const { rerenderWith } = renderHookHarness(initial)
 
     act(() => {
-      dispatchAgentEvent('coder_text_chunk', {
+      dispatchAgentEvent('message.delta', {
         issueId: '84',
         projectId: 'project',
         executionId: 'work',
