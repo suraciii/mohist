@@ -43,7 +43,7 @@ public sealed class SkillsCommandRegistrationSpecs
         services.AddSingleton<TextWriter>(TextWriter.Null);
         services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<SystemdServiceInstaller>();
+        services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, sp.GetRequiredService<ICommandExecutor>()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();

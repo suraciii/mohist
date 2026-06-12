@@ -94,7 +94,7 @@ internal sealed class SourceCodeUpdater
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
-    private readonly SystemdServiceInstaller _systemd;
+    private readonly IServiceInstaller _systemd;
     private readonly ICommandExecutor _commandExecutor;
     private readonly IFileSystem _fileSystem;
     private readonly IEnvironmentVariableProvider _environment;
@@ -105,7 +105,7 @@ internal sealed class SourceCodeUpdater
     public SourceCodeUpdater(
         TextWriter output,
         TextWriter error,
-        SystemdServiceInstaller systemd,
+        IServiceInstaller systemd,
         ICommandExecutor commandExecutor,
         IFileSystem? fileSystem = null,
         IEnvironmentVariableProvider? environment = null,
@@ -290,7 +290,7 @@ internal sealed class SourceCodeUpdater
         {
             _out.WriteLine("Dry run: would execute:");
             _out.WriteLine($"  cd {root} && dotnet build Mohist.sln");
-            _out.WriteLine("  systemctl --user restart mohist.service (if installed)");
+            _out.WriteLine($"  {RestartCommandLine("server")} (if installed)");
             _out.WriteLine("  wait for /api/health, /, and referenced /assets/* response headers readiness checks");
             return 0;
         }
@@ -336,7 +336,7 @@ internal sealed class SourceCodeUpdater
         {
             _out.WriteLine("Dry run: would execute:");
             _out.WriteLine($"  cd {root} && npm run build -w packages/runner");
-            _out.WriteLine("  systemctl --user restart mohist-runner.service (if installed)");
+            _out.WriteLine($"  {RestartCommandLine("runner")} (if installed)");
             return 0;
         }
 
@@ -398,6 +398,14 @@ internal sealed class SourceCodeUpdater
         if (OperatingSystem.IsMacOS()) return "osx-x64";
         if (OperatingSystem.IsWindows()) return "win-x64";
         return "linux-x64";
+    }
+
+    private static string RestartCommandLine(string kind)
+    {
+        var unitName = kind == "runner" ? "mohist-runner.service" : "mohist.service";
+        if (OperatingSystem.IsWindows())
+            return $"schtasks /Run /TN Mohist_{char.ToUpperInvariant(kind[0])}{kind[1..]}";
+        return $"systemctl --user restart {unitName}";
     }
 
     private void WriteCommandFailureOutput(string stdout, string stderr)

@@ -30,7 +30,7 @@ internal static class MohistCliCommands
         new("--dry-run") { Description = "Preview commands without executing" };
 
     internal static Option<string?> UnitDirOption() =>
-        new("--unit-dir") { Description = "systemd unit directory" };
+        new("--unit-dir") { Description = "Service unit directory (Linux only)" };
 
     internal static Option<int> LinesOption() =>
         new("--lines", "-n") { Description = "Number of log lines", DefaultValueFactory = _ => 100 };
@@ -85,7 +85,7 @@ internal static class MohistCliCommands
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
-        services.AddSingleton<SystemdServiceInstaller>();
+        services.AddSingleton<IServiceInstaller>(sp => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor) : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();

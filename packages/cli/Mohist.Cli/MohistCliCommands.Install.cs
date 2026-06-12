@@ -9,17 +9,17 @@ internal static class InstallCommands
     public static Command Build(IServiceProvider provider)
     {
         var install = new Command("install", "Install mohist components from source");
-        var systemd = provider.GetRequiredService<SystemdServiceInstaller>();
+        var installer = provider.GetRequiredService<IServiceInstaller>();
 
-        install.Subcommands.Add(BuildServerInstall(systemd));
-        install.Subcommands.Add(BuildRunnerInstall(systemd));
+        install.Subcommands.Add(BuildServerInstall(installer));
+        install.Subcommands.Add(BuildRunnerInstall(installer));
 
         return install;
     }
 
-    private static Command BuildServerInstall(SystemdServiceInstaller systemd)
+    private static Command BuildServerInstall(IServiceInstaller installer)
     {
-        var cmd = new Command("server", "Install server as systemd service from source");
+        var cmd = new Command("server", "Install server as a managed background service from source");
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
         var listenUrlOpt = new Option<string?>("--listen-url") { Description = "Server listen URL" };
         var dryRunOpt = MohistCliCommands.DryRunOption();
@@ -34,14 +34,14 @@ internal static class InstallCommands
             var unitDir = ctx.GetValue(unitDirOpt);
             var repoRoot = ctx.GetValue(repoRootOpt);
             var listenUrl = ctx.GetValue(listenUrlOpt);
-            return systemd.InstallServerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, listenUrl, null, null));
+            return installer.InstallServerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, listenUrl, null, null));
         });
         return cmd;
     }
 
-    private static Command BuildRunnerInstall(SystemdServiceInstaller systemd)
+    private static Command BuildRunnerInstall(IServiceInstaller installer)
     {
-        var cmd = new Command("runner", "Install runner as systemd service from source");
+        var cmd = new Command("runner", "Install runner as a managed background service from source");
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
         var serverUrlOpt = new Option<string?>("--server-url") { Description = "Server URL" };
         var runnerRootOpt = new Option<string?>("--runner-root") { Description = "Runner root path" };
@@ -59,7 +59,7 @@ internal static class InstallCommands
             var repoRoot = ctx.GetValue(repoRootOpt);
             var serverUrl = ctx.GetValue(serverUrlOpt);
             var runnerRoot = ctx.GetValue(runnerRootOpt);
-            return systemd.InstallRunnerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, null, serverUrl, runnerRoot));
+            return installer.InstallRunnerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, null, serverUrl, runnerRoot));
         });
         return cmd;
     }
