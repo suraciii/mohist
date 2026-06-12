@@ -86,7 +86,38 @@ public static class WorkflowYamlSerializer
         if (withMap is not null)
             ValidateTaskExpectations(id, withMap);
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap));
+        var artifacts = ParseTaskArtifacts(map);
+
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts);
+    }
+
+    private static TaskArtifactCapture? ParseTaskArtifacts(Dictionary<string, object?> taskMap)
+    {
+        if (!taskMap.TryGetValue("artifacts", out var artifactsValue) || artifactsValue is null)
+            return null;
+
+        var artifactsMap = Normalize(artifactsValue) as Dictionary<string, object?>;
+        if (artifactsMap is null)
+            throw new InvalidOperationException("Workflow task 'artifacts' must be an object");
+
+        var filesValue = artifactsMap.TryGetValue("files", out var files) ? files : null;
+        var filesList = filesValue is null ? [] : List(artifactsMap, "files");
+        var declarations = new List<TaskArtifactDeclaration>(filesList.Count);
+        foreach (var item in filesList)
+        {
+            var entry = Normalize(item);
+            string? path = entry switch
+            {
+                string s => NullIfEmpty(s),
+                Dictionary<string, object?> obj => obj.TryGetValue("path", out var p) ? NullIfEmpty(p?.ToString() ?? "") : null,
+                _ => null,
+            };
+            if (string.IsNullOrWhiteSpace(path))
+                throw new InvalidOperationException("Workflow task 'artifacts.files' entries require a 'path'");
+            declarations.Add(new TaskArtifactDeclaration(path!));
+        }
+
+        return declarations.Count == 0 ? null : new TaskArtifactCapture(declarations);
     }
 
     private static void ValidateTaskExpectations(string taskId, Dictionary<string, object?> withMap)
@@ -171,7 +202,15 @@ public static class WorkflowYamlSerializer
         };
         if (task.Uses is not null) map["uses"] = task.Uses;
         AddWith(map, task.With);
+        AddArtifacts(map, task.Artifacts);
         return map;
+    }
+
+    private static void AddArtifacts(Dictionary<string, object?> map, TaskArtifactCapture? artifacts)
+    {
+        if (artifacts is null || artifacts.IsEmpty) return;
+        var files = artifacts.Files.Select(f => (object?)new Dictionary<string, object?> { ["path"] = f.Path }).ToList();
+        map["artifacts"] = new Dictionary<string, object?> { ["files"] = files };
     }
 
     private static Dictionary<string, object?> ToCheckMap(CheckDefinition check)

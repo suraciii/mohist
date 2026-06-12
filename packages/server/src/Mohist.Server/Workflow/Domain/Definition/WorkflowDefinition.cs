@@ -2,11 +2,19 @@ using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Definition;
 
+public sealed record TaskArtifactDeclaration(string Path);
+
+public sealed record TaskArtifactCapture(List<TaskArtifactDeclaration> Files)
+{
+    public bool IsEmpty => Files is null || Files.Count == 0;
+}
+
 public sealed record TaskDefinition(
     string Id,
     string Title,
     string? Uses = null,
-    Dictionary<string, JsonElement?>? With = null);
+    Dictionary<string, JsonElement?>? With = null,
+    TaskArtifactCapture? Artifacts = null);
 
 public sealed record CheckFailureRepair(int Limit, TaskDefinition Task, TaskDefinition? VerifyTask = null);
 

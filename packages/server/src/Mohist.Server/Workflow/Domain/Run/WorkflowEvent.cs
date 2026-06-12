@@ -1,3 +1,5 @@
+using Mohist.Server.Workflow.Domain.Artifacts;
+
 namespace Mohist.Server.Workflow.Domain.Run;
 
 public union WorkflowEvent(
@@ -17,7 +19,8 @@ public union WorkflowEvent(
     CheckPassed,
     CheckFailed,
     CheckPending,
-    RepairScheduled);
+    RepairScheduled,
+    WorkflowArtifactRecorded);
 
 public sealed record WorkflowRunStarted;
 public sealed record WorkflowRunResumed;

@@ -99,6 +99,7 @@ public static class EventCatalog
         ReverseDns.CheckFailed,
         ReverseDns.CheckPending,
         ReverseDns.RepairScheduled,
+        ReverseDns.WorkflowArtifactRecorded,
         ReverseDns.AgentSessionRuntimeBound,
         ReverseDns.AgentSessionUsageRecorded,
         ReverseDns.AgentSessionModelChanged,
@@ -138,6 +139,7 @@ public static class EventCatalog
         public const string CheckFailed = "com.mohist.workflow.check.failed";
         public const string CheckPending = "com.mohist.workflow.check.pending";
         public const string RepairScheduled = "com.mohist.workflow.repair-scheduled";
+        public const string WorkflowArtifactRecorded = "com.mohist.workflow.artifact.recorded";
 
         public const string AgentSessionRuntimeBound = "com.mohist.agent-session.runtime-bound";
         public const string AgentSessionUsageRecorded = "com.mohist.agent-session.usage-recorded";

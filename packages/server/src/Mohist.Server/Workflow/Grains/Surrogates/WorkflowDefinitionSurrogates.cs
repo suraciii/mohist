@@ -69,13 +69,14 @@ public struct TaskDefinitionSurrogate
     [Id(1)] public string Title;
     [Id(2)] public string? Uses;
     [Id(3)] public Dictionary<string, JsonElement?>? With;
+    [Id(4)] public TaskArtifactCapture? Artifacts;
 }
 
 [RegisterConverter]
 public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition, TaskDefinitionSurrogate>
 {
     public TaskDefinition ConvertFromSurrogate(in TaskDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With);
+        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Artifacts);
 
     public TaskDefinitionSurrogate ConvertToSurrogate(in TaskDefinition value) => new()
     {
@@ -83,6 +84,7 @@ public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition
         Title = value.Title,
         Uses = value.Uses,
         With = value.With,
+        Artifacts = value.Artifacts,
     };
 }
 

@@ -18,11 +18,11 @@ public sealed record WorkflowWork
     }
 
     public static WorkflowWork StageInit(string stage) => new(stage, "stage-init", new StageInitData());
-    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with) => new(stage, "task", new TaskData(id, title, uses, with));
+    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null) => new(stage, "task", new TaskData(id, title, uses, with, artifacts));
     public static WorkflowWork Checks(string stage, List<CheckItem> items) => new(stage, "checks", new ChecksData(items));
 
     public sealed record StageInitData;
-    public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With);
+    public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With, TaskArtifactCapture? Artifacts = null);
     public sealed record ChecksData(List<CheckItem> Items);
 }
 
@@ -38,7 +38,7 @@ public static partial class WorkflowRunExtensions
 
             var pendingTask = current.CurrentTask();
             if (pendingTask is not null)
-                return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput);
+                return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts);
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)

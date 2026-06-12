@@ -13,6 +13,7 @@ export interface WorkDispatchResponse {
   projectId?: string | null
   issueId?: string | null
   issueNumber?: number | null
+  artifacts?: string | null
 }
 
 export interface WorkItem {
@@ -26,6 +27,7 @@ export interface WorkItem {
   variables?: JsonObject | null
   projectId?: string | null
   issueNumber?: number | null
+  artifacts?: JsonObject | null
 }
 
 export interface WorkItemResult {
@@ -33,6 +35,7 @@ export interface WorkItemResult {
   message?: string | null
   output?: string | null
   exitCode?: number | null
+  artifactUploadIds?: string[] | null
 }
 
 export interface ActionContext {

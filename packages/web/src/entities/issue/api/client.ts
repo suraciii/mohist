@@ -1,5 +1,5 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
-import type { CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
 
 export interface IssueWorkflowVariables {
   vars?: Record<string, unknown> | null
@@ -103,6 +103,55 @@ export function getWorkflowYaml(workflowRunId: string) {
 
 export function getIssueWorkflowProfileYaml(number: number, projectId: string) {
   return request<IssueWorkflowProfileYamlResponse>(projectApiPath(projectId, `/issues/${number}/workflow-profile`))
+}
+
+export interface IssueWorkflowArtifactListParams {
+  path?: string
+  history?: boolean
+  taskRunId?: string
+}
+
+export function getIssueWorkflowArtifacts(number: number, params: IssueWorkflowArtifactListParams = {}, projectId?: string | null) {
+  const search = new URLSearchParams()
+  if (params.path) search.set('path', params.path)
+  if (params.history) search.set('history', 'true')
+  if (params.taskRunId) search.set('taskRunId', params.taskRunId)
+  const qs = search.toString()
+  return request<(WorkflowArtifact | WorkflowArtifactDirectory)[]>(projectApiPath(projectId, `/issues/${number}/workflow/artifacts${qs ? `?${qs}` : ''}`))
+}
+
+export function issueWorkflowArtifactContentPath(number: number, artifactId: string, projectId?: string | null) {
+  return projectApiPath(projectId, `/issues/${number}/workflow/artifacts/${encodeURIComponent(artifactId)}/content`)
+}
+
+export type WorkflowArtifactContentResult =
+  | { kind: 'text'; content: string; contentType: string | null }
+  | { kind: 'directory'; entries: WorkflowArtifactDirectoryEntry[]; totalSize: number }
+
+export async function getIssueWorkflowArtifactContent(
+  number: number,
+  artifactId: string,
+  options: { file?: string } = {},
+  projectId?: string | null,
+): Promise<WorkflowArtifactContentResult> {
+  const path = issueWorkflowArtifactContentPath(number, artifactId, projectId)
+  const search = new URLSearchParams()
+  if (options.file) search.set('file', options.file)
+  const qs = search.toString()
+  const res = await fetch(`/api${path}${qs ? `?${qs}` : ''}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error')
+    throw new ApiError(`Failed to fetch artifact content: ${text}`, res.status)
+  }
+
+  const contentType = res.headers.get('content-type')
+  if (!options.file && contentType?.includes('application/json')) {
+    const directory = await res.json() as WorkflowArtifactDirectory
+    return { kind: 'directory', entries: directory.entries ?? [], totalSize: directory.totalSize ?? 0 }
+  }
+
+  const content = await res.text()
+  return { kind: 'text', content, contentType }
 }
 
 export function updateIssueWorkflowProfileYaml(number: number, yaml: string, projectId: string) {

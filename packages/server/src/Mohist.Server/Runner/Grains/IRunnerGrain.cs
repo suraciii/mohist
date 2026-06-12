@@ -45,7 +45,8 @@ public record WorkDispatch(
     string WorkType = "task",
     string? Stage = null,
     string? Title = null,
-    WorkIssueRef? Issue = null);
+    WorkIssueRef? Issue = null,
+    string? Artifacts = null);
 
 [GenerateSerializer]
 public record WorkIssueRef(
@@ -54,7 +55,7 @@ public record WorkIssueRef(
     int IssueNumber);
 
 [GenerateSerializer]
-public record WorkResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);
+public record WorkResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

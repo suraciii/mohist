@@ -28,6 +28,7 @@ public static class MohistApiRegistration
         app.MapAgentRoutes();
         app.MapRunnerRoutes();
         app.MapRunnerStatusRoutes();
+        app.MapWorkflowArtifactUploadRoutes();
         app.MapHub<RunnerHub>("/hubs/runner");
         app.MapHub<MohistHub>("/hubs/events");
         return app;

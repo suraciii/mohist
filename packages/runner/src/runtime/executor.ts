@@ -1,12 +1,19 @@
 import { join } from "node:path"
 import type { ActionContext, JsonObject, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
-import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
+import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
+import {
+  actionProducedArtifacts,
+  captureArtifacts,
+  captureRequiresFailures,
+  summarizeCaptureFailures,
+  uploadCapturedArtifacts,
+} from "./artifact-capture.js"
 
 export class WorkExecutor {
   constructor(
@@ -39,7 +46,12 @@ export class WorkExecutor {
       }
       const renderedWith = renderTemplate(work.with, variables)
       const workDir = await this.resolveWorkDir(renderedWith, variables)
-      return normalize(work, await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir }))
+      const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
+      const normalized = normalize(work, result)
+      if (normalized.status !== "completed") {
+        return normalized
+      }
+      return await this.captureAndUploadArtifacts(work, workDir, normalized, result, variables, signal)
     } catch (error) {
       return failure(work, error instanceof Error ? error.message : String(error))
     }
@@ -94,6 +106,109 @@ export class WorkExecutor {
     const workDir = stringInput(withInput, "working-directory") ?? stringAt(variables, ["workspace", "path"]) ?? join(this.fallbackWorkDir, "default")
     await ensureDir(workDir)
     return workDir
+  }
+
+  /**
+   * Capture the task's declared `artifacts.files` plus any
+   * action-produced dynamic artifacts from the runner workspace, upload
+   * each to the server, and attach the resulting upload ids to the task
+   * result. A failure to capture or upload any declared artifact fails
+   * the task through the normal task failure path; dynamic artifact
+   * failures are reported on the message but do not fail the task.
+   */
+  private async captureAndUploadArtifacts(
+    work: WorkItem,
+    workDir: string,
+    result: WorkItemResult,
+    actionResult: import("../core/types.js").ActionResult,
+    variables: JsonObject,
+    signal: AbortSignal,
+  ): Promise<WorkItemResult> {
+    // Render the declared artifacts object so template variables
+    // (e.g. `${{ openspecChangeDir }}/review.md` from the default
+    // workflow) resolve to workspace-relative paths before the
+    // capture layer hands them to the filesystem. Without this
+    // substitution the runner would read from a literal
+    // `${{ openspecChangeDir }}` directory and fail every declared
+    // artifact capture with ENOENT.
+    //
+    // Artifact `path` strings must resolve every embedded reference;
+    // unlike `with.prompt` they are real workspace paths, not
+    // documentation, so an embedded `${{ unknown }}` left in place
+    // is a bug rather than a tolerated literal. We use
+    // `unresolvedReferences` (which catches both whole-string and
+    // embedded) to surface the failure before the capture layer
+    // would otherwise encounter an ENOENT.
+    let renderedArtifacts: JsonObject | null = null
+    if (work.artifacts) {
+      try {
+        const unresolved = unresolvedReferences(work.artifacts, variables)
+        if (unresolved.length > 0) {
+          return {
+            ...result,
+            status: "failed",
+            message: `${result.message ? result.message + "; " : ""}artifact declaration references undefined variable(s): ${unresolved.map((p) => "'${{ " + p + " }}'").join(", ")}. Add the variable to workflow.variables or a parent stage.`.slice(0, 4000),
+          }
+        }
+        renderedArtifacts = renderTemplate(work.artifacts, variables) as JsonObject | null
+      } catch (error) {
+        return {
+          ...result,
+          status: "failed",
+          message: `${result.message ? result.message + "; " : ""}artifact template render failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
+        }
+      }
+    }
+
+    const dynamicInputs = actionProducedArtifacts(actionResult)
+    let captureOutcome
+    try {
+      captureOutcome = await captureArtifacts({ work, workDir, dynamicArtifacts: dynamicInputs, renderedArtifacts })
+    } catch (error) {
+      return {
+        ...result,
+        status: "failed",
+        message: `${result.message ? result.message + "; " : ""}artifact capture failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
+      }
+    }
+    const declaredFailures = captureRequiresFailures(captureOutcome)
+    if (declaredFailures.length > 0) {
+      return {
+        ...result,
+        status: "failed",
+        message: `${result.message ? result.message + "; " : ""}required declared artifacts could not be captured: ${summarizeCaptureFailures(declaredFailures)}`.slice(0, 4000),
+      }
+    }
+    if (captureOutcome.captures.length === 0) {
+      return result
+    }
+    let uploads
+    try {
+      uploads = await uploadCapturedArtifacts(this.connection, work.workflowRunId, work.workId, captureOutcome.captures, signal)
+    } catch (error) {
+      return {
+        ...result,
+        status: "failed",
+        message: `${result.message ? result.message + "; " : ""}artifact upload failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
+      }
+    }
+    const uploadFailures = uploads.failures
+    const requiredUploadFailures = uploadFailures.filter((failure) => failure.source === "declared")
+    if (requiredUploadFailures.length > 0) {
+      return {
+        ...result,
+        status: "failed",
+        message: `${result.message ? result.message + "; " : ""}required declared artifacts could not be uploaded: ${summarizeCaptureFailures(requiredUploadFailures)}`.slice(0, 4000),
+      }
+    }
+    const message = uploadFailures.length > 0
+      ? `${result.message ? result.message + "; " : ""}some dynamic artifacts failed to upload: ${summarizeCaptureFailures(uploadFailures)}`
+      : result.message
+    return {
+      ...result,
+      message: message ?? result.message,
+      artifactUploadIds: uploads.uploads.map((upload) => upload.uploadId),
+    }
   }
 }
 

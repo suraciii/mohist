@@ -13,6 +13,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
+using Mohist.Server.Workflow.Services.Artifacts;
 using Orleans;
 using Xunit;
 
@@ -104,7 +105,10 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        return new WorkflowQuerier(factory, new WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
+        return new WorkflowQuerier(
+            factory,
+            new WorkflowProfileManager(factory, null!, new PromptTemplateEngine()),
+            new WorkflowArtifactQuerier(factory));
     }
 
     public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)

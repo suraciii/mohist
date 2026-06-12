@@ -16,6 +16,7 @@ public sealed class TaskRun
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
     public TaskRunStatus Status { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
+    public TaskArtifactCapture? Artifacts { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
 }
 
@@ -96,6 +97,7 @@ public static class TaskRunExtensions
                 WithInput = input.With,
                 Status = TaskRunStatus.Pending,
                 RequiredFiles = requiredFiles.Count > 0 ? requiredFiles : null,
+                Artifacts = input.Artifacts,
                 Classification = classification
             };
         }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Infrastructure.Events;
@@ -35,6 +36,7 @@ internal static class WorkflowEventSerializer
         CheckFailed => EventCatalog.ReverseDns.CheckFailed,
         CheckPending => EventCatalog.ReverseDns.CheckPending,
         RepairScheduled => EventCatalog.ReverseDns.RepairScheduled,
+        WorkflowArtifactRecorded => EventCatalog.ReverseDns.WorkflowArtifactRecorded,
         _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
     };
 
@@ -72,6 +74,7 @@ internal static class WorkflowEventSerializer
         nameof(CheckFailed) => data.Deserialize<CheckFailed>(JsonOptions)!,
         nameof(CheckPending) => data.Deserialize<CheckPending>(JsonOptions)!,
         nameof(RepairScheduled) => data.Deserialize<RepairScheduled>(JsonOptions)!,
+        nameof(WorkflowArtifactRecorded) => data.Deserialize<WorkflowArtifactRecorded>(JsonOptions)!,
         _ => throw new InvalidOperationException($"Unknown workflow event '{type}'"),
     };
 
@@ -94,6 +97,7 @@ internal static class WorkflowEventSerializer
         CheckFailed x => x,
         CheckPending x => x,
         RepairScheduled x => x,
+        WorkflowArtifactRecorded x => x,
         null => throw new InvalidOperationException("Null workflow event"),
     };
 }

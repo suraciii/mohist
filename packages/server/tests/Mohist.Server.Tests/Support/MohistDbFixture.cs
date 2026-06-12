@@ -65,6 +65,8 @@ public sealed class MohistDbFixture : IAsyncLifetime
         var runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-{Guid.NewGuid():N}");
         Directory.CreateDirectory(runnerRoot);
         var systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-sys-{Guid.NewGuid():N}.json");
+        var artifactStorageRoot = Path.Combine(Path.GetTempPath(), $"mohist-artifacts-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(artifactStorageRoot);
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -73,6 +75,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
                 ["Mohist:RunnerRoot"] = runnerRoot,
                 ["Mohist:WebRoot"] = Path.Combine(Path.GetTempPath(), $"mohist-web-{Guid.NewGuid():N}"),
                 ["Mohist:SystemUpdate:StatePath"] = systemUpdateStatePath,
+                ["Mohist:ArtifactStorage:Root"] = artifactStorageRoot,
                 ["Mohist:ServerUrl"] = "http://127.0.0.1:3456",
             })
             .Build();

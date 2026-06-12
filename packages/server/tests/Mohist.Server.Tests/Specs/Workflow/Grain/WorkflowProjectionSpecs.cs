@@ -501,6 +501,109 @@ public class WorkflowProjectionSpecs
         return currentStage.ApprovalStatus is { Result: null }
             || (currentStage.Tasks.All(t => t.Status == "completed") && currentStage.Checks.All(c => c.Status == "completed"));
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void TaskStatusView_WithArtifactSummaries_CarriesSummaries()
+    {
+        var summaries = new List<ArtifactSummaryView>
+        {
+            new("art_abc", "review.md", "file", "review.md", DateTimeOffset.UtcNow, 1024),
+            new("art_def", "design.md", "file", "design.md", DateTimeOffset.UtcNow, 2048),
+        };
+
+        var task = new TaskStatusView(
+            "ai-review.1", "AI review", "mohist/acp-agent", "completed",
+            null, TaskClassification.UserFacing, SessionName: null, ArtifactSummaries: summaries);
+
+        Assert.NotNull(task.ArtifactSummaries);
+        Assert.Equal(2, task.ArtifactSummaries.Count);
+        Assert.Equal("art_abc", task.ArtifactSummaries[0].ArtifactId);
+        Assert.Equal("review.md", task.ArtifactSummaries[0].Path);
+        Assert.Equal("art_def", task.ArtifactSummaries[1].ArtifactId);
+        Assert.Equal("design.md", task.ArtifactSummaries[1].Path);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void TaskStatusView_WithoutArtifactSummaries_DefaultsNull()
+    {
+        var task = new TaskStatusView("t1", "Basic task", "core/script", "running");
+
+        Assert.Null(task.ArtifactSummaries);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowStatusMapper_MapTasks_DoesNotSetArtifactSummaries()
+    {
+        var stage = new StageRun
+        {
+            Id = "build",
+            Attempt = 1,
+            RequiresApproval = false,
+            Status = StageRunStatus.Completed,
+            Tasks =
+            [
+                new TaskRun
+                {
+                    Id = "build.1",
+                    DefinitionId = "build",
+                    Attempt = 1,
+                    Title = "Build step",
+                    Status = TaskRunStatus.Completed,
+                    Uses = "core/script",
+                    RequiredFiles = null,
+                    Classification = TaskClassification.Orchestration
+                }
+            ]
+        };
+
+        var result = WorkflowStatusMapper.MapTasks(stage, definition: null);
+
+        var task = Assert.Single(result);
+        Assert.Equal("build.1", task.Id);
+        Assert.Equal("completed", task.Status);
+        Assert.Null(task.ArtifactSummaries);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ArtifactSummaryView_ContainsOnlyDtoFields_NoStoragePaths()
+    {
+        var summary = new ArtifactSummaryView(
+            "art_123", "review.md", "file", "Review Report", DateTimeOffset.UtcNow, 4096);
+
+        var json = JsonSerializer.Serialize(summary);
+
+        Assert.Contains("ArtifactId", json);
+        Assert.Contains("review.md", json);
+        Assert.DoesNotContain("StoragePath", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("ContentHash", json, StringComparison.Ordinal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowStatusMapper_MapTasks_ProjectedSumariesAreNullByDefault()
+    {
+        var stage = new StageRun
+        {
+            Id = "plan",
+            Attempt = 1,
+            RequiresApproval = false,
+            Status = StageRunStatus.Running,
+            Tasks = []
+        };
+
+        var result = WorkflowStatusMapper.MapTasks(stage, definition: null);
+
+        Assert.Empty(result);
+    }
 }
 
 public class FakeFileContentService
