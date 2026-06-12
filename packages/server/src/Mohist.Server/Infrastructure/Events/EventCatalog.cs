@@ -10,8 +10,8 @@ public static class EventCatalog
     /// <summary>
     /// All registered CloudEvents <c>type</c> values. New events must be added here
     /// AND must have a producer that calls <c>bus.Emit</c> with that exact type string.
-    /// Includes legacy domain names, generic session observation names, and
-    /// reverse-DNS names. Generic session observation names are listed here for
+    /// Includes legacy domain names, generic session runtime event names, and
+    /// reverse-DNS names. Generic session runtime event names are listed here for
     /// subscription discovery, but they flow through the dedicated transcript
     /// SignalR channel instead of the domain EventBridge path.
     /// </summary>
@@ -37,7 +37,7 @@ public static class EventCatalog
         "plan_session_update",
         "plan_round_start",
         "plan_round_complete",
-        // === Generic session observation names (transcript channel) ===
+        // === Generic session runtime event names (transcript channel) ===
         "session.input",
         "message.delta",
         "reasoning.delta",
@@ -99,12 +99,9 @@ public static class EventCatalog
         ReverseDns.CheckFailed,
         ReverseDns.CheckPending,
         ReverseDns.RepairScheduled,
-        ReverseDns.AgentSessionStarted,
-        ReverseDns.AgentSessionActivated,
-        ReverseDns.AgentSessionCompleted,
-        ReverseDns.AgentSessionFailed,
-        ReverseDns.AgentSessionCancelled,
-        ReverseDns.AgentSessionStatusChanged,
+        ReverseDns.AgentSessionRuntimeBound,
+        ReverseDns.AgentSessionUsageRecorded,
+        ReverseDns.AgentSessionModelChanged,
         ReverseDns.RunnerDisconnected,
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
@@ -142,12 +139,9 @@ public static class EventCatalog
         public const string CheckPending = "com.mohist.workflow.check.pending";
         public const string RepairScheduled = "com.mohist.workflow.repair-scheduled";
 
-        public const string AgentSessionStarted = "com.mohist.agent-session.started";
-        public const string AgentSessionActivated = "com.mohist.agent-session.activated";
-        public const string AgentSessionCompleted = "com.mohist.agent-session.completed";
-        public const string AgentSessionFailed = "com.mohist.agent-session.failed";
-        public const string AgentSessionCancelled = "com.mohist.agent-session.cancelled";
-        public const string AgentSessionStatusChanged = "com.mohist.agent-session.status-changed";
+        public const string AgentSessionRuntimeBound = "com.mohist.agent-session.runtime-bound";
+        public const string AgentSessionUsageRecorded = "com.mohist.agent-session.usage-recorded";
+        public const string AgentSessionModelChanged = "com.mohist.agent-session.model-changed";
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 

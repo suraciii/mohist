@@ -10,72 +10,23 @@ public class AgentSessionEventSerializerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void BusType_Started_ReturnsReverseDnsConstant()
+    public void BusType_RuntimeBound_ReturnsReverseDnsConstant()
     {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionStarted("acp-1"));
+        var busType = AgentSessionEventSerializer.BusType(new AgentSessionRuntimeBound("acp-1"));
 
-        Assert.Equal(EventCatalog.ReverseDns.AgentSessionStarted, busType);
+        Assert.Equal(EventCatalog.ReverseDns.AgentSessionRuntimeBound, busType);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void BusType_Activated_ReturnsReverseDnsConstant()
+    public void EventCatalog_IncludesTranscriptRuntimeEventTypes()
     {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionActivated("running"));
-
-        Assert.Equal(EventCatalog.ReverseDns.AgentSessionActivated, busType);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void BusType_Completed_ReturnsReverseDnsConstant()
-    {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionCompleted(0));
-
-        Assert.Equal(EventCatalog.ReverseDns.AgentSessionCompleted, busType);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void BusType_Failed_ReturnsReverseDnsConstant()
-    {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionFailed("error", 1));
-
-        Assert.Equal(EventCatalog.ReverseDns.AgentSessionFailed, busType);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void BusType_Cancelled_ReturnsReverseDnsConstant()
-    {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionCancelled("stopped", 2));
-
-        Assert.Equal(EventCatalog.ReverseDns.AgentSessionCancelled, busType);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void BusType_StatusChanged_ReturnsReverseDnsConstant()
-    {
-        var busType = AgentSessionEventSerializer.BusType(new AgentSessionStatusChanged("stalled", null));
-
-        Assert.Equal(EventCatalog.ReverseDns.AgentSessionStatusChanged, busType);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
-    [Fact]
-    public void EventCatalog_IncludesTranscriptObservationTypes()
-    {
-        Assert.Contains("agent_message", EventCatalog.All);
-        Assert.Contains("agent_thought", EventCatalog.All);
-        Assert.Contains("agent_message_chunk", EventCatalog.All);
-        Assert.Contains("agent_thought_chunk", EventCatalog.All);
-        Assert.Contains("agent_session_terminal", EventCatalog.All);
+        Assert.Contains("message.delta", EventCatalog.All);
+        Assert.Contains("reasoning.delta", EventCatalog.All);
+        Assert.Contains("tool_call.started", EventCatalog.All);
+        Assert.Contains("session.closed", EventCatalog.All);
+        Assert.Contains("usage.updated", EventCatalog.All);
+        Assert.Contains("model.resolved", EventCatalog.All);
     }
 }

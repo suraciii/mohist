@@ -55,12 +55,9 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged]: { issueId: string; projectId: string; priority: string }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded]: { issueId: string; projectId: string; prerequisiteId: string }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved]: { issueId: string; projectId: string; prerequisiteId: string }
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionStarted]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionActivated]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionFailed]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged]: { issueId: string; projectId: string; status: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded]: { issueId: string; projectId: string }
+  [REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged]: { issueId: string; projectId: string }
 } & AgentDetailEventMap
 
 export type EventName = keyof EventMap

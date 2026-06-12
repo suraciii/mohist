@@ -72,35 +72,23 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await _stateStore.SaveTranscriptAsync(SessionId, _session, segments, ct);
     }
 
-    public async Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command)
+    public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
     {
-        var wasTerminal = _session?.IsTerminal ?? false;
         if (_session is null)
         {
-            var existing = await LoadByWorkflowAndSessionAsync(command.WorkflowRunId, command.SessionName);
-            if (existing is not null)
-            {
-                _session = existing;
-                wasTerminal = _session.IsTerminal;
-                if (!_session.IsTerminal)
-                    _ = _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
-            }
-            else
-                _session = CreateSession(command);
+            _session = CreateSession(command);
         }
         else
         {
-            if (!_session.IsTerminal)
-                _ = _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+            _ = _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
-        if (!wasTerminal)
-            await UpdateProjectionAsync(command);
+        await UpdateProjectionAsync(command);
         return await ToInfoAsync(_session);
     }
 
-    private AgentSession CreateSession(EnsureAgentSessionCommand command) =>
+    private AgentSession CreateSession(OpenAgentSessionCommand command) =>
         AgentSession.Create(
             SessionId,
             command.RunnerId ?? string.Empty,
@@ -108,7 +96,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             null,
             metadata: BuildMetadata(command));
 
-    private static AgentSessionMetadata BuildMetadata(EnsureAgentSessionCommand command) =>
+    private static AgentSessionMetadata BuildMetadata(OpenAgentSessionCommand command) =>
         new AgentSessionMetadata()
             .WithLabel(AgentSessionMetadataKeys.ProjectId, command.ProjectId)
             .WithLabel(AgentSessionMetadataKeys.IssueNumber, command.IssueNumber is > 0 ? command.IssueNumber.Value.ToString() : null)
@@ -120,7 +108,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .WithLabel(AgentSessionMetadataKeys.Stage, command.Stage)
             .WithAnnotation(AgentSessionMetadataKeys.Title, command.Title);
 
-    private async Task UpdateProjectionAsync(EnsureAgentSessionCommand command)
+    private async Task UpdateProjectionAsync(OpenAgentSessionCommand command)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.AgentSessions.FindAsync(SessionId);
@@ -132,12 +120,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await db.SaveChangesAsync();
     }
 
-    public async Task<AgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
+    public async Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command)
     {
-        var session = await GetOrCreateAsync();
+        var session = await GetRequiredAsync();
 
         var now = DateTime.UtcNow;
-        var events = session.AttachAgent(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now);
+        var events = session.AttachPhysicalSession(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now);
         if (events.Count == 0)
             return await ToInfoAsync(session);
 
@@ -145,106 +133,25 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await ToInfoAsync(session);
     }
 
-    public async Task<IReadOnlyList<AgentSessionEventInfo>> AppendSessionEventsAsync(AppendAgentSessionEventsCommand command)
+    public async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command)
     {
-        if (command.Events.Count == 0) return [];
+        if (command.RuntimeEvents.Count == 0) return [];
 
-        var session = await GetOrCreateAsync();
-        var wasTerminal = session.IsTerminal;
-        var phaseBefore = session.Status.Phase;
-        var statusBefore = AgentSessionStatusNames.ToName(phaseBefore);
+        var session = await GetRequiredAsync();
 
         var now = DateTime.UtcNow;
         var events = new List<AgentSessionEvent>();
-        if (!wasTerminal)
-            events.AddRange(session.RecordActivity(now));
+        events.AddRange(session.RecordActivity(now));
         var projection = await LoadProjectionAsync(session.Id);
 
         await EnsureTranscriptInitializedAsync(session.Id);
 
-        var entries = new List<AgentSessionEventEnvelope>();
-        var statusChangedThisCall = new List<string>();
-        var terminalThisCall = false;
-        AgentSessionEvent? terminalEvent = null;
-        string? terminalStatus = null;
-
-        foreach (var e in command.Events)
+        var entries = new List<AgentSessionRuntimeEventEnvelope>();
+        foreach (var e in command.RuntimeEvents)
         {
-            if (!wasTerminal)
-            {
-                if (IsLivenessEvent(e.Type))
-                {
-                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                    var status = GetStringProp(payload, "status") ?? "running";
-                    var failureReason = GetStringProp(payload, "failureReason");
-                    var activatedEvents = session.MarkActive(status, now, failureReason);
-                    events.AddRange(activatedEvents);
-                    if (activatedEvents.Count > 0)
-                        statusChangedThisCall.Add(AgentSessionStatusNames.ToName(session.Status.Phase));
-                }
-                else if (IsSessionClosedEvent(e.Type))
-                {
-                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                    var status = GetStringProp(payload, "status") ?? "completed";
-                    var failureReason = GetStringProp(payload, "failureReason");
-                    var failureCategory = GetStringProp(payload, "failureCategory");
-                    var exitCode = GetIntProp(payload, "exitCode");
-                    AgentSessionEvent? terminalEvt = null;
-                    if (status == "failed")
-                        terminalEvt = EmitAndCapture(session.Fail(now, failureReason, exitCode), events);
-                    else if (status == "cancelled")
-                        terminalEvt = EmitAndCapture(session.Cancel(now, failureReason, exitCode), events);
-                    else
-                        terminalEvt = EmitAndCapture(session.Complete(now, exitCode), events);
-                    if (terminalEvt is not null && !terminalThisCall)
-                    {
-                        terminalThisCall = true;
-                        terminalEvent = terminalEvt;
-                        terminalStatus = status;
-                    }
-                }
-                else if (IsUsageEvent(e.Type))
-                {
-                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                    var inputTokens = GetLongProp(payload, "inputTokens");
-                    var outputTokens = GetLongProp(payload, "outputTokens");
-                    var totalTokens = GetLongProp(payload, "totalTokens");
-                    var cachedReadTokens = GetLongProp(payload, "cachedReadTokens");
-                    var thoughtTokens = GetLongProp(payload, "thoughtTokens");
+            events.AddRange(ApplyRuntimeEventToDomain(session, e, now));
 
-                    var costAmount = GetDoubleProp(payload, "costAmount");
-                    var costCurrency = GetStringProp(payload, "costCurrency");
-                    if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("cost", out var costProp) && costProp.ValueKind == JsonValueKind.Object)
-                    {
-                        costAmount ??= GetDoubleProp(costProp, "amount");
-                        costCurrency ??= GetStringProp(costProp, "currency");
-                    }
-
-                    var contextWindowSize = GetLongProp(payload, "contextWindowSize");
-                    var contextWindowUsed = GetLongProp(payload, "contextWindowUsed");
-                    if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("contextWindow", out var cwProp) && cwProp.ValueKind == JsonValueKind.Object)
-                    {
-                        contextWindowSize ??= GetLongProp(cwProp, "size");
-                        contextWindowUsed ??= GetLongProp(cwProp, "used");
-                    }
-
-                    events.AddRange(session.ApplyUsage(inputTokens, outputTokens, totalTokens, cachedReadTokens, thoughtTokens, costAmount, costCurrency, contextWindowUsed, contextWindowSize));
-                }
-                else if (IsModelResolvedEvent(e.Type))
-                {
-                    // Resolved model is an event-level observation; consumers project it from transcript segments.
-                }
-                else if (IsToolStartedEvent(e.Type))
-                {
-                    // Tool calls are transcript events, not AgentSession domain state.
-                }
-                else if (IsToolUpdateEvent(e.Type))
-                {
-                    // Tool call state is projected from transcript segments.
-                }
-            }
-
-            entries.Add(new AgentSessionEventEnvelope
+            entries.Add(new AgentSessionRuntimeEventEnvelope
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
@@ -263,18 +170,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             });
         }
 
-        if (!wasTerminal)
-            events.AddRange(session.EnsureActive(now));
-
-        var firstRowThisCall = !wasTerminal
-            && phaseBefore == AgentSessionStatus.Created
-            && session.Status.StartedAt is null;
-
         var transcriptSegments = _transcript.Accept(
             session,
             entries,
             now,
-            forceFlushPending: terminalThisCall || session.IsTerminal || command.Events.Count > 1);
+            forceFlushPending: command.RuntimeEvents.Count > 1);
 
         if (events.Count > 0 || transcriptSegments.Count > 0)
             if (transcriptSegments.Count > 0)
@@ -286,94 +186,28 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await FanOutRealtimeAsync(
             session,
             entries,
-            firstRowThisCall,
-            terminalThisCall,
-            terminalEvent,
-            terminalStatus,
-            statusChangedThisCall,
-            statusBefore);
+            events);
 
         return entries.Select(e => ToEventInfo(e)).ToList();
     }
 
-    private static AgentSessionEvent? EmitAndCapture(IReadOnlyList<AgentSessionEvent> domainEvents, List<AgentSessionEvent> sink)
-    {
-        if (domainEvents.Count == 0) return null;
-        sink.AddRange(domainEvents);
-        return domainEvents[domainEvents.Count - 1];
-    }
-
     private async Task FanOutRealtimeAsync(
         AgentSession session,
-        IReadOnlyList<AgentSessionEventEnvelope> entries,
-        bool firstRowThisCall,
-        bool terminalThisCall,
-        AgentSessionEvent? terminalEvent,
-        string? terminalStatus,
-        IReadOnlyList<string> statusChangedThisCall,
-        string statusBefore)
+        IReadOnlyList<AgentSessionRuntimeEventEnvelope> entries,
+        IReadOnlyList<AgentSessionEvent> domainEvents)
     {
         var source = AgentSessionSource(session);
 
-        if (firstRowThisCall)
+        foreach (var domainEvent in domainEvents)
         {
             try
             {
-                var startedEvent = new AgentSessionStarted(session.Status.AgentRuntimeSessionId ?? string.Empty);
-                var type = AgentSessionEventSerializer.BusType(startedEvent);
-                var data = AgentSessionEventSerializer.ToData(startedEvent);
-                await _eventPublisher.PublishAsync(
-                    data,
-                    type,
-                    source,
-                    subject: session.SessionName,
-                    ct: CancellationToken.None);
+                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.SessionName);
             }
             catch (Exception ex)
             {
                 _log.LogError(ex,
-                    "AgentSessionGrain failed to publish AgentSessionStarted for {SessionId}",
-                    session.Id);
-            }
-        }
-
-        if (terminalThisCall && terminalEvent is not null)
-        {
-            try
-            {
-                await PublishAgentSessionLifecycleAsync(terminalEvent, source, session.SessionName);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to publish {Status} for {SessionId}",
-                    terminalStatus ?? "terminal", session.Id);
-            }
-        }
-
-        var lastDistinctStatus = statusBefore;
-        foreach (var newStatus in statusChangedThisCall)
-        {
-            if (string.Equals(newStatus, lastDistinctStatus, StringComparison.Ordinal))
-                continue;
-            lastDistinctStatus = newStatus;
-
-            try
-            {
-                var statusEvent = new AgentSessionStatusChanged(newStatus, session.Status.FailureReason);
-                var type = AgentSessionEventSerializer.BusType(statusEvent);
-                var data = AgentSessionEventSerializer.ToData(statusEvent);
-                await _eventPublisher.PublishAsync(
-                    data,
-                    type,
-                    source,
-                    subject: session.SessionName,
-                    ct: CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to publish AgentSessionStatusChanged for {SessionId}",
+                    "AgentSessionGrain failed to publish domain event for {SessionId}",
                     session.Id);
             }
         }
@@ -427,27 +261,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
     }
 
-    public async Task<AgentSessionInfo?> FailIfRunningAsync(string reason)
-    {
-        var session = await GetOrCreateAsync();
-        if (session.IsTerminal) return await ToInfoAsync(session);
-
-        var events = session.Fail(DateTime.UtcNow, reason);
-        await CommitAsync(session, events);
-        return await ToInfoAsync(session);
-    }
-
     public async Task<AgentSessionInfo?> GetAsync()
     {
         return _session is null ? null : await ToInfoAsync(_session);
-    }
-
-    private async Task<AgentSession?> LoadByWorkflowAndSessionAsync(string workflowRunId, string sessionName)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.AgentSessions.AsNoTracking()
-            .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName);
-        return row is null ? null : AgentSessionJson.Deserialize(row);
     }
 
     private async Task EnsureTranscriptInitializedAsync(string sessionId)
@@ -464,23 +280,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _realtimeSequence = Math.Max(_realtimeSequence, latestTranscriptSequence);
     }
 
-    private async Task<AgentSession> GetOrCreateAsync()
+    private async Task<AgentSession> GetRequiredAsync()
     {
         if (_session is not null) return _session;
 
-        var parts = SessionId.Split('/');
-        var projectId = parts.Length > 0 ? parts[0] : string.Empty;
-        var workflowRunId = parts.Length > 1 ? parts[1] : string.Empty;
-        var sessionName = parts.Length > 2 ? parts[2] : string.Empty;
-
-        var metadata = new AgentSessionMetadata()
-            .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
-            .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, sessionName);
-        _session = AgentSession.Create(SessionId, string.Empty, "opencode", null, metadata: metadata);
-        await _stateStore.SaveAsync(SessionId, _session);
-        return _session;
+        _session = await _stateStore.LoadAsync(SessionId);
+        return _session ?? throw new InvalidOperationException($"Agent session {SessionId} does not exist.");
     }
 
     private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
@@ -527,8 +332,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private static long DurationMs(AgentSession session)
     {
-        var start = session.Status.StartedAt ?? session.Status.CreatedAt;
-        var end = session.Status.CompletedAt ?? DateTime.UtcNow;
+        var start = session.Status.BoundAt ?? session.Status.CreatedAt;
+        var end = DateTime.UtcNow;
         return Math.Max(0, (long)(end - start).TotalMilliseconds);
     }
 
@@ -549,17 +354,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         null,
         s.Runtime.RunnerId,
         s.Status.AgentRuntimeSessionId,
-        AgentSessionStatusNames.ToName(s.Status.Phase),
+        StatusName(s),
         s.Settings.Model,
         s.Runtime.WorkDir,
         null,
         null,
         s.Status.CreatedAt.ToString("o"),
-        s.Status.StartedAt?.ToString("o"),
+        s.Status.BoundAt?.ToString("o"),
         s.Status.LastDataAt?.ToString("o"),
-        s.Status.CompletedAt?.ToString("o"),
-        s.Status.FailureReason,
-        s.Status.ExitCode,
+        null,
+        null,
+        null,
         eventSummary.ResolvedModel,
         usage.InputTokens,
         usage.OutputTokens,
@@ -572,8 +377,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         usage.ContextWindowSize,
         eventSummary.FailureCategory,
         eventSummary.ToolCallCount,
-        eventSummary.ToolErrorCount);
+            eventSummary.ToolErrorCount);
     }
+
+    private static string StatusName(AgentSession session) =>
+        session.Status.AgentRuntimeSessionId is not null
+        && session.Status.LastDataAt is not null
+        && DateTime.UtcNow - session.Status.LastDataAt.Value <= TimeSpan.FromMinutes(5)
+            ? "active"
+            : "inactive";
 
     private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
     {
@@ -632,7 +444,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId);
     }
 
-    private static AgentSessionEventInfo ToEventInfo(AgentSessionEventEnvelope e) => new(
+    private static AgentSessionRuntimeEventInfo ToEventInfo(AgentSessionRuntimeEventEnvelope e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.ProjectId,
@@ -648,7 +460,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         e.PayloadJson,
         e.CreatedAt.ToString("o"));
 
-    private static AgentSessionEventEnvelope ToEventEnvelope(AgentSessionTranscriptSegmentRow segment) => new()
+    private static AgentSessionRuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptSegmentRow segment) => new()
     {
         Id = segment.Id,
         SessionId = segment.SessionId,
@@ -666,12 +478,76 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         CreatedAt = segment.StartedAt,
     };
 
-    private static bool IsLivenessEvent(string type) => type == "session.liveness";
-    private static bool IsSessionClosedEvent(string type) => type == "session.closed";
-    private static bool IsUsageEvent(string type) => type == "usage.updated";
-    private static bool IsModelResolvedEvent(string type) => type == "model.resolved";
-    private static bool IsToolStartedEvent(string type) => type == "tool_call.started";
-    private static bool IsToolUpdateEvent(string type) => type is "tool_call.updated" or "tool_call.completed";
+    private static IReadOnlyList<AgentSessionEvent> ApplyRuntimeEventToDomain(
+        AgentSession session,
+        AgentSessionRuntimeEventInput runtimeEvent,
+        DateTime now)
+    {
+        var payload = JsonSerializer.Deserialize<JsonElement>(runtimeEvent.PayloadJson);
+        return runtimeEvent.Type switch
+        {
+            "session.liveness" => session.RecordActivity(now),
+            "session.closed" => session.RecordActivity(now),
+            "usage.updated" => session.ApplyUsage(
+                GetLongProp(payload, "inputTokens"),
+                GetLongProp(payload, "outputTokens"),
+                GetLongProp(payload, "totalTokens"),
+                GetLongProp(payload, "cachedReadTokens"),
+                GetLongProp(payload, "thoughtTokens"),
+                GetCostAmount(payload),
+                GetCostCurrency(payload),
+                GetContextWindowUsed(payload),
+                GetContextWindowSize(payload)),
+            "model.resolved" => session.ResolveModel(
+                GetStringProp(payload, "resolvedModel") ?? GetStringProp(payload, "model"),
+                now),
+            _ => []
+        };
+    }
+
+    private static double? GetCostAmount(JsonElement payload)
+    {
+        var direct = GetDoubleProp(payload, "costAmount");
+        if (direct is not null) return direct;
+        return payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("cost", out var costProp)
+            && costProp.ValueKind == JsonValueKind.Object
+            ? GetDoubleProp(costProp, "amount")
+            : null;
+    }
+
+    private static string? GetCostCurrency(JsonElement payload)
+    {
+        var direct = GetStringProp(payload, "costCurrency");
+        if (direct is not null) return direct;
+        return payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("cost", out var costProp)
+            && costProp.ValueKind == JsonValueKind.Object
+            ? GetStringProp(costProp, "currency")
+            : null;
+    }
+
+    private static long? GetContextWindowUsed(JsonElement payload)
+    {
+        var direct = GetLongProp(payload, "contextWindowUsed");
+        if (direct is not null) return direct;
+        return payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("contextWindow", out var cwProp)
+            && cwProp.ValueKind == JsonValueKind.Object
+            ? GetLongProp(cwProp, "used")
+            : null;
+    }
+
+    private static long? GetContextWindowSize(JsonElement payload)
+    {
+        var direct = GetLongProp(payload, "contextWindowSize");
+        if (direct is not null) return direct;
+        return payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("contextWindow", out var cwProp)
+            && cwProp.ValueKind == JsonValueKind.Object
+            ? GetLongProp(cwProp, "size")
+            : null;
+    }
 
     private static string ExtractText(string json)
     {
@@ -742,7 +618,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         int? ToolCallCount,
         int? ToolErrorCount);
 
-    private sealed record AgentSessionEventEnvelope
+    private sealed record AgentSessionRuntimeEventEnvelope
     {
         public long Id { get; init; }
         public string SessionId { get; init; } = string.Empty;
@@ -777,7 +653,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         public IReadOnlyList<AgentSessionTranscriptSegmentRow> Accept(
             AgentSession session,
-            IReadOnlyList<AgentSessionEventEnvelope> rows,
+            IReadOnlyList<AgentSessionRuntimeEventEnvelope> rows,
             DateTime now,
             bool forceFlushPending)
         {
@@ -811,7 +687,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return segments;
         }
 
-        private void AppendText(AgentSessionEventEnvelope row, string kind, DateTime now, List<AgentSessionTranscriptSegmentRow> segments)
+        private void AppendText(AgentSessionRuntimeEventEnvelope row, string kind, DateTime now, List<AgentSessionTranscriptSegmentRow> segments)
         {
             var text = ExtractText(row.PayloadJson);
             if (string.IsNullOrEmpty(text))
@@ -853,7 +729,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             if (_pending is null)
                 return;
 
-            var row = new AgentSessionEventEnvelope
+            var row = new AgentSessionRuntimeEventEnvelope
             {
                 SessionId = _pending.SessionId,
                 ProjectId = _pending.ProjectId,
@@ -869,7 +745,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             FlushPending(row, segments);
         }
 
-        private void FlushPending(AgentSessionEventEnvelope row, List<AgentSessionTranscriptSegmentRow> segments)
+        private void FlushPending(AgentSessionRuntimeEventEnvelope row, List<AgentSessionTranscriptSegmentRow> segments)
         {
             if (_pending is null)
                 return;
@@ -895,7 +771,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         private AgentSessionTranscriptSegmentRow CreateSegment(
-            AgentSessionEventEnvelope row,
+            AgentSessionRuntimeEventEnvelope row,
             string kind,
             string payloadJson,
             string? correlationId,

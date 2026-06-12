@@ -22,7 +22,7 @@ public class WorkflowActivityQuerier
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.AgentSessions.AsNoTracking()
-            .Where(s => s.CompletedAt == null && (s.Status == "created" || s.Status == "running" || s.Status == "probing"));
+            .Where(s => s.AgentSessionId != null);
         if (!string.IsNullOrWhiteSpace(projectId)) query = query.Where(s => s.ProjectId == projectId);
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
@@ -53,7 +53,7 @@ public class WorkflowActivityQuerier
                 row.Stage,
                 null,
                 session.Id,
-                (session.Status.StartedAt ?? session.Status.CreatedAt).ToString("o"),
+                (session.Status.BoundAt ?? session.Status.CreatedAt).ToString("o"),
                 lastActivity,
                 new ActiveAgentProgressDto(
                     row.Stage,
@@ -66,7 +66,7 @@ public class WorkflowActivityQuerier
     }
 
     private static DateTime LastActivityAt(AgentSession session) =>
-        session.Status.LastDataAt ?? session.Status.StartedAt ?? session.Status.CreatedAt;
+        session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;
 }
 
 public sealed record ActiveAgentDto(string RunnerId, string IssueId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress);

@@ -100,11 +100,9 @@ export type AgentDetailEventMap = {
     contextWindowUsed?: number
   }
   'model.resolved': { issueId: string; projectId: string; executionId?: string; acpSessionId?: string; coderSessionId?: string; model: string }
-  'com.mohist.agent-session.started': { issueId: string; projectId: string }
-  'com.mohist.agent-session.completed': { issueId: string; projectId: string }
-  'com.mohist.agent-session.failed': { issueId: string; projectId: string }
-  'com.mohist.agent-session.cancelled': { issueId: string; projectId: string }
-  'com.mohist.agent-session.status-changed': { issueId: string; projectId: string; status: string }
+  'com.mohist.agent-session.runtime-bound': { issueId: string; projectId: string }
+  'com.mohist.agent-session.usage-recorded': { issueId: string; projectId: string }
+  'com.mohist.agent-session.model-changed': { issueId: string; projectId: string }
 }
 
 export interface AgentSessionInfo {

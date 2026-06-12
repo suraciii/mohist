@@ -50,6 +50,8 @@ export function getSessionLabel(session: CoderSessionSummary): string {
 }
 
 export function getSessionStatusLabel(session: CoderSessionSummary): string {
+  if (session.status === 'active') return 'Active'
+  if (session.status === 'inactive') return 'Inactive'
   if (session.status === 'running') return 'Running'
   if (session.status === 'probing') return 'Checking session'
   if (session.status === 'failed') return 'Session failed'
@@ -59,7 +61,7 @@ export function getSessionStatusLabel(session: CoderSessionSummary): string {
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === 'running' || status === 'probing') {
+  if (status === 'active' || status === 'running' || status === 'probing') {
     const color = status === 'probing' ? 'bg-yellow-400' : 'bg-blue-400'
     const dotColor = status === 'probing' ? 'bg-yellow-500' : 'bg-blue-500'
     return (
@@ -90,7 +92,7 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
   const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`)
   const startTime = formatTime(session.createdAt)
 
-  const isActive = session.status === 'running' || session.status === 'probing'
+  const isActive = session.status === 'active' || session.status === 'running' || session.status === 'probing'
   const durationMs = isActive
     ? Date.now() - new Date(session.createdAt).getTime()
     : session.completedAt

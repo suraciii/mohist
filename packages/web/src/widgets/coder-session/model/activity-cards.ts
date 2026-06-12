@@ -60,7 +60,7 @@ export interface StatusCounts {
   failed: number
 }
 
-const ACTIVE_STATUSES = new Set(['created', 'running', 'probing'])
+const ACTIVE_STATUSES = new Set(['active'])
 
 function sessionToCard(s: AgentActivitySession): SessionCard {
   return {
@@ -122,8 +122,8 @@ export function useActivityCards() {
       statusCounts: data?.summary ?? {
         active: activeCards.length,
         waiting: waitingCards.length,
-        completed: recentCards.filter((c) => c.status === 'completed').length,
-        failed: recentCards.filter((c) => c.status === 'failed' || c.status === 'cancelled').length,
+        completed: 0,
+        failed: 0,
       },
       slotUsage: data?.summary.slots ?? { active: 0, max: 0 },
     }

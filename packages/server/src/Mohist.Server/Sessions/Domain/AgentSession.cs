@@ -104,10 +104,10 @@ public sealed record AgentSessionRuntime(
 public sealed record AgentSessionSettings(string? Model = null);
 
 public sealed record AgentSessionStatusSnapshot(
-    AgentSessionStatus Phase = AgentSessionStatus.Created,
+    AgentSessionStatus Phase = AgentSessionStatus.Opened,
     string? AgentRuntimeSessionId = null,
     DateTime CreatedAt = default,
-    DateTime? StartedAt = null,
+    DateTime? BoundAt = null,
     DateTime? LastDataAt = null,
     DateTime? CompletedAt = null,
     string? FailureReason = null,
@@ -115,7 +115,7 @@ public sealed record AgentSessionStatusSnapshot(
     AgentUsageSummary? UsageSummary = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(AgentSessionStatus.Created, CreatedAt: now, UsageSummary: new AgentUsageSummary());
+        new(AgentSessionStatus.Opened, CreatedAt: now, UsageSummary: new AgentUsageSummary());
 }
 
 public sealed record AgentUsageSummary(

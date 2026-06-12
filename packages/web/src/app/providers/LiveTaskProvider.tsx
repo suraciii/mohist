@@ -420,10 +420,9 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           case REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed:
           case REVERSE_DNS_EVENT_TYPES.WorkflowRunRetrying:
           case REVERSE_DNS_EVENT_TYPES.WorkflowRunRerunning:
-          case REVERSE_DNS_EVENT_TYPES.AgentSessionStarted:
-          case REVERSE_DNS_EVENT_TYPES.AgentSessionActivated:
-          case REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted:
-          case REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged: {
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded:
+          case REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged: {
             if (handleReverseDnsIntegrationOutcome(eventName, parsed, queryClient, setRebaseConflict)) {
               break
             }
@@ -443,24 +442,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
               const evt = parsed as EventMap['agent_error']
               notifyRunLifecycleToast(queryClient, viewedIssueRef.current, evt.issueId, 'error')
             }
-            break
-          }
-          case REVERSE_DNS_EVENT_TYPES.AgentSessionFailed:
-          case REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled: {
-            queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            const evt = parsed as {
-              issueId: string
-              projectId: string
-              reason?: string
-            }
-            notifyRunLifecycleToast(
-              queryClient,
-              viewedIssueRef.current,
-              evt.issueId,
-              'error',
-            )
             break
           }
           case 'agent_blocked': {

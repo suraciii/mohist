@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
 
@@ -89,49 +89,87 @@ public static class RunnerRoutes
             return Results.Ok(new RunnerReportResponse(report.WorkflowRunId, report.WorkflowStatus, report.Tracked, report.Reason));
         });
 
-        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/ensure", async (
-            string runnerId, string projectId, string workflowRunId, string sessionName,
-            AgentSessionEnsureRequest req, IGrainFactory grains) =>
+        group.MapGet("/sessions/{projectId}/{workflowRunId}/{sessionName}", async (
+            string projectId, string workflowRunId, string sessionName,
+            AgentSessionResolver sessions,
+            CancellationToken ct) =>
         {
-            var grain = grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(projectId, workflowRunId, sessionName));
-            var session = await grain.EnsureAsync(new EnsureAgentSessionCommand(
+            var session = await sessions.GetAsync(workflowRunId, sessionName, ct);
+            return session is null
+                ? ApiResults.NotFound($"Session {sessionName} not found")
+                : ApiResults.Ok(ToRunnerAgentSession(session));
+        });
+
+        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/open", async (
+            string runnerId, string projectId, string workflowRunId, string sessionName,
+            AgentSessionOpenRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            var sessionId = await sessions.ResolveAsync(workflowRunId, sessionName, ct) ?? sessions.NewSessionId();
+            var grain = sessions.GetGrain(sessionId);
+            var session = await grain.OpenAsync(new OpenAgentSessionCommand(
                 projectId, req.IssueNumber, workflowRunId, sessionName,
                 runnerId, req.WorkId, req.WorkType, req.Stage, req.Title));
-            return Results.Ok(session);
+            return Results.Ok(ToRunnerAgentSession(session));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/attach", async (
-            string projectId, string workflowRunId, string sessionName,
-            AgentSessionAttachRequest req, IGrainFactory grains) =>
+            string workflowRunId, string sessionName,
+            AgentSessionAttachRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
         {
-            var grain = grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(projectId, workflowRunId, sessionName));
-            return Results.Ok(await grain.AttachAgentAsync(new AttachAgentCommand(
-                req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid)));
+            var sessionId = await sessions.ResolveAsync(workflowRunId, sessionName, ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
+
+            try
+            {
+                var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                    req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                return Results.Ok(ToRunnerAgentSession(session));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "agent_session_attach_conflict");
+            }
         });
 
-        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/session-events", async (
-            string projectId, string workflowRunId, string sessionName,
-            AgentSessionEventsRequest req, IGrainFactory grains) =>
+        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/runtime-events", async (
+            string workflowRunId, string sessionName,
+            AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
         {
-            var grain = grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(projectId, workflowRunId, sessionName));
-            var inputs = req.Events.Select(e => new AgentSessionEventInput(
+            var sessionId = await sessions.ResolveAsync(workflowRunId, sessionName, ct);
+            if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
+
+            var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await grain.AppendSessionEventsAsync(new AppendAgentSessionEventsCommand(req.WorkId, req.WorkType, req.Stage, inputs)));
+            return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(req.WorkId, req.WorkType, req.Stage, runtimeEvents)));
         });
 
         return app;
     }
+
+    private static RunnerAgentSessionResponse ToRunnerAgentSession(AgentSessionInfo session) =>
+        new(
+            new RunnerAgentSessionKey(session.ProjectId, session.WorkflowRunId, session.SessionName),
+            session.AgentSessionId,
+            session.Status,
+            session.WorkDir,
+            session.Model,
+            session.ResolvedModel);
 }
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
 public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus, bool Tracked, string? Reason = null);
-public record AgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
+public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
+public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null);
+public record AgentSessionOpenRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
 public record AgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
-public record AgentSessionEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionEventRequest> Events);
-public record AgentSessionEventRequest(string Type, System.Text.Json.JsonElement Payload);
+public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents);
+public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(
     string WorkflowRunId,
     string WorkId,
