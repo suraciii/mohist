@@ -1,3 +1,5 @@
+using Orleans.Concurrency;
+
 namespace Mohist.Server.Runner.Grains;
 
 public interface IRunnerGrain : IGrainWithStringKey
@@ -6,6 +8,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task UnregisterAsync();
     Task HeartbeatAsync();
     Task HeartbeatRepairAsync(RunnerInfo info);
+    [AlwaysInterleave]
     Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work);
     Task<WorkDispatch?> PollAsync();
     Task<RunnerWorkReportResult> ReportResultAsync(string workflowRunId, string workId, WorkResult result);
