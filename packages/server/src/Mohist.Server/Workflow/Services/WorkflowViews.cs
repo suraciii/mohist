@@ -70,7 +70,8 @@ public sealed record TaskStatusView(
     string? Uses,
     string Status,
     IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles = null,
-    TaskClassification Classification = TaskClassification.UserFacing);
+    TaskClassification Classification = TaskClassification.UserFacing,
+    string? SessionName = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

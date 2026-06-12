@@ -162,6 +162,34 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task RuntimeEvents_RefreshSessionSummaryActivityWithoutDomainEvents()
+    {
+        var (project, issue, _, session) = await CreateStartedAgentSessionAsync("summary-activity", sessionName: "check");
+        var beforeSummaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
+        var beforeSummary = Assert.Single(beforeSummaries);
+        Assert.NotNull(beforeSummary.LastDataAt);
+        var beforeLastDataAt = DateTime.Parse(beforeSummary.LastDataAt!);
+
+        await Task.Delay(20);
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeEvents = new object[]
+            {
+                new { type = "message.delta", payload = new { text = "still working" } }
+            }
+        });
+
+        var summaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
+        var summary = Assert.Single(summaries);
+
+        Assert.Equal("active", summary.Status);
+        Assert.NotNull(summary.LastDataAt);
+        Assert.True(DateTime.Parse(summary.LastDataAt!) > beforeLastDataAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequence()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events", sessionName: "plan");
@@ -1102,7 +1130,7 @@ public class AgentSessionSpecs
     }
 
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
-    private sealed record AgentSessionSummaryDto(string Id, string SessionName, string Status);
+    private sealed record AgentSessionSummaryDto(string Id, string SessionName, string Status, string? LastDataAt);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     private sealed record ActivitySlotUsageDto(int Active, int Max);

@@ -38,9 +38,9 @@ function buildSessionMetadata(
     stage: meta.stage,
     createdAt: meta.createdAt,
     completedAt: meta.completedAt,
-    lastActivityAt: lastEventAt,
+    lastActivityAt: lastEventAt ?? meta.lastActivityAt ?? meta.lastDataAt ?? null,
     firstPromptSentAt: null,
-    lastDataAt: lastEventAt,
+    lastDataAt: lastEventAt ?? meta.lastDataAt ?? meta.lastActivityAt ?? null,
     probeSentAt: null,
     probeDeadlineAt: null,
     failureReason: null,
@@ -305,7 +305,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold text-gray-900">
-            {meta?.title ?? 'Session'}
+            {meta.sessionName ?? 'Session'}
           </h1>
         </div>
 
@@ -468,8 +468,8 @@ export function SessionPage() {
   const initialTurns = useMemo<SessionTurn[]>(() => transcriptResponse?.turns ?? EMPTY_TURNS, [transcriptResponse])
 
   const lastEventAt = useMemo(() => {
-    return transcriptResponse?.lastActivityAt ?? null
-  }, [transcriptResponse])
+    return transcriptResponse?.lastActivityAt ?? metadata?.lastActivityAt ?? metadata?.lastDataAt ?? null
+  }, [transcriptResponse, metadata?.lastActivityAt, metadata?.lastDataAt])
 
   const detail: CoderSessionDetail | null = useMemo(() => {
     if (!metadata) return null
@@ -706,7 +706,7 @@ export function SessionPage() {
         className="flex-1 overflow-y-auto"
       >
         <SessionTranscriptLayout
-          title={detail.metadata.title ?? 'Session'}
+          title={detail.metadata.sessionName ?? routeSessionKey ?? 'Session'}
           turnCount={displayTurnCount}
           turns={displayTurns}
           statusKind={displayStatusKind}

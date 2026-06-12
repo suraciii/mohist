@@ -404,6 +404,7 @@ export interface StageTaskState {
   taskId: string
   title: string
   status: StageTaskStatus
+  sessionName?: string | null
   source?: 'static' | 'dynamic'
   origin?: WorkItemOrigin | null
   order: number
@@ -494,6 +495,7 @@ export interface WorkflowTimelineTask {
   title: string
   uses: string | null
   status: StageTaskStatus
+  sessionName?: string | null
   startedAt: string | null
   completedAt: string | null
   durationMs: number | null

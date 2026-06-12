@@ -23,6 +23,17 @@ public static class TaskRunExtensions
 {
     private const string ExpectKey = "expect";
     private const string FilesKey = "files";
+    private const string SessionKey = "session";
+
+    public static string? ExtractSessionName(Dictionary<string, JsonElement?>? withInput)
+    {
+        if (withInput is null) return null;
+        if (!withInput.TryGetValue(SessionKey, out var session) || !session.HasValue)
+            return null;
+        return session.Value.ValueKind == JsonValueKind.String
+            ? session.Value.GetString()
+            : null;
+    }
 
     public static IReadOnlyList<WorkflowTaskRequiredFile> ExtractRequiredFiles(Dictionary<string, JsonElement?>? withInput)
     {

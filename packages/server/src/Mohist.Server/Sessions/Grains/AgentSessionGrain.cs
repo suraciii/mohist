@@ -105,7 +105,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var now = DateTime.UtcNow;
         var events = session.AttachPhysicalSession(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now);
         if (events.Count == 0)
+        {
+            await _stateStore.SaveAsync(SessionId, session);
+            _session = session;
             return await ToInfoAsync(session);
+        }
 
         await CommitAsync(session, events);
         return await ToInfoAsync(session);
@@ -144,8 +148,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             now,
             forceFlushPending: command.RuntimeEvents.Count > 1);
 
-        if (events.Count > 0)
-            await _stateStore.SaveAsync(SessionId, session, events);
+        await _stateStore.SaveAsync(SessionId, session, events);
         if (transcript is not null)
             await _transcriptStore.SaveAsync(transcript);
         _session = session;

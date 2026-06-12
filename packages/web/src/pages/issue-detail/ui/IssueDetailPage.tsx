@@ -13,7 +13,6 @@ import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
 import { BranchBar, WorkflowView, TaskProgressPanel, IssueWorkflowProfileEditor } from '../../../widgets/issue-workflow'
-import { SessionList } from '../../../widgets/coder-session'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -1166,13 +1165,6 @@ export function IssueDetailPage() {
                 />
               )}
 
-              {!isBacklog && workflowStage && (
-                <SessionList
-                  issueNumber={issueNumber}
-                  currentStage={workflowStage}
-                  isLive={isAgentRunningOnThis}
-                />
-              )}
             </div>
           </div>
         </div>

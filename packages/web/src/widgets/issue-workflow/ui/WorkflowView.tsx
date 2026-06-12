@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
+import { MessageSquareIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { approveIssue, rejectIssue, resumeIssue, startIssue, getFileContent } from '../../../entities/issue'
@@ -8,7 +10,7 @@ import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import { useWorkflowTimeline } from '../../../entities/issue'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -84,6 +86,7 @@ function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflow
         taskId: task.id,
         title: task.title,
         status: task.status,
+        sessionName: task.sessionName,
         order: index,
         attempts: task.attempts,
         duration: task.durationMs ?? 0,
@@ -342,6 +345,23 @@ function RequiredFileEntry({ rf, issueNumber }: { rf: { path: string; source: st
   )
 }
 
+function TaskSessionChip({ issueNumber, sessionName }: { issueNumber: number; sessionName: string }) {
+  const toProjectPath = useProjectPath()
+  const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`)
+
+  return (
+    <Link
+      to={transcriptPath}
+      onClick={(event) => event.stopPropagation()}
+      className="inline-flex items-center gap-1 rounded border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:border-blue-200 hover:bg-blue-100 shrink-0"
+      title={`Open ${sessionName} transcript`}
+    >
+      <MessageSquareIcon className="h-3 w-3" aria-hidden="true" />
+      <span>{sessionName}</span>
+    </Link>
+  )
+}
+
 function TaskItem({
   task,
   issueNumber,
@@ -381,6 +401,7 @@ function TaskItem({
   const hasReason = task.reason != null
   const originLabel = formatOriginLabel(task.origin)
   const originTitle = formatOriginTitle(task.origin)
+  const sessionName = task.sessionName?.trim()
 
   return (
     <div
@@ -399,6 +420,9 @@ function TaskItem({
         )}
         {originLabel && (
           <span className="text-[11px] text-gray-400 flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
+        )}
+        {sessionName && (
+          <TaskSessionChip issueNumber={issueNumber} sessionName={sessionName} />
         )}
         {duration != null && duration > 0 && (
           <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(duration)}</span>
