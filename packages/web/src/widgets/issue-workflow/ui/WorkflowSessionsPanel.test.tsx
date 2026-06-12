@@ -66,6 +66,8 @@ describe('WorkflowSessionsPanel', () => {
           id: 's-plan',
           sessionName: 'plan',
           status: 'completed',
+          model: 'configured/PlanModel',
+          resolvedModel: 'resolved/PlanModel',
           totalTokens: 42_000,
           contextWindowUsed: 32_000,
           contextWindowSize: 200_000,
@@ -92,6 +94,8 @@ describe('WorkflowSessionsPanel', () => {
     expect(screen.getByText('plan')).toBeInTheDocument()
     expect(screen.getByText('check')).toBeInTheDocument()
     expect(screen.getByText('build')).toBeInTheDocument()
+    expect(screen.getAllByText('minimax/MiniMax-M3')).toHaveLength(2)
+    expect(screen.getByText('configured/PlanModel -> resolved/PlanModel')).toBeInTheDocument()
     expect(screen.getByText('probe timed out')).toBeInTheDocument()
   })
 

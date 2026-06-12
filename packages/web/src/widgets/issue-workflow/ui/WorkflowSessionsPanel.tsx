@@ -52,6 +52,13 @@ function contextText(session: WorkflowRunSession): string | null {
   return `${pct}% ctx`
 }
 
+function modelLabel(session: WorkflowRunSession): string | null {
+  if (session.resolvedModel && session.model && session.resolvedModel !== session.model) {
+    return `${session.model} -> ${session.resolvedModel}`
+  }
+  return session.resolvedModel ?? session.model ?? null
+}
+
 function relativeTime(iso: string | null | undefined): string {
   if (!iso) return ''
   const diff = Date.now() - new Date(iso).getTime()
@@ -99,9 +106,7 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
   const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(session.sessionName)}`)
   const context = contextText(session)
   const cost = formatCost(session.costAmount, session.costCurrency)
-  const model = session.resolvedModel && session.resolvedModel !== session.model
-    ? session.resolvedModel
-    : session.model
+  const model = modelLabel(session)
   const lastActivity = session.lastDataAt ?? session.completedAt ?? session.startedAt ?? session.createdAt
 
   return (
@@ -113,10 +118,17 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
       <div className="flex items-center gap-2 min-w-0">
         <StatusIcon status={session.status} />
         <span className="font-mono text-xs font-semibold text-foreground truncate">{session.sessionName}</span>
-        <span className="ml-auto text-[11px] text-muted-foreground shrink-0">{statusLabel(session.status)}</span>
+        {model && (
+          <span
+            className="ml-auto max-w-[180px] truncate rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-medium text-foreground/80"
+            title={model}
+          >
+            {model}
+          </span>
+        )}
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-        {model && <span className="truncate max-w-full">{model}</span>}
+        <span>{statusLabel(session.status)}</span>
         <span>{usageText(session)}</span>
         {context && <span>{context}</span>}
         {cost && <span>{cost}</span>}
