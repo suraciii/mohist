@@ -4,10 +4,6 @@ public static partial class AgentSessionExtensions
 {
     extension(AgentSession session)
     {
-        public bool IsBound => session.Status.Phase == AgentSessionStatus.Bound;
-
-        public bool IsOpened => session.Status.Phase == AgentSessionStatus.Opened;
-
         public IReadOnlyList<AgentSessionEvent> MergeMetadata(AgentSessionMetadata? metadata)
         {
             session.Metadata = session.Metadata.Merge(metadata);
@@ -42,9 +38,6 @@ public static partial class AgentSessionExtensions
                 AgentRuntimeSessionId = existingAgentSessionId ?? agentSessionId,
                 BoundAt = session.Status.BoundAt ?? now,
                 LastDataAt = now,
-                FailureReason = null,
-                CompletedAt = null,
-                ExitCode = null
             };
             var events = new List<AgentSessionEvent>();
             if (string.IsNullOrWhiteSpace(existingAgentSessionId))

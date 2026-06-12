@@ -368,8 +368,6 @@ public class AgentSessionSpecs
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("active", grainSession.Status);
-        Assert.Null(grainSession.ExitCode);
-        Assert.Null(grainSession.FailureReason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -428,7 +426,6 @@ public class AgentSessionSpecs
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("active", grainSession.Status);
-        Assert.Null(grainSession.FailureReason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -476,8 +473,6 @@ public class AgentSessionSpecs
         Assert.Equal(session.Id, opened.Id);
         Assert.Equal("active", opened.Status);
         Assert.NotNull(opened.AgentSessionId);
-        Assert.Null(opened.CompletedAt);
-        Assert.Null(opened.FailureReason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -671,7 +666,6 @@ public class AgentSessionSpecs
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("active", grainSession.Status);
-        Assert.Null(grainSession.FailureReason);
         Assert.Equal("probe_timeout", grainSession.FailureCategory);
     }
 
@@ -957,7 +951,7 @@ public class AgentSessionSpecs
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
-        Assert.Equal("ACP agent requires 'prompt'", grainSession.FailureReason);
+        Assert.Equal("prompt_missing", grainSession.FailureCategory);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         Assert.Equal(0, activity.Summary.Active);

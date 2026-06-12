@@ -142,8 +142,6 @@ public static class AgentSessionJson
         Status = AgentSessionStatusNames.ToName(session.Status.Phase),
         CreatedAt = session.Status.CreatedAt,
         LastDataAt = session.Status.LastDataAt,
-        CompletedAt = null,
-        UpdatedAt = updatedAt,
     };
 
     private static AgentSession Normalize(AgentSession session, AgentSessionRow row)
@@ -151,9 +149,7 @@ public static class AgentSessionJson
         if (string.IsNullOrWhiteSpace(session.Id))
             throw new InvalidOperationException("AgentSession state is missing required fields.");
         if (session.Runtime is null)
-            session.Runtime = new AgentSessionRuntime(row.RunnerId ?? string.Empty, "opencode", null);
-        else if (string.IsNullOrWhiteSpace(session.Runtime.AgentRuntime))
-            session.Runtime = session.Runtime with { AgentRuntime = "opencode" };
+            session.Runtime = new AgentSessionRuntime(row.RunnerId ?? string.Empty, null);
         if (session.Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state is missing CreatedAt.");
         var phase = !string.IsNullOrWhiteSpace(session.Status.AgentRuntimeSessionId) || !string.IsNullOrWhiteSpace(row.AgentSessionId)

@@ -9,6 +9,4 @@ public class AgentSessionRow
     public string Status { get; set; } = "opened";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastDataAt { get; set; }
-    public DateTime? CompletedAt { get; set; }
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

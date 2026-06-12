@@ -13,9 +13,7 @@ public sealed class AgentSession
     public static AgentSession Create(
         string id,
         string runnerId,
-        string agentRuntime,
         string? workDir,
-        string? model = null,
         AgentSessionMetadata? metadata = null,
         DateTime? now = null)
     {
@@ -24,8 +22,8 @@ public sealed class AgentSession
         {
             Id = id,
             Metadata = metadata ?? new AgentSessionMetadata(),
-            Runtime = new AgentSessionRuntime(runnerId, agentRuntime, workDir),
-            Settings = new AgentSessionSettings(model),
+            Runtime = new AgentSessionRuntime(runnerId, workDir),
+            Settings = new AgentSessionSettings(),
             Status = AgentSessionStatusSnapshot.Created(createdAt)
         };
     }
@@ -71,7 +69,6 @@ public sealed record AgentSessionMetadata(
 
 public sealed record AgentSessionRuntime(
     string RunnerId,
-    string AgentRuntime,
     string? WorkDir);
 
 public sealed record AgentSessionSettings(string? Model = null);
@@ -82,9 +79,6 @@ public sealed record AgentSessionStatusSnapshot(
     DateTime CreatedAt = default,
     DateTime? BoundAt = null,
     DateTime? LastDataAt = null,
-    DateTime? CompletedAt = null,
-    string? FailureReason = null,
-    int? ExitCode = null,
     AgentUsageSummary? UsageSummary = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>

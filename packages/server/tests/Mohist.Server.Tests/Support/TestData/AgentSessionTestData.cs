@@ -33,7 +33,6 @@ public static class AgentSessionTestData
         var session = AgentSession.Create(
             id,
             runnerId ?? string.Empty,
-            "opencode",
             null,
             metadata: BuildMetadata(projectId, issueNumber, workflowRunId, sessionName, workId, workType, stage, title));
         var row = new AgentSessionRow
@@ -42,7 +41,6 @@ public static class AgentSessionTestData
             RunnerId = runnerId,
             Status = "running",
             CreatedAt = createdAt,
-            UpdatedAt = createdAt,
         };
         return (session, row);
     }
