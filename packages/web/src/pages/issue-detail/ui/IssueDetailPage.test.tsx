@@ -48,7 +48,6 @@ const projects: Project[] = [
   {
     id: 'proj-1',
     name: 'Project 1',
-    path: '/tmp/p1',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     repositories: [],

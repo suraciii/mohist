@@ -152,7 +152,7 @@ export interface SessionMetadata {
   createdAt: string
   completedAt: string | null
   cwd?: string | null
-  worktree?: string | null
+  workspace?: string | null
   firstPromptSentAt?: string | null
   lastActivityAt?: string | null
   lastDataAt?: string | null

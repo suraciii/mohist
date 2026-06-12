@@ -50,11 +50,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task ListAsync_AfterProjectRepositoryConfigChange_ResolvesLatestMetadataForEachIssue()
     {
         // Given two issues bound to two project repositories.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main-old",
-            defaultBaseBranch: "release-old",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
 
         var explicitIssue = await CreateIssueAsync(projectId, "Explicit repo issue", "secondary");
         var defaultIssue = await CreateIssueAsync(projectId, "Default repo issue");
@@ -62,9 +58,9 @@ public class IssueRepositoryResolutionRegressionSpecs
         // When the project repository configuration is changed.
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("main");
-        await projectGrain.AddRepositoryAsync("main", "/proj/main-new", "git@main.example:repo-new.git", "release-new");
+        await projectGrain.AddRepositoryAsync("main", "git@main.example:repo-new.git", "release-new");
         await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync("secondary", "/proj/secondary-new", "git@secondary.example:repo-new.git", "develop-new");
+        await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo-new.git", "develop-new");
 
         // Then listing issues returns resolved repositories reflecting the latest project config.
         using var scope = _services.CreateScope();
@@ -80,13 +76,13 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var explicitInfo = byNumber[explicitIssue.Number];
         Assert.Equal("secondary", explicitInfo.Repository!.Name);
-        Assert.Equal("/proj/secondary-new", explicitInfo.Repository.Path);
+        Assert.Equal("git@secondary.example:repo-new.git", explicitInfo.Repository.GitUrl);
         Assert.Equal("develop-new", explicitInfo.Repository.BaseBranch);
         Assert.Null(explicitInfo.RepositoryProblem);
 
         var defaultInfo = byNumber[defaultIssue.Number];
         Assert.Equal("main", defaultInfo.Repository!.Name);
-        Assert.Equal("/proj/main-new", defaultInfo.Repository.Path);
+        Assert.Equal("git@main.example:repo-new.git", defaultInfo.Repository.GitUrl);
         Assert.Equal("release-new", defaultInfo.Repository.BaseBranch);
         Assert.Null(defaultInfo.RepositoryProblem);
     }
@@ -97,18 +93,14 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task ListIssuesApi_AfterProjectRepositoryConfigChange_ResolvesLatestMetadata()
     {
         // Given an issue created against a project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "List path resolves", "secondary");
-        Assert.Equal("/proj/secondary-old", issue.Repository!.Path);
+        Assert.Equal("git@secondary.example:repo.git", issue.Repository!.GitUrl);
 
         // When the project repository configuration is changed.
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync("secondary", "/proj/secondary-new", "git@secondary.example:repo-new.git", "develop-new");
+        await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo-new.git", "develop-new");
 
         // Then the list endpoint returns the resolved repository from the live project config.
         using var response = await _client.GetAsync($"/api/projects/{projectId}/issues");
@@ -119,7 +111,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var found = list.Single(item => item.GetProperty("number").GetInt32() == issue.Number);
         var repository = found.GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary-new", repository.GetProperty("path").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("develop-new", repository.GetProperty("baseBranch").GetString());
     }
 
@@ -130,8 +122,8 @@ public class IssueRepositoryResolutionRegressionSpecs
     {
         // Given a project with two repositories whose names differ only by case.
         var projectId = await CreateProjectWithAmbiguousRepositoryAsync(
-            new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-            new RepositoryInfo { Name = "MAIN", Path = "/proj/MAIN", BaseBranch = "main", IsDefault = false });
+            new RepositoryInfo { Name = "main", GitUrl = "git@main.example:repo.git", BaseBranch = "main", IsDefault = true },
+            new RepositoryInfo { Name = "MAIN", GitUrl = "git@MAIN.example:repo.git", BaseBranch = "main", IsDefault = false });
 
         // When the client posts an issue with the case-insensitive ambiguous reference.
         using var response = await _client.PostAsJsonAsync(
@@ -156,8 +148,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         // Given a project with two repositories whose names differ only by case
         // and an issue whose stored reference resolves ambiguously.
         var projectId = await CreateProjectWithAmbiguousRepositoryAsync(
-            new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-            new RepositoryInfo { Name = "MAIN", Path = "/proj/MAIN", BaseBranch = "main", IsDefault = false });
+            new RepositoryInfo { Name = "main", GitUrl = "git@main.example:repo.git", BaseBranch = "main", IsDefault = true },
+            new RepositoryInfo { Name = "MAIN", GitUrl = "git@MAIN.example:repo.git", BaseBranch = "main", IsDefault = false });
 
         var counter = _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
         var number = await counter.NextAsync();
@@ -190,8 +182,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         // Given a project with two repositories whose names differ only by case
         // and an issue whose stored reference resolves ambiguously.
         var projectId = await CreateProjectWithAmbiguousRepositoryAsync(
-            new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-            new RepositoryInfo { Name = "MAIN", Path = "/proj/MAIN", BaseBranch = "main", IsDefault = false });
+            new RepositoryInfo { Name = "main", GitUrl = "git@main.example:repo.git", BaseBranch = "main", IsDefault = true },
+            new RepositoryInfo { Name = "MAIN", GitUrl = "git@MAIN.example:repo.git", BaseBranch = "main", IsDefault = false });
 
         var counter = _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
         var number = await counter.NextAsync();
@@ -214,18 +206,14 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task RebaseEndpoint_AfterRepositoryPathAndBaseBranchChange_EmbedsNewRepositoryContextInTask()
+    public async Task RebaseEndpoint_AfterRepositoryGitUrlAndBaseBranchChange_EmbedsNewRepositoryContextInTask()
     {
-        // Given an issue bound to a project repository whose path and base branch
+        // Given an issue bound to a project repository whose git url and base branch
         // are subsequently changed.
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
 
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Rebase context embeds", "secondary");
         await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
 
@@ -233,7 +221,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
@@ -248,7 +235,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", payload.GetProperty("data").GetProperty("baseBranch").GetString());
 
         // And the queued rebase task embeds the resolved repository context
-        // (name, path, remote, base branch) from the live project configuration,
+        // (name, gitUrl, base branch) from the live project configuration,
         // not the originally resolved repository details.
         var wrId = payload.GetProperty("data").GetProperty("workflowRunId").GetString();
         var run = await LoadWorkflowRunAsync(wrId!);
@@ -258,26 +245,21 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", rebaseTask.WithInput!["baseBranch"]!.Value.GetString());
         var repository = rebaseTask.WithInput["repository"]!.Value;
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary-new", repository.GetProperty("path").GetString());
-        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task RebaseEndpoint_AfterRepositoryPathAndBaseBranchChange_UsesCurrentRepositoryConfiguration()
+    public async Task RebaseEndpoint_AfterRepositoryGitUrlAndBaseBranchChange_UsesCurrentRepositoryConfiguration()
     {
-        // Given an issue bound to a project repository whose path and base branch
+        // Given an issue bound to a project repository whose git url and base branch
         // are subsequently changed.
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
 
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Rebase no fallback", "secondary");
         await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
 
@@ -285,7 +267,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
@@ -321,11 +302,7 @@ public class IssueRepositoryResolutionRegressionSpecs
                 "abc1234", "abc1234", "First commit", "Author", "2024-01-01T00:00:00Z", new[] { "a.txt" }),
         };
 
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Commits resolve", "secondary");
         await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
 
@@ -333,7 +310,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary",
             "git@secondary.example:repo.git",
             "release-new");
 
@@ -356,11 +332,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         // Given an issue bound to a project repository whose configuration is later removed.
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var issue = await CreateIssueAsync(projectId, "File content orphan", "secondary");
         await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
 
@@ -381,12 +353,12 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task WorkspaceWorktreeStatusEndpoint_AfterRepositoryPathAndBaseBranchChange_ReturnsResolvedWorktreeStatus()
+    public async Task WorkspaceStatusEndpoint_AfterRepositoryGitUrlAndBaseBranchChange_ReturnsResolvedWorkspaceStatus()
     {
-        // Given an issue bound to a project repository whose path and base branch are later changed.
+        // Given an issue bound to a project repository whose git url and base branch are later changed.
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
-        _fixture.Git.WorktreeStatus = new Mohist.Server.Infrastructure.Workspace.WorkspaceStatus
+        _fixture.Git.WorkspaceStatus = new Mohist.Server.Infrastructure.Workspace.WorkspaceStatus
         {
             Exists = true,
             Branch = "mo/issue-1",
@@ -397,28 +369,23 @@ public class IssueRepositoryResolutionRegressionSpecs
             ConflictingFiles = [],
         };
 
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
-        var issue = await CreateIssueAsync(projectId, "Worktree base drifts", "secondary");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
+        var issue = await CreateIssueAsync(projectId, "Workspace base drifts", "secondary");
         await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
-        // When the user requests the worktree status after the project repository config change.
+        // When the user requests the workspace status after the project repository config change.
         using var response = await _client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issue.Number}/worktree-status");
+            $"/api/projects/{projectId}/issues/{issue.Number}/workspace-status");
 
-        // Then the endpoint returns a successful worktree status — proving the route
-        // resolved the live project repository (path + base branch) instead of failing
+        // Then the endpoint returns a successful workspace status — proving the route
+        // resolved the live project repository (git url + base branch) instead of failing
         // because of stale issue repository data or silently using a fallback.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -433,11 +400,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_ProjectRepositoryDefaultChanged_PreservesExplicitReferenceInsteadOfAdoptingNewDefault()
     {
         // Given an issue explicitly bound to a non-default project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var explicitIssue = await CreateIssueAsync(projectId, "Explicit secondary", "secondary");
         Assert.Equal("secondary", explicitIssue.Repository!.Name);
         Assert.False(explicitIssue.Repository.IsDefault);
@@ -450,7 +413,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var fetched = await GetIssueReadModelAsync(projectId, explicitIssue.Number);
         Assert.NotNull(fetched);
         Assert.Equal("secondary", fetched!.Repository!.Name);
-        Assert.Equal("/proj/secondary", fetched.Repository.Path);
+        Assert.Equal("git@secondary.example:repo.git", fetched.Repository.GitUrl);
         Assert.True(fetched.Repository.IsDefault, "Default flag must follow project config, not the original issue repository details");
     }
 
@@ -460,11 +423,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_ReferencedRepositoryRemoved_ButProjectHasOtherRepositories_RepositoryProblemReportsCandidates()
     {
         // Given an issue bound to a non-default repository and a project with multiple repositories.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var issue = await CreateIssueAsync(projectId, "Becomes orphan", "secondary");
 
         // When the referenced repository is removed.
@@ -490,7 +449,9 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_ProjectHasNoRepositories_AfterRepositoryRemoval_SurfacesProjectHasNoRepositoriesProblem()
     {
         // Given a project with a single default repository and an issue bound to it.
-        var projectId = await CreateProjectAsync("single-repo", "/proj/main", "main");
+        var projectId = await CreateProjectAsync("single-repo");
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
         var issue = await CreateIssueAsync(projectId, "Last repo removed", "main");
 
         // When the only repository is removed.
@@ -512,7 +473,9 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_ProjectDeleted_AfterIssueCreation_SurfacesProjectMissingRepositoryProblem()
     {
         // Given an issue created against a project.
-        var projectId = await CreateProjectAsync("transient", "/proj/main", "main");
+        var projectId = await CreateProjectAsync("transient");
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
         var issue = await CreateIssueAsync(projectId, "Vanishing project", "main");
 
         // When the project is deleted.
@@ -534,11 +497,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task WorkflowStart_AfterProjectRepositoryRemoteChange_PicksUpLatestRemoteInVariables()
     {
         // Given an issue bound to a project repository whose remote is later changed.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
@@ -548,7 +507,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary",
             "git@secondary.example:repo-remote-new.git",
             "develop");
 
@@ -559,7 +517,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         var variables = await LoadWorkflowVariablesAsync(wrId);
         var repository = variables.RootElement.GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("git@secondary.example:repo-remote-new.git", repository.GetProperty("remote").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -567,7 +524,9 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Fact]
     public async Task GetIssue_WithoutRepositoryRef_FallsBackToProjectDefault()
     {
-        var projectId = await CreateProjectAsync("legacy-no-ref", "/proj/main", "main");
+        var projectId = await CreateProjectAsync("legacy-no-ref");
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "issue_no_ref",
             projectId,
@@ -582,23 +541,19 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.NotNull(info);
         Assert.NotNull(info!.Repository);
         Assert.Equal("main", info.Repository!.Name);
-        Assert.Equal("/proj/main", info.Repository.Path);
+        Assert.Equal("git@main.example:repo.git", info.Repository.GitUrl);
         Assert.True(info.Repository.IsDefault);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetIssue_AfterRepositoryPathAndBaseBranchChange_ReturnsLatestPathAndBaseBranch()
+    public async Task GetIssue_AfterRepositoryGitUrlAndBaseBranchChange_ReturnsLatestGitUrlAndBaseBranch()
     {
         // Given an issue created against a project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Single read drifts", "secondary");
-        Assert.Equal("/proj/secondary-old", issue.Repository!.Path);
+        Assert.Equal("git@secondary.example:repo.git", issue.Repository!.GitUrl);
         Assert.Equal("develop-old", issue.Repository.BaseBranch);
 
         // When the project repository configuration is changed.
@@ -606,7 +561,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
@@ -618,8 +572,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var data = payload.GetProperty("data");
         var repository = data.GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary-new", repository.GetProperty("path").GetString());
-        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
         Assert.False(repository.GetProperty("isDefault").GetBoolean());
     }
@@ -631,18 +584,13 @@ public class IssueRepositoryResolutionRegressionSpecs
     {
         // Given an issue bound to a project repository whose path and base branch are
         // subsequently changed in project configuration.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Consistency across endpoints", "secondary");
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
@@ -662,15 +610,14 @@ public class IssueRepositoryResolutionRegressionSpecs
         var listRepository = listItem.GetProperty("repository");
 
         // Then the two endpoints agree on the latest resolved repository metadata
-        // (path, remote, base branch) and the default marker, so the issue page and
+        // (gitUrl, base branch) and the default marker, so the issue page and
         // the issue list can never disagree after a project config change.
         Assert.Equal(singleRepository.GetProperty("name").GetString(), listRepository.GetProperty("name").GetString());
-        Assert.Equal(singleRepository.GetProperty("path").GetString(), listRepository.GetProperty("path").GetString());
-        Assert.Equal(singleRepository.GetProperty("remote").GetString(), listRepository.GetProperty("remote").GetString());
+        Assert.Equal(singleRepository.GetProperty("gitUrl").GetString(), listRepository.GetProperty("gitUrl").GetString());
         Assert.Equal(singleRepository.GetProperty("baseBranch").GetString(), listRepository.GetProperty("baseBranch").GetString());
         Assert.Equal(singleRepository.GetProperty("isDefault").GetBoolean(), listRepository.GetProperty("isDefault").GetBoolean());
 
-        Assert.Equal("/proj/secondary-new", singleRepository.GetProperty("path").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", singleRepository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-new", singleRepository.GetProperty("baseBranch").GetString());
     }
 
@@ -680,11 +627,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task IssueListApi_AfterReferencedRepositoryRemoved_ReportsRepositoryProblemForOrphanedIssue()
     {
         // Given an issue bound to a non-default project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var issue = await CreateIssueAsync(projectId, "Orphan in list", "secondary");
 
         // When the referenced repository is removed.
@@ -714,11 +657,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task WorkflowStart_AfterMultipleSequentialProjectConfigChanges_UsesLatestConfig()
     {
         // Given an issue created against a project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-v1",
-            secondaryBaseBranch: "develop-v1");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-v1");
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
@@ -728,15 +667,15 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the project repository configuration is changed three times in a row,
         // leaving the repository name unchanged but updating path/remote/base branch.
-        foreach (var (path, remote, branch) in new[]
+        foreach (var (gitUrl, branch) in new[]
         {
-            ("/proj/secondary-v2", "git@secondary.example:v2.git", "develop-v2"),
-            ("/proj/secondary-v3", "git@secondary.example:v3.git", "develop-v3"),
-            ("/proj/secondary-final", "git@secondary.example:final.git", "release-final"),
+            ("git@secondary.example:v2.git", "develop-v2"),
+            ("git@secondary.example:v3.git", "develop-v3"),
+            ("git@secondary.example:final.git", "release-final"),
         })
         {
             await projectGrain.RemoveRepositoryAsync("secondary");
-            await projectGrain.AddRepositoryAsync("secondary", path, remote, branch);
+            await projectGrain.AddRepositoryAsync("secondary", gitUrl, branch);
         }
 
         // Then the workflow start uses only the latest config and ignores every
@@ -745,8 +684,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var variables = await LoadWorkflowVariablesAsync(wrId);
         var repository = variables.RootElement.GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary-final", repository.GetProperty("path").GetString());
-        Assert.Equal("git@secondary.example:final.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("git@secondary.example:final.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-final", repository.GetProperty("baseBranch").GetString());
 
         // And the issue read model agrees with the workflow variables for the same change.
@@ -754,7 +692,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var readRepository = payload.GetProperty("data").GetProperty("repository");
-        Assert.Equal("/proj/secondary-final", readRepository.GetProperty("path").GetString());
+        Assert.Equal("git@secondary.example:final.git", readRepository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-final", readRepository.GetProperty("baseBranch").GetString());
     }
 
@@ -764,11 +702,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_AfterIssueGrainReactivation_StillResolvesFromCurrentProjectConfig()
     {
         // Given an issue bound to a project repository.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Reactivation reads latest", "secondary");
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         // Force the issue grain to load and capture its current state.
@@ -781,7 +715,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
@@ -796,7 +729,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var repository = payload.GetProperty("data").GetProperty("repository");
-        Assert.Equal("/proj/secondary-new", repository.GetProperty("path").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
     }
 
@@ -810,11 +743,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
 
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-old",
-            secondaryBaseBranch: "develop-old");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Rebase response drifts", "secondary");
         await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
 
@@ -822,7 +751,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release-new");
 
@@ -847,11 +775,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task ListIssues_AfterReferencedRepositoryRemoved_PreservesIssueOrderingAndIncludesProblemField()
     {
         // Given several issues bound to a project repository that will be removed.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var firstSecondary = await CreateIssueAsync(projectId, "First secondary", "secondary");
         var defaultIssue = await CreateIssueAsync(projectId, "Default issue");
         var secondSecondary = await CreateIssueAsync(projectId, "Second secondary", "secondary");
@@ -892,11 +816,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     {
         // Given an issue bound to a project repository whose path/remote/baseBranch
         // are subsequently changed, but whose name is preserved.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main",
-            defaultBaseBranch: "main",
-            secondaryRepoPath: "/proj/secondary-v1",
-            secondaryBaseBranch: "develop-v1");
+        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-v1");
         var issue = await CreateIssueAsync(projectId, "Name preserved, fields updated", "secondary");
         Assert.Equal("secondary", issue.Repository!.Name);
 
@@ -904,7 +824,6 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-v2",
             "git@secondary.example:repo-v2.git",
             "develop-v2");
 
@@ -915,8 +834,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var repository = payload.GetProperty("data").GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary-v2", repository.GetProperty("path").GetString());
-        Assert.Equal("git@secondary.example:repo-v2.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("git@secondary.example:repo-v2.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("develop-v2", repository.GetProperty("baseBranch").GetString());
 
         // And the issue row only stores the stable reference — it does not carry
@@ -932,10 +850,10 @@ public class IssueRepositoryResolutionRegressionSpecs
         }
     }
 
-    private async Task<string> CreateProjectAsync(string name, string path, string baseBranch)
+    private async Task<string> CreateProjectAsync(string name)
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
-        await _grains.GetGrain<IProjectGrain>(projectId).CreateAsync(name, path, baseBranch);
+        await _grains.GetGrain<IProjectGrain>(projectId).CreateAsync(name);
         return projectId;
     }
 
@@ -958,8 +876,6 @@ public class IssueRepositoryResolutionRegressionSpecs
             {
                 Id = projectId,
                 Name = $"proj-{Guid.NewGuid():N}",
-                Path = defaultRepo.Path ?? "/proj/main",
-                BaseBranch = defaultRepo.BaseBranch,
                 RepositoriesJson = json,
             });
             await db.SaveChangesAsync();
@@ -971,20 +887,13 @@ public class IssueRepositoryResolutionRegressionSpecs
         return projectId;
     }
 
-    private async Task<string> CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-        string defaultRepoPath,
-        string defaultBaseBranch,
-        string secondaryRepoPath,
-        string secondaryBaseBranch)
+    private async Task<string> CreateProjectWithDefaultAndSecondaryRepositoryAsync(string secondaryBaseBranch)
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", defaultRepoPath, defaultBaseBranch);
-        await projectGrain.AddRepositoryAsync(
-            "secondary",
-            secondaryRepoPath,
-            "git@secondary.example:repo.git",
-            secondaryBaseBranch);
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
+        await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", secondaryBaseBranch);
         return projectId;
     }
 
@@ -1041,8 +950,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         {
             repository = new RepositoryDto(
                 repoEl.GetProperty("name").GetString()!,
-                repoEl.TryGetProperty("path", out var pathEl) ? pathEl.GetString() : null,
-                repoEl.TryGetProperty("remote", out var remoteEl) ? remoteEl.GetString() : null,
+                repoEl.GetProperty("gitUrl").GetString()!,
                 repoEl.GetProperty("baseBranch").GetString()!,
                 repoEl.GetProperty("isDefault").GetBoolean());
         }
@@ -1073,6 +981,10 @@ public class IssueRepositoryResolutionRegressionSpecs
         await workflow.AssignRunnerAsync(runnerId);
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync();
+
+        var project = await _grains.GetGrain<IProjectGrain>(projectId).GetAsync();
+        var path = Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project!.Name, number);
+        Directory.CreateDirectory(path);
     }
 
     private async Task<JsonDocument> LoadWorkflowVariablesAsync(string workflowRunId)
@@ -1105,7 +1017,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
     private sealed record CreatedIssueDto(string Id, int Number, RepositoryDto? Repository);
 
-    private sealed record RepositoryDto(string Name, string? Path, string? Remote, string BaseBranch, bool IsDefault);
+    private sealed record RepositoryDto(string Name, string GitUrl, string BaseBranch, bool IsDefault);
 
     private sealed record JsonEnvelope(bool Success, JsonElement? Data = default, string? Error = null, string? Code = null);
 }

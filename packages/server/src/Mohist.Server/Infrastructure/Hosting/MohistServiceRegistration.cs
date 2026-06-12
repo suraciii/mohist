@@ -124,8 +124,6 @@ public static class MohistServiceRegistration
     public const string ServerUrlEnvironmentVariable = "MOHIST_SERVER_URL";
     public const string DbPathEnvironmentVariable = "MOHIST_DB_PATH";
     public const string HomeEnvironmentVariable = "HOME";
-    public const string RunnerRootEnvironmentVariable = "MOHIST_RUNNER_ROOT";
-    public const string WorkspaceRootEnvironmentVariable = "MOHIST_WORKSPACE_ROOT";
 
     public static string ResolveSqliteConnectionString(IConfiguration configuration)
     {
@@ -156,9 +154,9 @@ public static class MohistServiceRegistration
 
     private static string? ResolveRunnerRoot(IConfiguration configuration)
     {
-        var configured = configuration["Mohist:RunnerRoot"]
-            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(RunnerRootEnvironmentVariable)
-            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(WorkspaceRootEnvironmentVariable);
+        var configured = configuration[MohistWorkspaceLayout.RunnerRootConfigurationKey]
+            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(MohistWorkspaceLayout.RunnerRootEnvironmentVariable)
+            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(MohistWorkspaceLayout.WorkspaceRootEnvironmentVariable);
         return string.IsNullOrWhiteSpace(configured) ? null : configured;
     }
 }

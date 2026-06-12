@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import type { IssueWorkflowProfileYamlResponse } from '../model/types'
 import type { IssueWorkflowArtifactListParams } from './client'
-import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue, getIssueWorkflowProfileYaml, updateIssueWorkflowProfileYaml, deleteIssueWorkflowProfileTemplate, getIssueWorkflowArtifacts, getIssueWorkflowArtifactContent } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, unarchiveIssue, updateIssueWorkflowProfileYaml } from './client'
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
   const { projectId } = useProject()
@@ -92,11 +92,11 @@ export function useWorkflowYaml(workflowRunId: string | null | undefined, enable
   })
 }
 
-export function useWorktreeStatus(issueNumber: number, enabled: boolean) {
+export function useWorkspaceStatus(issueNumber: number, enabled: boolean) {
   const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'worktree-status'],
-    queryFn: () => getWorktreeStatus(issueNumber, projectId),
+    queryKey: ['issues', issueNumber, projectId, 'workspace-status'],
+    queryFn: () => getWorkspaceStatus(issueNumber, projectId),
     enabled: enabled && issueNumber > 0 && !!projectId,
     refetchInterval: 30_000,
   })

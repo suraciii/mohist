@@ -541,7 +541,7 @@ export function IssueDetailPage() {
               <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
                 <span>showing merge-base → {diffData.head}</span>
                 <span>·</span>
-                <span>Worktree retained</span>
+                <span>Workspace retained</span>
               </div>
             </div>
           )}
@@ -750,14 +750,9 @@ export function IssueDetailPage() {
                       <dt className="text-muted-foreground">Repository</dt>
                       <dd className="text-foreground text-right">
                         {issue.repository.name}
-                        {issue.repository.path && (
+                        {issue.repository.gitUrl && (
                           <span className="text-muted-foreground/70 text-xs ml-1">
-                            ({issue.repository.path})
-                          </span>
-                        )}
-                        {issue.repository.remote && (
-                          <span className="text-muted-foreground/70 text-xs ml-1">
-                            (remote)
+                            ({issue.repository.gitUrl})
                           </span>
                         )}
                       </dd>

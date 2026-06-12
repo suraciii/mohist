@@ -138,8 +138,6 @@ public class ProjectQuerier
     {
         Id = e.Id,
         Name = e.Name,
-        Path = e.Path,
-        BaseBranch = e.BaseBranch,
         Repositories = JsonSerializer.Deserialize<List<RepositoryInfo>>(e.RepositoriesJson) ?? [],
         Variables = variables ?? ProjectVariablesBag.Empty,
         CreatedAt = e.CreatedAt.ToString("o"),

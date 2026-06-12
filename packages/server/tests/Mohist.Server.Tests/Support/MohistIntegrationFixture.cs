@@ -107,7 +107,13 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
             services.RemoveAll<ConfigService>();
-            services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
+            services.RemoveAll<IEnvironmentVariableProvider>();
+            services.AddSingleton<IEnvironmentVariableProvider>(_ =>
+            {
+                var environment = new MockEnvironmentVariableProvider();
+                environment[MohistWorkspaceLayout.RunnerRootEnvironmentVariable] = _runnerRoot;
+                return environment;
+            });
             services.AddSingleton(provider => new ConfigService(
                 provider.GetRequiredService<IConfiguration>(),
                 provider.GetRequiredService<IEnvironmentVariableProvider>(),

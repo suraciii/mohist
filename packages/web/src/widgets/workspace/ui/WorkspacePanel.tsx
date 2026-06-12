@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../../../shared/api/client'
-import { cleanupIssueWorktree, onRebaseEvent, rebaseIssue, useLiveTask, useWorktreeStatus } from '../../../entities/issue'
+import { cleanupIssueWorkspace, onRebaseEvent, rebaseIssue, useLiveTask, useWorkspaceStatus } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 
-interface WorktreePanelProps {
+interface WorkspacePanelProps {
   issueNumber: number
   isAgentRunning: boolean
   isDone?: boolean
@@ -31,10 +31,10 @@ const STEP_LABELS: Record<RebaseStep, string> = {
   verifying: 'Verifying build...',
 }
 
-export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreePanelProps) {
+export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: WorkspacePanelProps) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  const { data: status, isLoading } = useWorktreeStatus(issueNumber, true)
+  const { data: status, isLoading } = useWorkspaceStatus(issueNumber, true)
   const { rebaseConflict } = useLiveTask()
   const [rebaseResult, setRebaseResult] = useState<RebaseResult | null>(null)
   const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null)
@@ -80,7 +80,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
       }
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
     },
     onError: (error: Error) => {
       if (error instanceof ApiError && error.code === 'rebase_already_pending') {
@@ -99,7 +99,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
   })
 
   const cleanupMutation = useMutation({
-    mutationFn: () => cleanupIssueWorktree(issueNumber, projectId),
+    mutationFn: () => cleanupIssueWorkspace(issueNumber, projectId),
     onSuccess: (data) => {
       setCleanupResult({
         type: data.removed ? 'success' : 'info',
@@ -107,7 +107,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
       })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
     },
     onError: (error: Error) => {
       setCleanupResult({ type: 'error', message: error.message })
@@ -127,10 +127,10 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <h2 className="text-sm font-semibold text-gray-700 mb-1">Worktree</h2>
+      <h2 className="text-sm font-semibold text-gray-700 mb-1">Workspace</h2>
       {isDone && (
         <p className="text-xs text-gray-400 mb-2">
-          Retained for review/traceability. Archiving also removes this worktree.
+          Retained for review/traceability. Archiving also removes this workflow workspace.
         </p>
       )}
 
@@ -255,7 +255,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
           disabled={!canCleanup || cleanupMutation.isPending}
           className="mt-2 h-auto w-full border-gray-300 bg-white px-3 py-2 text-gray-700 hover:bg-gray-50"
         >
-          {cleanupMutation.isPending ? 'Removing worktree...' : isAgentRunning ? 'Remove after completion' : 'Remove worktree'}
+          {cleanupMutation.isPending ? 'Cleaning up workspace...' : isAgentRunning ? 'Clean up after completion' : 'Clean up workspace'}
         </Button>
       )}
     </div>

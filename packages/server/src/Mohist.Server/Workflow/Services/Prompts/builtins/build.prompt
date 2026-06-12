@@ -44,6 +44,12 @@ If the task has no spec reference, treat its acceptance criteria as the complete
 - Follow repository conventions.
 - Avoid unrelated refactors.
 - Preserve existing behavior unless the task explicitly changes it.
+- Commit your changes on the workflow's per-run branch (`${{ workspace.branch }}`).
+  This branch is materialized by the runner and is the source ref used by
+  the Integrate stage. Do not switch to or create a different worktree-style
+  branch such as `mo/issue-${{ issue.number }}`; all task, check, repair,
+  merge, and conflict-resolver work must run inside the workflow workspace
+  at `${{ workspace.path }}` and stay on `${{ workspace.branch }}`.
 </implementation_policy>
 
 <verification>

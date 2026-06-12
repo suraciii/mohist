@@ -598,12 +598,12 @@ function getDiffAvailability(
   diffData: ReturnType<typeof useChangedFilesData>['diffData'],
   commitsData: ReturnType<typeof useChangedFilesData>['commitsData'],
 ) {
-  const worktreeRemoved = diffData?.reason === 'worktree_removed' || commitsData?.reason === 'worktree_removed'
+  const workspaceRemoved = diffData?.reason === 'workspace_removed' || commitsData?.reason === 'workspace_removed'
   const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
   const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
   const unavailableMessage = notStarted
     ? 'No changes yet'
-    : worktreeRemoved
+    : workspaceRemoved
       ? 'Changes unavailable — workspace removed'
       : branchMissing
         ? 'Changes unavailable — branch missing'
@@ -705,7 +705,7 @@ function NoFileChangesState() {
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center text-gray-400">
         <div className="text-lg mb-2">No file changes yet</div>
-        <div className="text-sm">This issue's worktree has no diff entries</div>
+        <div className="text-sm">This issue's workflow workspace has no diff entries</div>
       </div>
     </div>
   )

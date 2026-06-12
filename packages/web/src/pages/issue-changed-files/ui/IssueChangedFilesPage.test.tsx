@@ -216,9 +216,9 @@ describe('IssueChangedFilesPage', () => {
       expect(screen.getByText('No changes yet')).toBeTruthy()
     })
 
-    it('shows worktree-removed message when worktree was removed', () => {
+    it('shows workspace-removed message when workspace was removed', () => {
       mockUseIssueDiff.mockReturnValue({
-        data: { available: false, reason: 'worktree_removed', message: '' },
+        data: { available: false, reason: 'workspace_removed', message: '' },
       })
       renderPage()
       expect(screen.getByText('Changes unavailable — workspace removed')).toBeTruthy()
@@ -659,7 +659,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('renders recoverable error for unavailable diff with reason', () => {
       mockUseIssueDiff.mockReturnValue({
-        data: { available: false, reason: 'worktree_removed', message: 'workspace removed' },
+        data: { available: false, reason: 'workspace_removed', message: 'workspace removed' },
       })
       renderPage()
       expect(screen.getByText('Changes unavailable — workspace removed')).toBeTruthy()

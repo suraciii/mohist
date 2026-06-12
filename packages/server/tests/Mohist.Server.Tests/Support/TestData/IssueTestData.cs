@@ -58,14 +58,10 @@ public static class IssueTestData
 
     public static ProjectInfo CreateProject(
         string id = DefaultProjectId,
-        string name = "Test Project",
-        string path = "/tmp/test",
-        string baseBranch = "main") =>
+        string name = "Test Project") =>
         new()
         {
             Id = id,
             Name = name,
-            Path = path,
-            BaseBranch = baseBranch,
         };
 }

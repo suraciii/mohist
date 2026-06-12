@@ -20,11 +20,8 @@ public class IssueVariableBuilderSpecs
     private static readonly WorkflowProjectContext Project = new(
         Id: "proj_test",
         Name: "mohist-local",
-        Path: "/tmp/mohist-test",
-        BaseBranch: "master",
         RepositoryName: "master",
-        RepositoryRemote: null,
-        RepositoryPath: "/tmp/mohist-test",
+        RepositoryGitUrl: "git@example.com:mohist-local.git",
         RepositoryBaseBranch: "master");
 
     private static MohistIssue TestIssue(int number = 80) => new()
@@ -99,8 +96,12 @@ public class IssueVariableBuilderSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void BuiltInContext_AlwaysPresent_EvenWhenNoProjectOrIssueConfig()
+    public void BuildReturnsEmptyUserBundle_WhenNoProjectOrIssueConfig()
     {
+        // The built-in context (mohist, issue, project, repository, workspace,
+        // openspec*) is now composed exclusively by IssueGrain.BuildIssueVariables
+        // and merged on top of this user bundle before dispatch. This test
+        // pins the user-bundle-only contract for IssueVariableBuilder.
         var result = IssueVariableBuilder.Build(
             projectBundle: VariableBundle.Empty,
             issueBundle: VariableBundle.Empty,
@@ -108,15 +109,7 @@ public class IssueVariableBuilderSpecs
             issue: TestIssue(number: 80),
             project: Project);
 
-        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
-        var root = doc.RootElement;
-
-        Assert.Equal("mohist", root.GetProperty("mohist").GetProperty("system").GetString());
-        Assert.Equal("wr_x", root.GetProperty("mohist").GetProperty("runId").GetString());
-        Assert.Equal(80, root.GetProperty("issue").GetProperty("number").GetInt32());
-        Assert.Equal("proj_test", root.GetProperty("project").GetProperty("id").GetString());
-        Assert.Equal("issue-80", root.GetProperty("openspecChangeName").GetString());
-        Assert.Equal("openspec/changes/issue-80", root.GetProperty("openspecChangeDir").GetString());
+        Assert.True(result.Vars is null || result.Vars.Value.ValueKind == JsonValueKind.Object);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

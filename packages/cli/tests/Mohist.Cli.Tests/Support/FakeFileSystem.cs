@@ -1,0 +1,115 @@
+using System.Text;
+
+namespace Mohist.Cli.Tests.Support;
+
+public sealed class FakeFileSystem : IFileSystem
+{
+    private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+    private string _currentDirectory = "/";
+
+    public string CurrentDirectory
+    {
+        get => _currentDirectory;
+        set => _currentDirectory = value;
+    }
+
+    public IReadOnlyDictionary<string, string> Files => _files;
+
+    public void AddFile(string path, string content)
+    {
+        _files[Normalize(path)] = content;
+    }
+
+    public bool Exists(string path) => _files.ContainsKey(Normalize(path)) || _directories.Contains(Normalize(path));
+
+    public bool DirectoryExists(string path) => _directories.Contains(Normalize(path));
+
+    public void CreateDirectory(string path)
+    {
+        _directories.Add(Normalize(path));
+    }
+
+    public void Delete(string path)
+    {
+        _files.Remove(Normalize(path));
+    }
+
+    public void DeleteDirectory(string path)
+    {
+        var normalized = Normalize(path);
+        var prefix = normalized.EndsWith(Path.DirectorySeparatorChar) ? normalized : normalized + Path.DirectorySeparatorChar;
+        foreach (var dir in _directories.Where(d => d == normalized || d.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            _directories.Remove(dir);
+        }
+
+        foreach (var key in _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            _files.Remove(key);
+        }
+    }
+
+    public void Move(string source, string destination)
+    {
+        var sourceKey = Normalize(source);
+        var destKey = Normalize(destination);
+        if (_files.TryGetValue(sourceKey, out var content))
+        {
+            _files.Remove(sourceKey);
+            _files[destKey] = content;
+        }
+    }
+
+    public string ReadAllText(string path) => _files.TryGetValue(Normalize(path), out var content)
+        ? content
+        : throw new FileNotFoundException($"File not found: {path}");
+
+    public Task<string> ReadAllTextAsync(string path) => Task.FromResult(ReadAllText(path));
+
+    public void WriteAllText(string path, string contents)
+    {
+        _files[Normalize(path)] = contents;
+    }
+
+    public Task WriteAllTextAsync(string path, string contents)
+    {
+        WriteAllText(path, contents);
+        return Task.CompletedTask;
+    }
+
+    public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption)
+    {
+        var normalized = Normalize(path);
+        var prefix = normalized.EndsWith(Path.DirectorySeparatorChar) ? normalized : normalized + Path.DirectorySeparatorChar;
+        return _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+    }
+
+    public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(ReadAllText(path)));
+
+    public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    private static string Normalize(string path) => Path.GetFullPath(path);
+
+    private sealed class RecordingStream : MemoryStream
+    {
+        private readonly FakeFileSystem _owner;
+        private readonly string _path;
+
+        public RecordingStream(FakeFileSystem owner, string path)
+        {
+            _owner = owner;
+            _path = path;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _owner.WriteAllText(_path, Encoding.UTF8.GetString(ToArray()));
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+}

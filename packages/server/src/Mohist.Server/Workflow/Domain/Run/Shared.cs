@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -25,3 +26,20 @@ public sealed record WorkLease(
 public sealed record TaskResult(
     string Status,
     string? Reason = null);
+
+/// <summary>
+/// The per-run head ref the runner materializes inside the workflow
+/// workspace. MUST stay in sync with the runner's <c>runBranchName()</c>
+/// helper in <c>packages/runner/src/runtime/workspace.ts</c>.
+/// </summary>
+public static class WorkflowRunBranch
+{
+    private static readonly Regex SafeChars = new("[^A-Za-z0-9_-]", RegexOptions.Compiled);
+
+    public static string For(string? runId)
+    {
+        if (string.IsNullOrEmpty(runId)) return "mohist/run";
+        var safe = SafeChars.Replace(runId, string.Empty);
+        return string.IsNullOrEmpty(safe) ? "mohist/run" : $"mohist/run-{safe}";
+    }
+}

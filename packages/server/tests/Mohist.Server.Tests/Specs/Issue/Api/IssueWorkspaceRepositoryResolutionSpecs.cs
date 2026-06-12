@@ -50,7 +50,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync("secondary", "/proj/secondary-new", "git@secondary.example:repo-new.git", "release");
+        await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo-new.git", "release");
 
         // When the user opens the workspace diff.
         using var diffResponse = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/diff");
@@ -82,10 +82,10 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
 
-        // When the user requests workspace diff/file-content/worktree-status/cleanup endpoints.
+        // When the user requests workspace diff/file-content/workspace-status/cleanup endpoints.
         using var diff = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/diff");
         using var fileContent = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/file-content?path=a.txt");
-        using var worktreeStatus = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/worktree-status");
+        using var workspaceStatus = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/workspace-status");
         using var cleanup = await _client.PostAsync($"/api/projects/{projectId}/issues/{issue.Number}/cleanup", null);
 
         // Then each endpoint returns a clear repository configuration problem instead of
@@ -99,9 +99,9 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         var fileContentPayload = await fileContent.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("repository_not_found", fileContentPayload.GetProperty("code").GetString());
 
-        Assert.Equal(HttpStatusCode.Conflict, worktreeStatus.StatusCode);
-        var worktreeStatusPayload = await worktreeStatus.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("repository_not_found", worktreeStatusPayload.GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, workspaceStatus.StatusCode);
+        var workspaceStatusPayload = await workspaceStatus.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("repository_not_found", workspaceStatusPayload.GetProperty("code").GetString());
 
         Assert.Equal(HttpStatusCode.Conflict, cleanup.StatusCode);
         var cleanupPayload = await cleanup.Content.ReadFromJsonAsync<JsonElement>();
@@ -120,7 +120,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
-        await projectGrain.AddRepositoryAsync("secondary", "/proj/secondary", "git@secondary.example:repo.git", "release");
+        await projectGrain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "release");
 
         // When the user queues a rebase without specifying a base branch.
         using var response = await _client.PostAsJsonAsync(
@@ -178,7 +178,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             null);
 
         // Then the endpoint returns a clear repository configuration problem instead of
-        // silently removing the worktree using a stale path.
+        // silently removing the workflow workspace using stale issue repository data.
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("repository_not_found", payload.GetProperty("code").GetString());
@@ -186,15 +186,16 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     private async Task<string> CreateProjectWithSecondaryRepositoryAsync(string secondaryPath, string secondaryBaseBranch)
     {
-        var projectId = await CreateProjectAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        var projectId = await CreateProjectAsync($"proj-{Guid.NewGuid():N}");
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
-        await grain.AddRepositoryAsync("secondary", secondaryPath, "git@secondary.example:repo.git", secondaryBaseBranch);
+        await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
+        await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", secondaryBaseBranch);
         return projectId;
     }
 
-    private async Task<string> CreateProjectAsync(string name, string path, string baseBranch)
+    private async Task<string> CreateProjectAsync(string name)
     {
-        using var response = await _client.PostAsJsonAsync("/api/projects", new { name, path, baseBranch });
+        using var response = await _client.PostAsJsonAsync("/api/projects", new { name });
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         return json.GetProperty("data").GetProperty("id").GetString()!;
@@ -233,6 +234,10 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         await workflow.AssignRunnerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync();
+
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).GetAsync();
+        var path = Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(_fixture.RunnerRoot, project!.Name, number);
+        Directory.CreateDirectory(path);
     }
 
     private sealed record IssueDto(string Id, int Number);

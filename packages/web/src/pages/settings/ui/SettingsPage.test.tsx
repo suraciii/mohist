@@ -25,9 +25,8 @@ const projects: Project[] = [
   {
     id: 'proj-first',
     name: 'first-project',
-    path: '/tmp/first',
     repositories: [
-      { name: 'first', path: '/tmp/first', baseBranch: 'main', isDefault: true },
+      { name: 'first', gitUrl: 'git@example.com:first.git', baseBranch: 'main', isDefault: true },
     ],
     createdAt: '2026-06-01T00:00:00Z',
     updatedAt: '2026-06-01T00:00:00Z',
@@ -35,9 +34,8 @@ const projects: Project[] = [
   {
     id: 'proj-selected',
     name: 'selected-project',
-    path: '/tmp/selected',
     repositories: [
-      { name: 'selected', path: '/tmp/selected', baseBranch: 'master', isDefault: true },
+      { name: 'selected', gitUrl: 'git@example.com:selected.git', baseBranch: 'master', isDefault: true },
     ],
     createdAt: '2026-06-01T00:00:00Z',
     updatedAt: '2026-06-01T00:00:00Z',

@@ -94,6 +94,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             var issueId = metadata?.Annotations?.GetValueOrDefault("issueId") ?? GetIssueId();
             var effectiveDefinition = await LoadEffectiveDefinitionAsync(projectId, issueId);
             _run = WorkflowRun.Create(GrainKey, effectiveDefinition, metadata ?? BuildRunMetadata(null));
+            _run.Workspace = input?.Workspace;
         }
 
         var events = _run.Start();
@@ -1178,7 +1179,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         // Step 8 of design/eventbus.md: hook dispatch removed.
         // Side effects now flow through the bus — IssueGrain subscribes
         // to com.mohist.workflow.run.stopped (Step 5) and the
-        // worktree cleanup service subscribes to .completed.
+        // workflow workspace cleanup service subscribes to .completed.
     }
 
     private async Task OnWorkflowFailedAsync(string? reason)

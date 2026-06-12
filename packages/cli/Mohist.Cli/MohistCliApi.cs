@@ -44,6 +44,45 @@ internal sealed class MohistCliApi
     public async Task<int> PrintGetAsync(string path) =>
         await PrintResponseAsync(await _http.GetAsync(path));
 
+    public async Task<int> PrintProjectListAsync()
+    {
+        using var response = await _http.GetAsync("/api/projects");
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+        if (node is null)
+        {
+            _out.WriteLine(response.StatusCode);
+            return response.IsSuccessStatusCode ? 0 : 1;
+        }
+
+        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
+        if (!success)
+        {
+            var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+            var code = node["code"]?.GetValue<string>();
+            _err.WriteLine(code is null ? error : $"{error} ({code})");
+            return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+
+        var data = node["data"];
+        if (data is not JsonArray array || array.Count == 0)
+        {
+            _out.WriteLine("No projects");
+            return 0;
+        }
+
+        var activeProjectId = await ResolveProjectIdAsync(null);
+        foreach (var item in array)
+        {
+            var id = item?["id"]?.GetValue<string>() ?? "";
+            var name = item?["name"]?.GetValue<string>() ?? "";
+            var marker = id == activeProjectId ? "* " : "  ";
+            _out.WriteLine($"{marker}{name}");
+        }
+
+        return 0;
+    }
+
     public async Task<int> PrintDeleteAsync(string path) =>
         await PrintResponseAsync(await _http.DeleteAsync(path));
 
@@ -225,6 +264,9 @@ internal sealed class MohistCliApi
             return null;
         }
     }
+
+    public Task<string?> ResolveProjectIdAsync(string? projectId) =>
+        ResolveProjectIdAsync(null, projectId);
 
     private static string ProjectStatePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),

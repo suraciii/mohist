@@ -122,9 +122,9 @@ describe('ChangesPanel', () => {
   })
 
   describe('Workspace removed copy', () => {
-    it('shows workspace removed message instead of No changes yet when worktree_removed', () => {
-      const diffData = makeDiffResponse({ available: false, reason: 'worktree_removed', message: 'Workspace has been removed. Diff is only available while the issue worktree is retained.' })
-      const commitsData = makeCommitsResponse({ available: false, reason: 'worktree_removed', message: 'Workspace has been removed.' })
+    it('shows workspace removed message instead of No changes yet when workspace_removed', () => {
+      const diffData = makeDiffResponse({ available: false, reason: 'workspace_removed', message: 'Workspace has been removed. Diff is only available while the issue workspace is retained.' })
+      const commitsData = makeCommitsResponse({ available: false, reason: 'workspace_removed', message: 'Workspace has been removed.' })
 
       render(
         <ChangesPanel
@@ -142,6 +142,27 @@ describe('ChangesPanel', () => {
 
       expect(screen.getByText(/workspace removed/i)).toBeInTheDocument()
       expect(screen.queryByText('No changes yet')).not.toBeInTheDocument()
+    })
+
+    it('does not display worktree wording on the review surface', () => {
+      const diffData = makeDiffResponse({ available: false, reason: 'workspace_removed', message: 'Workspace has been removed.' })
+      const commitsData = makeCommitsResponse({ available: false, reason: 'workspace_removed', message: 'Workspace has been removed.' })
+
+      render(
+        <ChangesPanel
+          diffData={diffData}
+          commitsData={commitsData}
+          diffTab="files"
+          setDiffTab={vi.fn()}
+          expandedFiles={new Set()}
+          setExpandedFiles={vi.fn()}
+          expandedCommits={new Set()}
+          setExpandedCommits={vi.fn()}
+          issueNumber={1}
+        />
+      )
+
+      expect(screen.queryByText(/worktree/i)).not.toBeInTheDocument()
     })
 
     it('shows branch missing message when branch_missing', () => {
@@ -241,7 +262,7 @@ describe('ChangesPanel', () => {
       expect(screen.getByText(/2 commits?/)).toBeInTheDocument()
       expect(screen.getByText(/\+50/)).toBeInTheDocument()
       expect(screen.getByText(/-20/)).toBeInTheDocument()
-      expect(screen.getByText(/Worktree retained/)).toBeInTheDocument()
+      expect(screen.getByText(/Workspace retained/)).toBeInTheDocument()
     })
   })
 
@@ -323,8 +344,8 @@ describe('ChangesPanel', () => {
     })
 
     it('does not render review summary when diff is unavailable', () => {
-      const diffData = makeDiffResponse({ available: false, reason: 'worktree_removed', message: 'Workspace removed.' })
-      const commitsData = makeCommitsResponse({ available: false, reason: 'worktree_removed', message: 'Workspace removed.' })
+      const diffData = makeDiffResponse({ available: false, reason: 'workspace_removed', message: 'Workspace removed.' })
+      const commitsData = makeCommitsResponse({ available: false, reason: 'workspace_removed', message: 'Workspace removed.' })
 
       render(
         <ChangesPanel

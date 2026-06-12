@@ -23,8 +23,8 @@ public static class ProjectRoutes
 
         root.MapPost("/", async (CreateProjectRequest req, IGrainFactory grains, ProjectQuerier projectsQuery) =>
         {
-            if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Path))
-                return ApiResults.BadRequest("name and path are required");
+            if (string.IsNullOrWhiteSpace(req.Name))
+                return ApiResults.BadRequest("name is required");
 
             if (!ProjectName.TryNormalize(req.Name, out var projectName, out var nameError))
                 return ApiResults.BadRequest(nameError!, "invalid_project_name");
@@ -36,7 +36,7 @@ public static class ProjectRoutes
             var projectGrain = grains.GetGrain<IProjectGrain>(id);
             try
             {
-                var project = await projectGrain.CreateAsync(projectName, req.Path, req.BaseBranch);
+                var project = await projectGrain.CreateAsync(projectName);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
@@ -63,11 +63,11 @@ public static class ProjectRoutes
             return ApiResults.Ok(project);
         });
 
-        byRef.MapPatch("", async (HttpContext context, UpdateProjectRequest req, IGrainFactory grains) =>
+        byRef.MapPatch("", async (HttpContext context, IGrainFactory grains) =>
         {
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
-            var updated = await projectGrain.UpdateAsync(req.BaseBranch);
+            var updated = await projectGrain.UpdateAsync();
             return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project not found");
         });
 
@@ -89,14 +89,14 @@ public static class ProjectRoutes
         {
             if (string.IsNullOrWhiteSpace(req.Name))
                 return ApiResults.BadRequest("name is required");
-            if (string.IsNullOrWhiteSpace(req.Path) && string.IsNullOrWhiteSpace(req.Remote))
-                return ApiResults.BadRequest("path or remote is required");
+            if (string.IsNullOrWhiteSpace(req.GitUrl))
+                return ApiResults.BadRequest("gitUrl is required", "repository_giturl_required");
 
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             try
             {
-                var updated = await projectGrain.AddRepositoryAsync(req.Name, req.Path, req.Remote, req.BaseBranch);
+                var updated = await projectGrain.AddRepositoryAsync(req.Name, req.GitUrl, req.BaseBranch, req.IsDefault);
                 return updated is not null
                     ? Results.Json(new { success = true, data = updated }, statusCode: 201)
                     : ApiResults.NotFound("Project not found");
@@ -111,12 +111,40 @@ public static class ProjectRoutes
         {
             var project = context.GetResolvedProject();
             var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
+
             if (req.SetDefault == true)
             {
                 var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
                 return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
             }
-            return ApiResults.BadRequest("No action specified");
+
+            var hasUpdateFields = !string.IsNullOrWhiteSpace(req.NewName)
+                || !string.IsNullOrWhiteSpace(req.GitUrl)
+                || req.BaseBranch is not null
+                || req.IsDefault is not null;
+
+            if (!hasUpdateFields)
+                return ApiResults.BadRequest("No action specified");
+
+            if (req.IsDefault == false)
+            {
+                return ApiResults.BadRequest("Use explicit default assignment; clearing default is not supported via this endpoint");
+            }
+
+            try
+            {
+                var updated = await projectGrain.UpdateRepositoryAsync(
+                    repoName,
+                    newName: req.NewName,
+                    gitUrl: req.GitUrl,
+                    baseBranch: req.BaseBranch,
+                    isDefault: req.IsDefault);
+                return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
         });
 
         byRef.MapDelete("/repositories/{repoName}", async (HttpContext context, string repoName, IGrainFactory grains) =>
@@ -383,10 +411,15 @@ public sealed record ProjectPromptOverrideRequest(
 
 public sealed record PromptPreviewRequest(JsonElement? Variables);
 
-public record CreateProjectRequest(string Name, string Path, string? BaseBranch = null);
-public record UpdateProjectRequest(string? BaseBranch = null);
-public record AddRepositoryRequest(string Name, string? Path = null, string? Remote = null, string? BaseBranch = null);
-public record UpdateRepositoryRequest(bool? SetDefault = null);
+public record CreateProjectRequest(string Name);
+public record UpdateProjectRequest();
+public record AddRepositoryRequest(string Name, string GitUrl, string? BaseBranch = null, bool? IsDefault = null);
+public record UpdateRepositoryRequest(
+    bool? SetDefault = null,
+    string? NewName = null,
+    string? GitUrl = null,
+    string? BaseBranch = null,
+    bool? IsDefault = null);
 public record CreateProjectTemplateRequest(string Yaml);
 public record UpdateProjectTemplateRequest(string Yaml);
 public record SetDefaultTemplateRequest(string TemplateId);

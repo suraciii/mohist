@@ -26,7 +26,6 @@ public static class StatusRoutes
                 status.Add(new
                 {
                     name = project.Name,
-                    path = project.Path,
                     issues = issues.Count,
                     activeIssues
                 });
@@ -50,7 +49,6 @@ public static class StatusRoutes
             var result = new
             {
                 name = current.Name,
-                path = current.Path,
                 issues = allIssues.Count,
                 activeIssues = active.Count,
                 issuesByStatus = new Dictionary<string, int>

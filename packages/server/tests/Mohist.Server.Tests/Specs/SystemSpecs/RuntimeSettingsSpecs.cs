@@ -20,7 +20,9 @@ public class RuntimeSettingsSpecs
     public async Task GivenUserChoosesDefaultAndStageModels_WhenSettingsPatchProjectVariables_ThenMohistUsesThoseRuntimePreferences()
     {
         var projectName = $"settings-{Guid.NewGuid():N}";
-        await _client.PostOkAsync("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        await _client.PostOkAsync("/api/projects", new { name = projectName });
+        var projectId = (await _client.GetDataAsync<List<ProjectResponse>>("/api/projects")).Single(p => p.Name == projectName).Id;
+        await _client.PostOkAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         await _client.PatchDataAsync<ProjectVariablesDto>($"/api/projects/{projectName}/workflow-profile/variables", new
         {
@@ -46,4 +48,5 @@ public class RuntimeSettingsSpecs
 
     private sealed record ProjectVariablesDto(JsonDocument? Vars, Dictionary<string, ProjectStageVariablesDto>? Stages);
     private sealed record ProjectStageVariablesDto(JsonDocument Vars);
+    private sealed record ProjectResponse(string Id, string Name);
 }

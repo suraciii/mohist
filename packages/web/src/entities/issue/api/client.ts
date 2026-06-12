@@ -217,7 +217,7 @@ export function stopIssue(number: number, projectId?: string | null) {
   return request<{ ok: boolean; issueNumber: number }>(projectApiPath(projectId, `/issues/${number}/stop`), { method: 'POST' })
 }
 
-export function getWorktreeStatus(number: number, projectId?: string | null) {
+export function getWorkspaceStatus(number: number, projectId?: string | null) {
   return request<{
     exists: boolean
     branch?: string
@@ -226,10 +226,10 @@ export function getWorktreeStatus(number: number, projectId?: string | null) {
     behind?: number
     rebaseInProgress?: boolean
     conflictingFiles?: string[]
-  }>(projectApiPath(projectId, `/issues/${number}/worktree-status`))
+  }>(projectApiPath(projectId, `/issues/${number}/workspace-status`))
 }
 
-export function cleanupIssueWorktree(number: number, projectId?: string | null) {
+export function cleanupIssueWorkspace(number: number, projectId?: string | null) {
   return request<{
     removed: boolean
     message: string

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Mohist.Server.SystemInfo;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
@@ -14,6 +16,7 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -35,6 +38,8 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly IEventStore _eventStore;
     private readonly IEventPublisher _eventBus;
+    private readonly IConfiguration _configuration;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -49,6 +54,8 @@ public class IssueGrain : Grain, IIssueGrain
         IssueWorkflowProfileManager issueProfileManager,
         IEventStore eventStore,
         IEventPublisher eventBus,
+        IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -62,6 +69,8 @@ public class IssueGrain : Grain, IIssueGrain
         _issueProfileManager = issueProfileManager;
         _eventStore = eventStore;
         _eventBus = eventBus;
+        _configuration = configuration;
+        _environment = environment;
         _log = log;
     }
 
@@ -112,7 +121,10 @@ public class IssueGrain : Grain, IIssueGrain
         if (!eligibility.Startable)
             throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
 
-        await EnsureNoActiveWorkflowAsync();
+        var reusedRunId = await TryReuseActiveWorkflowAsync();
+        if (reusedRunId is not null)
+            return reusedRunId;
+
         return await StartWorkflowAsync(project);
     }
 
@@ -129,6 +141,7 @@ public class IssueGrain : Grain, IIssueGrain
         var projectGrain = GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId);
         var projectInfo = await projectGrain.GetAsync();
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
+        var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
 
         if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
             await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
@@ -143,7 +156,7 @@ public class IssueGrain : Grain, IIssueGrain
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
 
-        await _issueProfileManager.PatchVariablesAsync(issue.Id, BuildIssueVariables(wrId, issue, projectContext));
+        await _issueProfileManager.PatchVariablesAsync(issue.Id, BuildIssueVariables(wrId, issue, projectContext, workspace));
 
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.Id, key, body);
@@ -159,45 +172,43 @@ public class IssueGrain : Grain, IIssueGrain
                         ["projectId"] = projectContext.Id,
                         ["issueId"] = issue.Id,
                         ["issueNumber"] = issue.Number.ToString(),
-                    })));
+                    }),
+                Workspace: workspace));
 
         await SaveIssueAsync();
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
 
-    private async Task EnsureNoActiveWorkflowAsync()
+    private async Task<string?> TryReuseActiveWorkflowAsync()
     {
         var issue = _issue!;
         var activeWorkflowRunId = issue.ActiveWorkflowRunId;
-        if (activeWorkflowRunId is null) return;
+        if (activeWorkflowRunId is null) return null;
 
-        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(activeWorkflowRunId);
         try
         {
-            if (!await workflow.IsStoppedOrTerminalAsync())
-                await workflow.StopAsync("issue-start-workflow");
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(activeWorkflowRunId);
+            if (await workflow.IsStoppedOrTerminalAsync())
+            {
+                issue.ClearStoppedWorkflow(activeWorkflowRunId);
+                await SaveIssueAsync();
+                return null;
+            }
+
+            _log.LogInformation("Issue {IssueId} reusing active workflow {WorkflowRunId}", issue.Id, activeWorkflowRunId);
+            return activeWorkflowRunId;
         }
         catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
         {
             _log.LogWarning(ex,
-                "Issue {IssueId} active workflow {WorkflowRunId} cannot be loaded while starting a new workflow; clearing active workflow reference",
+                "Issue {IssueId} active workflow {WorkflowRunId} cannot be loaded while starting; clearing active workflow reference",
                 issue.Id,
                 activeWorkflowRunId);
+            issue.ClearStoppedWorkflow(activeWorkflowRunId);
+            await SaveIssueAsync();
+            return null;
         }
-
-        try
-        {
-            if (!await workflow.IsStoppedOrTerminalAsync())
-                throw new InvalidOperationException($"Issue #{issue.Number} already has active workflow {activeWorkflowRunId}");
-        }
-        catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
-        {
-            // The old run cannot be resumed or stopped through the domain model.
-            // Treat it as historical state and let Start Workflow create a new run.
-        }
-
-        issue.ClearStoppedWorkflow(activeWorkflowRunId);
     }
 
     private static bool IsWorkflowRunStateCorruption(Exception ex)
@@ -220,22 +231,28 @@ public class IssueGrain : Grain, IIssueGrain
     {
         var projectId = overrideContext?.Id ?? projectInfo?.Id ?? issue.ProjectId;
         var projectName = overrideContext?.Name ?? projectInfo?.Name ?? issue.ProjectId;
-        var projectPath = overrideContext?.Path
-            ?? (string.IsNullOrWhiteSpace(repo.Path) ? projectInfo?.EffectivePath : repo.Path)
-            ?? ".";
-        var baseBranch = overrideContext?.BaseBranch
-            ?? (string.IsNullOrWhiteSpace(repo.BaseBranch) ? projectInfo?.BaseBranch : repo.BaseBranch)
-            ?? "main";
-
         return new WorkflowProjectContext(
             projectId,
             projectName,
-            projectPath,
-            baseBranch,
             repo.Name,
-            repo.Remote,
-            repo.Path,
+            repo.GitUrl,
             repo.BaseBranch);
+    }
+
+    private WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue, WorkflowProjectContext projectContext, string workflowRunId)
+    {
+        var runnerRoot = MohistWorkspaceLayout.ResolveRunnerRoot(_configuration, _environment);
+        var workspacePath = MohistWorkspaceLayout.IssueWorkspacePath(runnerRoot, projectContext.Name, issue.Number);
+        var changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number);
+        // The runner manages the per-run head ref (`mohist/run-${workflowRunId}`)
+        // inside the workspace; the integrate merge uses this branch as the
+        // source. Persisting it on WorkspaceIdentity keeps review APIs,
+        // SignalR handlers, and the integrate task aligned on a stable ref.
+        var runBranch = WorkflowRunBranch.For(workflowRunId);
+        return new WorkspaceIdentity(
+            Path: workspacePath,
+            Branch: runBranch,
+            ChangeDir: changeDir);
     }
 
     public async Task CancelAsync()
@@ -389,14 +406,18 @@ public class IssueGrain : Grain, IIssueGrain
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
-    private VariableBundle BuildIssueVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project)
+    private VariableBundle BuildIssueVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, WorkspaceIdentity workspace)
     {
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
             ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
             ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, path = project.RepositoryPath, remote = project.RepositoryRemote, baseBranch = project.RepositoryBaseBranch ?? project.BaseBranch }, WorkflowVariableJson.Options),
+            // `project` is a Mohist scope: only identity-level metadata. The
+            // base branch belongs to the repository reference, never the
+            // project, so it is intentionally absent here.
+            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name }, WorkflowVariableJson.Options),
+            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, gitUrl = project.RepositoryGitUrl, baseBranch = project.RepositoryBaseBranch }, WorkflowVariableJson.Options),
+            ["workspace"] = JsonSerializer.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch, changeDir = workspace.ChangeDir }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
         };

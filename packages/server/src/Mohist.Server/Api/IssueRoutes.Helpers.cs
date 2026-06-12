@@ -98,8 +98,7 @@ public static partial class IssueRoutes
             ["repository"] = new Dictionary<string, object?>
             {
                 ["name"] = repository.Name,
-                ["path"] = repository.Path,
-                ["remote"] = repository.Remote,
+                ["gitUrl"] = repository.GitUrl,
                 ["baseBranch"] = repository.BaseBranch,
             },
         };

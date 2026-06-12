@@ -16,25 +16,22 @@ export function RepositoriesSection({ projectId }: Props) {
   const setDefault = useSetDefaultRepository()
 
   const [newName, setNewName] = useState('')
-  const [newPath, setNewPath] = useState('')
-  const [newRemote, setNewRemote] = useState('')
+  const [newGitUrl, setNewGitUrl] = useState('')
   const [newBranch, setNewBranch] = useState('main')
 
   function handleAdd() {
-    if (!newName.trim()) return
-    if (!newPath.trim() && !newRemote.trim()) return
+    if (!newName.trim() || !newGitUrl.trim()) return
     addRepo.mutate({
       projectId,
-      data: { name: newName.trim(), path: newPath || undefined, remote: newRemote || undefined, baseBranch: newBranch },
+      data: { name: newName.trim(), gitUrl: newGitUrl.trim(), baseBranch: newBranch },
     })
     setNewName('')
-    setNewPath('')
-    setNewRemote('')
+    setNewGitUrl('')
     setNewBranch('main')
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="repositories-section">
       <h3 className="text-sm font-medium text-foreground">Repositories</h3>
 
       {isLoading ? (
@@ -46,11 +43,12 @@ export function RepositoriesSection({ projectId }: Props) {
           description="No repositories configured for this project."
         />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" data-testid="repositories-list">
           {repositories.map((repo) => (
             <div
               key={repo.name}
               data-testid={`repository-${repo.name}`}
+              data-repository-default={repo.isDefault ? 'true' : 'false'}
               className={`flex items-center justify-between rounded-lg border p-3 ${
                 repo.isDefault
                   ? 'border-blue-200 bg-blue-50'
@@ -59,15 +57,36 @@ export function RepositoriesSection({ projectId }: Props) {
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{repo.name}</span>
+                  <span
+                    className="text-sm font-medium text-foreground"
+                    data-testid={`repository-name-${repo.name}`}
+                  >
+                    {repo.name}
+                  </span>
                   {repo.isDefault && (
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">default</span>
+                    <span
+                      data-testid={`repository-default-badge-${repo.name}`}
+                      className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700"
+                    >
+                      default
+                    </span>
                   )}
                 </div>
-                <div className="mt-0.5 text-xs text-muted-foreground truncate">
-                  {repo.remote ? `remote: ${repo.remote}` : `path: ${repo.path}`}
+                <div
+                  className="mt-0.5 text-xs text-muted-foreground truncate"
+                  data-testid={`repository-giturl-${repo.name}`}
+                >
+                  {repo.gitUrl}
                   {repo.baseBranch !== 'main' && ` · ${repo.baseBranch}`}
                 </div>
+                {repo.baseBranch !== 'main' && (
+                  <div
+                    className="mt-0.5 text-xs text-muted-foreground"
+                    data-testid={`repository-basebranch-${repo.name}`}
+                  >
+                    base branch: {repo.baseBranch}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1 ml-2 shrink-0">
                 {!repo.isDefault && (
@@ -76,6 +95,7 @@ export function RepositoriesSection({ projectId }: Props) {
                     size="sm"
                     onClick={() => setDefault.mutate({ projectId, repoName: repo.name })}
                     className="text-xs h-7"
+                    data-testid={`repository-set-default-${repo.name}`}
                   >
                     Set default
                   </Button>
@@ -86,6 +106,7 @@ export function RepositoriesSection({ projectId }: Props) {
                     size="sm"
                     onClick={() => removeRepo.mutate({ projectId, repoName: repo.name })}
                     className="text-xs h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    data-testid={`repository-remove-${repo.name}`}
                   >
                     Remove
                   </Button>
@@ -96,51 +117,52 @@ export function RepositoriesSection({ projectId }: Props) {
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-2">
+      <div
+        className="rounded-lg border border-border bg-muted/50 p-3 space-y-2"
+        data-testid="repository-add-form"
+      >
         <h4 className="text-xs font-medium text-foreground/80">Add Repository</h4>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <Label className="text-xs">Name</Label>
+            <Label className="text-xs" htmlFor="repository-add-name">Name</Label>
             <Input
+              id="repository-add-name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="e.g. frontend"
               className="h-8 text-sm"
+              data-testid="repository-add-name"
             />
           </div>
           <div>
-            <Label className="text-xs">Base Branch</Label>
+            <Label className="text-xs" htmlFor="repository-add-branch">Base Branch</Label>
             <Input
+              id="repository-add-branch"
               value={newBranch}
               onChange={(e) => setNewBranch(e.target.value)}
               placeholder="main"
               className="h-8 text-sm"
+              data-testid="repository-add-branch"
             />
           </div>
         </div>
         <div>
-          <Label className="text-xs">Local Path</Label>
+          <Label className="text-xs" htmlFor="repository-add-giturl">Git URL</Label>
           <Input
-            value={newPath}
-            onChange={(e) => setNewPath(e.target.value)}
-            placeholder="/path/to/repo"
-            className="h-8 text-sm"
-          />
-        </div>
-        <div>
-          <Label className="text-xs">Remote URL</Label>
-          <Input
-            value={newRemote}
-            onChange={(e) => setNewRemote(e.target.value)}
+            id="repository-add-giturl"
+            value={newGitUrl}
+            onChange={(e) => setNewGitUrl(e.target.value)}
             placeholder="https://github.com/org/repo.git"
             className="h-8 text-sm"
+            data-testid="repository-add-giturl"
           />
         </div>
         <Button
           onClick={handleAdd}
-          disabled={!newName.trim() || (!newPath.trim() && !newRemote.trim()) || addRepo.isPending}
+          disabled={!newName.trim() || !newGitUrl.trim() || addRepo.isPending}
           size="sm"
           className="w-full"
+          data-testid="repository-add-submit"
         >
           {addRepo.isPending ? 'Adding...' : 'Add Repository'}
         </Button>

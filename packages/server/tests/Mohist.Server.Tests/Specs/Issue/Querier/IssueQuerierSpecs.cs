@@ -30,7 +30,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-1", Name = "Project One", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-1", Name = "Project One" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_1",
@@ -66,7 +66,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-id-keyed-1", Name = "Id Keyed Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-id-keyed-1", Name = "Id Keyed Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_id_keyed_1",
@@ -109,7 +109,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = $"proj-dual-key-{Guid.NewGuid():N}", Name = "Dual Key Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = $"proj-dual-key-{Guid.NewGuid():N}", Name = "Dual Key Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = $"issue_dual_key_{Guid.NewGuid():N}",
@@ -144,7 +144,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-progress-1", Name = "Progress Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-progress-1", Name = "Progress Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_prog_1",
@@ -237,7 +237,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-orch-1", Name = "Orch Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-orch-1", Name = "Orch Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_orch_1",
@@ -319,7 +319,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-fail-1", Name = "Fail Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-fail-1", Name = "Fail Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_fail_1",
@@ -401,7 +401,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-backlog-1", Name = "Backlog Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-backlog-1", Name = "Backlog Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_backlog_1",
@@ -433,7 +433,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-done-1", Name = "Done Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-done-1", Name = "Done Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_done_1",
@@ -481,7 +481,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-nouser-1", Name = "No User Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-nouser-1", Name = "No User Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_nouser_1",
@@ -552,7 +552,7 @@ public class IssueQuerierSpecs
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var project = new ProjectInfo { Id = "proj-approval-1", Name = "Approval Project", Path = "/tmp/project" };
+        var project = new ProjectInfo { Id = "proj-approval-1", Name = "Approval Project" };
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue_approval_1",
