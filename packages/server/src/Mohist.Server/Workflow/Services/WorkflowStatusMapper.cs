@@ -68,12 +68,28 @@ public static class WorkflowStatusMapper
     public static List<TaskStatusView> MapTasks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Tasks.Count > 0)
-            return stage.Tasks.Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, FrontendStatus(t.Status.ToString()), t.RequiredFiles, t.Classification)).ToList();
+            return stage.Tasks
+                .Select(t => new TaskStatusView(
+                    t.Id,
+                    t.Title,
+                    t.Uses,
+                    FrontendStatus(t.Status.ToString()),
+                    t.RequiredFiles,
+                    t.Classification,
+                    TaskRunExtensions.ExtractSessionName(t.WithInput)))
+                .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (stageDefinition is null) return [];
         return stageDefinition.Tasks
-            .Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, "pending", TaskRunExtensions.ExtractRequiredFiles(t.With), TaskRunExtensions.DeriveClassification(t.Uses, null)))
+            .Select(t => new TaskStatusView(
+                t.Id,
+                t.Title,
+                t.Uses,
+                "pending",
+                TaskRunExtensions.ExtractRequiredFiles(t.With),
+                TaskRunExtensions.DeriveClassification(t.Uses, null),
+                TaskRunExtensions.ExtractSessionName(t.With)))
             .ToList();
     }
 
