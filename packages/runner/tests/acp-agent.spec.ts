@@ -84,6 +84,25 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude")).toBeTruthy()
   })
 
+  it("NewSessionCreatedBeforeModelConfiguration_RunnerReportsPhysicalSessionIdToServer", async () => {
+    const fixture = createFixture("model-config-fails")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      session: "build",
+      model: "anthropic/claude",
+    }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.serverConnection.calls).toContainEqual(expect.objectContaining({
+      event: "attachWorkflowAgentSession",
+      sessionName: "build",
+      body: expect.objectContaining({ agentSessionId: "fake-session-1" }),
+    }))
+    expect(fixture.timeline.findIndex((entry) => entry.event === "newSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession"))
+    expect(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "setSessionConfigOption"))
+  })
+
   it("PermissionRequestHasAllowOption_AgentRequestsPermission_SelectsAllowOption", async () => {
     const fixture = createFixture("permission")
 
@@ -159,7 +178,7 @@ describe("mohist/acp-agent", () => {
     )
   })
 
-  it("NamedWorkflowSessionUsesWorkAttemptSuffix_SessionRowsDoNotCollideAcrossRetries", async () => {
+  it("NamedWorkflowSessionStartsNewAcpSession_ReportsPhysicalSessionIdToServerWithoutRenaming", async () => {
     const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
@@ -172,11 +191,15 @@ describe("mohist/acp-agent", () => {
     }))
 
     expect(result.status).toBe("success")
-    const sessionNames = fixture.serverConnection.calls
+    const sessionCalls = fixture.serverConnection.calls
       .filter((entry) => entry.event === "ensureWorkflowAgentSession" || entry.event === "attachWorkflowAgentSession" || entry.event === "workflowAgentSessionEvents")
-      .map((entry) => entry.sessionName)
-    expect(sessionNames).toContain("check:ai-review.2")
-    expect(sessionNames).not.toContain("check")
+    expect(sessionCalls.map((entry) => entry.sessionName)).toEqual(expect.arrayContaining(["check"]))
+    expect(sessionCalls.some((entry) => entry.sessionName !== "check")).toBe(false)
+    expect(fixture.serverConnection.calls).toContainEqual(expect.objectContaining({
+      event: "attachWorkflowAgentSession",
+      sessionName: "check",
+      body: expect.objectContaining({ agentSessionId: "fake-session-1" }),
+    }))
   })
 
   it("ExistingSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
@@ -717,12 +740,14 @@ describe("mohist/acp-agent shared session observability", () => {
 })
 
 function createFixture(scenario: Scenario) {
-  const agent = new FakeAcpAgent(scenario)
-  const serverConnection = new FakeServerConnection()
+  const timeline: Array<{ event: string }> = []
+  const agent = new FakeAcpAgent(scenario, timeline)
+  const serverConnection = new FakeServerConnection(timeline)
   setAcpProcessFactoryForTest(() => createFakeProcess(agent))
   return {
     agent,
     serverConnection,
+    timeline,
     context(withInput: Record<string, unknown>, signal = new AbortController().signal, overrides: Partial<ActionContext> = {}): ActionContext {
       return {
         ...baseContext(withInput, signal),
@@ -786,7 +811,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage"
+type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -794,7 +819,7 @@ class FakeAcpAgent {
   private promptCount = 0
   private initialPromptResolve: ((value: { stopReason: "end_turn" }) => void) | null = null
 
-  constructor(private readonly scenario: Scenario) {}
+  constructor(private readonly scenario: Scenario, private readonly timeline?: Array<{ event: string }>) {}
 
   bind(connection: AgentSideConnection) {
     this.connection = connection
@@ -808,6 +833,7 @@ class FakeAcpAgent {
         return { protocolVersion: PROTOCOL_VERSION, agentInfo: { name: "fake-acp-agent", version: "0.1.0" }, agentCapabilities: {} }
       },
       async newSession(params) {
+        self.timeline?.push({ event: "newSession" })
         self.calls.push({ event: "newSession", cwd: params.cwd })
         if (self.scenario === "resolved-model") {
           return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1" } }
@@ -815,12 +841,14 @@ class FakeAcpAgent {
         return { sessionId: "fake-session-1" }
       },
       async setSessionConfigOption(params) {
+        self.timeline?.push({ event: "setSessionConfigOption" })
         self.calls.push({ event: "setSessionConfigOption", ...params })
-        if (self.scenario === "model-fallback") throw new Error("set config unsupported")
+        if (self.scenario === "model-fallback" || self.scenario === "model-config-fails") throw new Error("set config unsupported")
         return { configOptions: [] }
       },
       async unstable_setSessionModel(params) {
         self.calls.push({ event: "unstable_setSessionModel", ...params })
+        if (self.scenario === "model-config-fails") throw new Error("set model unsupported")
         return {}
       },
       async prompt(params) {
@@ -988,16 +1016,19 @@ function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-f
 }
 
 class FakeServerConnection {
-  readonly calls: Array<{ event: string; type?: string; payload?: unknown; args?: unknown[]; sessionName?: string }> = []
+  readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string }> = []
   nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+
+  constructor(private readonly timeline?: Array<{ event: string }>) {}
 
   async ensureWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string) {
     this.calls.push({ event: "ensureWorkflowAgentSession", sessionName })
     return this.nextEnsureWorkflowAgentSession
   }
 
-  async attachWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string, ...args: unknown[]) {
-    this.calls.push({ event: "attachWorkflowAgentSession", sessionName, args })
+  async attachWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string, body: unknown) {
+    this.timeline?.push({ event: "attachWorkflowAgentSession" })
+    this.calls.push({ event: "attachWorkflowAgentSession", sessionName, body })
   }
 
   async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events: Array<{ type: string; payload: unknown }> }) {
