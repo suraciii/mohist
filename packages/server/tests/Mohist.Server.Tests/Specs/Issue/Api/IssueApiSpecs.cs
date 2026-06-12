@@ -20,7 +20,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task Comments_RoundTripThroughIssueDetailShape()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-compat-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-compat-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Commented issue", projectId = project.Id });
 
         var comment = await _client.PostDataAsync<CommentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/comments", new { body = "Looks good" });
@@ -35,8 +37,10 @@ public class IssueApiSpecs
     [Fact]
     public async Task CreateIssue_OnLegacyCollectionRoute_ReturnsNotFound()
     {
-        await _client.PostOkAsync("/api/projects", new { name = $"web-multi-a-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        await _client.PostOkAsync("/api/projects", new { name = $"web-multi-b-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var projectA = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-multi-a-{Guid.NewGuid():N}" });
+        var projectB = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-multi-b-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{projectA.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostOkAsync($"/api/projects/{projectB.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         using var response = await _client.PostAsJsonAsync("/api/issues", new { title = "Ambiguous issue" });
 
@@ -48,7 +52,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task CreateIssue_OnProjectRoute_UsesRouteProjectContext()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-header-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-header-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Project scoped issue" });
 
@@ -62,7 +68,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-header-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-header-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Project scoped epic", description = "Runtime model", priority = "p2" });
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
@@ -75,8 +83,12 @@ public class IssueApiSpecs
     [Fact]
     public async Task ListIssues_ReturnsOnlyIssuesInRouteProject()
     {
-        var firstProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-a-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var secondProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-b-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var firstProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-a-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{firstProject.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var secondProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-b-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{secondProject.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var firstIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{firstProject.Id}/issues", new { title = "First listed issue" });
         var secondIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{secondProject.Id}/issues", new { title = "Second listed issue" });
 
@@ -91,7 +103,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task CreateIssue_WithWorkflowProfileId_RoundTripsProfileId()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-profile-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-profile-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/default" });
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
@@ -117,7 +131,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task Prerequisites_ProjectIntoStartEligibility()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Prereq", projectId = project.Id });
         var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dependent", projectId = project.Id });
 
@@ -133,7 +149,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-gate-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-gate-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate prereq", projectId = project.Id });
         var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate dependent", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
@@ -176,7 +194,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task ProjectStatus_UsesIssueLifecycleStages()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-status-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-status-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lifecycle status issue", projectId = project.Id });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", new { });
@@ -202,7 +222,9 @@ public class IssueApiSpecs
     [Fact]
     public async Task Epics_LinkIssueAndExposePrimaryEpic()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-epic-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-epic-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Epic issue", projectId = project.Id });
         var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Runtime model", description = "Ship runtime", priority = "p1", projectId = project.Id });
 

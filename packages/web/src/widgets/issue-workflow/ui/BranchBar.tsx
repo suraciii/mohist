@@ -3,7 +3,7 @@ import { Button } from '@/shared/ui/components/button'
 import { WorkflowStage, useLiveTask } from '../../../entities/issue'
 import { ApiError } from '../../../shared/api/client'
 import { rebaseIssue } from '../../../entities/issue'
-import { useWorktreeStatus } from '../../../entities/issue'
+import { useWorkspaceStatus } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 
 const BRANCH_BAR_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Done])
@@ -19,19 +19,19 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const { projectId } = useProject()
   const { rebaseConflict } = useLiveTask()
 
-  const hasWorktreeStage = stage !== null && BRANCH_BAR_STAGES.has(stage)
-  const { data, isLoading } = useWorktreeStatus(issueNumber, hasWorktreeStage)
+  const hasWorkspaceStage = stage !== null && BRANCH_BAR_STAGES.has(stage)
+  const { data, isLoading } = useWorkspaceStatus(issueNumber, hasWorkspaceStage)
 
   const rebaseMutation = useMutation({
     mutationFn: () => rebaseIssue(issueNumber, projectId),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'workspace-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })
 
-  if (!hasWorktreeStage) return null
+  if (!hasWorkspaceStage) return null
   if (isLoading) return null
   if (!data || !data.exists) return null
 
@@ -48,7 +48,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
 
   const ahead = data.ahead ?? 0
   const behind = data.behind ?? 0
-  const branch = data.branch ?? `mo/issue-${issueNumber}`
+  const branch = data.branch ?? 'workspace'
   const baseBranch = data.baseBranch ?? 'master'
   const isDone = stage === WorkflowStage.Done
 
@@ -97,7 +97,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
         )}
         {isDone && (
           <p className="text-xs text-amber-600">
-            This Done worktree is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained worktree.
+            This Done workflow workspace is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained workspace.
           </p>
         )}
         {rebaseMutation.isError && (
@@ -141,7 +141,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
       </div>
       {isDone && (
         <p className="mt-2 text-xs text-muted-foreground">
-          This Done worktree is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained worktree.
+          This Done workflow workspace is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained workspace.
         </p>
       )}
     </div>

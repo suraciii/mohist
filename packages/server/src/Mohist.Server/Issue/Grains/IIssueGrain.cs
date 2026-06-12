@@ -38,12 +38,9 @@ public sealed record IssueWorkflowStatus(
 public sealed record WorkflowProjectContext(
     [property: Id(0)] string Id,
     [property: Id(1)] string Name,
-    [property: Id(2)] string Path,
-    [property: Id(3)] string BaseBranch,
-    [property: Id(4)] string? RepositoryName = null,
-    [property: Id(5)] string? RepositoryRemote = null,
-    [property: Id(6)] string? RepositoryPath = null,
-    [property: Id(7)] string? RepositoryBaseBranch = null);
+    [property: Id(2)] string? RepositoryName = null,
+    [property: Id(3)] string? RepositoryGitUrl = null,
+    [property: Id(4)] string? RepositoryBaseBranch = null);
 
 [GenerateSerializer]
 public sealed record IssuePrerequisiteResult(

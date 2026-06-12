@@ -41,8 +41,7 @@ public class IssueRepositoryApiSpecs
 
         Assert.NotNull(envelope.Data?.Repository);
         Assert.Equal("secondary", envelope.Data!.Repository!.Name);
-        Assert.Equal("/proj/secondary", envelope.Data.Repository.Path);
-        Assert.Equal("git@secondary.example:repo.git", envelope.Data.Repository.Remote);
+        Assert.Equal("git@secondary.example:repo.git", envelope.Data.Repository.GitUrl);
         Assert.Equal("develop", envelope.Data.Repository.BaseBranch);
         Assert.False(envelope.Data.Repository.IsDefault);
         Assert.Null(envelope.Data.RepositoryProblem);
@@ -59,7 +58,7 @@ public class IssueRepositoryApiSpecs
 
         Assert.NotNull(envelope.Data?.Repository);
         Assert.Equal("main", envelope.Data!.Repository!.Name);
-        Assert.Equal("/proj/main", envelope.Data.Repository.Path);
+        Assert.Equal("git@main.example:repo.git", envelope.Data.Repository.GitUrl);
         Assert.Equal("main", envelope.Data.Repository.BaseBranch);
         Assert.True(envelope.Data.Repository.IsDefault);
         Assert.Null(envelope.Data.RepositoryProblem);
@@ -101,7 +100,7 @@ public class IssueRepositoryApiSpecs
         Assert.NotNull(fetchedExistingIssue);
         Assert.NotNull(fetchedExistingIssue!.Repository);
         Assert.Equal("main", fetchedExistingIssue.Repository!.Name);
-        Assert.Equal("/proj/main", fetchedExistingIssue.Repository.Path);
+        Assert.Equal("git@main.example:repo.git", fetchedExistingIssue.Repository.GitUrl);
         Assert.False(fetchedExistingIssue.Repository.IsDefault);
 
         var createdAfterSwap = await CreateIssueAsync(projectId, new { title = "Picks up new default" });
@@ -115,18 +114,17 @@ public class IssueRepositoryApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetIssue_AfterRepositoryMetadataChange_ReturnsResolvedPathAndBaseBranchFromCurrentProjectConfig()
+    public async Task GetIssue_AfterRepositoryMetadataChange_ReturnsResolvedGitUrlAndBaseBranchFromCurrentProjectConfig()
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
         var created = await CreateIssueAsync(projectId, new { title = "Reflects new metadata", repositoryName = "secondary" });
-        Assert.Equal("/proj/secondary", created.Data!.Repository!.Path);
+        Assert.Equal("git@secondary.example:repo.git", created.Data!.Repository!.GitUrl);
         Assert.Equal("develop", created.Data.Repository.BaseBranch);
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release");
 
@@ -134,8 +132,7 @@ public class IssueRepositoryApiSpecs
         Assert.NotNull(fetched);
         Assert.NotNull(fetched!.Repository);
         Assert.Equal("secondary", fetched.Repository!.Name);
-        Assert.Equal("/proj/secondary-new", fetched.Repository.Path);
-        Assert.Equal("git@secondary.example:repo-new.git", fetched.Repository.Remote);
+        Assert.Equal("git@secondary.example:repo-new.git", fetched.Repository.GitUrl);
         Assert.Equal("release", fetched.Repository.BaseBranch);
         Assert.Null(fetched.RepositoryProblem);
     }
@@ -191,8 +188,9 @@ public class IssueRepositoryApiSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
-        var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
-        await grain.AddRepositoryAsync("secondary", "/proj/secondary", "git@secondary.example:repo.git", "develop");
+        var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
+        await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "develop");
         return (projectId, project);
     }
 
@@ -204,7 +202,7 @@ public class IssueRepositoryApiSpecs
         RepositoryDto? Repository,
         RepositoryProblemDto? RepositoryProblem);
 
-    private sealed record RepositoryDto(string Name, string? Path, string? Remote, string BaseBranch, bool IsDefault);
+    private sealed record RepositoryDto(string Name, string GitUrl, string BaseBranch, bool IsDefault);
 
     private sealed record RepositoryProblemDto(string Code, string Message, string? RepositoryRef, string[]? CandidateNames);
 }

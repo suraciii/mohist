@@ -34,7 +34,9 @@ public class IssueCreationSpecs
     {
         var id = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
+        var project = await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
+        return project;
     }
 
     private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null)
@@ -111,7 +113,7 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Context");
 
         var grain = _grains.GetGrain<IIssueGrain>(created.Id);
-        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "trunk"));
+        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project"));
 
         Assert.StartsWith("wr_", wrId);
         Assert.DoesNotContain(project.Id, wrId);
@@ -124,9 +126,12 @@ public class IssueCreationSpecs
 
         Assert.NotNull(work);
         Assert.NotNull(work.Variables);
-        Assert.Contains("/tmp/my-project", work.Variables);
         Assert.Contains("My Project", work.Variables);
-        Assert.Contains("trunk", work.Variables);
+        Assert.Contains("repository", work.Variables);
+        Assert.Contains("main", work.Variables);
+        Assert.Contains("workspace", work.Variables);
+        Assert.DoesNotContain("project.path", work.Variables);
+        Assert.DoesNotContain("project.baseBranch", work.Variables);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -260,7 +265,7 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Cancelable");
 
         var issue = _grains.GetGrain<IIssueGrain>(created.Id);
-        var workflowRunId = await issue.StartWorkAsync(new WorkflowProjectContext(project.Id, project.Name, project.Path, project.BaseBranch));
+        var workflowRunId = await issue.StartWorkAsync(new WorkflowProjectContext(project.Id, project.Name, RepositoryBaseBranch: project.DefaultRepository?.BaseBranch ?? "main"));
 
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
@@ -316,7 +321,7 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Add Search");
 
         var grain = _grains.GetGrain<IIssueGrain>(created.Id);
-        await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+        await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", RepositoryBaseBranch: "main"));
 
         var status = await grain.GetWorkflowStatusAsync();
 
@@ -373,7 +378,7 @@ public class IssueCreationSpecs
         var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
 
         await dependentGrain.AddPrerequisiteAsync(prereq.Number);
-        var prereqRunId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+        var prereqRunId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", RepositoryBaseBranch: "main"));
         await prereqGrain.CompleteWorkAsync(prereqRunId);
 
         var eligibility = await dependentGrain.GetStartEligibilityAsync();

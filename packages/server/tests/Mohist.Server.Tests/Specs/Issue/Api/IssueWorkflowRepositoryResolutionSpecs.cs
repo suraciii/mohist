@@ -34,10 +34,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary",
             "git@secondary.example:repo.git",
             "develop");
 
@@ -51,8 +50,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var variables = await LoadWorkflowVariablesAsync(wrId);
         var repository = variables.RootElement.GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary", repository.GetProperty("path").GetString());
-        Assert.Equal("git@secondary.example:repo.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("git@secondary.example:repo.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("develop", repository.GetProperty("baseBranch").GetString());
     }
 
@@ -63,10 +61,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-old",
             "git@secondary.example:repo-old.git",
             "develop");
 
@@ -78,7 +75,6 @@ public class IssueWorkflowRepositoryResolutionSpecs
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary-new",
             "git@secondary.example:repo-new.git",
             "release");
 
@@ -87,8 +83,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var variables = await LoadWorkflowVariablesAsync(wrId);
         var repository = variables.RootElement.GetProperty("repository");
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
-        Assert.Equal("/proj/secondary-new", repository.GetProperty("path").GetString());
-        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
         Assert.Equal("release", repository.GetProperty("baseBranch").GetString());
     }
 
@@ -99,10 +94,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
         await projectGrain.AddRepositoryAsync(
             "secondary",
-            "/proj/secondary",
             "git@secondary.example:repo.git",
             "develop");
 
@@ -135,7 +129,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";

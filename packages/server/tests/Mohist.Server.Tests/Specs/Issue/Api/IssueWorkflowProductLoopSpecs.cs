@@ -44,7 +44,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task IssueStart_RunnerCompletesWorkflow_IssueBecomesDone()
     {
         var projectName = $"project-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-product-loop", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -102,7 +103,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     [Fact]
     public async Task IssueWorkflowVariablesPatch_AppliesToFutureDispatches()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"variables-{Guid.NewGuid():N}", path = "/tmp/mohist-variable-patch", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"variables-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch workflow variables", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -132,7 +134,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     [Fact]
     public async Task IssueWorkflowVariablesPatch_ProjectsModelSettingsOnIssueDetail()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"issue-model-profile-{Guid.NewGuid():N}", path = "/tmp/mohist-issue-model-profile", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"issue-model-profile-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Configure issue model profile", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -159,7 +162,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     [Fact]
     public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-variable-patch", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -206,7 +210,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     [Fact]
     public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-stage-variable-patch", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project stage variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -253,7 +258,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
     {
         var projectName = $"global-runner-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-global-runner", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -296,7 +302,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     [Fact]
     public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
     {
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"yaml-{Guid.NewGuid():N}", path = "/tmp/mohist-yaml", baseBranch = "main" });
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"yaml-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Show workflow yaml", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;

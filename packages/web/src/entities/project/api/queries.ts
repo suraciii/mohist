@@ -20,7 +20,7 @@ export function useRepositories(projectId: string | undefined) {
 export function useAddRepository() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ projectId, data }: { projectId: string; data: { name: string; path?: string; remote?: string; baseBranch?: string } }) =>
+    mutationFn: ({ projectId, data }: { projectId: string; data: { name: string; gitUrl: string; baseBranch?: string; isDefault?: boolean } }) =>
       addRepository(projectId, data),
     onSuccess: (_, { projectId }) => {
       queryClient.invalidateQueries({ queryKey: ['repositories', projectId] })
@@ -68,7 +68,7 @@ export function useSetDefaultRepository() {
 export function useCreateProject() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { name: string; path: string }) => createProject(data),
+    mutationFn: (data: { name: string }) => createProject(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success('Project created')

@@ -19,12 +19,11 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-                new RepositoryInfo { Name = "secondary", Path = "/proj/secondary", BaseBranch = "develop", IsDefault = false },
+                new RepositoryInfo { Name = "main", GitUrl = "git@example.com:main.git", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "secondary", GitUrl = "git@example.com:secondary.git", BaseBranch = "develop", IsDefault = false },
             ],
         };
 
@@ -33,7 +32,7 @@ public class IssueRepositoryResolverSpecs
         Assert.False(result.HasProblem);
         Assert.NotNull(result.Repository);
         Assert.Equal("main", result.Repository!.Name);
-        Assert.Equal("/proj/main", result.Repository.Path);
+        Assert.Equal("git@example.com:main.git", result.Repository.GitUrl);
         Assert.Equal("main", result.Repository.BaseBranch);
         Assert.True(result.Repository.IsDefault);
     }
@@ -47,12 +46,11 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-                new RepositoryInfo { Name = "secondary", Path = "/proj/secondary", Remote = "git@secondary.example:repo.git", BaseBranch = "develop", IsDefault = false },
+                new RepositoryInfo { Name = "main", GitUrl = "git@example.com:main.git", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "secondary", GitUrl = "git@secondary.example:repo.git", BaseBranch = "develop", IsDefault = false },
             ],
         };
 
@@ -61,8 +59,7 @@ public class IssueRepositoryResolverSpecs
         Assert.False(result.HasProblem);
         Assert.NotNull(result.Repository);
         Assert.Equal("secondary", result.Repository!.Name);
-        Assert.Equal("/proj/secondary", result.Repository.Path);
-        Assert.Equal("git@secondary.example:repo.git", result.Repository.Remote);
+        Assert.Equal("git@secondary.example:repo.git", result.Repository.GitUrl);
         Assert.Equal("develop", result.Repository.BaseBranch);
         Assert.False(result.Repository.IsDefault);
     }
@@ -76,11 +73,10 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main-current", Remote = "git@current.example:repo.git", BaseBranch = "current-branch", IsDefault = true },
+                new RepositoryInfo { Name = "main", GitUrl = "git@current.example:repo.git", BaseBranch = "current-branch", IsDefault = true },
             ],
         };
 
@@ -88,8 +84,7 @@ public class IssueRepositoryResolverSpecs
 
         Assert.False(result.HasProblem);
         Assert.NotNull(result.Repository);
-        Assert.Equal("/proj/main-current", result.Repository!.Path);
-        Assert.Equal("git@current.example:repo.git", result.Repository.Remote);
+        Assert.Equal("git@current.example:repo.git", result.Repository!.GitUrl);
         Assert.Equal("current-branch", result.Repository.BaseBranch);
         Assert.True(result.Repository.IsDefault);
     }
@@ -116,8 +111,7 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-empty",
             Name = "Empty",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories = [],
         };
 
@@ -138,11 +132,10 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-nodefault",
             Name = "NoDefault",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "secondary", Path = "/proj/secondary", BaseBranch = "develop", IsDefault = false },
+                new RepositoryInfo { Name = "secondary", GitUrl = "git@example.com:secondary.git", BaseBranch = "develop", IsDefault = false },
             ],
         };
 
@@ -162,12 +155,11 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-                new RepositoryInfo { Name = "secondary", Path = "/proj/secondary", BaseBranch = "develop", IsDefault = false },
+                new RepositoryInfo { Name = "main", GitUrl = "git@example.com:main.git", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "secondary", GitUrl = "git@example.com:secondary.git", BaseBranch = "develop", IsDefault = false },
             ],
         };
 
@@ -191,11 +183,10 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "main", GitUrl = "git@example.com:main.git", BaseBranch = "main", IsDefault = true },
             ],
         };
 
@@ -214,12 +205,11 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
-                new RepositoryInfo { Name = "MAIN", Path = "/proj/MAIN", BaseBranch = "main", IsDefault = false },
+                new RepositoryInfo { Name = "main", GitUrl = "git@example.com:main.git", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "MAIN", GitUrl = "git@example.com:MAIN.git", BaseBranch = "main", IsDefault = false },
             ],
         };
 
@@ -243,11 +233,10 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "Main", Path = "/proj/Main", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "Main", GitUrl = "git@example.com:Main.git", BaseBranch = "main", IsDefault = true },
             ],
         };
 
@@ -267,11 +256,10 @@ public class IssueRepositoryResolverSpecs
         {
             Id = "proj-1",
             Name = "Project",
-            Path = "/proj",
-            BaseBranch = "main",
+
             Repositories =
             [
-                new RepositoryInfo { Name = "main", Path = "/proj/main", BaseBranch = "main", IsDefault = true },
+                new RepositoryInfo { Name = "main", GitUrl = "git@example.com:main.git", BaseBranch = "main", IsDefault = true },
             ],
         };
 

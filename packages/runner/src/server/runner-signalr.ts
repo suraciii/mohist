@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import * as signalR from "@microsoft/signalr"
 import { runCommand } from "../system/process.js"
 
@@ -27,6 +28,7 @@ export class RunnerSignalRClient {
       const workspace = resolveWorkspaceQuery(query)
       if (!workspace) return null
       const ac = new AbortController()
+      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return null
 
       const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
       if (branchExists.exitCode !== 0) return null
@@ -61,6 +63,7 @@ export class RunnerSignalRClient {
       const workspace = resolveWorkspaceQuery(query)
       if (!workspace) return null
       const ac = new AbortController()
+      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return null
 
       const [logResult, numstat, mergeBaseResult, aheadBehindResult] = await Promise.all([
         git(workspace.workDir, ["log", `${workspace.baseBranch}...${workspace.head}`, "--format=%H\t%h\t%s\t%an\t%ad", "--date=iso"], ac.signal),
@@ -92,16 +95,18 @@ export class RunnerSignalRClient {
       if (!workspace) return null
 
       const ac = new AbortController()
+      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return null
       const result = await git(workspace.workDir, ["show", "--format=", "--patch", hash], ac.signal)
       if (result.exitCode !== 0) return null
       return { diff: result.stdout }
     })
 
-    this.connection.on("GetWorktreeStatus", async (query: WorkspaceQuery) => {
+    this.connection.on("GetWorkspaceStatus", async (query: WorkspaceQuery) => {
       const workspace = resolveWorkspaceQuery(query)
       if (!workspace) return { exists: false }
 
       const ac = new AbortController()
+      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return { exists: false }
 
       const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
       if (branchExists.exitCode !== 0) return { exists: false }
@@ -125,6 +130,7 @@ export class RunnerSignalRClient {
       if (!workspace) return { base: null, head: null }
 
       const ac = new AbortController()
+      if (!await isGitWorkTree(workspace.workDir, ac.signal)) return { base: null, head: null }
 
       const [baseResult, headResult] = await Promise.all([
         git(workspace.workDir, ["show", `${workspace.baseBranch}:${path}`], ac.signal),
@@ -145,17 +151,27 @@ async function git(workDir: string, args: string[], signal: AbortSignal) {
 
 export interface WorkspaceQuery {
   issueNumber?: number
-  worktreePath?: string | null
+  workspacePath?: string | null
   branch?: string | null
   baseBranch?: string | null
 }
 
 export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined): { workDir: string; baseBranch: string; head: string } | null {
-  if (!query?.worktreePath || !query.baseBranch) return null
-  const issueNumber = typeof query.issueNumber === "number" ? query.issueNumber : null
-  const head = query.branch ?? (issueNumber !== null ? `mo/issue-${issueNumber}` : null)
+  if (!query?.workspacePath || !query.baseBranch) return null
+  // The legacy `mo/issue-{N}` worktree branch is no longer created by the
+  // runner. Callers MUST supply an explicit `branch` (the workspace's HEAD
+  // ref, e.g. `mohist/run-${workflowRunId}`). Returning null forces the
+  // server review APIs to surface `branch_missing` instead of a phantom
+  // `mo/issue-{N}` ref that would never resolve.
+  const head = query.branch ?? null
   if (!head) return null
-  return { workDir: query.worktreePath, baseBranch: query.baseBranch, head }
+  return { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
+}
+
+async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
+  if (!existsSync(workDir)) return false
+  const result = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
+  return result.exitCode === 0 && result.stdout.trim() === "true"
 }
 
 function parseDiffFiles(numstat: string, fullDiff: string): Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }> {

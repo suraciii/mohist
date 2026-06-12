@@ -137,8 +137,7 @@ export interface Issue {
   createdAt: string
   updatedAt: string
   projectName?: string
-  projectPath?: string
-  repository?: { name: string; path?: string; remote?: string; baseBranch: string } | null
+  repository?: { name: string; gitUrl: string; baseBranch: string } | null
   comments?: Comment[]
   approvalState?: ApprovalState
   priority?: string | null
@@ -191,7 +190,7 @@ export interface ComparisonMetadata {
   comparison: 'merge-base'
 }
 
-export type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error'
+export type ChangesUnavailableReason = 'workspace_removed' | 'branch_missing' | 'not_started' | 'git_error'
 
 export type ChangesAvailability =
   | { available: true; reason: null }

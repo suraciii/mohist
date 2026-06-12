@@ -3,6 +3,7 @@ namespace Mohist.Server.Infrastructure.Workspace;
 public class WorkspaceStatus
 {
     public bool Exists { get; set; }
+    public string? Reason { get; set; }
     public string? Branch { get; set; }
     public string? BaseBranch { get; set; }
     public int Ahead { get; set; }

@@ -3,10 +3,12 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Services;
@@ -53,11 +55,21 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         var agentConfig = BuildAgentConfig(globalAgentConfig);
         var prompts = GetMergedPromptsAsync(issue.ProjectId).GetAwaiter().GetResult();
 
+        // Built-in context mirrors IssueGrain.BuildIssueVariables so the
+        // profile-driven path and the IssueGrain path emit the same shape
+        // (no `project.path`/`repository.path`/etc. leakage, with
+        // `workspace.path` and `repository.baseBranch` exposed).
+        var runBranch = WorkflowRunBranch.For(workflowRunId);
+        var workspacePath = MohistWorkspaceLayout.IssueWorkspacePath(
+            MohistWorkspaceLayout.DefaultRunnerRoot(), project.Name, issue.Number);
+
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
             ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
             ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
+            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name }, WorkflowVariableJson.Options),
+            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, gitUrl = project.RepositoryGitUrl, baseBranch = project.RepositoryBaseBranch }, WorkflowVariableJson.Options),
+            ["workspace"] = JsonSerializer.SerializeToElement(new { path = workspacePath, branch = runBranch, changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number) }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
             ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options),

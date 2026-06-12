@@ -58,7 +58,7 @@ public class IssueRepositoryReferenceSpecs
         var info = await GetIssueInfoAsync(projectId, 1);
         Assert.NotNull(info);
         Assert.Equal("main", info!.Repository?.Name);
-        Assert.Equal("/proj/main", info.Repository?.Path);
+        Assert.Equal("git@main.example:repo.git", info.Repository?.GitUrl);
         Assert.True(info.Repository?.IsDefault);
 
         var storedJson = await LoadStateAsync(projectId, 1);
@@ -147,7 +147,7 @@ public class IssueRepositoryReferenceSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/empty", "main");
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
         await projectGrain.RemoveRepositoryAsync("main");
 
         using (var scope = _fixture.Services.CreateScope())
@@ -194,8 +194,9 @@ public class IssueRepositoryReferenceSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
-        var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
-        await grain.AddRepositoryAsync("secondary", "/proj/secondary", "git@secondary.example:repo.git", "develop");
+        var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
+        await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "develop");
         return (projectId, project);
     }
 

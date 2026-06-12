@@ -105,7 +105,6 @@ public static partial class IssueRoutes
             int number,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IGitService git,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
@@ -114,22 +113,14 @@ public static partial class IssueRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError) return repoError;
 
-            var repoPath = issue.Repository!.Path ?? IssueRepositoryResolutionHelpers.DefaultRepoPath;
-            var projectName = issue.ProjectName ?? "project";
-
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
                 await grain.ArchiveAsync();
-                var cleanup = await git.RemoveWorktreeAsync(repoPath, projectName, number);
                 return ApiResults.Ok(new
                 {
-                    message = cleanup.Removed
-                        ? "Issue archived and worktree removed"
-                        : "Issue archived",
-                    cleanup,
-                    warning = cleanup.Status == "failed" ? cleanup.Message : null,
+                    message = "Issue archived",
                 });
             }
             catch (InvalidOperationException ex)
@@ -158,15 +149,13 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            IGitService git) =>
+            IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
 
             var all = await issuesQuery.ListAsync(project.Id, null, all: true);
             var completed = all.Where(i => i.Status == "done" && i.ArchivedAt == null).ToList();
             var skipped = all.Where(i => i.Status != "done" && i.ArchivedAt == null).ToList();
-            var cleanupFailed = 0;
 
             foreach (var issue in completed)
             {
@@ -175,14 +164,9 @@ public static partial class IssueRoutes
                 {
                     if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is not null)
                     {
-                        cleanupFailed++;
                         continue;
                     }
-                    var repoPath = issue.Repository!.Path ?? IssueRepositoryResolutionHelpers.DefaultRepoPath;
-                    var projectName = issue.ProjectName ?? "project";
                     await grain.ArchiveAsync();
-                    var cleanup = await git.RemoveWorktreeAsync(repoPath, projectName, issue.Number);
-                    if (cleanup.Status == "failed") cleanupFailed++;
                 }
                 catch
                 {
@@ -195,7 +179,6 @@ public static partial class IssueRoutes
                 archived = completed.Count,
                 skipped = skipped.Count,
                 skippedNumbers = skipped.Select(s => s.Number).ToList(),
-                cleanupFailed,
                 message = $"Archived {completed.Count} completed issues, skipped {skipped.Count}"
             });
         });

@@ -85,12 +85,15 @@ public class ActivityWaitingApiSpecs
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"waiting-{Guid.NewGuid():N}";
-        return await _client.PostDataAsync<ProjectDto>("/api/projects", new
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
         {
-            name,
-            path = "/tmp/mohist-waiting",
+            name = "main",
+            gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
+            isDefault = true,
         });
+        return project;
     }
 
     private async Task<ProjectIssueDto> InsertBacklogIssueAsync(string projectId, int number, string title)

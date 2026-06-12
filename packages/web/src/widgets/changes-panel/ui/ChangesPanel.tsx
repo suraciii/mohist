@@ -107,13 +107,13 @@ export function ChangesPanel({
 
   const diffUnavailable = diffData?.available === false
 
-  const worktreeRemoved = diffData?.reason === 'worktree_removed' || commitsData?.reason === 'worktree_removed'
+  const workspaceRemoved = diffData?.reason === 'workspace_removed' || commitsData?.reason === 'workspace_removed'
   const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
   const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
 
   const showUnavailable = notStarted
     ? <p className="text-sm text-gray-400">No changes yet</p>
-    : worktreeRemoved
+    : workspaceRemoved
       ? <p className="text-sm text-orange-600">Changes unavailable — workspace removed</p>
       : branchMissing
         ? <p className="text-sm text-orange-600">Changes unavailable — branch missing</p>
@@ -143,7 +143,7 @@ export function ChangesPanel({
           <span className="text-green-600">+{summary.additions}</span>
           <span className="text-red-500">-{summary.deletions}</span>
           <span>·</span>
-          <span className="text-gray-400">Worktree retained</span>
+          <span className="text-gray-400">Workspace retained</span>
         </div>
       ) : null}
 

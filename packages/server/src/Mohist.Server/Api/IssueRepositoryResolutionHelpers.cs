@@ -4,7 +4,6 @@ namespace Mohist.Server.Api;
 
 public static class IssueRepositoryResolutionHelpers
 {
-    public const string DefaultRepoPath = ".";
     public const string DefaultBaseBranch = "main";
 
     public static IResult? CheckRepositoryConfigured(IssueReadModel? issue)

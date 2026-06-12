@@ -142,9 +142,6 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
                 }`}
               >
                 <div className="font-medium truncate">{project.name}</div>
-                <div className="text-xs text-muted-foreground truncate mt-0.5">
-                  {project.path}
-                </div>
               </button>
             ))}
             <div className="border-t my-1" />

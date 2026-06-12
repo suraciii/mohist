@@ -81,7 +81,7 @@ public class MohistDefaultWorkflowProfileSpecs
             Title = "支持中文标题 🚀",
         };
 
-        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
 
         using var document = JsonDocument.Parse(variables);
         Assert.Equal("issue-154", document.RootElement.GetProperty("openspecChangeName").GetString());
@@ -130,7 +130,10 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         Assert.Equal("mohist/merge", merge.Uses);
         var mergeWithJson = JsonSerializer.Serialize(merge.With);
-        Assert.Contains("mo/issue-${{ issue.number }}", mergeWithJson);
+        // The integrate task merges from the per-run branch on the workspace
+        // clone, not from a legacy worktree branch.
+        Assert.Contains("workspace.branch", mergeWithJson);
+        Assert.Contains("repository.baseBranch", mergeWithJson);
         Assert.Contains("\"conflictResolver\"", mergeWithJson);
         Assert.Contains("Resolve merge conflicts", mergeWithJson);
     }
@@ -217,7 +220,7 @@ public class MohistDefaultWorkflowProfileSpecs
         var variables = profile.BuildVariables(
             "wr-1",
             issue,
-            new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"),
+            new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"),
             new Dictionary<string, object?> { ["model"] = "openai/gpt-4o", ["probeTimeoutMs"] = 30000 });
 
         using var document = JsonDocument.Parse(variables);
@@ -267,7 +270,7 @@ public class MohistDefaultWorkflowProfileSpecs
             Title = "Test",
         };
 
-        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
 
         using var document = JsonDocument.Parse(variables);
         var prompts = document.RootElement.GetProperty("prompts");
@@ -297,7 +300,7 @@ public class MohistDefaultWorkflowProfileSpecs
             Title = "Merge test",
         };
 
-        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
 
         using var document = JsonDocument.Parse(variables);
         var prompts = document.RootElement.GetProperty("prompts");
@@ -371,7 +374,7 @@ public class MohistDefaultWorkflowProfileSpecs
             Number = 42,
             Title = "Use CLI issue details",
         };
-        var variablesJson = profile.BuildVariables("wr-42", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+        var variablesJson = profile.BuildVariables("wr-42", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
         using var variables = JsonDocument.Parse(variablesJson);
         var (rendered, missing, _) = new PromptTemplateEngine().Render(prompts["proposal"], variables.RootElement);
 
@@ -905,7 +908,8 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
     [Fact]
     public async Task StartWork_WithUnknownPromptReference_Returns400MissingPromptsWithMissingKeysDetails()
     {
-        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"missing-prompts-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references unknown prompt", projectId = project.Id });
 
         var customYaml = """
@@ -938,7 +942,8 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
     [Fact]
     public async Task StartWork_WithMultipleUnknownPromptReferences_ReturnsAllMissingKeysInDetails()
     {
-        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"multi-missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"multi-missing-prompts-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references multiple unknown prompts", projectId = project.Id });
 
         var customYaml = """
@@ -972,7 +977,8 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
     [Fact]
     public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitMissingPromptsError()
     {
-        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"known-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"known-prompts-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references known prompt", projectId = project.Id });
 
         var customYaml = """

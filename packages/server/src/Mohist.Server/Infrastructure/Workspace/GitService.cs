@@ -95,33 +95,29 @@ public class GitService : IGitService
         return result.ExitCode == 0 ? result.Output : null;
     }
 
-    public async Task<WorkspaceStatus> GetWorktreeStatusAsync(string projectPath, string projectName, int issueNumber, string baseBranch)
+    public async Task<WorkspaceStatus> GetWorkspaceStatusAsync(string workspacePath, string baseBranch, string headBranch)
     {
-        var branchName = $"mo/issue-{issueNumber}";
-        var worktreePath = GetExistingIssueWorktreePath(projectPath, projectName, issueNumber);
+        if (!Directory.Exists(workspacePath))
+            return new WorkspaceStatus { Exists = false, Reason = "workspace_removed" };
 
-        if (worktreePath is null)
-            return new WorkspaceStatus { Exists = false };
+        if (!await BranchExistsAsync(workspacePath, headBranch))
+            return new WorkspaceStatus { Exists = false, Reason = "branch_missing" };
 
-        var exists = await BranchExistsAsync(projectPath, branchName);
-        if (!exists)
-            return new WorkspaceStatus { Exists = false };
-
-        var (ahead, behind) = await GetAheadBehindAsync(projectPath, baseBranch, branchName);
-        var rebaseResult = await RunGitAsync(projectPath, "rebase", "--show-current-patch");
+        var (ahead, behind) = await GetAheadBehindAsync(workspacePath, baseBranch, headBranch);
+        var rebaseResult = await RunGitAsync(workspacePath, "rebase", "--show-current-patch");
         var rebaseInProgress = rebaseResult.ExitCode == 0;
 
         string[] conflicts = [];
         if (rebaseInProgress)
         {
-            var statusResult = await RunGitAsync(projectPath, "diff", "--name-only", "--diff-filter=U");
+            var statusResult = await RunGitAsync(workspacePath, "diff", "--name-only", "--diff-filter=U");
             conflicts = statusResult.Output.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
         }
 
         return new WorkspaceStatus
         {
             Exists = true,
-            Branch = branchName,
+            Branch = headBranch,
             BaseBranch = baseBranch,
             Ahead = ahead,
             Behind = behind,
@@ -130,47 +126,55 @@ public class GitService : IGitService
         };
     }
 
-    public async Task<WorktreeRemovalResult> RemoveWorktreeAsync(string projectPath, string projectName, int issueNumber)
+    public async Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string workspacePath)
     {
-        var worktreePath = GetIssueWorktreePath(projectName, issueNumber);
-        var existingWorktreePath = GetExistingIssueWorktreePath(projectPath, projectName, issueNumber);
-        if (existingWorktreePath is null)
+        if (string.IsNullOrWhiteSpace(workspacePath) || !Directory.Exists(workspacePath))
         {
-            return new WorktreeRemovalResult(
+            return new WorkspaceRemovalResult(
                 Removed: false,
                 Status: "missing",
-                Path: worktreePath,
-                Reason: "worktree_missing",
-                Message: "Worktree already removed");
+                Path: workspacePath,
+                Reason: "workspace_missing",
+                Message: "Workspace already removed");
         }
 
-        var result = await RunGitAsync(projectPath, "worktree", "remove", "--force", existingWorktreePath);
-        if (result.ExitCode == 0 || !Directory.Exists(existingWorktreePath))
+        if (!IsUnderRunnerRoot(workspacePath))
         {
-            return new WorktreeRemovalResult(
+            return new WorkspaceRemovalResult(
+                Removed: false,
+                Status: "failed",
+                Path: workspacePath,
+                Reason: "workspace_cleanup_refused",
+                Message: "Workspace path is outside the runner-managed root");
+        }
+
+        try
+        {
+            await Task.Run(() => Directory.Delete(workspacePath, recursive: true));
+            return new WorkspaceRemovalResult(
                 Removed: true,
                 Status: "removed",
-                Path: existingWorktreePath,
+                Path: workspacePath,
                 Reason: null,
-                Message: "Worktree removed");
+                Message: "Workspace removed");
         }
-
-        var error = string.IsNullOrWhiteSpace(result.Error) ? result.Output.Trim() : result.Error.Trim();
-        return new WorktreeRemovalResult(
-            Removed: false,
-            Status: "failed",
-            Path: existingWorktreePath,
-            Reason: "git_worktree_remove_failed",
-            Message: string.IsNullOrWhiteSpace(error) ? "Failed to remove worktree" : error);
+        catch (Exception ex)
+        {
+            return new WorkspaceRemovalResult(
+                Removed: false,
+                Status: "failed",
+                Path: workspacePath,
+                Reason: "workspace_cleanup_failed",
+                Message: ex.Message);
+        }
     }
 
-    private string GetIssueWorktreePath(string projectName, int issueNumber)
-        => MohistWorkspaceLayout.IssueWorktreePath(_runnerRoot, projectName, issueNumber);
-
-    private string? GetExistingIssueWorktreePath(string projectPath, string projectName, int issueNumber)
+    private bool IsUnderRunnerRoot(string workspacePath)
     {
-        var worktreePath = GetIssueWorktreePath(projectName, issueNumber);
-        return Directory.Exists(worktreePath) ? worktreePath : null;
+        var root = Path.GetFullPath(_runnerRoot);
+        var target = Path.GetFullPath(workspacePath);
+        return target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || target.Equals(root, StringComparison.Ordinal);
     }
 
     private static async Task<(string Output, string Error, int ExitCode)> RunGitAsync(string workingDir, string command, params string[] args)
@@ -249,8 +253,8 @@ public interface IGitService
     Task<GitCommit[]> GetCommitsAsync(string repoPath, string baseRef, string headRef);
     Task<string?> GetCommitDiffAsync(string repoPath, string hash);
     Task<string?> GetFileContentAsync(string repoPath, string branch, string filePath);
-    Task<WorkspaceStatus> GetWorktreeStatusAsync(string projectPath, string projectName, int issueNumber, string baseBranch);
-    Task<WorktreeRemovalResult> RemoveWorktreeAsync(string projectPath, string projectName, int issueNumber);
+    Task<WorkspaceStatus> GetWorkspaceStatusAsync(string workspacePath, string baseBranch, string headBranch);
+    Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string workspacePath);
 }
 
 public class GitDiffResult
@@ -263,4 +267,4 @@ public class GitDiffResult
 
 public record DiffFile(string File, int Additions, int Deletions, string Diff, bool IsBinary);
 public record GitCommit(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
-public record WorktreeRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);
+public record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);

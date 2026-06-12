@@ -12,15 +12,22 @@ namespace Mohist.Server.Issue.Services;
 /// start. Layers, lowest priority first, are merged via
 /// <see cref="VariableBundle.MergeAll"/>:
 ///
-///   1. Built-in calling context (mohist / issue / project / repository / openspec*)
-///   2. Project variables (<c>ProjectWorkflowProfile.Variables</c>) — defaults.
-///   3. Issue variables (<c>IssueWorkflowProfile.Variables</c>) — overrides.
+///   1. Project variables (<c>ProjectWorkflowProfile.Variables</c>) — defaults.
+///   2. Issue variables (<c>IssueWorkflowProfile.Variables</c>) — overrides.
 ///
 /// Anything a user patches onto the project (e.g. <c>vars.agent.model</c>) is
 /// therefore visible to the dispatch layer unless the issue overrides it. This
 /// is the single fix for the issue-#80 dispatch stall where the build agent
 /// silently fell through to opencode's local default because <c>vars.agent</c>
 /// was never populated.
+///
+/// The built-in context (<c>mohist</c>, <c>issue</c>, <c>project</c>,
+/// <c>repository</c>, <c>workspace</c>, <c>openspecChangeName</c>,
+/// <c>openspecChangeDir</c>) is composed by
+/// <c>IssueGrain.BuildIssueVariables</c> and merged on top of this user
+/// bundle before dispatch. This class only handles the user-variable
+/// layering; it deliberately does not emit a built-in context so the two
+/// code paths cannot drift.
 /// </summary>
 public static class IssueVariableBuilder
 {
@@ -31,58 +38,11 @@ public static class IssueVariableBuilder
         MohistIssue issue,
         WorkflowProjectContext project)
     {
-        var builtIn = BuildBuiltInContext(workflowRunId, issue, project);
-        return VariableBundle.MergeAll(builtIn, projectBundle, issueBundle);
-    }
-
-    private static VariableBundle BuildBuiltInContext(
-        string workflowRunId,
-        MohistIssue issue,
-        WorkflowProjectContext project)
-    {
-        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["mohist"] = JsonSerializer.SerializeToElement(
-                new { system = "mohist", runId = workflowRunId },
-                WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(
-                new
-                {
-                    id = issue.Id,
-                    number = issue.Number,
-                    title = issue.Title,
-                    body = issue.Body ?? string.Empty,
-                },
-                WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(
-                new
-                {
-                    id = project.Id,
-                    name = project.Name,
-                    path = project.Path,
-                    baseBranch = project.BaseBranch,
-                    defaultBranch = project.BaseBranch,
-                },
-                WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(
-                new
-                {
-                    name = project.RepositoryName,
-                    path = project.RepositoryPath,
-                    remote = project.RepositoryRemote,
-                    baseBranch = project.RepositoryBaseBranch ?? project.BaseBranch,
-                },
-                WorkflowVariableJson.Options),
-            ["openspecChangeName"] = JsonSerializer.SerializeToElement(
-                MohistDefaultWorkflowProjection.ChangeName(issue.Number),
-                WorkflowVariableJson.Options),
-            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(
-                MohistDefaultWorkflowProjection.ChangeDir(issue.Number),
-                WorkflowVariableJson.Options),
-        };
-
-        var varsJson = JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
-        var varsElement = JsonSerializer.Deserialize<JsonElement>(varsJson);
-        return new VariableBundle(varsElement);
+        // The dispatch contract is owned by IssueGrain.BuildIssueVariables;
+        // this builder only layers user/project/issue variables.
+        _ = workflowRunId;
+        _ = issue;
+        _ = project;
+        return VariableBundle.MergeAll(projectBundle, issueBundle);
     }
 }

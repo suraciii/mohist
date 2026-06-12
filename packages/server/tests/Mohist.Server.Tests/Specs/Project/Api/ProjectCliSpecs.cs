@@ -75,6 +75,204 @@ public class ProjectCliSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
+    public async Task ProjectCreate_NameOnly_SendsNameOnlyBodyAndOmitsPathFields()
+    {
+        var files = new FakeFileSystem();
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.Created, """
+            {
+              "success": true,
+              "data": { "id": "proj_new", "name": "alpha" }
+            }
+            """);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["project", "create", "alpha"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var request = http.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects", request.RequestUri!.PathAndQuery);
+        var body = http.RequestBodies.Single();
+        Assert.Contains("\"name\": \"alpha\"", body);
+        Assert.DoesNotContain("\"path\"", body);
+        Assert.DoesNotContain("\"effectivePath\"", body);
+        Assert.DoesNotContain("\"baseBranch\"", body);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task ProjectList_DisplaysNamesWithCurrentMarkerAndOmitsPathFields()
+    {
+        var files = new FakeFileSystem();
+        var statePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".mohist",
+            "cli-state.json");
+        files.AddDirectory(Path.GetDirectoryName(statePath)!);
+        await files.WriteAllTextAsync(statePath, """{ "activeProjectId": "proj_b" }""");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            {
+              "success": true,
+              "data": [
+                { "id": "proj_a", "name": "alpha" },
+                { "id": "proj_b", "name": "beta" },
+                { "id": "proj_c", "name": "gamma" }
+              ]
+            }
+            """);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["project", "list"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects", http.Requests.Single().RequestUri!.PathAndQuery);
+        var lines = output.ToString().TrimEnd().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("  alpha", lines);
+        Assert.Contains("* beta", lines);
+        Assert.Contains("  gamma", lines);
+        Assert.DoesNotContain("path", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("", error.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepositoryAdd_WithGitUrl_SendsGitUrlBaseBranchNameAndIsDefault()
+    {
+        var files = new FakeFileSystem();
+        var statePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".mohist",
+            "cli-state.json");
+        files.AddDirectory(Path.GetDirectoryName(statePath)!);
+        await files.WriteAllTextAsync(statePath, """{ "activeProjectId": "proj_123" }""");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.Created, """
+            {
+              "success": true,
+              "data": {
+                "id": "proj_123",
+                "name": "e2e",
+                "repositories": [
+                  { "name": "backend", "gitUrl": "git@example.com:backend.git", "baseBranch": "main", "isDefault": true }
+                ]
+              }
+            }
+            """);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["repository", "add", "backend", "--git-url", "git@example.com:backend.git", "--base-branch", "main", "--default"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var request = http.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_123/repositories", request.RequestUri!.PathAndQuery);
+        var body = http.RequestBodies.Single();
+        Assert.Contains("\"name\": \"backend\"", body);
+        Assert.Contains("\"gitUrl\": \"git@example.com:backend.git\"", body);
+        Assert.Contains("\"baseBranch\": \"main\"", body);
+        Assert.Contains("\"isDefault\": true", body);
+        Assert.DoesNotContain("\"path\"", body);
+        Assert.DoesNotContain("\"remote\"", body);
+        Assert.DoesNotContain("\"resolvedPath\"", body);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepositoryAdd_WithoutGitUrl_IsRejectedBeforeApiCall()
+    {
+        var files = new FakeFileSystem();
+        var statePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".mohist",
+            "cli-state.json");
+        files.AddDirectory(Path.GetDirectoryName(statePath)!);
+        await files.WriteAllTextAsync(statePath, """{ "activeProjectId": "proj_123" }""");
+        var http = new RecordingHttpHandler();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["repository", "add", "backend"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(http.Requests);
+        Assert.Contains("git-url", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
+    public async Task RepositoryAdd_WithPathOnly_IsRejectedWithValidationError()
+    {
+        var files = new FakeFileSystem();
+        var statePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".mohist",
+            "cli-state.json");
+        files.AddDirectory(Path.GetDirectoryName(statePath)!);
+        await files.WriteAllTextAsync(statePath, """{ "activeProjectId": "proj_123" }""");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.BadRequest, """
+            {
+              "success": false,
+              "error": "gitUrl is required",
+              "code": "repository_giturl_required"
+            }
+            """);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["repository", "add", "backend", "--git-url", "/proj/backend"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.NotEqual(0, exitCode);
+        var request = http.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        var body = http.RequestBodies.Single();
+        Assert.Contains("\"gitUrl\": \"/proj/backend\"", body);
+        Assert.DoesNotContain("\"path\"", body);
+        Assert.Contains("gitUrl is required", error.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
     public async Task IssueList_UsesPersistedActiveProjectWhenProjectIdIsOmitted()
     {
         var files = new FakeFileSystem();
@@ -115,6 +313,7 @@ public class ProjectCliSpecs
         private readonly Queue<HttpResponseMessage> _responses = new();
 
         public List<HttpRequestMessage> Requests { get; } = [];
+        public List<string> RequestBodies { get; } = [];
 
         public void EnqueueJson(HttpStatusCode status, string json)
         {
@@ -124,15 +323,25 @@ public class ProjectCliSpecs
             });
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
-            return Task.FromResult(_responses.Count > 0
+            if (request.Content is not null)
+            {
+                var body = await request.Content.ReadAsStringAsync(cancellationToken);
+                RequestBodies.Add(body);
+            }
+            else
+            {
+                RequestBodies.Add("");
+            }
+
+            return _responses.Count > 0
                 ? _responses.Dequeue()
                 : new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("""{ "success": true, "data": null }""", Encoding.UTF8, "application/json"),
-                });
+                };
         }
     }
 }

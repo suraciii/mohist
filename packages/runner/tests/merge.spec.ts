@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { mergeAction, setMergeConflictResolverForTest, setMergeGitRunnerForTest } from "../src/actions/registry.js"
+import { mergeAction, mergeReadyAction, setMergeConflictResolverForTest, setMergeGitRunnerForTest } from "../src/actions/registry.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 afterEach(() => {
@@ -8,12 +8,13 @@ afterEach(() => {
 })
 
 describe("mohist/merge", () => {
-  it("SquashMergeConflictWithResolver_ResolvesThenCommits", async () => {
+  it("SquashMergeConflictWithResolver_ResolvesThenCommitsInWorkspace", async () => {
     const calls: string[] = []
+    const workDirs: string[] = []
     let resolverRan = false
     setMergeConflictResolverForTest(async (resolverContext) => {
       resolverRan = true
-      expect(resolverContext.workDir).toBe("/repo")
+      expect(resolverContext.workDir).toBe("/fake/worktree")
       expect(resolverContext.workId).toBe("integrate:merge.1-conflict-resolve-1")
       expect(String(resolverContext.with?.prompt)).toContain("specs/web-ui/spec.md")
       return {
@@ -23,8 +24,9 @@ describe("mohist/merge", () => {
       }
     })
     let conflictCheckCount = 0
-    setMergeGitRunnerForTest(async (_workDir, args) => {
+    setMergeGitRunnerForTest(async (workDir, args) => {
       calls.push(args.join(" "))
+      workDirs.push(workDir)
       switch (args.join(" ")) {
         case "status --porcelain":
           return ok("")
@@ -68,17 +70,18 @@ describe("mohist/merge", () => {
       "commit -m SignalR realtime push (#82) -m * T-001",
       "rev-parse HEAD",
     ])
+    expect(workDirs.every((d) => d === "/fake/worktree")).toBe(true)
     expect(output).toMatchObject({
       kind: "merge",
       source: "mo/issue-82",
       target: "master",
       strategy: "squash",
-      workDir: "/repo",
       commit: "abc123",
       conflicts: ["specs/web-ui/spec.md"],
       resolveAttempts: 1,
     })
     expect(output.output).toContain("agent staged resolved files")
+    expect(output).not.toHaveProperty("workDir")
   })
 
   it("SquashMergeConflictWithoutConfiguredResolver_UsesDefaultResolver", async () => {
@@ -161,6 +164,185 @@ describe("mohist/merge", () => {
     expect(calls).not.toContain("merge --squash mo/issue-82")
     expect(output.output).toContain("Existing merge conflicts detected")
   })
+
+  it("MergeActionFailure_IncludesStructuredDiagnostics", async () => {
+    setMergeConflictResolverForTest(async () => ({
+      status: "failure",
+      message: "resolver failed",
+      output: "resolver failed",
+      exitCode: 1,
+    }))
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      switch (args.join(" ")) {
+        case "status --porcelain":
+          return ok("")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "merge --squash mo/issue-82":
+          return fail("CONFLICT (content): Merge conflict in file.txt")
+        case "diff --name-only --diff-filter=U":
+          return ok("file.txt\n")
+        case "rev-parse master":
+          return ok("base-sha\n")
+        case "rev-parse mo/issue-82":
+          return ok("head-sha\n")
+        case "merge-base master mo/issue-82":
+          return ok("merge-base-sha\n")
+        case "log --format=* %s master..mo/issue-82":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await mergeAction(context({
+      source: "mo/issue-82",
+      target: "master",
+      strategy: "squash",
+      message: "Complete issue #82",
+      maxConflictRetries: 1,
+      conflictResolver: { with: { agent: { type: "opencode" } } },
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "merge",
+      source: "mo/issue-82",
+      target: "master",
+      strategy: "squash",
+      targetBranch: "master",
+      baseSha: "base-sha",
+      candidateHeadSha: "head-sha",
+      mergeBaseSha: "merge-base-sha",
+      conflicts: ["file.txt"],
+      resolveAttempts: 1,
+    })
+  })
+})
+
+describe("mohist/merge-ready", () => {
+  it("CleanCandidate_ReturnsStructuredMergeability", async () => {
+    const calls: string[] = []
+    const workDirs: string[] = []
+    setMergeGitRunnerForTest(async (workDir, args) => {
+      calls.push(args.join(" "))
+      workDirs.push(workDir)
+      switch (args.join(" ")) {
+        case "rev-parse master":
+          return ok("base-sha\n")
+        case "rev-parse HEAD":
+          return ok("head-sha\n")
+        case "merge-base master HEAD":
+          return ok("merge-base-sha\n")
+        case "rev-parse --abbrev-ref HEAD":
+          return ok("issue-branch\n")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "merge --squash --no-commit HEAD":
+          return ok("")
+        case "reset --hard":
+          return ok("HEAD is now at base-sha")
+        case "checkout issue-branch":
+          return ok("Switched to branch 'issue-branch'")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await mergeReadyAction(context({ baseBranch: "master" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(workDirs.every((d) => d === "/fake/worktree")).toBe(true)
+    expect(output).toMatchObject({
+      kind: "merge-ready",
+      targetBranch: "master",
+      strategy: "squash",
+      baseSha: "base-sha",
+      candidateHeadSha: "head-sha",
+      mergeBaseSha: "merge-base-sha",
+      canMerge: true,
+      conflictFiles: [],
+    })
+    expect(output.checkedAt).toBeDefined()
+  })
+
+  it("ConflictingCandidate_ReturnsConflictFiles", async () => {
+    const calls: string[] = []
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse master":
+          return ok("base-sha\n")
+        case "rev-parse HEAD":
+          return ok("head-sha\n")
+        case "merge-base master HEAD":
+          return ok("merge-base-sha\n")
+        case "rev-parse --abbrev-ref HEAD":
+          return ok("issue-branch\n")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "merge --squash --no-commit HEAD":
+          return fail("CONFLICT (content): Merge conflict in file.txt")
+        case "diff --name-only --diff-filter=U":
+          return ok("file.txt\n")
+        case "reset --hard":
+          return ok("HEAD is now at base-sha")
+        case "checkout issue-branch":
+          return ok("Switched to branch 'issue-branch'")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await mergeReadyAction(context({ baseBranch: "master" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "merge-ready",
+      targetBranch: "master",
+      strategy: "squash",
+      baseSha: "base-sha",
+      candidateHeadSha: "head-sha",
+      mergeBaseSha: "merge-base-sha",
+      canMerge: false,
+      conflictFiles: ["file.txt"],
+    })
+  })
+
+  it("PreflightRestoresOriginalBranch_AfterTemporaryMerge", async () => {
+    const calls: string[] = []
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse master":
+          return ok("base-sha\n")
+        case "rev-parse HEAD":
+          return ok("head-sha\n")
+        case "merge-base master HEAD":
+          return ok("merge-base-sha\n")
+        case "rev-parse --abbrev-ref HEAD":
+          return ok("issue-branch\n")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "merge --squash --no-commit HEAD":
+          return ok("")
+        case "reset --hard":
+          return ok("HEAD is now at base-sha")
+        case "checkout issue-branch":
+          return ok("Switched to branch 'issue-branch'")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    await mergeReadyAction(context({ baseBranch: "master" }))
+
+    expect(calls).toContain("checkout master")
+    expect(calls[calls.length - 1]).toBe("checkout issue-branch")
+  })
 })
 
 function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
@@ -173,7 +355,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     uses: "mohist/merge",
     with: withOverrides,
     variables: {
-      project: { path: "/repo" },
+      repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main" },
       issue: { title: "SignalR realtime push", number: 82 },
       ...variables,
     },

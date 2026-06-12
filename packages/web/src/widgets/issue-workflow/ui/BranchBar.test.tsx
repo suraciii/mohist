@@ -4,11 +4,11 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BranchBar } from './BranchBar'
 import { WorkflowStage } from '../../../entities/issue'
-import { useWorktreeStatus } from '../../../entities/issue'
+import { useWorkspaceStatus } from '../../../entities/issue'
 
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
-  useWorktreeStatus: vi.fn(),
+  useWorkspaceStatus: vi.fn(),
   useLiveTask: () => ({}),
 }))
 
@@ -18,8 +18,8 @@ describe('BranchBar', () => {
     vi.clearAllMocks()
   })
 
-  it('shows retained Done worktree archive-removal copy when a Done issue has a worktree', () => {
-    vi.mocked(useWorktreeStatus).mockReturnValue({
+  it('shows retained Done workflow workspace archive-removal copy when a Done issue has a workspace', () => {
+    vi.mocked(useWorkspaceStatus).mockReturnValue({
       data: {
         exists: true,
         branch: 'mo/issue-146',
@@ -28,7 +28,7 @@ describe('BranchBar', () => {
         behind: 0,
       },
       isLoading: false,
-    } as ReturnType<typeof useWorktreeStatus>)
+    } as ReturnType<typeof useWorkspaceStatus>)
 
     const queryClient = new QueryClient()
     render(
@@ -38,6 +38,6 @@ describe('BranchBar', () => {
     )
 
     expect(screen.getByText(/retained for review, traceability, diff inspection, and debugging/i)).toBeTruthy()
-    expect(screen.getByText(/Archiving will remove the retained worktree/i)).toBeTruthy()
+    expect(screen.getByText(/Archiving will remove the retained workspace/i)).toBeTruthy()
   })
 })

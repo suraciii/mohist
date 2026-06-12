@@ -227,7 +227,7 @@ stages:
           title: Rebase onto base branch
           uses: mohist/rebase
           with:
-            baseBranch: ${{ project.baseBranch }}
+            baseBranch: ${{ repository.baseBranch }}
             conflictResolver:
               title: Resolve rebase conflicts
               with:
@@ -252,8 +252,8 @@ stages:
         title: Merge branch
         uses: mohist/merge
         with:
-          source: mo/issue-${{ issue.number }}
-          target: ${{ project.baseBranch }}
+          source: ${{ workspace.branch }}
+          target: ${{ repository.baseBranch }}
           strategy: squash
           message: Complete issue #${{ issue.number }}
           conflictResolver:

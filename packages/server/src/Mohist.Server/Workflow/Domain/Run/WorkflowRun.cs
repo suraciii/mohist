@@ -13,6 +13,12 @@ public sealed record WorkflowRunMetadata(
     [property: Id(2)] Dictionary<string, string>? Labels = null,
     [property: Id(3)] Dictionary<string, string>? Annotations = null);
 
+[GenerateSerializer]
+public sealed record WorkspaceIdentity(
+    [property: Id(0)] string Path,
+    [property: Id(1)] string? Branch = null,
+    [property: Id(2)] string? ChangeDir = null);
+
 public sealed class WorkflowRun
 {
     public required string Id { get; init; }
@@ -24,6 +30,7 @@ public sealed class WorkflowRun
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public FailureDetails? Failure { get; set; }
+    public WorkspaceIdentity? Workspace { get; set; }
 
     public bool IsClaimed => Claim is not null;
     public string? ClaimedBy => Claim?.RunnerId;

@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +14,7 @@ using Mohist.Server.Project.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Issue.Api;
@@ -38,7 +42,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CompleteWorkAsync_IssueTransitionsFromInProgressToDone()
     {
-        var (projectId, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
 
         var issue = _grains.GetGrain<IIssueGrain>(issueId);
         await issue.CompleteWorkAsync(wrId);
@@ -58,7 +62,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CancelAsync_WhenWorkflowRunning_RejectsWithError()
     {
-        var (_, _, issueId, _) = await SeedIssueInProgressAsync();
+        var (_, _, _, issueId, _) = await SeedIssueInProgressAsync();
 
         var issue = _grains.GetGrain<IIssueGrain>(issueId);
         await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
@@ -69,7 +73,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CancelAsync_WhenWorkflowStopped_IssueTransitionsToCancelled()
     {
-        var (projectId, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
 
         var wfGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StopAsync("user-stopped");
@@ -88,7 +92,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task CompleteWorkAsync_ForIssueNotInProgress_StaysInCurrentState()
     {
-        var projectId = await SeedProjectAsync();
+        var (projectId, _) = await SeedProjectAsync();
         var (issueId, issueNumber) = await CreateIssueInBacklogAsync(projectId);
 
         var wrId = $"wr_{Guid.NewGuid():N}";
@@ -116,7 +120,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task RerunAsync_WhenActiveWorkflowStateCannotDeserialize_ReplacesActiveWorkflow()
     {
-        var (projectId, issueNumber, _, oldWrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, _, oldWrId) = await SeedIssueInProgressAsync();
         await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
         await _grains.GetGrain<IWorkflowGrain>(oldWrId).DeactivateForTestAsync();
         await PoisonWorkflowFailureReasonAsync(oldWrId, "RemovedReason");
@@ -139,7 +143,7 @@ public class IssueWorkflowLifecycleSpecs
     [Fact]
     public async Task StartWorkAsync_WhenExistingWorkflowIsStopped_StartsNewWorkflow()
     {
-        var (projectId, issueNumber, issueId, oldWrId) = await SeedIssueInProgressAsync();
+        var (projectId, _, issueNumber, issueId, oldWrId) = await SeedIssueInProgressAsync();
         await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
 
         var issue = _grains.GetGrain<IIssueGrain>(issueId);
@@ -152,12 +156,137 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Equal(newWrId, restarted.WorkflowRunId);
     }
 
-    private async Task<string> SeedProjectAsync()
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkAsync_PersistsWorkspaceIdentityOnWorkflowRun()
+    {
+        var (projectId, projectName, issueNumber, _, wrId) = await SeedIssueInProgressAsync();
+
+        var run = await LoadWorkflowRunAsync(wrId);
+        Assert.NotNull(run);
+        Assert.NotNull(run!.Workspace);
+        Assert.Equal(
+            Path.Combine(_fixture.RunnerRoot, projectName, "workspaces", $"issue-{issueNumber}"),
+            run.Workspace.Path);
+        Assert.Equal($"mohist/run-{wrId}", run.Workspace.Branch);
+        Assert.Equal($"openspec/changes/issue-{issueNumber}", run.Workspace.ChangeDir);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkAsync_WhenActiveRunExists_ReusesRunAndWorkspace()
+    {
+        var (_, _, _, issueId, firstWrId) = await SeedIssueInProgressAsync();
+
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        var secondWrId = await issue.StartWorkAsync();
+
+        Assert.Equal(firstWrId, secondWrId);
+
+        var run = await LoadWorkflowRunAsync(firstWrId);
+        Assert.NotNull(run);
+        Assert.NotNull(run!.Workspace);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkAsync_WhenPrerequisiteIncomplete_DoesNotCreateWorkflowRunOrWorkspace()
+    {
+        var (projectId, _) = await SeedProjectAsync();
+        var prereq = await CreateIssueInBacklogAsync(projectId);
+        var dependent = await CreateIssueInBacklogAsync(projectId);
+
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.issueId);
+        await dependentGrain.AddPrerequisiteAsync(prereq.number);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => dependentGrain.StartWorkAsync());
+
+        await using var db = new MohistDbContext(new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options);
+
+        var runsForDependent = db.WorkflowRuns
+            .AsNoTracking()
+            .Where(r => r.MetadataProjectId == projectId)
+            .ToList();
+        Assert.Empty(runsForDependent);
+
+        var projectRow = await db.Projects.FindAsync(projectId);
+        Assert.NotNull(projectRow);
+        Assert.DoesNotContain("path", projectRow!.RepositoriesJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Path", projectRow.RepositoriesJson);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ProjectAndRepository_AfterStart_HaveNoLocalPathFields()
+    {
+        var (projectId, _, _, _, wrId) = await SeedIssueInProgressAsync();
+
+        await using var db = new MohistDbContext(new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options);
+
+        var projectRow = await db.Projects.FindAsync(projectId);
+        Assert.NotNull(projectRow);
+        Assert.DoesNotContain("Path", projectRow!.RepositoriesJson);
+        Assert.DoesNotContain("ResolvedPath", projectRow.RepositoriesJson);
+
+        var runRow = await db.WorkflowRuns.FindAsync(wrId);
+        Assert.NotNull(runRow);
+        Assert.Contains("\"workspace\"", runRow!.State);
+        Assert.Contains("\"path\"", runRow.State);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWork_DispatchVariables_ExposeWorkspacePathAndRepositoryMetadataOnly()
+    {
+        var (projectId, projectName, _, _, wrId) = await SeedIssueInProgressAsync();
+
+        using var scope = _services.CreateScope();
+        var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
+        var snapshot = await query.GetVariablesAsync(wrId);
+        Assert.NotNull(snapshot);
+        Assert.False(string.IsNullOrWhiteSpace(snapshot!.Variables));
+
+        using var doc = JsonDocument.Parse(snapshot.Variables);
+        var root = doc.RootElement;
+
+        var project = root.GetProperty("project");
+        Assert.Equal(projectId, project.GetProperty("id").GetString());
+        Assert.Equal(projectName, project.GetProperty("name").GetString());
+        Assert.False(project.TryGetProperty("path", out _));
+        Assert.False(project.TryGetProperty("effectivePath", out _));
+
+        var repository = root.GetProperty("repository");
+        Assert.Equal("origin", repository.GetProperty("name").GetString());
+        Assert.Equal("git@example.com:mohist-local.git", repository.GetProperty("gitUrl").GetString());
+        Assert.Equal("main", repository.GetProperty("baseBranch").GetString());
+        Assert.False(repository.TryGetProperty("path", out _));
+        Assert.False(repository.TryGetProperty("remote", out _));
+        Assert.False(repository.TryGetProperty("resolvedPath", out _));
+
+        var workspace = root.GetProperty("workspace");
+        Assert.False(string.IsNullOrWhiteSpace(workspace.GetProperty("path").GetString()));
+        var headBranch = workspace.GetProperty("branch").GetString();
+        Assert.StartsWith("mohist/run-", headBranch);
+        Assert.False(string.IsNullOrWhiteSpace(workspace.GetProperty("changeDir").GetString()));
+    }
+
+    private async Task<(string projectId, string projectName)> SeedProjectAsync()
     {
         var id = $"proj_{Guid.NewGuid():N}";
+        var name = $"mohist-local-{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/mohist-lifecycle", null);
-        return id;
+        await projectGrain.CreateAsync(name);
+        await projectGrain.AddRepositoryAsync("origin", "git@example.com:mohist-local.git", "main");
+        return (id, name);
     }
 
     private async Task<(string issueId, int number)> CreateIssueInBacklogAsync(string projectId)
@@ -169,19 +298,15 @@ public class IssueWorkflowLifecycleSpecs
         return (issueId, number);
     }
 
-    private async Task<(string projectId, int number, string issueId, string wrId)> SeedIssueInProgressAsync()
+    private async Task<(string projectId, string projectName, int number, string issueId, string wrId)> SeedIssueInProgressAsync()
     {
-        var projectId = await SeedProjectAsync();
+        var (projectId, projectName) = await SeedProjectAsync();
         var (issueId, number) = await CreateIssueInBacklogAsync(projectId);
 
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
-            Id: projectId,
-            Name: $"proj-{Guid.NewGuid():N}",
-            Path: "/tmp/mohist-lifecycle",
-            BaseBranch: "main"));
+        var wrId = await grain.StartWorkAsync();
 
-        return (projectId, number, issueId, wrId);
+        return (projectId, projectName, number, issueId, wrId);
     }
 
     private async Task PoisonWorkflowFailureReasonAsync(string workflowRunId, string reason)

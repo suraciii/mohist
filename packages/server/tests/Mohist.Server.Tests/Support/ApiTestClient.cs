@@ -30,6 +30,29 @@ public static class ApiTestClient
         return await ReadDataAsync<T>(response);
     }
 
+    /// <summary>
+    /// Creates a project and immediately attaches a single default repository.
+    /// Tests that need a project to be issue-startable use this helper instead
+    /// of POSTing a name-only project (which is the new contract) and then
+    /// issuing against an empty repository set.
+    /// </summary>
+    public static async Task<T> PostProjectWithRepositoryAsync<T>(
+        this HttpClient client,
+        string projectPath,
+        object projectBody,
+        object repositoryBody)
+    {
+        var project = await PostDataAsync<T>(client, projectPath, projectBody);
+        var idProperty = typeof(T).GetProperty("Id");
+        var projectId = idProperty?.GetValue(project) as string
+            ?? throw new InvalidOperationException("Project response must have an Id property");
+        await client.PostAsJsonAsync(
+            $"{projectPath}/{projectId}/repositories",
+            repositoryBody,
+            JsonOptions);
+        return project;
+    }
+
     public static async Task PostOkAsync(this HttpClient client, string path, object? body = null)
     {
         using var response = body is null

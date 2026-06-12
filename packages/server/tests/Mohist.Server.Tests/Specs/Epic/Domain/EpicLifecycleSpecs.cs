@@ -256,12 +256,18 @@ public class EpicLifecycleSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        return await _client.PostDataAsync<ProjectDto>("/api/projects", new
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
             name = $"epic-life-{Guid.NewGuid():N}",
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main",
         });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        {
+            name = "main",
+            gitUrl = $"file://{Guid.NewGuid():N}",
+            baseBranch = "main",
+            isDefault = true,
+        });
+        return project;
     }
 
     private async Task<IssueDto> CreateIssueAsync(string projectId, string title)
@@ -272,7 +278,7 @@ public class EpicLifecycleSpecs
     private async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)
     {
         var grain = _grains.GetGrain<IIssueGrain>(issueInfo.Id);
-        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(projectId, "Lifecycle Test", "/tmp/lifecycle", "main"));
+        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(projectId, "Lifecycle Test", RepositoryBaseBranch: "main"));
         await grain.CompleteWorkAsync(wrId);
     }
 

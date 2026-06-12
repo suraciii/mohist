@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Api;
 
@@ -19,6 +21,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/diff", async (
             HttpContext context, int number,
             IGitService git,
+            IWorkflowRunStore workflowRunStore,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -26,26 +29,35 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            var (repoPath, _) = ResolveRepo(issue);
-            if (!await BranchExistsAsync(git, issue, repoPath))
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
+            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
+                return ApiResults.Ok(Unavailable("not_started", "Issue has no active workflow"));
 
-            if (string.IsNullOrEmpty(issue.WorkflowRunId))
-                return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
+            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
+                return ApiResults.Ok(Unavailable("workspace_removed", "The workflow workspace is not available"));
+
+            var baseBranch = ResolveBaseBranch(issue);
+            var head = WorkspaceHeadOrNull(workspace, issue.WorkflowRunId);
+            if (head is null)
+                return ApiResults.Ok(Unavailable("branch_missing", "Workspace head branch is not recorded for this run"));
 
             try
             {
-                var result = await git.GetDiffAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
-                var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
-                var commits = await git.GetCommitsAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
-                var mergeBase = await git.GetMergeBaseAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
+                if (!await git.BranchExistsAsync(workspace.Path, head))
+                    return ApiResults.Ok(Unavailable("branch_missing", "Workspace branch not found in workspace"));
+
+                var result = await git.GetDiffAsync(workspace.Path, baseBranch, head);
+                var (ahead, behind) = await git.GetAheadBehindAsync(workspace.Path, baseBranch, head);
+                var commits = await git.GetCommitsAsync(workspace.Path, baseBranch, head);
+                var mergeBase = await git.GetMergeBaseAsync(workspace.Path, baseBranch, head);
+                var patches = result.Files.Select(f => new { path = f.File, diff = f.Diff }).ToArray();
 
                 return ApiResults.Ok(new
                 {
                     available = true,
                     reason = (string?)null,
-                    @base = ResolveRepo(issue).BaseBranch,
-                    head = $"mo/issue-{number}",
+                    @base = baseBranch,
+                    head,
                     mergeBase,
                     ahead,
                     behind,
@@ -53,17 +65,19 @@ public static class WorkspaceRoutes
                     comparison = "merge-base",
                     summary = new { filesChanged = result.Files.Count, commits = commits.Length, additions = result.TotalAdditions, deletions = result.TotalDeletions },
                     files = result.Files,
+                    patches,
                 });
             }
-            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            catch (Exception ex)
             {
-                return ApiResults.Ok(new { available = false, reason = "timeout", message = "Runner query timed out" });
+                return ApiResults.Ok(Unavailable("git_error", ex.Message));
             }
         });
 
         issues.MapGet("/commits", async (
             HttpContext context, int number,
             IGitService git,
+            IWorkflowRunStore workflowRunStore,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -71,21 +85,27 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            var (repoPath, _) = ResolveRepo(issue);
-            if (!await BranchExistsAsync(git, issue, repoPath))
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
+            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
+                return ApiResults.Ok(Unavailable("not_started", "Issue has no active workflow"));
 
-            if (string.IsNullOrEmpty(issue.WorkflowRunId))
-                return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
+            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
+                return ApiResults.Ok(Unavailable("workspace_removed", "The workflow workspace is not available"));
+
+            var baseBranch = ResolveBaseBranch(issue);
+            var head = WorkspaceHeadOrNull(workspace, issue.WorkflowRunId);
+            if (head is null)
+                return ApiResults.Ok(Unavailable("branch_missing", "Workspace head branch is not recorded for this run"));
 
             try
             {
-                var (_, baseBranch) = ResolveRepo(issue);
-                var head = $"mo/issue-{number}";
-                var commits = await git.GetCommitsAsync(repoPath, baseBranch, head);
-                var result = await git.GetDiffAsync(repoPath, baseBranch, head);
-                var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, baseBranch, head);
-                var mergeBase = await git.GetMergeBaseAsync(repoPath, baseBranch, head);
+                if (!await git.BranchExistsAsync(workspace.Path, head))
+                    return ApiResults.Ok(Unavailable("branch_missing", "Workspace branch not found in workspace"));
+
+                var commits = await git.GetCommitsAsync(workspace.Path, baseBranch, head);
+                var result = await git.GetDiffAsync(workspace.Path, baseBranch, head);
+                var (ahead, behind) = await git.GetAheadBehindAsync(workspace.Path, baseBranch, head);
+                var mergeBase = await git.GetMergeBaseAsync(workspace.Path, baseBranch, head);
 
                 return ApiResults.Ok(new
                 {
@@ -102,15 +122,16 @@ public static class WorkspaceRoutes
                     commits,
                 });
             }
-            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            catch (Exception ex)
             {
-                return ApiResults.Ok(new { available = false, reason = "timeout", message = "Runner query timed out" });
+                return ApiResults.Ok(Unavailable("git_error", ex.Message));
             }
         });
 
         issues.MapGet("/commits/{hash}/diff", async (
             HttpContext context, int number, string hash,
             IGitService git,
+            IWorkflowRunStore workflowRunStore,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -118,31 +139,39 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            var (repoPath, _) = ResolveRepo(issue);
-            if (!await BranchExistsAsync(git, issue, repoPath))
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found", hash, diff = "" });
-
-            if (string.IsNullOrEmpty(issue.WorkflowRunId))
+            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow", hash, diff = "" });
+
+            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
+                return ApiResults.Ok(new { available = false, reason = "workspace_removed", message = "The workflow workspace is not available", hash, diff = "" });
+
+            var head = WorkspaceHeadOrNull(workspace, issue.WorkflowRunId);
+            if (head is null)
+                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Workspace head branch is not recorded for this run", hash, diff = "" });
 
             try
             {
-                var diff = await git.GetCommitDiffAsync(repoPath, hash);
+                if (!await git.BranchExistsAsync(workspace.Path, head))
+                    return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Workspace branch not found in workspace", hash, diff = "" });
+
+                var diff = await git.GetCommitDiffAsync(workspace.Path, hash);
 
                 if (diff is null)
                     return ApiResults.NotFound($"Commit {hash} not found");
 
                 return ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff });
             }
-            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            catch (Exception ex)
             {
-                return ApiResults.Ok(new { available = false, reason = "timeout", message = "Runner query timed out", hash, diff = "" });
+                return ApiResults.Ok(new { available = false, reason = "git_error", message = ex.Message, hash, diff = "" });
             }
         });
 
-        issues.MapGet("/worktree-status", async (
+        issues.MapGet("/workspace-status", async (
             HttpContext context, int number,
             IGitService git,
+            IWorkflowRunStore workflowRunStore,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -150,25 +179,36 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            if (string.IsNullOrEmpty(issue.WorkflowRunId))
-                return ApiResults.Ok(new { exists = false });
+            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
+                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "not_started" });
+
+            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
+                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "workspace_removed" });
+
+            if (!Directory.Exists(workspace.Path))
+                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "workspace_removed" });
+
+            var head = WorkspaceHeadOrNull(workspace, issue.WorkflowRunId);
+            if (head is null)
+                return ApiResults.Ok(new WorkspaceStatus { Exists = true, Reason = "branch_missing" });
 
             try
             {
-                var projectName = issue.ProjectName ?? issue.ProjectId;
-                var (repoPath, baseBranch) = ResolveRepo(issue);
-                var result = await git.GetWorktreeStatusAsync(repoPath, projectName, number, baseBranch);
+                var baseBranch = ResolveBaseBranch(issue);
+                var result = await git.GetWorkspaceStatusAsync(workspace.Path, baseBranch, head);
                 return ApiResults.Ok(result);
             }
-            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            catch (Exception)
             {
-                return ApiResults.Ok(new { exists = false, reason = "timeout" });
+                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "git_error" });
             }
         });
 
         issues.MapGet("/file-content", async (
             HttpContext context, int number, string path,
             IGitService git,
+            IWorkflowRunStore workflowRunStore,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -176,23 +216,31 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            if (string.IsNullOrEmpty(issue.WorkflowRunId))
-                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
+            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "not_started" });
+
+            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "workspace_removed" });
+
+            var head = WorkspaceHeadOrNull(workspace, issue.WorkflowRunId);
+            if (head is null)
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "branch_missing" });
 
             try
             {
-                var (_, baseBranch) = ResolveRepo(issue);
-                var baseContent = await git.GetFileContentAsync(ResolveRepo(issue).RepoPath, baseBranch, path);
-                var headContent = await git.GetFileContentAsync(ResolveRepo(issue).RepoPath, $"mo/issue-{number}", path);
+                var baseBranch = ResolveBaseBranch(issue);
+                var baseContent = await git.GetFileContentAsync(workspace.Path, baseBranch, path);
+                var headContent = await git.GetFileContentAsync(workspace.Path, head, path);
                 return ApiResults.Ok(new { @base = baseContent, head = headContent });
             }
-            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            catch (Exception)
             {
-                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "git_error" });
             }
         });
 
-        issues.MapPost("/cleanup", async (HttpContext context, int number, IGrainFactory grains, IGitService git, WorkflowActivityQuerier projection, IssueQuerier issuesQuery) =>
+        issues.MapPost("/cleanup", async (HttpContext context, int number, IGrainFactory grains, IGitService git, IWorkflowRunStore workflowRunStore, WorkflowActivityQuerier projection, IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
@@ -203,21 +251,44 @@ public static class WorkspaceRoutes
             var workflow = await grain.GetWorkflowStatusAsync();
             if (IsWorkflowActive(workflow))
             {
-                return ApiResults.Conflict("Cannot remove a worktree while the issue workflow is active", "worktree_active");
+                return ApiResults.Conflict("Cannot clean workflow workspace while the issue workflow is active", "workspace_active");
             }
 
             var activeAgents = await projection.ListActiveAgentsAsync(pid);
             if (activeAgents.Any(a => a.IssueNumber == number))
             {
-                return ApiResults.Conflict("Cannot remove a worktree while an agent is running", "worktree_agent_running");
+                return ApiResults.Conflict("Cannot clean workflow workspace while an agent is running", "workspace_agent_running");
             }
 
-            var (repoPath, _) = ResolveRepo(issue);
-            var projectName = issue.ProjectName ?? "project";
-            var removal = await git.RemoveWorktreeAsync(repoPath, projectName, number);
+            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
+            {
+                return ApiResults.Conflict("No workflow workspace to clean", "workspace_missing");
+            }
+
+            if (!Directory.Exists(workspace.Path))
+            {
+                return ApiResults.Ok(new
+                {
+                    removed = false,
+                    message = "Workspace already removed",
+                    resources = new[]
+                    {
+                        new
+                        {
+                            type = "workspace",
+                            status = "missing",
+                            path = workspace.Path,
+                            reason = "workspace_missing",
+                        },
+                    },
+                });
+            }
+
+            var removal = await git.RemoveWorkspaceAsync(workspace.Path);
             if (removal.Status == "failed")
             {
-                return ApiResults.Conflict(removal.Message, "worktree_cleanup_failed", removal);
+                return ApiResults.Conflict(removal.Message, "workspace_cleanup_failed", removal);
             }
 
             return ApiResults.Ok(ToCleanupResponse(removal));
@@ -229,18 +300,38 @@ public static class WorkspaceRoutes
     private static IResult? CheckRepositoryConfig(IssueReadModel? issue) =>
         IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue);
 
-    private static (string RepoPath, string BaseBranch) ResolveRepo(IssueReadModel issue)
+    private static string ResolveBaseBranch(IssueReadModel issue) =>
+        ResolveRepoBaseBranch(issue);
+
+    private static string ResolveRepoBaseBranch(IssueReadModel issue)
     {
         var repo = issue.Repository
             ?? throw new InvalidOperationException(
                 "Issue repository context is not resolved; check IssueRepositoryResolutionHelpers.CheckRepositoryConfigured first.");
-        var repoPath = string.IsNullOrWhiteSpace(repo.Path) ? IssueRepositoryResolutionHelpers.DefaultRepoPath : repo.Path;
-        var baseBranch = string.IsNullOrWhiteSpace(repo.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : repo.BaseBranch;
-        return (repoPath, baseBranch);
+        return string.IsNullOrWhiteSpace(repo.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : repo.BaseBranch;
     }
 
-    private static Task<bool> BranchExistsAsync(IGitService git, IssueReadModel issue, string repoPath)
-        => git.BranchExistsAsync(repoPath, $"mo/issue-{issue.Number}");
+    private static async Task<WorkspaceIdentity?> ResolveWorkspaceAsync(IWorkflowRunStore store, IssueReadModel issue)
+    {
+        if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
+            return null;
+        var run = await store.LoadAsync(issue.WorkflowRunId);
+        return run?.Workspace;
+    }
+
+    /// <summary>
+    /// Returns the workspace's recorded head ref. The runner materializes the
+    /// per-run branch <c>mohist/run-${workflowRunId}</c> inside the workspace;
+    /// review APIs use that ref instead of legacy <c>mo/issue-{N}</c>.
+    /// </summary>
+    private static string? WorkspaceHeadOrNull(WorkspaceIdentity? workspace, string? workflowRunId)
+    {
+        if (workspace is not null && !string.IsNullOrWhiteSpace(workspace.Branch))
+            return workspace.Branch;
+        if (string.IsNullOrWhiteSpace(workflowRunId))
+            return null;
+        return WorkflowRunBranch.For(workflowRunId);
+    }
 
     private static bool IsWorkflowActive(IssueWorkflowStatus? workflow)
     {
@@ -249,7 +340,9 @@ public static class WorkspaceRoutes
             || string.Equals(status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static object ToCleanupResponse(WorktreeRemovalResult removal) => new
+    private static object Unavailable(string reason, string message) => new { available = false, reason, message };
+
+    private static object ToCleanupResponse(WorkspaceRemovalResult removal) => new
     {
         removed = removal.Removed,
         message = removal.Message,
@@ -257,7 +350,7 @@ public static class WorkspaceRoutes
         {
             new
             {
-                type = "worktree",
+                type = "workspace",
                 status = removal.Status,
                 path = removal.Path,
                 reason = removal.Reason,

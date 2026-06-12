@@ -38,32 +38,18 @@ public class ProjectGrain : Grain, IProjectGrain
 
     public Task<ProjectInfo?> GetAsync() => Task.FromResult(_project);
 
-    public async Task<ProjectInfo> CreateAsync(string name, string path, string? baseBranch)
+    public async Task<ProjectInfo> CreateAsync(string name)
     {
         name = ProjectName.NormalizeOrThrow(name);
 
         if (_project is not null)
             throw new InvalidOperationException($"Project '{GrainKey}' already exists");
 
-        var branch = baseBranch ?? "main";
-        var repos = new List<RepositoryInfo>
-        {
-            new()
-            {
-                Name = "main",
-                Path = path,
-                BaseBranch = branch,
-                IsDefault = true,
-            },
-        };
-
         var entry = new ProjectRow
         {
             Id = GrainKey,
             Name = name,
-            Path = path,
-            BaseBranch = branch,
-            RepositoriesJson = JsonSerializer.Serialize(repos),
+            RepositoriesJson = "[]",
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -74,22 +60,17 @@ public class ProjectGrain : Grain, IProjectGrain
         {
             Id = GrainKey,
             Name = name,
-            Path = path,
-            BaseBranch = branch,
-            Repositories = repos,
+            Repositories = [],
             Variables = ProjectVariablesBag.Empty,
         };
 
-        _log.LogInformation("Project {Name} created at {Path}", name, path);
+        _log.LogInformation("Project {Name} created", name);
         return _project;
     }
 
-    public async Task<ProjectInfo?> UpdateAsync(string? baseBranch)
+    public async Task<ProjectInfo?> UpdateAsync()
     {
         if (_project is null) return null;
-
-        if (baseBranch is not null)
-            _project.BaseBranch = baseBranch;
 
         _project.UpdatedAt = DateTime.UtcNow.ToString("o");
 
@@ -97,7 +78,6 @@ public class ProjectGrain : Grain, IProjectGrain
         var entry = await db.Projects.FindAsync(GrainKey);
         if (entry is null) return null;
 
-        entry.BaseBranch = _project.BaseBranch;
         entry.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
 
@@ -124,22 +104,65 @@ public class ProjectGrain : Grain, IProjectGrain
         return Task.FromResult(_project?.Repositories ?? []);
     }
 
-    public async Task<ProjectInfo?> AddRepositoryAsync(string repoName, string? path, string? remote, string? baseBranch)
+    public async Task<ProjectInfo?> AddRepositoryAsync(string repoName, string gitUrl, string? baseBranch, bool? isDefault = null)
     {
         if (_project is null) return null;
-        if (string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(remote))
-            throw new ArgumentException("path or remote is required");
+        if (string.IsNullOrWhiteSpace(gitUrl))
+            throw new ArgumentException("gitUrl is required");
         if (_project.Repositories.Any(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"Repository '{repoName}' already exists");
+
+        var makeDefault = isDefault ?? _project.Repositories.Count == 0;
+        if (makeDefault)
+        {
+            foreach (var r in _project.Repositories)
+                r.IsDefault = false;
+        }
 
         _project.Repositories.Add(new RepositoryInfo
         {
             Name = repoName,
-            Path = path,
-            Remote = remote,
+            GitUrl = gitUrl,
             BaseBranch = baseBranch ?? "main",
-            IsDefault = _project.Repositories.Count == 0,
+            IsDefault = makeDefault,
         });
+
+        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        await PersistRepositoriesAsync();
+        return _project;
+    }
+
+    public async Task<ProjectInfo?> UpdateRepositoryAsync(string repoName, string? newName = null, string? gitUrl = null, string? baseBranch = null, bool? isDefault = null)
+    {
+        if (_project is null) return null;
+
+        var repo = _project.Repositories.FirstOrDefault(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase));
+        if (repo is null) return null;
+
+        if (!string.IsNullOrWhiteSpace(newName) && !string.Equals(newName, repo.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            if (_project.Repositories.Any(r => string.Equals(r.Name, newName, StringComparison.OrdinalIgnoreCase) && !string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException($"Repository '{newName}' already exists");
+            repo.Name = newName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(gitUrl))
+            repo.GitUrl = gitUrl;
+
+        if (baseBranch is not null)
+            repo.BaseBranch = string.IsNullOrWhiteSpace(baseBranch) ? "main" : baseBranch;
+
+        if (isDefault == true)
+        {
+            foreach (var r in _project.Repositories)
+                r.IsDefault = false;
+            repo.IsDefault = true;
+        }
+        else if (isDefault == false && repo.IsDefault && _project.Repositories.Count > 1)
+        {
+            repo.IsDefault = false;
+            _project.Repositories[0].IsDefault = true;
+        }
 
         _project.UpdatedAt = DateTime.UtcNow.ToString("o");
         await PersistRepositoriesAsync();
