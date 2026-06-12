@@ -1,7 +1,7 @@
 import { request, projectApiPath } from '../../../shared/api/client'
 import type {
-  AgentSessionEventsResponse,
   AgentSessionMetadata,
+  AgentSessionTranscriptResponse,
   CoderSessionSummary,
 } from '../model/types'
 
@@ -15,8 +15,8 @@ export function getAgentSessionMetadata(number: number, name: string, projectId?
   )
 }
 
-export function getAgentSessionEvents(number: number, name: string, projectId?: string | null) {
-  return request<AgentSessionEventsResponse>(
-    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/events`),
+export function getAgentSessionTranscript(number: number, name: string, projectId?: string | null) {
+  return request<AgentSessionTranscriptResponse>(
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/transcript`),
   )
 }

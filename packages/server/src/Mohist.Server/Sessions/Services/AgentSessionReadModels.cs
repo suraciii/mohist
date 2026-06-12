@@ -40,8 +40,6 @@ public sealed record AgentSessionDto(
     int? ToolCallCount,
     int? ToolErrorCount);
 
-public sealed record AgentSessionRuntimeEventLogDto(string Id, string SessionId, string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName, string? AgentSessionId, string? WorkId, string? WorkType, string? Stage, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
-
 public sealed record AgentSessionMetadataDto(
     string Id,
     string SessionName,
@@ -68,18 +66,62 @@ public sealed record AgentSessionMetadataDto(
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
 
 public sealed record AgentSessionMetadataCounts(
-    [property: JsonPropertyName("eventCount")] int EventCount,
+    [property: JsonPropertyName("segmentCount")] int SegmentCount,
     [property: JsonPropertyName("toolCount")] int ToolCount);
 
-public sealed record AgentSessionRuntimeEventDto(
-    [property: JsonPropertyName("id")] long Id,
-    [property: JsonPropertyName("sequence")] long Sequence,
-    [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("payload")] JsonElement? Payload,
-    [property: JsonPropertyName("createdAt")] string CreatedAt);
+public sealed class AgentSessionTranscriptResponse
+{
+    public IReadOnlyList<AgentSessionTranscriptTurnDto> Turns { get; init; } = [];
+    public int SegmentCount { get; init; }
+    public string? LastActivityAt { get; init; }
+}
 
-public sealed record AgentSessionRuntimeEventsResponse(
-    [property: JsonPropertyName("events")] IReadOnlyList<AgentSessionRuntimeEventDto> Events);
+public sealed class AgentSessionTranscriptTurnDto
+{
+    public string Id { get; init; } = string.Empty;
+    public string StartedAt { get; init; } = string.Empty;
+    public string? CompletedAt { get; set; }
+    public bool Incomplete { get; set; }
+    public AgentSessionTranscriptUserDto User { get; init; } = new();
+    public List<AgentSessionTranscriptPartDto> Assistant { get; init; } = [];
+}
+
+public sealed class AgentSessionTranscriptUserDto
+{
+    public string Role { get; init; } = "mohist";
+    public string Text { get; init; } = string.Empty;
+    public string Kind { get; init; } = "task";
+    public string SentAt { get; init; } = string.Empty;
+}
+
+public sealed class AgentSessionTranscriptPartDto
+{
+    public string Id { get; init; } = string.Empty;
+    public string Type { get; init; } = string.Empty;
+    public string? Text { get; init; }
+    public AgentSessionTranscriptToolDto? Tool { get; set; }
+    public string? Message { get; init; }
+    public string? Kind { get; init; }
+    public string? StartedAt { get; init; }
+    public string? CompletedAt { get; set; }
+    public string? At { get; init; }
+}
+
+public sealed class AgentSessionTranscriptToolDto
+{
+    public string ToolCallId { get; init; } = string.Empty;
+    public string ToolName { get; init; } = "unknown";
+    public string? NormalizedName { get; init; }
+    public string Status { get; set; } = "pending";
+    public string? Title { get; set; }
+    public string? Input { get; set; }
+    public string? Output { get; set; }
+    public string? Error { get; set; }
+    public string StartedAt { get; init; } = string.Empty;
+    public string? CompletedAt { get; set; }
+    public string? RawInput { get; set; }
+    public string? RawOutput { get; set; }
+}
 
 public sealed record AgentSessionSummaryDto(
     string Id,
@@ -133,7 +175,7 @@ public sealed record WorkflowSessionDto(
     string? FailureReason,
     int? ExitCode);
 
-public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IReadOnlyList<AgentSessionRuntimeEventLogDto> Events);
+public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
 public sealed record ActivityDto(
     ActivitySummaryDto Summary,

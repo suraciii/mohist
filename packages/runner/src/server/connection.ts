@@ -54,7 +54,7 @@ export class ServerConnection {
   }
 
   async workflowAgentSessionEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/events`, body, signal)
+    await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/session-events`, body, signal)
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal) {

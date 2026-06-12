@@ -128,7 +128,7 @@ export function useCoderSessions(issueNumber: number) {
     )
 
     unsubs.push(
-      onAgentEvent('agent_usage_update', (detail) => {
+      onAgentEvent('usage.updated', (detail) => {
         if (!mountedRef.current) return
         setLiveSessions((prev) => {
           const idx = prev.findIndex((s) => s.id === detail.coderSessionId)

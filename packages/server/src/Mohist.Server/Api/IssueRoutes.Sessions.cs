@@ -30,7 +30,7 @@ public static partial class IssueRoutes
             return metadata is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(metadata);
         });
 
-        group.MapGet("/{number:int}/sessions/{name}/events", async (
+        group.MapGet("/{number:int}/sessions/{name}/transcript", async (
             HttpContext ctx,
             string projectRef,
             int number,
@@ -38,8 +38,8 @@ public static partial class IssueRoutes
             AgentSessionQuerier sessions) =>
         {
             var project = GetRequiredProject(ctx);
-            var events = await sessions.GetSessionEventsAsync(project.Id, number, name);
-            return events is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(events);
+            var transcript = await sessions.GetSessionTranscriptAsync(project.Id, number, name);
+            return transcript is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(transcript);
         });
     }
 }

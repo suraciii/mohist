@@ -28,7 +28,6 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
-    public DbSet<AgentSessionRuntimeEventRow> AgentSessionRuntimeEvents { get; set; } = null!;
     public DbSet<AgentSessionTranscriptSegmentRow> AgentSessionTranscriptSegments { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
@@ -118,25 +117,6 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName }).IsUnique();
             entity.HasIndex(e => e.AgentSessionId);
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
-        });
-
-        modelBuilder.Entity<AgentSessionRuntimeEventRow>(entity =>
-        {
-            entity.ToTable("AgentSessionRuntimeEvents");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.SessionName).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.AgentSessionId).HasMaxLength(256);
-            entity.Property(e => e.WorkId).HasMaxLength(256);
-            entity.Property(e => e.WorkType).HasMaxLength(64);
-            entity.Property(e => e.Stage).HasMaxLength(64);
-            entity.Property(e => e.Type).HasMaxLength(128).IsRequired();
-            entity.Property(e => e.PayloadJson).IsRequired();
-            entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
-            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
-            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
         });
 
         modelBuilder.Entity<AgentSessionTranscriptSegmentRow>(entity =>

@@ -49,7 +49,7 @@ function persistedEvent(text: string): SessionEvent {
   return {
     id: 1,
     sequence: 1,
-    type: 'agent_message',
+    type: 'assistant_text',
     payload: { text },
     createdAt: '2026-06-12T00:00:00.000Z',
   }

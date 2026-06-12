@@ -16,20 +16,16 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private static readonly HashSet<string> TranscriptEventTypes = new(StringComparer.Ordinal)
     {
-        "mohist_prompt",
-        "coder_text_chunk",
-        "coder_thought_chunk",
-        "coder_tool_call",
-        "agent_message_chunk",
-        "agent_thought_chunk",
-        "tool_call",
-        "tool_call_update",
-        "ralph_task_update",
-        "ralph_loop_progress",
-        "agent_liveness_status",
-        "agent_usage_update",
-        "agent_session_model_resolved",
-        "agent_session_terminal",
+        "session.input",
+        "message.delta",
+        "reasoning.delta",
+        "tool_call.started",
+        "tool_call.updated",
+        "tool_call.completed",
+        "session.liveness",
+        "usage.updated",
+        "model.resolved",
+        "session.closed",
     };
 
     private readonly IAgentSessionStore _stateStore;
@@ -73,7 +69,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (segments.Count == 0)
             return;
 
-        await _stateStore.SaveTranscriptAsync(SessionId, _session, [], segments, ct);
+        await _stateStore.SaveTranscriptAsync(SessionId, _session, segments, ct);
     }
 
     public async Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command)
@@ -149,7 +145,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await ToInfoAsync(session);
     }
 
-    public async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command)
+    public async Task<IReadOnlyList<AgentSessionEventInfo>> AppendSessionEventsAsync(AppendAgentSessionEventsCommand command)
     {
         if (command.Events.Count == 0) return [];
 
@@ -166,7 +162,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         await EnsureTranscriptInitializedAsync(session.Id);
 
-        var entries = new List<AgentSessionRuntimeEventRow>();
+        var entries = new List<AgentSessionEventEnvelope>();
         var statusChangedThisCall = new List<string>();
         var terminalThisCall = false;
         AgentSessionEvent? terminalEvent = null;
@@ -176,7 +172,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             if (!wasTerminal)
             {
-                if (e.Type == "agent_liveness_status")
+                if (IsLivenessEvent(e.Type))
                 {
                     var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                     var status = GetStringProp(payload, "status") ?? "running";
@@ -186,7 +182,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                     if (activatedEvents.Count > 0)
                         statusChangedThisCall.Add(AgentSessionStatusNames.ToName(session.Status.Phase));
                 }
-                else if (e.Type == "agent_session_terminal")
+                else if (IsSessionClosedEvent(e.Type))
                 {
                     var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                     var status = GetStringProp(payload, "status") ?? "completed";
@@ -207,7 +203,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                         terminalStatus = status;
                     }
                 }
-                else if (e.Type == "agent_usage_update")
+                else if (IsUsageEvent(e.Type))
                 {
                     var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                     var inputTokens = GetLongProp(payload, "inputTokens");
@@ -234,21 +230,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
                     events.AddRange(session.ApplyUsage(inputTokens, outputTokens, totalTokens, cachedReadTokens, thoughtTokens, costAmount, costCurrency, contextWindowUsed, contextWindowSize));
                 }
-                else if (e.Type == "agent_session_model_resolved")
+                else if (IsModelResolvedEvent(e.Type))
                 {
                     // Resolved model is an event-level observation; consumers project it from transcript segments.
                 }
-                else if (e.Type == "tool_call")
+                else if (IsToolStartedEvent(e.Type))
                 {
                     // Tool calls are transcript events, not AgentSession domain state.
                 }
-                else if (e.Type == "tool_call_update")
+                else if (IsToolUpdateEvent(e.Type))
                 {
                     // Tool call state is projected from transcript segments.
                 }
             }
 
-            entries.Add(new AgentSessionRuntimeEventRow
+            entries.Add(new AgentSessionEventEnvelope
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
@@ -281,7 +277,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             forceFlushPending: terminalThisCall || session.IsTerminal || command.Events.Count > 1);
 
         if (events.Count > 0 || transcriptSegments.Count > 0)
-            await _stateStore.SaveTranscriptAsync(SessionId, session, events, transcriptSegments);
+            if (transcriptSegments.Count > 0)
+                await _stateStore.SaveTranscriptAsync(SessionId, session, transcriptSegments);
+            else
+                await _stateStore.SaveAsync(SessionId, session, events);
         _session = session;
 
         await FanOutRealtimeAsync(
@@ -306,7 +305,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private async Task FanOutRealtimeAsync(
         AgentSession session,
-        IReadOnlyList<AgentSessionRuntimeEventRow> entries,
+        IReadOnlyList<AgentSessionEventEnvelope> entries,
         bool firstRowThisCall,
         bool terminalThisCall,
         AgentSessionEvent? terminalEvent,
@@ -461,13 +460,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .Where(e => e.SessionId == sessionId)
             .Select(e => (long?)e.Sequence)
             .MaxAsync() ?? 0;
-        var latestRuntimeSequence = await db.AgentSessionRuntimeEvents
-            .Where(e => e.SessionId == sessionId)
-            .Select(e => (long?)e.Sequence)
-            .MaxAsync() ?? 0;
-        var latestSequence = Math.Max(latestTranscriptSequence, latestRuntimeSequence);
-        _transcript.Initialize(latestSequence + 1);
-        _realtimeSequence = Math.Max(_realtimeSequence, latestSequence);
+        _transcript.Initialize(latestTranscriptSequence + 1);
+        _realtimeSequence = Math.Max(_realtimeSequence, latestTranscriptSequence);
     }
 
     private async Task<AgentSession> GetOrCreateAsync()
@@ -581,58 +575,55 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         eventSummary.ToolErrorCount);
     }
 
-    private async Task<AgentSessionRuntimeEventSummary> LoadEventSummaryAsync(string sessionId)
+    private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var transcriptSegments = await db.AgentSessionTranscriptSegments.AsNoTracking()
             .Where(e => e.SessionId == sessionId)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
-        var runtimeEvents = await db.AgentSessionRuntimeEvents.AsNoTracking()
-            .Where(e => e.SessionId == sessionId)
-            .OrderBy(e => e.Sequence)
-            .ToListAsync();
-        var events = runtimeEvents
-            .Concat(transcriptSegments.Select(ToRuntimeLike))
+        var events = transcriptSegments
+            .Select(ToEventEnvelope)
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToList();
 
         string? resolvedModel = null;
         string? failureCategory = null;
-        var toolCalls = 0;
-        var toolErrors = 0;
+        var toolCallIds = new HashSet<string>(StringComparer.Ordinal);
+        var failedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var e in events)
         {
-            if (e.Type == "agent_session_model_resolved")
+            if (e.Type == "model.resolved" || e.Type == "model")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                 resolvedModel = GetStringProp(payload, "resolvedModel") ?? resolvedModel;
             }
-            else if (e.Type == "agent_session_terminal")
+            else if (e.Type == "session.closed" || e.Type == "session_closed")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                 failureCategory = GetStringProp(payload, "failureCategory") ?? failureCategory;
             }
-            else if (e.Type == "tool_call")
-            {
-                toolCalls++;
-            }
-            else if (e.Type == "tool_call_update")
+            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                var status = GetStringProp(payload, "status") ?? GetStringProp(payload, "state");
+                var toolCallId = GetToolStringProp(payload, "toolCallId")
+                    ?? GetToolStringProp(payload, "id")
+                    ?? GetToolStringProp(payload, "callId")
+                    ?? e.Sequence.ToString();
+                toolCallIds.Add(toolCallId);
+                var status = GetToolStringProp(payload, "status") ?? GetToolStringProp(payload, "state");
                 if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
-                    toolErrors++;
+                    failedToolCallIds.Add(toolCallId);
             }
         }
 
-        return new AgentSessionRuntimeEventSummary(
+        return new AgentSessionEventSummary(
             resolvedModel,
             failureCategory,
-            toolCalls == 0 ? null : toolCalls,
-            toolErrors == 0 ? null : Math.Min(toolErrors, Math.Max(toolCalls, toolErrors)));
+            toolCallIds.Count == 0 ? null : toolCallIds.Count,
+            failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count);
     }
 
     private async Task<AgentSessionRow?> LoadProjectionAsync(string sessionId)
@@ -641,7 +632,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId);
     }
 
-    private static AgentSessionRuntimeEventInfo ToEventInfo(AgentSessionRuntimeEventRow e) => new(
+    private static AgentSessionEventInfo ToEventInfo(AgentSessionEventEnvelope e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.ProjectId,
@@ -657,7 +648,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         e.PayloadJson,
         e.CreatedAt.ToString("o"));
 
-    private static AgentSessionRuntimeEventRow ToRuntimeLike(AgentSessionTranscriptSegmentRow segment) => new()
+    private static AgentSessionEventEnvelope ToEventEnvelope(AgentSessionTranscriptSegmentRow segment) => new()
     {
         Id = segment.Id,
         SessionId = segment.SessionId,
@@ -674,6 +665,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         PayloadJson = segment.PayloadJson,
         CreatedAt = segment.StartedAt,
     };
+
+    private static bool IsLivenessEvent(string type) => type == "session.liveness";
+    private static bool IsSessionClosedEvent(string type) => type == "session.closed";
+    private static bool IsUsageEvent(string type) => type == "usage.updated";
+    private static bool IsModelResolvedEvent(string type) => type == "model.resolved";
+    private static bool IsToolStartedEvent(string type) => type == "tool_call.started";
+    private static bool IsToolUpdateEvent(string type) => type is "tool_call.updated" or "tool_call.completed";
 
     private static string ExtractText(string json)
     {
@@ -702,6 +700,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             : null;
     }
 
+    private static string? GetToolStringProp(JsonElement payload, string name)
+    {
+        if (payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("toolCall", out var toolCall))
+        {
+            var nested = GetStringProp(toolCall, name);
+            if (nested is not null) return nested;
+        }
+
+        return GetStringProp(payload, name);
+    }
+
     private static int? GetIntProp(JsonElement element, string name)
     {
         if (element.ValueKind != JsonValueKind.Object) return null;
@@ -726,84 +736,29 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             : null;
     }
 
-    private static ToolCallProjection? ParseToolCall(string json, string eventType)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var payload = doc.RootElement;
-            var nested = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("toolCall", out var toolCall)
-                ? toolCall
-                : default;
-
-            var toolCallId = GetStringProp(nested, "toolCallId")
-                ?? GetStringProp(payload, "toolCallId")
-                ?? GetStringProp(payload, "id")
-                ?? GetStringProp(payload, "callId");
-            if (string.IsNullOrWhiteSpace(toolCallId)) return null;
-
-            var toolName = GetStringProp(nested, "toolName")
-                ?? GetStringProp(payload, "toolName")
-                ?? GetStringProp(payload, "name")
-                ?? GetStringProp(payload, "kind")
-                ?? "unknown";
-            var status = GetStringProp(nested, "status")
-                ?? GetStringProp(payload, "status")
-                ?? (eventType == "tool_call_update" ? "completed" : "started");
-
-            return new ToolCallProjection(
-                toolName,
-                MapToolState(status),
-                toolCallId,
-                GetStringProp(nested, "title") ?? GetStringProp(payload, "title"),
-                CloneProperty(nested, "input") ?? CloneProperty(payload, "rawInput") ?? CloneProperty(payload, "input"),
-                CloneProperty(nested, "output") ?? CloneProperty(payload, "rawOutput") ?? CloneProperty(payload, "output"),
-                CloneProperty(nested, "metadata") ?? CloneProperty(payload, "metadata") ?? CloneProperty(payload, "rawOutputMetadata"),
-                CloneProperty(nested, "details") ?? CloneProperty(payload, "details"),
-                GetStringProp(nested, "normalizedName") ?? GetStringProp(payload, "normalizedName"),
-                GetStringProp(nested, "displayTitle") ?? GetStringProp(payload, "displayTitle"),
-                GetStringProp(nested, "displaySubtitle") ?? GetStringProp(payload, "displaySubtitle"),
-                GetStringProp(nested, "category") ?? GetStringProp(payload, "category"));
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string MapToolState(string status) => status switch
-    {
-        "pending" or "in_progress" or "running" => "started",
-        "completed" or "failed" or "cancelled" or "timeout" => status,
-        _ => status
-    };
-
-    private static JsonElement? CloneProperty(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
-            return null;
-        return value.Clone();
-    }
-
-    private sealed record ToolCallProjection(
-        string ToolName,
-        string State,
-        string ToolCallId,
-        string? Title,
-        JsonElement? RawInput,
-        JsonElement? RawOutput,
-        JsonElement? Metadata,
-        JsonElement? Details,
-        string? NormalizedName,
-        string? DisplayTitle,
-        string? DisplaySubtitle,
-        string? Category);
-
-    private sealed record AgentSessionRuntimeEventSummary(
+    private sealed record AgentSessionEventSummary(
         string? ResolvedModel,
         string? FailureCategory,
         int? ToolCallCount,
         int? ToolErrorCount);
+
+    private sealed record AgentSessionEventEnvelope
+    {
+        public long Id { get; init; }
+        public string SessionId { get; init; } = string.Empty;
+        public string ProjectId { get; init; } = string.Empty;
+        public int IssueNumber { get; init; }
+        public string WorkflowRunId { get; init; } = string.Empty;
+        public string SessionName { get; init; } = string.Empty;
+        public string? AgentSessionId { get; init; }
+        public string? WorkId { get; init; }
+        public string? WorkType { get; init; }
+        public string? Stage { get; init; }
+        public long Sequence { get; init; }
+        public string Type { get; init; } = string.Empty;
+        public string PayloadJson { get; init; } = "{}";
+        public DateTime CreatedAt { get; init; }
+    }
 
     private sealed class TranscriptAccumulator
     {
@@ -822,7 +777,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         public IReadOnlyList<AgentSessionTranscriptSegmentRow> Accept(
             AgentSession session,
-            IReadOnlyList<AgentSessionRuntimeEventRow> rows,
+            IReadOnlyList<AgentSessionEventEnvelope> rows,
             DateTime now,
             bool forceFlushPending)
         {
@@ -840,7 +795,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                     continue;
 
                 FlushInto(session, now, segments);
-                segments.Add(CreateSegment(row, row.Type, row.PayloadJson, correlationId: ExtractCorrelationId(row.PayloadJson), rawEventCount: 1, startedAt: row.CreatedAt, updatedAt: row.CreatedAt, completedAt: row.CreatedAt));
+                segments.Add(CreateSegment(row, ToTranscriptSegmentKind(row.Type), row.PayloadJson, correlationId: ExtractCorrelationId(row.PayloadJson), rawEventCount: 1, startedAt: row.CreatedAt, updatedAt: row.CreatedAt, completedAt: row.CreatedAt));
             }
 
             if (forceFlushPending)
@@ -856,7 +811,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return segments;
         }
 
-        private void AppendText(AgentSessionRuntimeEventRow row, string kind, DateTime now, List<AgentSessionTranscriptSegmentRow> segments)
+        private void AppendText(AgentSessionEventEnvelope row, string kind, DateTime now, List<AgentSessionTranscriptSegmentRow> segments)
         {
             var text = ExtractText(row.PayloadJson);
             if (string.IsNullOrEmpty(text))
@@ -898,7 +853,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             if (_pending is null)
                 return;
 
-            var row = new AgentSessionRuntimeEventRow
+            var row = new AgentSessionEventEnvelope
             {
                 SessionId = _pending.SessionId,
                 ProjectId = _pending.ProjectId,
@@ -914,7 +869,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             FlushPending(row, segments);
         }
 
-        private void FlushPending(AgentSessionRuntimeEventRow row, List<AgentSessionTranscriptSegmentRow> segments)
+        private void FlushPending(AgentSessionEventEnvelope row, List<AgentSessionTranscriptSegmentRow> segments)
         {
             if (_pending is null)
                 return;
@@ -940,7 +895,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         private AgentSessionTranscriptSegmentRow CreateSegment(
-            AgentSessionRuntimeEventRow row,
+            AgentSessionEventEnvelope row,
             string kind,
             string payloadJson,
             string? correlationId,
@@ -970,9 +925,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         private static string? ToTextSegmentKind(string eventType) => eventType switch
         {
-            "agent_message_chunk" or "agent_output_chunk" or "coder_text_chunk" => "agent_message",
-            "agent_thought_chunk" or "coder_thought_chunk" => "agent_thought",
+            "message.delta" => "assistant_text",
+            "reasoning.delta" => "assistant_reasoning",
             _ => null
+        };
+
+        private static string ToTranscriptSegmentKind(string eventType) => eventType switch
+        {
+            "session.input" => "input",
+            "tool_call.started" or "tool_call.updated" or "tool_call.completed" => "tool_call",
+            "session.liveness" => "status",
+            "usage.updated" => "usage",
+            "model.resolved" => "model",
+            "session.closed" => "session_closed",
+            _ => eventType
         };
 
         private static string? ExtractCorrelationId(string json)
@@ -982,9 +948,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 var payload = JsonSerializer.Deserialize<JsonElement>(json);
                 return GetStringProp(payload, "messageId")
                     ?? GetStringProp(payload, "partId")
-                    ?? GetStringProp(payload, "id")
-                    ?? GetStringProp(payload, "callId")
-                    ?? GetStringProp(payload, "toolCallId");
+                    ?? GetToolStringProp(payload, "toolCallId")
+                    ?? GetToolStringProp(payload, "id")
+                    ?? GetToolStringProp(payload, "callId");
             }
             catch
             {

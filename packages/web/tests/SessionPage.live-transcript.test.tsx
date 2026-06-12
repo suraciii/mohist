@@ -272,7 +272,7 @@ describe('useSessionTranscript live parity and convergence', () => {
   it('appends liveness probe and recovery parts for live liveness events', async () => {
     const { result } = renderLiveTranscript()
     act(() => {
-      dispatchAgentEvent('agent_liveness_status', {
+      dispatchAgentEvent('session.liveness', {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
@@ -284,7 +284,7 @@ describe('useSessionTranscript live parity and convergence', () => {
         probeDeadlineAt: '2024-01-01T00:00:31.000Z',
         activeProbeVersion: 4,
       })
-      dispatchAgentEvent('agent_liveness_status', {
+      dispatchAgentEvent('session.liveness', {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',

@@ -18,10 +18,10 @@ public interface IEventsClient
     /// <summary>
     /// Receive a transcript (non-domain, observation-only) event from the
     /// dedicated <see cref="ITranscriptEventPublisher"/> channel. Carries a
-    /// <see cref="TranscriptEnvelope"/> whose <c>Type</c> is the runtime
-    /// event name (e.g. <c>coder_text_chunk</c>, <c>ralph_task_update</c>)
-    /// and whose <c>Payload</c> is the deserialised payload JSON the
-    /// runner sent. The <c>OnEvent</c> channel is intentionally
+    /// <see cref="TranscriptEnvelope"/> whose <c>Type</c> is the generic
+    /// session event name (e.g. <c>message.delta</c> or
+    /// <c>tool_call.started</c>) and whose <c>Payload</c> is the deserialised
+    /// payload JSON the runner sent. The <c>OnEvent</c> channel is intentionally
     /// separate: domain events and transcript events flow on physically
     /// distinct SignalR methods so the Web can subscribe to one without
     /// the other.

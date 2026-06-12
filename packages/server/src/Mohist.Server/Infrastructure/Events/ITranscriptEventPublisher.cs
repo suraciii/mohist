@@ -2,13 +2,13 @@ namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
 /// Publishes a transcript (non-domain, observation-only) event from
-/// <c>AgentSessionGrain.AppendRuntimeEventsAsync</c> to subscribed SignalR
+/// <c>AgentSessionGrain.AppendSessionEventsAsync</c> to subscribed SignalR
 /// connections on the dedicated <c>OnTranscriptEvent</c> channel.
 ///
 /// <para>
 /// Transcript events are NOT domain events: they describe what the
-/// agent is doing (a text chunk, a tool call, a Ralph task progress
-/// tick, a liveness heartbeat, …) without changing the
+/// agent session is doing (input, text/reasoning deltas, tool calls,
+/// usage/model observations, liveness, and close notices) without changing the
 /// <c>AgentSession</c> lifecycle. They therefore do not — and must
 /// not — flow through <see cref="IEventPublisher"/> /
 /// <see cref="Mohist.Server.Events.Hub.EventBridge"/>. This publisher
@@ -22,11 +22,10 @@ namespace Mohist.Server.Infrastructure.Events;
 /// the envelope's <see cref="TranscriptEnvelope.Type"/> in its
 /// subscription set. The Web is expected to include the canonical
 /// transcript event set in its subscription list when it wants live
-/// transcript data, including both the legacy coder event names and
-/// runner-native aliases such as <c>agent_message</c>,
-/// <c>agent_thought</c>, <c>agent_message_chunk</c>,
-/// <c>agent_thought_chunk</c>, <c>tool_call</c>, and
-/// <c>tool_call_update</c>.
+/// transcript data, such as <c>session.input</c>,
+/// <c>message.delta</c>, <c>reasoning.delta</c>,
+/// <c>tool_call.started</c>, <c>tool_call.updated</c>,
+/// <c>tool_call.completed</c>, and <c>session.closed</c>.
 /// </para>
 /// </summary>
 public interface ITranscriptEventPublisher

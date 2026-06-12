@@ -43,7 +43,7 @@ export interface RecoveryStatus {
   reason?: string
 }
 
-function mapLivenessToRecoveryStatus(status: AgentDetailEventMap['agent_liveness_status']['status']): RecoveryStatus['status'] {
+function mapLivenessToRecoveryStatus(status: AgentDetailEventMap['session.liveness']['status']): RecoveryStatus['status'] {
   if (status === 'probing') return 'recovering'
   if (status === 'running') return 'recovered'
   return 'failed'
@@ -121,6 +121,11 @@ function timelineToolCallToEntry(tool: SessionTimelineToolCall, fallbackAt: stri
   }
 }
 
+function toToolCallEntryState(state: AgentDetailEventMap['tool_call.started']['state']): ToolCallEntry['state'] {
+  if (state === 'timeout') return 'failed'
+  return state
+}
+
 function timelineRecoveryToEvent(recovery: SessionTimelineRecovery): RecoveryEvent {
   return {
     status: recovery.status,
@@ -159,8 +164,8 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   const [rounds, setRounds] = useState<Round[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [taskProgress, setTaskProgress] = useState<TaskProgressMap>(new Map())
-  const [loopProgress, setLoopProgress] = useState<LoopProgress | null>(null)
+  const [taskProgress] = useState<TaskProgressMap>(new Map())
+  const [loopProgress] = useState<LoopProgress | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null)
   const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null)
 
@@ -191,19 +196,19 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
       let changed = false
 
       for (const event of batch) {
-        if (event.sessionUpdate === 'agent_message_chunk' || event.sessionUpdate === 'agent_message') {
+        if (event.sessionUpdate === 'message.delta') {
           const textData = event.data as { text?: string }
           if (textData?.text) {
             lastRound.agentText += textData.text
             changed = true
           }
-        } else if (event.sessionUpdate === 'agent_thought_chunk' || event.sessionUpdate === 'agent_thought') {
+        } else if (event.sessionUpdate === 'reasoning.delta') {
           const textData = event.data as { text?: string }
           if (textData?.text) {
             lastRound.thoughtText += textData.text
             changed = true
           }
-        } else if (event.sessionUpdate === 'tool_call') {
+        } else if (event.sessionUpdate === 'tool_call.started') {
           const d = event.data as Record<string, unknown>
           const toolCallId = d.toolCallId as string | undefined
           const toolName = (d.title ?? d.kind ?? '') as string
@@ -223,7 +228,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
             lastRound.toolCalls = [...lastRound.toolCalls, entry]
             changed = true
           }
-        } else if (event.sessionUpdate === 'tool_call_update') {
+        } else if (event.sessionUpdate === 'tool_call.updated' || event.sessionUpdate === 'tool_call.completed') {
           const d = event.data as Record<string, unknown>
           const toolCallId = d.toolCallId as string | undefined
           const status = d.status as string | undefined
@@ -434,7 +439,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     )
 
     unsubs.push(
-      onAgentEvent('coder_text_chunk', (detail) => {
+      onAgentEvent('message.delta', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         const s = sessionRef.current
         if (s && detail.acpSessionId !== s.acpSessionId) return
@@ -450,93 +455,80 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     )
 
     unsubs.push(
-      onAgentEvent('coder_tool_call', (detail) => {
+      onAgentEvent('reasoning.delta', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         const s = sessionRef.current
         if (s && detail.acpSessionId !== s.acpSessionId) return
-        const map = liveToolCallMapRef.current
-        const existing = map.get(detail.toolCallId)
-
-        if (detail.state === 'started') {
-          const entry: ToolCallEntry = {
-            executionId: detail.executionId,
-            toolName: detail.toolName,
-            state: 'started',
-            timestamp: Date.now(),
-            acpSessionId: detail.acpSessionId,
-            toolCallId: detail.toolCallId,
-            title: detail.title,
-            rawInput: typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput ?? ''),
-          }
-          map.set(detail.toolCallId, entry)
-          setRoundsRef.current((prev) => {
-            if (prev.length === 0) return prev
-            const next = [...prev]
-            const lastRound = { ...next[next.length - 1] }
-            lastRound.toolCalls = [...lastRound.toolCalls, entry]
-            next[next.length - 1] = lastRound
-            return next
-          })
-        } else if (existing) {
-          const updated: ToolCallEntry = {
-            ...existing,
-            state: detail.state,
-            title: detail.title ?? existing.title,
-            rawInput: detail.rawInput != null ? (typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput)) : existing.rawInput,
-            rawOutput: typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? ''),
-          }
-          map.set(detail.toolCallId, updated)
-          setRoundsRef.current((prev) => {
-            if (prev.length === 0) return prev
-            const next = [...prev]
-            const lastRound = { ...next[next.length - 1] }
-            lastRound.toolCalls = lastRound.toolCalls.map((tc) =>
-              tc.toolCallId === detail.toolCallId ? updated : tc,
-            )
-            next[next.length - 1] = lastRound
-            return next
-          })
-        }
-      }),
-    )
-
-    unsubs.push(
-      onAgentEvent('ralph_task_update', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (sessionRef.current) return
-        setTaskProgress((prev) => {
-          const next = new Map(prev)
-          const existing = next.get(detail.taskId)
-          const statusMap: Record<string, 'running' | 'passed' | 'failed' | 'retrying' | 'pending'> = {
-            started: 'running',
-            completed: 'passed',
-            failed: 'failed',
-            retrying: 'retrying',
-          }
-          next.set(detail.taskId, {
-            taskId: detail.taskId,
-            taskIndex: detail.taskIndex,
-            totalTasks: detail.totalTasks,
-            status: statusMap[detail.status] ?? 'pending',
-            executionId: detail.executionId,
-            attempt: detail.attempt ?? existing?.attempt,
-            error: detail.error ?? existing?.error,
-          })
+        setRoundsRef.current((prev) => {
+          if (prev.length === 0) return prev
+          const next = [...prev]
+          const lastRound = { ...next[next.length - 1] }
+          lastRound.thoughtText += detail.text
+          next[next.length - 1] = lastRound
           return next
         })
       }),
     )
 
-    unsubs.push(
-      onAgentEvent('ralph_loop_progress', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (sessionRef.current) return
-        setLoopProgress({
-          completed: detail.completed,
-          failed: detail.failed,
-          total: detail.total,
+    const handleToolEvent = (detail: AgentDetailEventMap['tool_call.started']) => {
+      if (detail.issueId !== issueId || !mountedRef.current) return
+      const s = sessionRef.current
+      if (s && detail.acpSessionId !== s.acpSessionId) return
+      const map = liveToolCallMapRef.current
+      const existing = map.get(detail.toolCallId)
+
+      if (detail.state === 'started') {
+        const entry: ToolCallEntry = {
+          executionId: detail.executionId,
+          toolName: detail.toolName,
+          state: 'started',
+          timestamp: Date.now(),
+          acpSessionId: detail.acpSessionId,
+          toolCallId: detail.toolCallId,
+          title: detail.title,
+          rawInput: typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput ?? ''),
+        }
+        map.set(detail.toolCallId, entry)
+        setRoundsRef.current((prev) => {
+          if (prev.length === 0) return prev
+          const next = [...prev]
+          const lastRound = { ...next[next.length - 1] }
+          lastRound.toolCalls = [...lastRound.toolCalls, entry]
+          next[next.length - 1] = lastRound
+          return next
         })
-      }),
+      } else if (existing) {
+        const updated: ToolCallEntry = {
+          ...existing,
+          state: toToolCallEntryState(detail.state),
+          title: detail.title ?? existing.title,
+          rawInput: detail.rawInput != null ? (typeof detail.rawInput === 'string' ? detail.rawInput : JSON.stringify(detail.rawInput)) : existing.rawInput,
+          rawOutput: typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? ''),
+        }
+        map.set(detail.toolCallId, updated)
+        setRoundsRef.current((prev) => {
+          if (prev.length === 0) return prev
+          const next = [...prev]
+          const lastRound = { ...next[next.length - 1] }
+          lastRound.toolCalls = lastRound.toolCalls.map((tc) =>
+            tc.toolCallId === detail.toolCallId ? updated : tc,
+          )
+          next[next.length - 1] = lastRound
+          return next
+        })
+      }
+    }
+
+    unsubs.push(
+      onAgentEvent('tool_call.started', handleToolEvent),
+    )
+
+    unsubs.push(
+      onAgentEvent('tool_call.updated', handleToolEvent),
+    )
+
+    unsubs.push(
+      onAgentEvent('tool_call.completed', handleToolEvent),
     )
 
     unsubs.push(
@@ -582,7 +574,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     )
 
     unsubs.push(
-      onAgentEvent('agent_liveness_status', (detail) => {
+      onAgentEvent('session.liveness', (detail) => {
         if (detail.issueId !== issueId || !mountedRef.current) return
         const status = mapLivenessToRecoveryStatus(detail.status)
         const attempt = detail.activeProbeVersion ?? detail.satisfiedProbeVersion ?? detail.probeVersion ?? 1

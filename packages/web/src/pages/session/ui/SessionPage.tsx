@@ -3,26 +3,18 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useIssue } from '../../../entities/issue'
 import { useCoderSessions } from '../../../entities/coder-session'
-import { getAgentSessionMetadata, getAgentSessionEvents } from '../../../entities/coder-session'
+import { getAgentSessionMetadata, getAgentSessionTranscript } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
-import type { AgentSessionMetadata, AgentSessionEvent, SessionMetadata, SessionStatusKind, CoderSessionDetail } from '../../../entities/coder-session'
+import type { AgentSessionMetadata, AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, CoderSessionDetail, SessionTurn } from '../../../entities/coder-session'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
 import { Button } from '@/shared/ui/components/button'
 
 type StatusKind = SessionStatusKind
 
-const EMPTY_EVENTS: AgentSessionEvent[] = []
-
-function countTurnsFromEvents(events: AgentSessionEvent[]): number {
-  let count = 0
-  for (const event of events) {
-    if (event.type === 'mohist_prompt') count += 1
-  }
-  return count
-}
+const EMPTY_TURNS: SessionTurn[] = []
 
 function buildSessionMetadata(
   meta: AgentSessionMetadata,
@@ -52,7 +44,7 @@ function buildSessionMetadata(
     probeSentAt: null,
     probeDeadlineAt: null,
     failureReason: null,
-    eventCount: meta.metadata.eventCount,
+    segmentCount: meta.metadata.segmentCount,
     toolCount: meta.metadata.toolCount,
     turnCount,
     changedFiles: meta.changedFiles,
@@ -442,8 +434,8 @@ export function SessionPage() {
     () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
   )
-  const eventsQueryKey = useMemo(
-    () => ['issues', issueNumber, projectId, 'agent-session-events', lookupKey] as const,
+  const transcriptQueryKey = useMemo(
+    () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
   )
 
@@ -461,29 +453,25 @@ export function SessionPage() {
   })
 
   const {
-    data: eventsResponse,
-  } = useQuery<{ events: AgentSessionEvent[] } | null, Error>({
-    queryKey: eventsQueryKey,
+    data: transcriptResponse,
+  } = useQuery<AgentSessionTranscriptResponse | null, Error>({
+    queryKey: transcriptQueryKey,
     queryFn: async () => {
       if (!decodedSessionName) return null
-      return getAgentSessionEvents(issueNumber, decodedSessionName, projectId)
+      return getAgentSessionTranscript(issueNumber, decodedSessionName, projectId)
     },
     enabled: hasRoute && !!metadata,
   })
 
-  const initialEvents = useMemo<AgentSessionEvent[]>(() => eventsResponse?.events ?? EMPTY_EVENTS, [eventsResponse])
+  const initialTurns = useMemo<SessionTurn[]>(() => transcriptResponse?.turns ?? EMPTY_TURNS, [transcriptResponse])
 
   const lastEventAt = useMemo(() => {
-    const list = eventsResponse?.events
-    if (!list || list.length === 0) return null
-    return list[list.length - 1]?.createdAt ?? null
-  }, [eventsResponse])
+    return transcriptResponse?.lastActivityAt ?? null
+  }, [transcriptResponse])
 
   const detail: CoderSessionDetail | null = useMemo(() => {
     if (!metadata) return null
-    const turnCount = eventsResponse?.events
-      ? countTurnsFromEvents(eventsResponse.events)
-      : 0
+    const turnCount = transcriptResponse?.turns.length ?? 0
     return {
       id: metadata.id,
       acpSessionId: metadata.acpSessionId,
@@ -497,10 +485,10 @@ export function SessionPage() {
       stage: metadata.stage,
       title: metadata.title,
       metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.acpSessionId),
-      turns: [],
+      turns: initialTurns,
       incomplete: false,
     }
-  }, [metadata, eventsResponse, lastEventAt])
+  }, [metadata, transcriptResponse, initialTurns, lastEventAt])
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -527,8 +515,8 @@ export function SessionPage() {
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
     acpSessionId,
-    initialEvents: initialEvents.length > 0 ? initialEvents : undefined,
-    sessionQueryKeys: [metadataQueryKey, eventsQueryKey],
+    initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
+    sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
   })
 

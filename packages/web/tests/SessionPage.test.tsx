@@ -148,7 +148,7 @@ function convertLegacyTurnsToEvents(turns: SessionTurn[]): AgentSessionEvent[] {
         events.push({
           id: sequence,
           sequence,
-          type: 'agent_liveness_status',
+          type: 'session.liveness',
           payload: { status: 'failed', failureReason: part.message },
           createdAt: part.at,
         })
@@ -2580,7 +2580,7 @@ describe('Terminal session events trigger refetch', () => {
     }))
 
     act(() => {
-      dispatchAgentEvent('agent_liveness_status', {
+      dispatchAgentEvent('session.liveness', {
         issueId: '123',
         projectId: 'project-1',
         executionId: 'exec-123',
