@@ -4,10 +4,15 @@ import type {
   AgentSessionMetadata,
   AgentSessionTranscriptResponse,
   CoderSessionSummary,
+  WorkflowRunSession,
 } from '../model/types'
 
 export function getCoderSessions(number: number, projectId?: string | null) {
   return request<CoderSessionSummary[]>(projectApiPath(projectId, `/issues/${number}/coder-sessions`))
+}
+
+export function getWorkflowRunSessions(workflowRunId: string) {
+  return request<WorkflowRunSession[]>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/sessions`)
 }
 
 export function getAgentSessionMetadata(number: number, name: string, projectId?: string | null) {

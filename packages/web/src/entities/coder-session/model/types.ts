@@ -86,6 +86,39 @@ export interface CoderSessionSummary {
   toolErrorCount?: number | null
 }
 
+export interface WorkflowRunSession {
+  id: string
+  workflowRunId: string
+  sessionName: string
+  acpSessionId: string | null
+  projectId: string | null
+  issueNumber: number | null
+  runnerId: string | null
+  status: string
+  model: string | null
+  workDir: string | null
+  processPid: number | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  lastDataAt: string | null
+  failureReason: string | null
+  exitCode: number | null
+  resolvedModel?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
+}
+
 export type CoderSessionItem = CoderSessionSummary
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'
