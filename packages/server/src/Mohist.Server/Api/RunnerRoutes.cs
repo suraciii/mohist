@@ -98,9 +98,10 @@ public static class RunnerRoutes
         {
             var labels = WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName);
             var session = await sessions.GetByLabelsAsync(labels, ct);
-            return session is null
-                ? ApiResults.NotFound($"Session {sessionName} not found")
-                : ApiResults.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
+            if (session is null)
+                return ApiResults.NotFound($"Session {sessionName} not found");
+
+            return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/open", async (

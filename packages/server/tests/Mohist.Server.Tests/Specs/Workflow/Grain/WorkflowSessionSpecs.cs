@@ -48,6 +48,7 @@ public class WorkflowSessionSpecs
             model = "openai/gpt-4o",
             processPid = 123,
         });
+        var fetched = await GetRawAsync<RunnerAgentSessionDto>(RunnerSessionPath("runner-1", projectId, workflowRunId, sessionName));
 
         await PostRawAsync<SessionEventDto[]>(RunnerAgentSessionRuntimeEventsPath("runner-1", projectId, workflowRunId, sessionName), new
         {
@@ -71,6 +72,9 @@ public class WorkflowSessionSpecs
         var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflow-runs/{workflowRunId}/sessions/{sessionName}");
 
         Assert.Equal(workflowRunId, opened.Key.WorkflowRunId);
+        Assert.Equal(workflowRunId, fetched.Key.WorkflowRunId);
+        Assert.Equal("acp-1", fetched.AcpSessionId);
+        Assert.Equal("/workspace", fetched.WorkDir);
         Assert.Equal(sessionName, detail.Session.SessionName);
         Assert.Equal("acp-1", detail.Session.AgentSessionId);
         Assert.Equal("active", detail.Session.Status);
@@ -179,6 +183,13 @@ public class WorkflowSessionSpecs
     private async Task<T> PostRawAsync<T>(string path, object body)
     {
         using var response = await _client.PostAsJsonAsync(path, body, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<T>(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))!;
+    }
+
+    private async Task<T> GetRawAsync<T>(string path)
+    {
+        using var response = await _client.GetAsync(path);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<T>(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))!;
     }
