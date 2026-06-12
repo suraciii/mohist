@@ -719,6 +719,8 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
     sessionId = session.sessionId
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
+    const resolvedModel = extractResolvedModelId(session)
+    await attachSessionToServer(context, sessionId, acp.processPid, agentConfig, resolvedModel)
 
     acp.setSessionHandlers(
       sessionId,
@@ -734,8 +736,6 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       },
     )
 
-    const resolvedModel = extractResolvedModelId(session)
-
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
@@ -749,7 +749,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
         }
       }
 
-    await emitSessionStarted(context, sessionId, acp.processPid, agentConfig, resolvedModel)
+    await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
@@ -838,8 +838,8 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
     sessionId = session.sessionId
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
-
     const resolvedModel = extractResolvedModelId(session)
+    await attachSessionToServer(context, sessionId, acpProcess.processPid, agentConfig, resolvedModel)
 
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
@@ -854,7 +854,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
         }
       }
 
-    await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig, resolvedModel)
+    await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
@@ -1019,11 +1019,20 @@ function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"da
 }
 
 async function emitSessionStarted(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined, resolvedModel?: string, resolvedModelSource: "newSession" | "resumeSession" = "newSession") {
+  await attachSessionToServer(context, agentSessionId, processPid, agentConfig, resolvedModel)
+  await emitResolvedModelEvent(context, agentSessionId, resolvedModel, resolvedModelSource)
+}
+
+async function attachSessionToServer(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined, resolvedModel?: string) {
   const sessionName = sessionNameFromContext(context)
   const projectId = context.projectId
   if (sessionName && context.serverConnection && projectId) {
     await context.serverConnection.attachWorkflowAgentSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }, context.signal)
   }
+}
+
+async function emitResolvedModelEvent(context: ActionContext, agentSessionId: string, resolvedModel: string | undefined, resolvedModelSource: "newSession" | "resumeSession" | "config_option_update") {
+  const sessionName = sessionNameFromContext(context)
   if (resolvedModel && sessionName) {
     await emitSessionEvent(context, RESOLVED_MODEL_EVENT, buildResolvedModelEventPayload(context, agentSessionId, resolvedModel, resolvedModelSource))
   }
@@ -1038,15 +1047,7 @@ async function emitSessionEvent(context: ActionContext, type: string, payload: J
 }
 
 function sessionNameFromContext(context: ActionContext) {
-  const requested = stringInput(context.with, "session")
-  if (!requested) return context.workId
-  if (!context.workId || requested === context.workId) return requested
-  if (context.stage && requested === context.stage && isRetryAttemptWorkId(context.workId)) return `${requested}:${context.workId}`
-  return requested
-}
-
-function isRetryAttemptWorkId(workId: string) {
-  return /(?:^|[.:])\d*[2-9]\d*$/.test(workId)
+  return stringInput(context.with, "session") ?? context.workId
 }
 
 function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {
