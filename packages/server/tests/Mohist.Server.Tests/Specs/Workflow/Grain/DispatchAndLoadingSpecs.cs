@@ -231,6 +231,46 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task StageAgentModelNull_InheritsProjectAgentModelAtDispatch()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(
+                "build",
+                [new("T-001", "Implement feature", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                {
+                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature")
+                })],
+                [])
+        ], Variables: new Dictionary<string, JsonElement?>
+        {
+            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "old-coding/legacy" })
+        }));
+
+        await PatchProjectVariablesAsync(TestProjectId(_workflowId!), new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" }
+            }),
+            Stages: new Dictionary<string, StageVariables>
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new
+                {
+                    agent = new { model = (string?)null }
+                }))
+            }));
+
+        var (task, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("T-001.", task.WorkId);
+        Assert.Contains("minimax-coding-plan/MiniMax-M3", task.With);
+        Assert.DoesNotContain("old-coding/legacy", task.With);
+        Assert.DoesNotContain("kimi-for-coding/k2p6", task.With);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task StageAgentVariableUpdate_DispatchedTaskInheritsLatestModelOverRenderedAgent()
     {
         var initialAgent = new { type = "opencode", model = "old-coding/legacy" };

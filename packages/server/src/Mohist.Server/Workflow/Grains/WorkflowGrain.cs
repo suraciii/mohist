@@ -533,7 +533,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             ? resolved.Vars.Value
             : JsonSerializer.Deserialize<JsonElement>("{}");
 
-        // Apply resolved stage-scoped vars
+        // Apply resolved stage-scoped vars. Nulls in a stage override mean "inherit"
+        // for dispatch-time variables; the persistent profile still keeps null as
+        // the user's cleared override.
         if (resolved.Stages is not null
             && !string.IsNullOrWhiteSpace(stage)
             && resolved.Stages.TryGetValue(stage, out var stageVars)
@@ -541,7 +543,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
         {
             var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
-            effectiveVarsJson = VariableBundle.DeepMerge(effectiveVarsJson, stageOverlay) ?? stageOverlay;
+            effectiveVarsJson = DeepMergeSkippingNulls(effectiveVarsJson, stageOverlay) ?? stageOverlay;
         }
 
         // Spread vars to payload top level (preserves opaque user context like "custom: { answer: 42 }")
@@ -590,6 +592,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
+        LogDispatchAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved);
 
         // --- 4. Extract issueRef from context (issue/project from _variables.Json) ---
         WorkIssueRef? issueRef = BuildIssueRef(payload);
@@ -607,6 +610,130 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _leaseState.State = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
         _lastRunnerId = runnerId;
         return dispatch;
+    }
+
+    private static JsonElement? DeepMergeSkippingNulls(JsonElement? @base, JsonElement? overlay)
+    {
+        if (!overlay.HasValue) return @base;
+        if (overlay.Value.ValueKind == JsonValueKind.Null) return @base;
+        if (!@base.HasValue) return overlay.Value.Clone();
+
+        if (@base.Value.ValueKind != JsonValueKind.Object)
+            return overlay.Value.Clone();
+        if (overlay.Value.ValueKind != JsonValueKind.Object)
+            return overlay.Value.Clone();
+
+        using var baseDoc = JsonDocument.Parse(@base.Value.GetRawText());
+        using var overlayDoc = JsonDocument.Parse(overlay.Value.GetRawText());
+        var merged = MergeObjectsSkippingNulls(baseDoc.RootElement, overlayDoc.RootElement);
+        return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(merged, WorkflowVariableJson.Options));
+    }
+
+    private static Dictionary<string, object?> MergeObjectsSkippingNulls(JsonElement @base, JsonElement overlay)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var property in @base.EnumerateObject())
+            result[property.Name] = JsonElementToObject(property.Value);
+
+        foreach (var property in overlay.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.Null)
+                continue;
+
+            if (property.Value.ValueKind == JsonValueKind.Object
+                && @base.TryGetProperty(property.Name, out var existing)
+                && existing.ValueKind == JsonValueKind.Object)
+            {
+                result[property.Name] = MergeObjectsSkippingNulls(existing, property.Value);
+                continue;
+            }
+
+            result[property.Name] = JsonElementToObject(property.Value);
+        }
+
+        return result;
+    }
+
+    private static object? JsonElementToObject(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => element.EnumerateObject().ToDictionary(p => p.Name, p => JsonElementToObject(p.Value), StringComparer.Ordinal),
+        JsonValueKind.Array => element.EnumerateArray().Select(JsonElementToObject).ToArray(),
+        JsonValueKind.String => element.GetString(),
+        JsonValueKind.Number when element.TryGetInt64(out var l) => l,
+        JsonValueKind.Number when element.TryGetDouble(out var d) => d,
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.Null => null,
+        _ => element.GetRawText(),
+    };
+
+    private void LogDispatchAgentDiagnostics(
+        string stage,
+        string workId,
+        Dictionary<string, JsonElement?>? dispatchWith,
+        JsonElement effectiveVarsJson,
+        VariableBundle resolved)
+    {
+        var withModel = TryReadNestedString(dispatchWith, "agent", "model");
+        var varsModel = TryReadNestedString(effectiveVarsJson, "agent", "model");
+        var stageModel = TryReadStageAgentModel(resolved, stage);
+        var source = !string.IsNullOrWhiteSpace(withModel)
+            ? "with.agent.model"
+            : !string.IsNullOrWhiteSpace(varsModel)
+                ? "vars.agent.model"
+                : !string.IsNullOrWhiteSpace(stageModel.Value)
+                    ? "stage.vars.agent.model"
+                    : "none";
+
+        _log.LogInformation(
+            "Workflow {WorkflowId} dispatch {WorkId} stage={Stage} agent model diagnostics: with={WithModel}, vars={VarsModel}, stageOverride={StageModel}, source={Source}",
+            GrainKey,
+            workId,
+            stage,
+            withModel ?? "(null)",
+            varsModel ?? "(null)",
+            stageModel.Present
+                ? stageModel.Value ?? "(null override)"
+                : "(missing)",
+            source);
+    }
+
+    private static string? TryReadNestedString(Dictionary<string, JsonElement?>? values, string key, string nestedKey)
+    {
+        if (values is null || !values.TryGetValue(key, out var value) || !value.HasValue)
+            return null;
+        return TryReadNestedString(value.Value, nestedKey);
+    }
+
+    private static string? TryReadNestedString(JsonElement value, string key, string nestedKey)
+    {
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(key, out var nested))
+            return null;
+        return TryReadNestedString(nested, nestedKey);
+    }
+
+    private static string? TryReadNestedString(JsonElement value, string key)
+    {
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(key, out var nested))
+            return null;
+        return nested.ValueKind == JsonValueKind.String ? nested.GetString() : null;
+    }
+
+    private static (bool Present, string? Value) TryReadStageAgentModel(VariableBundle resolved, string stage)
+    {
+        if (resolved.Stages is null || !resolved.Stages.TryGetValue(stage, out var stageVars) || !stageVars.Vars.HasValue)
+            return (false, null);
+
+        var vars = stageVars.Vars.Value;
+        if (vars.ValueKind != JsonValueKind.Object
+            || !vars.TryGetProperty("agent", out var agent)
+            || agent.ValueKind != JsonValueKind.Object
+            || !agent.TryGetProperty("model", out var model))
+            return (false, null);
+
+        return model.ValueKind == JsonValueKind.String
+            ? (true, model.GetString())
+            : (true, null);
     }
 
     private static WorkIssueRef? BuildIssueRef(Dictionary<string, JsonElement?> payload)
