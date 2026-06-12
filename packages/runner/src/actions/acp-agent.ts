@@ -247,6 +247,11 @@ interface AgentConfig {
   probeTimeoutMs?: number
 }
 
+interface RequestedModel {
+  model?: string
+  source: "agent.model" | "with.model" | "none"
+}
+
 interface LivenessProbeState {
   probeSentAt?: string
   probeDeadlineAt?: string
@@ -433,6 +438,52 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
     livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
     probeTimeoutMs: numberInput(with_, "probeTimeoutMs") ?? undefined,
   }
+}
+
+function resolveRequestedModel(context: ActionContext, agentConfig?: AgentConfig): RequestedModel {
+  const agentModel = agentConfig?.model
+  if (agentModel?.trim()) return { model: agentModel, source: "agent.model" }
+  const withModel = stringInput(context.with, "model")
+  if (withModel?.trim()) return { model: withModel, source: "with.model" }
+  return { source: "none" }
+}
+
+async function applyRequestedModel(connection: ClientSideConnection, context: ActionContext, sessionId: string, requested: RequestedModel, notify: (activityType?: string) => void) {
+  if (!requested.model?.trim()) {
+    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested))
+    return
+  }
+
+  console.info("mohist acp setting requested model", modelDiagnosticContext(context, requested))
+  try {
+    await connection.setSessionConfigOption({ sessionId, configId: "model", value: requested.model })
+    recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
+    console.info("mohist acp set model via config option", modelDiagnosticContext(context, requested))
+  } catch (configError) {
+    console.warn("mohist acp set model via config option failed; trying set_session_model", { ...modelDiagnosticContext(context, requested), error: errorMessage(configError) })
+    try {
+      await connection.unstable_setSessionModel({ sessionId, modelId: requested.model })
+      recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
+      console.info("mohist acp set model via set_session_model", modelDiagnosticContext(context, requested))
+    } catch (modelError) {
+      console.warn("mohist acp set requested model failed; provider default may be used", { ...modelDiagnosticContext(context, requested), error: errorMessage(modelError) })
+    }
+  }
+}
+
+function modelDiagnosticContext(context: ActionContext, requested: RequestedModel) {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    stage: context.stage,
+    sessionName: sessionNameFromContext(context),
+    requestedModel: requested.model ?? null,
+    requestedModelSource: requested.source,
+  }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function buildFallbackPrompt(context: ActionContext) {
@@ -634,18 +685,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
 
     const resolvedModel = extractResolvedModelId(resumeResult)
 
-    const model = agentConfig?.model ?? stringInput(context.with, "model")
-    if (model?.trim()) {
-      try {
-          await connection.setSessionConfigOption({ sessionId: acpSessionId, configId: "model", value: model })
-          recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
-        } catch {
-          try {
-            await connection.unstable_setSessionModel({ sessionId: acpSessionId, modelId: model })
-            recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
-          } catch {}
-        }
-      }
+    await applyRequestedModel(connection, context, acpSessionId, resolveRequestedModel(context, agentConfig), notifyData)
 
     acp.setSessionHandlers(
       acpSessionId,
@@ -741,18 +781,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       },
     )
 
-    const model = agentConfig?.model ?? stringInput(context.with, "model")
-    if (model?.trim()) {
-      try {
-          await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
-          recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
-        } catch {
-          try {
-            await connection.unstable_setSessionModel({ sessionId, modelId: model })
-            recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
-          } catch {}
-        }
-      }
+    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData)
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
     await emitSessionEvent(context, SESSION_INPUT_EVENT, buildPromptEvent(context, prompt, sessionId))
@@ -846,18 +875,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     const resolvedModel = extractResolvedModelId(session)
     await attachSessionToServer(context, sessionId, acpProcess.processPid, agentConfig, resolvedModel)
 
-    const model = agentConfig?.model ?? stringInput(context.with, "model")
-    if (model?.trim()) {
-      try {
-          await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
-          recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
-        } catch {
-          try {
-            await connection.unstable_setSessionModel({ sessionId, modelId: model })
-            recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
-          } catch {}
-        }
-      }
+    await applyRequestedModel(connection, context, sessionId, resolveRequestedModel(context, agentConfig), notifyData)
 
     await emitResolvedModelEvent(context, sessionId, resolvedModel, "newSession")
     await emitSessionEvent(context, SESSION_INPUT_EVENT, buildPromptEvent(context, prompt, sessionId))
