@@ -3,7 +3,7 @@ import type { SessionEvent } from '../../session/model/view'
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface AgentSessionMetadataCounts {
-  segmentCount?: number
+  partCount?: number
   eventCount?: number
   toolCount: number
   promptCount?: number
@@ -126,7 +126,7 @@ export interface SessionMetadata {
   probeSentAt?: string | null
   probeDeadlineAt?: string | null
   failureReason?: string | null
-  segmentCount?: number
+  partCount?: number
   eventCount?: number
   toolCount?: number
   turnCount?: number
@@ -236,7 +236,7 @@ export interface CoderSessionDetail {
 
 export interface AgentSessionTranscriptResponse {
   turns: SessionTurn[]
-  segmentCount: number
+  partCount: number
   lastActivityAt: string | null
 }
 

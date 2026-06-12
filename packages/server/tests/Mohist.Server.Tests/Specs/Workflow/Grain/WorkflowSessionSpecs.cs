@@ -73,11 +73,11 @@ public class WorkflowSessionSpecs
         Assert.Equal("acp-1", detail.Session.AgentSessionId);
         Assert.Equal("active", detail.Session.Status);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
-        Assert.Equal(3, detail.Transcript.SegmentCount);
+        Assert.Equal(2, detail.Transcript.PartCount);
         var turn = Assert.Single(detail.Transcript.Turns);
         Assert.Equal("write proposal", turn.User.Text);
         Assert.Contains(turn.Assistant, p => p.Type == "text" && p.Text == "done");
-        Assert.NotNull(turn.CompletedAt);
+        Assert.Null(turn.CompletedAt);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -130,11 +130,11 @@ public class WorkflowSessionSpecs
         var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
         Assert.Equal(sessionId, metadata.Id);
         Assert.Equal(sessionName, metadata.SessionName);
-        Assert.Equal(5, metadata.Metadata.SegmentCount);
+        Assert.Equal(3, metadata.Metadata.PartCount);
         Assert.Equal(0, metadata.Metadata.ToolCount);
 
         var transcript = await _client.GetDataAsync<IssueSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}/transcript");
-        Assert.Equal(5, transcript.SegmentCount);
+        Assert.Equal(3, transcript.PartCount);
         var turn = Assert.Single(transcript.Turns);
         Assert.Equal(promptBody, turn.User.Text);
         Assert.Equal("task", turn.User.Kind);
@@ -206,8 +206,8 @@ public class WorkflowSessionSpecs
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record IssueSessionMetadataTestDto(string Id, string SessionName, IssueSessionMetadataCountsTestDto Metadata);
-    private sealed record IssueSessionMetadataCountsTestDto(int SegmentCount, int ToolCount);
-    private sealed record IssueSessionTranscriptTestResponse(IssueSessionTranscriptTurnTestDto[] Turns, int SegmentCount, string? LastActivityAt);
+    private sealed record IssueSessionMetadataCountsTestDto(int PartCount, int ToolCount);
+    private sealed record IssueSessionTranscriptTestResponse(IssueSessionTranscriptTurnTestDto[] Turns, int PartCount, string? LastActivityAt);
     private sealed record IssueSessionTranscriptTurnTestDto(string Id, string StartedAt, string? CompletedAt, bool Incomplete, IssueSessionTranscriptUserTestDto User, IssueSessionTranscriptPartTestDto[] Assistant);
     private sealed record IssueSessionTranscriptUserTestDto(string Text, string Kind, string SentAt);
     private sealed record IssueSessionTranscriptPartTestDto(string Id, string Type, string? Text, string? ToolCallId, string? Status, string? StartedAt, string? CompletedAt, string? Message, string? Kind, string? At);

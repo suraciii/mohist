@@ -136,7 +136,7 @@ public class AgentSessionSpecs
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(7, metadata.GetProperty("segmentCount").GetInt32());
+        Assert.Equal(6, metadata.GetProperty("partCount").GetInt32());
         Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
         Assert.Equal("anthropic/claude-sonnet-4", root.GetProperty("resolvedModel").GetString());
         Assert.Equal(100, root.GetProperty("inputTokens").GetInt64());
@@ -182,7 +182,7 @@ public class AgentSessionSpecs
 
         var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
 
-        Assert.Equal(2, response.SegmentCount);
+        Assert.Equal(1, response.PartCount);
         var turn = Assert.Single(response.Turns);
         Assert.Equal("mohist", turn.User.Role);
         Assert.Equal("task", turn.User.Kind);
@@ -259,13 +259,13 @@ public class AgentSessionSpecs
         });
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToArrayAsync();
-        Assert.Equal([1L, 2L], segments.Select(e => e.Sequence).ToArray());
-        Assert.Equal("assistant_text", segments[0].Kind);
-        Assert.Equal("session_closed", segments[1].Kind);
+        Assert.Equal([1L, 2L], parts.Select(e => e.Sequence).ToArray());
+        Assert.Equal("text", parts[0].Type);
+        Assert.Equal("session_closed", parts[1].Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -273,23 +273,36 @@ public class AgentSessionSpecs
     [Fact]
     public async Task RunnerAppendsManyChunks_PersistsAggregatedTranscriptSegmentsOnly()
     {
-        var (project, _, _, session) = await CreateStartedAgentSessionAsync("chunk-aggregation");
+        var (project, issue, work, _) = await CreateStartedAgentSessionAsync("chunk-aggregation", sessionName: "plan");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        await issueGrain.StartWorkAsync();
+
+        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
+        var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         var runtimeEvents = Enumerable.Range(0, 96)
-            .Select(i => new { type = "reasoning.delta", payload = new { text = i.ToString("D2") } })
+            .Select(i => new { type = "reasoning.delta", payload = new { text = i.ToString("D2"), messageId = "reasoning-1" } })
             .Cast<object>()
             .ToArray();
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeEvents });
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToArrayAsync();
 
-        Assert.Equal(3, segments.Length);
-        Assert.All(segments, segment => Assert.Equal("assistant_reasoning", segment.Kind));
-        Assert.All(segments, segment => Assert.Equal(32, segment.RawEventCount));
+        var part = Assert.Single(parts);
+        Assert.Equal("reasoning", part.Type);
+        Assert.Equal(96, part.RawEventCount);
+        Assert.Equal(string.Concat(Enumerable.Range(0, 96).Select(i => i.ToString("D2"))), part.Text);
+
+        var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{session.IssueNumber}/sessions/{session.SessionName}/transcript");
+        var turn = Assert.Single(response.Turns);
+        var transcriptPart = Assert.Single(turn.Assistant);
+        Assert.Equal("reasoning", transcriptPart.Type);
+        Assert.Equal(string.Concat(Enumerable.Range(0, 96).Select(i => i.ToString("D2"))), transcriptPart.Text);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -607,13 +620,13 @@ public class AgentSessionSpecs
         Assert.Equal(0.001, grainSession.CostAmount);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var runtimeEvents = await db.AgentSessionTranscriptSegments
+        var runtimeEvents = await db.AgentSessionTranscriptParts
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
         Assert.Equal(2, runtimeEvents.Count);
-        Assert.Equal("session_closed", runtimeEvents[0].Kind);
-        Assert.Equal("usage", runtimeEvents[1].Kind);
+        Assert.Equal("session_closed", runtimeEvents[0].Type);
+        Assert.Equal("usage", runtimeEvents[1].Type);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1096,7 +1109,7 @@ public class AgentSessionSpecs
     private sealed record ActivityTaskProgressDto(int Completed, int Total);
     private sealed record ActivityPreviewDto(string Kind, string Text, string CreatedAt);
     private sealed record ActivityWaitingDto(int IssueNumber, string IssueTitle, string Label);
-    private sealed record AgentSessionTranscriptTestResponse(AgentSessionTranscriptTurnTestDto[] Turns, int SegmentCount, string? LastActivityAt);
+    private sealed record AgentSessionTranscriptTestResponse(AgentSessionTranscriptTurnTestDto[] Turns, int PartCount, string? LastActivityAt);
     private sealed record AgentSessionTranscriptTurnTestDto(string Id, AgentSessionTranscriptUserTestDto User, AgentSessionTranscriptPartTestDto[] Assistant, string StartedAt, string? CompletedAt, bool Incomplete);
     private sealed record AgentSessionTranscriptUserTestDto(string Role, string Text, string Kind, string SentAt);
     private sealed record AgentSessionTranscriptPartTestDto(string Id, string Type, string? Text, string? Message, string? Kind);

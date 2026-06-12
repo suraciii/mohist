@@ -42,9 +42,9 @@ public class AgentSessionQuerier
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName, ct);
         if (session is null) return null;
 
-        var segments = await LoadTranscriptSegmentsAsync(db, session.Id, ct);
+        var transcript = await LoadTranscriptAsync(db, session.Id, ct);
         var domainSession = AgentSessionJson.Deserialize(session);
-        return domainSession is null ? null : new WorkflowSessionDetailDto(ToWorkflowDto(domainSession), BuildTranscriptResponse(segments));
+        return domainSession is null ? null : new WorkflowSessionDetailDto(ToWorkflowDto(domainSession), BuildTranscriptResponse(transcript));
     }
 
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -126,8 +126,9 @@ public class AgentSessionQuerier
         var domainSession = AgentSessionJson.Deserialize(session);
         if (domainSession is null) return null;
 
-        var transcriptEvents = (await LoadTranscriptSegmentsAsync(db, session.Id, ct)).Select(ToProjection).ToList();
-        var segmentCount = transcriptEvents.Count;
+        var transcript = await LoadTranscriptAsync(db, session.Id, ct);
+        var transcriptEvents = transcript.Parts.Select(ToProjection).ToList();
+        var partCount = transcriptEvents.Count;
         var eventSummary = BuildEventSummary(transcriptEvents);
         var toolCount = eventSummary.ToolCallCount ?? 0;
         var usage = Usage(domainSession);
@@ -155,7 +156,7 @@ public class AgentSessionQuerier
             eventSummary.FailureCategory,
             eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount,
-            new AgentSessionMetadataCounts(segmentCount, toolCount));
+            new AgentSessionMetadataCounts(partCount, toolCount));
     }
 
     public async Task<AgentSessionTranscriptResponse?> GetSessionTranscriptAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
@@ -164,8 +165,8 @@ public class AgentSessionQuerier
         var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
-        var segments = await LoadTranscriptSegmentsAsync(db, session.Id, ct);
-        return BuildTranscriptResponse(segments);
+        var transcript = await LoadTranscriptAsync(db, session.Id, ct);
+        return BuildTranscriptResponse(transcript);
     }
 
     private static async Task<AgentSessionRow?> FindCurrentSessionAsync(
@@ -265,21 +266,21 @@ public class AgentSessionQuerier
     {
         if (sessionIds.Length == 0) return [];
 
-        var latestSegmentSeqs = await db.AgentSessionTranscriptSegments.AsNoTracking()
+        var latestPartSeqs = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .GroupBy(e => e.SessionId)
             .Select(g => new { SessionId = g.Key, Sequence = g.Max(e => e.Sequence) })
             .ToListAsync(ct);
 
         var result = new Dictionary<string, TranscriptEventProjection>(StringComparer.Ordinal);
-        if (latestSegmentSeqs.Count > 0)
+        if (latestPartSeqs.Count > 0)
         {
-            var latestBySession = latestSegmentSeqs.ToDictionary(e => e.SessionId, e => e.Sequence);
-            var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+            var latestBySession = latestPartSeqs.ToDictionary(e => e.SessionId, e => e.Sequence);
+            var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
                 .Where(e => sessionIds.Contains(e.SessionId))
                 .ToListAsync(ct);
 
-            foreach (var e in segments.Where(e => latestBySession.TryGetValue(e.SessionId, out var seq) && e.Sequence == seq))
+            foreach (var e in parts.Where(e => latestBySession.TryGetValue(e.SessionId, out var seq) && e.Sequence == seq))
                 result[e.SessionId] = ToProjection(e);
         }
 
@@ -292,12 +293,12 @@ public class AgentSessionQuerier
         var ids = sessionIds.Distinct(StringComparer.Ordinal).ToArray();
         if (ids.Length == 0) return [];
 
-        var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(e => ids.Contains(e.SessionId))
             .OrderBy(e => e.Sequence)
             .ToListAsync(ct);
 
-        return segments
+        return parts
             .Select(ToProjection)
             .OrderBy(e => e.Sequence)
             .GroupBy(e => e.SessionId, StringComparer.Ordinal)
@@ -323,7 +324,7 @@ public class AgentSessionQuerier
                 var payload = ParsePayload(e.PayloadJson);
                 failureCategory = GetStringProp(payload, "failureCategory") ?? failureCategory;
             }
-            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call")
+            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call" || e.Type == "tool")
             {
                 var payload = ParsePayload(e.PayloadJson);
                 var toolCallId = GetToolStringProp(payload, "toolCallId")
@@ -505,159 +506,126 @@ public class AgentSessionQuerier
         session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;
     private static AgentUsageSummary Usage(AgentSession session) => session.Status.UsageSummary ?? new AgentUsageSummary();
 
-    private static async Task<List<AgentSessionTranscriptSegmentRow>> LoadTranscriptSegmentsAsync(MohistDbContext db, string sessionId, CancellationToken ct) =>
-        await db.AgentSessionTranscriptSegments.AsNoTracking()
+    private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(MohistDbContext db, string sessionId, CancellationToken ct)
+    {
+        var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
             .Where(e => e.SessionId == sessionId)
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToListAsync(ct);
+        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(e => e.SessionId == sessionId)
+            .OrderBy(e => e.Sequence)
+            .ThenBy(e => e.Id)
+            .ToListAsync(ct);
+        return new AgentSessionTranscriptData(turns, parts);
+    }
 
-    private static AgentSessionTranscriptResponse BuildTranscriptResponse(IReadOnlyList<AgentSessionTranscriptSegmentRow> segments)
+    private static AgentSessionTranscriptResponse BuildTranscriptResponse(AgentSessionTranscriptData transcript)
     {
-        var turns = new List<AgentSessionTranscriptTurnDto>();
+        var responseTurns = new List<AgentSessionTranscriptTurnDto>();
+        var partsByTurn = transcript.Parts
+            .GroupBy(p => p.TurnId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Sequence).ThenBy(p => p.Id).ToList());
         var toolPartIndex = new Dictionary<string, AgentSessionTranscriptPartDto>(StringComparer.Ordinal);
-        AgentSessionTranscriptTurnDto? current = null;
-        var turnIndex = 0;
-        var partIndex = 0;
 
-        void FinalizeCurrent(string? completedAt)
+        foreach (var turn in transcript.Turns)
         {
-            if (current is null) return;
-            if (completedAt is not null)
+            var at = turn.StartedAt.ToString("o");
+            var dto = new AgentSessionTranscriptTurnDto
             {
-                CloseOpenTextParts(current, completedAt);
-                current.CompletedAt ??= completedAt;
-            }
-            current.Incomplete = false;
-            turns.Add(current);
-            current = null;
-            toolPartIndex.Clear();
-        }
-
-        foreach (var segment in segments)
-        {
-            var payload = ParsePayloadOrEmpty(segment.PayloadJson);
-            var at = segment.StartedAt.ToString("o");
-
-            if (segment.Kind == "input")
-            {
-                FinalizeCurrent(at);
-                current = new AgentSessionTranscriptTurnDto
-                {
-                    Id = $"turn-{turnIndex++}",
-                    StartedAt = at,
-                    CompletedAt = null,
-                    Incomplete = false,
-                    User = new AgentSessionTranscriptUserDto
-                    {
-                        Text = GetStringProp(payload, "text") ?? string.Empty,
-                        Kind = NormalizePromptKind(GetStringProp(payload, "kind") ?? GetStringProp(payload, "source")),
-                        SentAt = at,
-                    },
-                };
-                partIndex = 0;
-                continue;
-            }
-
-            current ??= new AgentSessionTranscriptTurnDto
-            {
-                Id = "turn-legacy-missing",
+                Id = $"turn-{turn.Sequence}",
                 StartedAt = at,
                 CompletedAt = null,
-                Incomplete = true,
+                Incomplete = false,
                 User = new AgentSessionTranscriptUserDto
                 {
-                    Text = string.Empty,
-                    Kind = "legacy-missing",
+                    Text = turn.PromptText,
+                    Kind = NormalizePromptKind(turn.PromptKind),
                     SentAt = at,
                 },
             };
+            toolPartIndex.Clear();
 
-            if (segment.Kind == "assistant_text" || segment.Kind == "assistant_reasoning")
+            if (partsByTurn.TryGetValue(turn.Id, out var parts))
             {
-                var text = GetStringProp(payload, "text");
-                if (!string.IsNullOrEmpty(text))
+                var partIndex = 0;
+                foreach (var part in parts)
                 {
-                    current.Assistant.Add(new AgentSessionTranscriptPartDto
+                    var payload = ParsePayloadOrEmpty(part.PayloadJson);
+                    var partAt = part.FirstSeenAt.ToString("o");
+                    if (part.Type == "text" || part.Type == "reasoning")
                     {
-                        Id = $"{current.Id}-p{++partIndex}",
-                        Type = segment.Kind == "assistant_text" ? "text" : "reasoning",
-                        Text = text,
-                        StartedAt = at,
-                        CompletedAt = (segment.CompletedAt ?? segment.UpdatedAt).ToString("o"),
-                    });
+                        dto.Assistant.Add(new AgentSessionTranscriptPartDto
+                        {
+                            Id = $"{dto.Id}-p{++partIndex}",
+                            Type = part.Type,
+                            Text = part.Text,
+                            StartedAt = partAt,
+                            CompletedAt = null,
+                        });
+                        continue;
+                    }
+
+                    if (part.Type == "tool")
+                    {
+                        UpsertTranscriptToolPart(dto, toolPartIndex, part, payload, partAt, ref partIndex);
+                        continue;
+                    }
+
+                    if (part.Type == "status")
+                    {
+                        if (GetStringProp(payload, "status") == "failed")
+                        {
+                            dto.Assistant.Add(new AgentSessionTranscriptPartDto
+                            {
+                                Id = $"{dto.Id}-p{++partIndex}",
+                                Type = "error",
+                                Message = GetStringProp(payload, "failureReason") ?? "Liveness failed",
+                                Kind = "recovery",
+                                At = partAt,
+                            });
+                        }
+                        continue;
+                    }
+
+                    if (part.Type == "session_closed")
+                    {
+                        var status = GetStringProp(payload, "status") ?? "completed";
+                        if (status is "failed" or "cancelled")
+                        {
+                            dto.Assistant.Add(new AgentSessionTranscriptPartDto
+                            {
+                                Id = $"{dto.Id}-p{++partIndex}",
+                                Type = "error",
+                                Message = GetStringProp(payload, "failureReason") ?? $"Session {status}",
+                                Kind = status == "cancelled" ? "cancelled" : "failed",
+                                At = partAt,
+                            });
+                        }
+                    }
                 }
-                continue;
             }
 
-            if (segment.Kind == "tool_call")
-            {
-                UpsertTranscriptToolPart(current, toolPartIndex, segment, payload, at, ref partIndex);
-                continue;
-            }
-
-            if (segment.Kind == "status")
-            {
-                if (GetStringProp(payload, "status") == "failed")
-                {
-                    current.Assistant.Add(new AgentSessionTranscriptPartDto
-                    {
-                        Id = $"{current.Id}-p{++partIndex}",
-                        Type = "error",
-                        Message = GetStringProp(payload, "failureReason") ?? "Liveness failed",
-                        Kind = "recovery",
-                        At = at,
-                    });
-                }
-                continue;
-            }
-
-            if (segment.Kind == "session_closed")
-            {
-                var status = GetStringProp(payload, "status") ?? "completed";
-                current.CompletedAt = at;
-                if (status is "failed" or "cancelled")
-                {
-                    current.Assistant.Add(new AgentSessionTranscriptPartDto
-                    {
-                        Id = $"{current.Id}-p{++partIndex}",
-                        Type = "error",
-                        Message = GetStringProp(payload, "failureReason") ?? $"Session {status}",
-                        Kind = status == "cancelled" ? "cancelled" : "failed",
-                        At = at,
-                    });
-                }
-                continue;
-            }
+            responseTurns.Add(dto);
         }
 
-        if (current is not null)
-        {
-            var completedAt = segments.Count > 0 ? segments[^1].UpdatedAt.ToString("o") : null;
-            FinalizeCurrent(completedAt);
-        }
+        var lastActivityAt = transcript.Parts.Count > 0
+            ? transcript.Parts.Max(p => p.LastSeenAt).ToString("o")
+            : transcript.Turns.LastOrDefault()?.UpdatedAt.ToString("o");
 
         return new AgentSessionTranscriptResponse
         {
-            Turns = turns,
-            SegmentCount = segments.Count,
-            LastActivityAt = segments.Count > 0 ? segments[^1].UpdatedAt.ToString("o") : null,
+            Turns = responseTurns,
+            PartCount = transcript.Parts.Count,
+            LastActivityAt = lastActivityAt,
         };
-    }
-
-    private static void CloseOpenTextParts(AgentSessionTranscriptTurnDto turn, string completedAt)
-    {
-        foreach (var part in turn.Assistant)
-        {
-            if ((part.Type == "text" || part.Type == "reasoning") && part.CompletedAt is null)
-                part.CompletedAt = completedAt;
-        }
     }
 
     private static void UpsertTranscriptToolPart(
         AgentSessionTranscriptTurnDto turn,
         IDictionary<string, AgentSessionTranscriptPartDto> toolPartIndex,
-        AgentSessionTranscriptSegmentRow segment,
+        AgentSessionTranscriptPartRow partRow,
         JsonElement payload,
         string at,
         ref int partIndex)
@@ -775,22 +743,24 @@ public class AgentSessionQuerier
         return true;
     }
 
-    private static TranscriptEventProjection ToProjection(AgentSessionTranscriptSegmentRow segment) => new()
+    private static TranscriptEventProjection ToProjection(AgentSessionTranscriptPartRow part) => new()
     {
-        Id = segment.Id,
-        SessionId = segment.SessionId,
-        ProjectId = segment.ProjectId,
-        IssueNumber = segment.IssueNumber,
-        WorkflowRunId = segment.WorkflowRunId,
-        SessionName = segment.SessionName,
-        AgentSessionId = segment.AgentSessionId,
-        WorkId = segment.WorkId,
-        WorkType = segment.WorkType,
-        Stage = segment.Stage,
-        Sequence = segment.Sequence,
-        Type = segment.Kind,
-        PayloadJson = segment.PayloadJson,
-        CreatedAt = segment.StartedAt,
+        Id = part.Id,
+        SessionId = part.SessionId,
+        ProjectId = part.ProjectId,
+        IssueNumber = part.IssueNumber,
+        WorkflowRunId = part.WorkflowRunId,
+        SessionName = part.SessionName,
+        AgentSessionId = part.AgentSessionId,
+        WorkId = part.WorkId,
+        WorkType = part.WorkType,
+        Stage = part.Stage,
+        Sequence = part.Sequence,
+        Type = part.Type,
+        PayloadJson = part.Type is "text" or "reasoning"
+            ? JsonSerializer.Serialize(new { text = part.Text })
+            : part.PayloadJson,
+        CreatedAt = part.FirstSeenAt,
     };
 
     private static List<AgentSessionProjection> ToDomain(IEnumerable<AgentSessionRow> rows)
@@ -910,5 +880,9 @@ internal sealed record TranscriptEventSummary(
     string? FailureCategory,
     int? ToolCallCount,
     int? ToolErrorCount);
+
+internal sealed record AgentSessionTranscriptData(
+    IReadOnlyList<AgentSessionTranscriptTurnRow> Turns,
+    IReadOnlyList<AgentSessionTranscriptPartRow> Parts);
 
 internal sealed record AgentSessionProjection(AgentSessionRow Row, AgentSession Session);

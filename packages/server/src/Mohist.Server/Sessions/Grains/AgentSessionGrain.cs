@@ -64,12 +64,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
 
         var now = DateTime.UtcNow;
-        await EnsureTranscriptInitializedAsync(_session.Id);
-        var segments = _transcript.Flush(_session, now);
-        if (segments.Count == 0)
+        var transcript = _transcript.Flush(_session, now);
+        if (transcript is null)
             return;
 
-        await _stateStore.SaveTranscriptAsync(SessionId, _session, segments, ct);
+        await _stateStore.SaveTranscriptAsync(SessionId, _session, transcript, ct);
     }
 
     public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
@@ -144,8 +143,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         events.AddRange(session.RecordActivity(now));
         var projection = await LoadProjectionAsync(session.Id);
 
-        await EnsureTranscriptInitializedAsync(session.Id);
-
         var entries = new List<AgentSessionRuntimeEventEnvelope>();
         foreach (var e in command.RuntimeEvents)
         {
@@ -170,15 +167,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             });
         }
 
-        var transcriptSegments = _transcript.Accept(
+        var transcript = _transcript.Accept(
             session,
             entries,
             now,
             forceFlushPending: command.RuntimeEvents.Count > 1);
 
-        if (events.Count > 0 || transcriptSegments.Count > 0)
-            if (transcriptSegments.Count > 0)
-                await _stateStore.SaveTranscriptAsync(SessionId, session, transcriptSegments);
+        if (events.Count > 0 || transcript is not null)
+            if (transcript is not null)
+                await _stateStore.SaveTranscriptAsync(SessionId, session, transcript);
             else
                 await _stateStore.SaveAsync(SessionId, session, events);
         _session = session;
@@ -264,20 +261,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionInfo?> GetAsync()
     {
         return _session is null ? null : await ToInfoAsync(_session);
-    }
-
-    private async Task EnsureTranscriptInitializedAsync(string sessionId)
-    {
-        if (_transcript.IsInitialized)
-            return;
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var latestTranscriptSequence = await db.AgentSessionTranscriptSegments
-            .Where(e => e.SessionId == sessionId)
-            .Select(e => (long?)e.Sequence)
-            .MaxAsync() ?? 0;
-        _transcript.Initialize(latestTranscriptSequence + 1);
-        _realtimeSequence = Math.Max(_realtimeSequence, latestTranscriptSequence);
     }
 
     private async Task<AgentSession> GetRequiredAsync()
@@ -390,11 +373,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var transcriptSegments = await db.AgentSessionTranscriptSegments.AsNoTracking()
+        var transcriptParts = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(e => e.SessionId == sessionId)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
-        var events = transcriptSegments
+        var events = transcriptParts
             .Select(ToEventEnvelope)
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
@@ -417,7 +400,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                 failureCategory = GetStringProp(payload, "failureCategory") ?? failureCategory;
             }
-            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call")
+            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call" || e.Type == "tool")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                 var toolCallId = GetToolStringProp(payload, "toolCallId")
@@ -460,22 +443,22 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         e.PayloadJson,
         e.CreatedAt.ToString("o"));
 
-    private static AgentSessionRuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptSegmentRow segment) => new()
+    private static AgentSessionRuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptPartRow part) => new()
     {
-        Id = segment.Id,
-        SessionId = segment.SessionId,
-        ProjectId = segment.ProjectId,
-        IssueNumber = segment.IssueNumber,
-        WorkflowRunId = segment.WorkflowRunId,
-        SessionName = segment.SessionName,
-        AgentSessionId = segment.AgentSessionId,
-        WorkId = segment.WorkId,
-        WorkType = segment.WorkType,
-        Stage = segment.Stage,
-        Sequence = segment.Sequence,
-        Type = segment.Kind,
-        PayloadJson = segment.PayloadJson,
-        CreatedAt = segment.StartedAt,
+        Id = part.Id,
+        SessionId = part.SessionId,
+        ProjectId = part.ProjectId,
+        IssueNumber = part.IssueNumber,
+        WorkflowRunId = part.WorkflowRunId,
+        SessionName = part.SessionName,
+        AgentSessionId = part.AgentSessionId,
+        WorkId = part.WorkId,
+        WorkType = part.WorkType,
+        Stage = part.Stage,
+        Sequence = part.Sequence,
+        Type = part.Type,
+        PayloadJson = part.PayloadJson,
+        CreatedAt = part.FirstSeenAt,
     };
 
     private static IReadOnlyList<AgentSessionEvent> ApplyRuntimeEventToDomain(
@@ -638,56 +621,60 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private sealed class TranscriptAccumulator
     {
-        private long _nextSequence = 1;
         private PendingTextSegment? _pending;
 
-        public bool IsInitialized { get; private set; }
         public bool HasPending => _pending is not null;
 
-        public void Initialize(long nextSequence)
-        {
-            if (IsInitialized) return;
-            _nextSequence = Math.Max(1, nextSequence);
-            IsInitialized = true;
-        }
-
-        public IReadOnlyList<AgentSessionTranscriptSegmentRow> Accept(
+        public AgentSessionTranscriptFlush? Accept(
             AgentSession session,
             IReadOnlyList<AgentSessionRuntimeEventEnvelope> rows,
             DateTime now,
             bool forceFlushPending)
         {
-            var segments = new List<AgentSessionTranscriptSegmentRow>();
+            var parts = new List<AgentSessionTranscriptPartDelta>();
             foreach (var row in rows)
             {
-                var textKind = ToTextSegmentKind(row.Type);
-                if (textKind is not null)
+                var textType = ToTextPartType(row.Type);
+                if (textType is not null)
                 {
-                    AppendText(row, textKind, now, segments);
+                    AppendText(row, textType, now, parts);
                     continue;
                 }
 
                 if (!TranscriptEventTypes.Contains(row.Type))
                     continue;
 
-                FlushInto(session, now, segments);
-                segments.Add(CreateSegment(row, ToTranscriptSegmentKind(row.Type), row.PayloadJson, correlationId: ExtractCorrelationId(row.PayloadJson), rawEventCount: 1, startedAt: row.CreatedAt, updatedAt: row.CreatedAt, completedAt: row.CreatedAt));
+                FlushInto(session, now, parts);
+                var type = ToTranscriptPartType(row.Type);
+                if (type == "input")
+                    continue;
+
+                parts.Add(CreatePartDelta(
+                    row,
+                    type,
+                    CorrelationKey(type, row.PayloadJson),
+                    ExtractCorrelationId(row.PayloadJson),
+                    textDelta: null,
+                    payloadJson: row.PayloadJson,
+                    rawEventCount: 1,
+                    firstSeenAt: row.CreatedAt,
+                    lastSeenAt: row.CreatedAt));
             }
 
             if (forceFlushPending)
-                FlushInto(session, now, segments);
+                FlushInto(session, now, parts);
 
-            return segments;
+            return ToFlush(session, rows, parts, now);
         }
 
-        public IReadOnlyList<AgentSessionTranscriptSegmentRow> Flush(AgentSession session, DateTime now)
+        public AgentSessionTranscriptFlush? Flush(AgentSession session, DateTime now)
         {
-            var segments = new List<AgentSessionTranscriptSegmentRow>();
-            FlushInto(session, now, segments);
-            return segments;
+            var parts = new List<AgentSessionTranscriptPartDelta>();
+            FlushInto(session, now, parts);
+            return parts.Count == 0 ? null : new AgentSessionTranscriptFlush(false, BuildTurn(session, null, now), parts);
         }
 
-        private void AppendText(AgentSessionRuntimeEventEnvelope row, string kind, DateTime now, List<AgentSessionTranscriptSegmentRow> segments)
+        private void AppendText(AgentSessionRuntimeEventEnvelope row, string type, DateTime now, List<AgentSessionTranscriptPartDelta> parts)
         {
             var text = ExtractText(row.PayloadJson);
             if (string.IsNullOrEmpty(text))
@@ -695,10 +682,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
             var correlationId = ExtractCorrelationId(row.PayloadJson);
             if (_pending is not null
-                && (!string.Equals(_pending.Kind, kind, StringComparison.Ordinal)
+                && (!string.Equals(_pending.Type, type, StringComparison.Ordinal)
                     || !string.Equals(_pending.CorrelationId, correlationId, StringComparison.Ordinal)))
             {
-                FlushPending(row, segments);
+                FlushPending(row, parts);
             }
 
             _pending ??= new PendingTextSegment(
@@ -711,7 +698,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 row.WorkId,
                 row.WorkType,
                 row.Stage,
-                kind,
+                type,
                 correlationId,
                 row.Type,
                 row.CreatedAt);
@@ -721,10 +708,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             if (_pending.RawEventCount >= TranscriptFlushRawEventThreshold
                 || _pending.Text.Length >= TranscriptFlushTextLengthThreshold
                 || now - _pending.StartedAt >= TranscriptFlushAgeThreshold)
-                FlushPending(row, segments);
+                FlushPending(row, parts);
         }
 
-        private void FlushInto(AgentSession session, DateTime now, List<AgentSessionTranscriptSegmentRow> segments)
+        private void FlushInto(AgentSession session, DateTime now, List<AgentSessionTranscriptPartDelta> parts)
         {
             if (_pending is null)
                 return;
@@ -742,10 +729,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 Stage = _pending.Stage ?? session.Phase,
                 CreatedAt = now,
             };
-            FlushPending(row, segments);
+            FlushPending(row, parts);
         }
 
-        private void FlushPending(AgentSessionRuntimeEventEnvelope row, List<AgentSessionTranscriptSegmentRow> segments)
+        private void FlushPending(AgentSessionRuntimeEventEnvelope row, List<AgentSessionTranscriptPartDelta> parts)
         {
             if (_pending is null)
                 return;
@@ -758,64 +745,128 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ["correlationId"] = _pending.CorrelationId,
             });
 
-            segments.Add(CreateSegment(
+            parts.Add(CreatePartDelta(
                 row,
-                _pending.Kind,
-                payload,
+                _pending.Type,
+                _pending.CorrelationId ?? _pending.Type,
                 _pending.CorrelationId,
+                _pending.Text.ToString(),
+                payload,
                 _pending.RawEventCount,
                 _pending.StartedAt,
-                _pending.UpdatedAt,
                 _pending.UpdatedAt));
             _pending = null;
         }
 
-        private AgentSessionTranscriptSegmentRow CreateSegment(
+        private static AgentSessionTranscriptPartDelta CreatePartDelta(
             AgentSessionRuntimeEventEnvelope row,
-            string kind,
-            string payloadJson,
+            string type,
+            string correlationKey,
             string? correlationId,
+            string? textDelta,
+            string payloadJson,
             int rawEventCount,
-            DateTime startedAt,
-            DateTime updatedAt,
-            DateTime? completedAt) => new()
-            {
-                SessionId = row.SessionId,
-                ProjectId = row.ProjectId,
-                IssueNumber = row.IssueNumber,
-                WorkflowRunId = row.WorkflowRunId,
-                SessionName = row.SessionName,
-                AgentSessionId = row.AgentSessionId,
-                WorkId = row.WorkId,
-                WorkType = row.WorkType,
-                Stage = row.Stage,
-                Sequence = _nextSequence++,
-                Kind = kind,
-                CorrelationId = correlationId,
-                PayloadJson = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson,
-                StartedAt = startedAt,
-                UpdatedAt = updatedAt,
-                CompletedAt = completedAt,
-                RawEventCount = rawEventCount,
-            };
+            DateTime firstSeenAt,
+            DateTime lastSeenAt) => new(
+                row.SessionId,
+                row.ProjectId,
+                row.IssueNumber,
+                row.WorkflowRunId,
+                row.SessionName,
+                row.AgentSessionId,
+                row.WorkId,
+                row.WorkType,
+                row.Stage,
+                type,
+                correlationKey,
+                correlationId,
+                textDelta,
+                string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson,
+                firstSeenAt,
+                lastSeenAt,
+                rawEventCount);
 
-        private static string? ToTextSegmentKind(string eventType) => eventType switch
+        private static AgentSessionTranscriptFlush? ToFlush(
+            AgentSession session,
+            IReadOnlyList<AgentSessionRuntimeEventEnvelope> rows,
+            IReadOnlyList<AgentSessionTranscriptPartDelta> parts,
+            DateTime now)
         {
-            "message.delta" => "assistant_text",
-            "reasoning.delta" => "assistant_reasoning",
+            var input = rows.FirstOrDefault(row => row.Type == "session.input");
+            if (parts.Count == 0 && input is null)
+                return null;
+            return new AgentSessionTranscriptFlush(input is not null, BuildTurn(session, input, now), parts);
+        }
+
+        private static AgentSessionTranscriptTurnUpsert BuildTurn(
+            AgentSession session,
+            AgentSessionRuntimeEventEnvelope? input,
+            DateTime now)
+        {
+            var payload = input is null ? default(JsonElement?) : ParsePayload(input.PayloadJson);
+            var promptText = payload is null
+                ? string.Empty
+                : GetStringProp(payload.Value, "text") ?? GetStringProp(payload.Value, "prompt") ?? string.Empty;
+            var promptKind = payload is null
+                ? "task"
+                : GetStringProp(payload.Value, "kind") ?? GetStringProp(payload.Value, "source") ?? "task";
+
+            return new AgentSessionTranscriptTurnUpsert(
+                session.Id,
+                session.ProjectId,
+                session.IssueNumber,
+                session.RunId,
+                session.SessionName,
+                session.Status.AgentRuntimeSessionId,
+                Sequence: input is null ? 0 : 1,
+                promptText,
+                NormalizePromptKind(promptKind),
+                input?.CreatedAt ?? session.Status.CreatedAt,
+                now);
+        }
+
+        private static string? ToTextPartType(string eventType) => eventType switch
+        {
+            "message.delta" => "text",
+            "reasoning.delta" => "reasoning",
             _ => null
         };
 
-        private static string ToTranscriptSegmentKind(string eventType) => eventType switch
+        private static string ToTranscriptPartType(string eventType) => eventType switch
         {
             "session.input" => "input",
-            "tool_call.started" or "tool_call.updated" or "tool_call.completed" => "tool_call",
+            "tool_call.started" or "tool_call.updated" or "tool_call.completed" => "tool",
             "session.liveness" => "status",
             "usage.updated" => "usage",
             "model.resolved" => "model",
             "session.closed" => "session_closed",
             _ => eventType
         };
+
+        private static string CorrelationKey(string type, string json) => type switch
+        {
+            "tool" => ExtractCorrelationId(json) ?? "tool",
+            "text" or "reasoning" => ExtractCorrelationId(json) ?? type,
+            _ => type,
+        };
+
+        private static string NormalizePromptKind(string? kind) => kind switch
+        {
+            "initial" or "task" or "retry" or "followup" or "recovery" => kind,
+            _ => "task"
+        };
+
+        private static JsonElement? ParsePayload(string json)
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<JsonElement>(json);
+            }
+            catch
+            {
+                return null;
+            }
+        }
 
         private static string? ExtractCorrelationId(string json)
         {
@@ -847,7 +898,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             string? workId,
             string? workType,
             string? stage,
-            string kind,
+            string type,
             string? correlationId,
             string sourceEventType,
             DateTime startedAt)
@@ -861,7 +912,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             WorkId = workId;
             WorkType = workType;
             Stage = stage;
-            Kind = kind;
+            Type = type;
             CorrelationId = correlationId;
             SourceEventType = sourceEventType;
             StartedAt = startedAt;
@@ -877,7 +928,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         public string? WorkId { get; }
         public string? WorkType { get; }
         public string? Stage { get; }
-        public string Kind { get; }
+        public string Type { get; }
         public string? CorrelationId { get; }
         public string SourceEventType { get; private set; }
         public DateTime StartedAt { get; }
