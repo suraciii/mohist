@@ -119,7 +119,7 @@ public class IssueSessionApiSpecs
         Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(8, metadata.GetProperty("segmentCount").GetInt32());
+        Assert.Equal(5, metadata.GetProperty("partCount").GetInt32());
         Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
 
         Assert.False(root.TryGetProperty("events", out _));
@@ -191,15 +191,15 @@ public class IssueSessionApiSpecs
 
         var response = await _client.GetDataAsync<IssueSessionTranscriptResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/transcript");
 
-        Assert.Equal(7, response.SegmentCount);
+        Assert.Equal(4, response.PartCount);
         var turn = Assert.Single(response.Turns);
         Assert.Equal("do the thing", turn.User.Text);
         Assert.Equal("task", turn.User.Kind);
         Assert.Equal(
-            new[] { "tool", "text", "reasoning", "text" },
+            new[] { "tool", "text", "reasoning" },
             turn.Assistant.Select(p => p.Type).ToArray());
         Assert.Contains(turn.Assistant, p => p.Type == "tool" && p.Tool?.ToolCallId == "tool-1" && p.Tool.Status == "completed");
-        Assert.NotNull(turn.CompletedAt);
+        Assert.Null(turn.CompletedAt);
         Assert.NotNull(response.LastActivityAt);
     }
 
@@ -252,7 +252,7 @@ public class IssueSessionApiSpecs
 
             var transcriptRoot = transcriptDoc.RootElement.GetProperty("data");
             Assert.True(transcriptRoot.TryGetProperty("turns", out _));
-            Assert.True(transcriptRoot.TryGetProperty("segmentCount", out _));
+            Assert.True(transcriptRoot.TryGetProperty("partCount", out _));
             Assert.True(transcriptRoot.TryGetProperty("lastActivityAt", out _));
             Assert.False(transcriptRoot.TryGetProperty("events", out _));
             Assert.False(transcriptRoot.TryGetProperty("assistant", out _));
@@ -331,7 +331,7 @@ public class IssueSessionApiSpecs
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(string Id, int Number, string Title);
-    private sealed record IssueSessionTranscriptResponseDto(IssueSessionTranscriptTurnDto[] Turns, int SegmentCount, string? LastActivityAt);
+    private sealed record IssueSessionTranscriptResponseDto(IssueSessionTranscriptTurnDto[] Turns, int PartCount, string? LastActivityAt);
     private sealed record IssueSessionTranscriptTurnDto(string Id, string StartedAt, string? CompletedAt, bool Incomplete, IssueSessionTranscriptUserDto User, IssueSessionTranscriptPartDto[] Assistant);
     private sealed record IssueSessionTranscriptUserDto(string Text, string Kind, string SentAt);
     private sealed record IssueSessionTranscriptPartDto(string Id, string Type, string? Text, IssueSessionTranscriptToolDto? Tool, string? Message, string? Kind, string? StartedAt, string? CompletedAt, string? At);

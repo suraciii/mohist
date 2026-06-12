@@ -66,13 +66,13 @@ public sealed record AgentSessionMetadataDto(
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
 
 public sealed record AgentSessionMetadataCounts(
-    [property: JsonPropertyName("segmentCount")] int SegmentCount,
+    [property: JsonPropertyName("partCount")] int PartCount,
     [property: JsonPropertyName("toolCount")] int ToolCount);
 
 public sealed class AgentSessionTranscriptResponse
 {
     public IReadOnlyList<AgentSessionTranscriptTurnDto> Turns { get; init; } = [];
-    public int SegmentCount { get; init; }
+    public int PartCount { get; init; }
     public string? LastActivityAt { get; init; }
 }
 
@@ -98,7 +98,7 @@ public sealed class AgentSessionTranscriptPartDto
 {
     public string Id { get; init; } = string.Empty;
     public string Type { get; init; } = string.Empty;
-    public string? Text { get; init; }
+    public string? Text { get; set; }
     public AgentSessionTranscriptToolDto? Tool { get; set; }
     public string? Message { get; init; }
     public string? Kind { get; init; }

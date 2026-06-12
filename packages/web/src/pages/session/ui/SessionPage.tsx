@@ -44,7 +44,7 @@ function buildSessionMetadata(
     probeSentAt: null,
     probeDeadlineAt: null,
     failureReason: null,
-    segmentCount: meta.metadata.segmentCount,
+    partCount: meta.metadata.partCount,
     toolCount: meta.metadata.toolCount,
     turnCount,
     changedFiles: meta.changedFiles,

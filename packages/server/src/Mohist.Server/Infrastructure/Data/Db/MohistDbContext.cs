@@ -28,7 +28,8 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
-    public DbSet<AgentSessionTranscriptSegmentRow> AgentSessionTranscriptSegments { get; set; } = null!;
+    public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
+    public DbSet<AgentSessionTranscriptPartRow> AgentSessionTranscriptParts { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
@@ -119,9 +120,24 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
         });
 
-        modelBuilder.Entity<AgentSessionTranscriptSegmentRow>(entity =>
+        modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
         {
-            entity.ToTable("AgentSessionTranscriptSegments");
+            entity.ToTable("AgentSessionTranscriptTurns");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentSessionId).HasMaxLength(256);
+            entity.Property(e => e.PromptText).IsRequired();
+            entity.Property(e => e.PromptKind).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
+        });
+
+        modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>
+        {
+            entity.ToTable("AgentSessionTranscriptParts");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
@@ -131,13 +147,14 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.WorkId).HasMaxLength(256);
             entity.Property(e => e.WorkType).HasMaxLength(64);
             entity.Property(e => e.Stage).HasMaxLength(64);
-            entity.Property(e => e.Kind).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.Type).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CorrelationKey).HasMaxLength(512).IsRequired();
             entity.Property(e => e.CorrelationId).HasMaxLength(256);
+            entity.Property(e => e.Text).IsRequired();
             entity.Property(e => e.PayloadJson).IsRequired();
-            entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
-            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
-            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
-            entity.HasIndex(e => new { e.SessionId, e.Kind, e.CorrelationId });
+            entity.HasIndex(e => new { e.TurnId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.TurnId, e.Type, e.CorrelationKey }).IsUnique();
+            entity.HasIndex(e => new { e.SessionId, e.Sequence });
         });
 
         modelBuilder.Entity<IssueCommentRow>(entity =>

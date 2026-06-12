@@ -9,8 +9,45 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 public interface IAgentSessionStore : IStateStore<AgentSession>
 {
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
-    Task SaveTranscriptAsync(string key, AgentSession state, IReadOnlyList<AgentSessionTranscriptSegmentRow> transcriptSegments, CancellationToken ct = default);
+    Task SaveTranscriptAsync(string key, AgentSession state, AgentSessionTranscriptFlush transcript, CancellationToken ct = default);
 }
+
+public sealed record AgentSessionTranscriptFlush(
+    bool StartNewTurn,
+    AgentSessionTranscriptTurnUpsert Turn,
+    IReadOnlyList<AgentSessionTranscriptPartDelta> Parts);
+
+public sealed record AgentSessionTranscriptTurnUpsert(
+    string SessionId,
+    string ProjectId,
+    int IssueNumber,
+    string WorkflowRunId,
+    string SessionName,
+    string? AgentSessionId,
+    long Sequence,
+    string PromptText,
+    string PromptKind,
+    DateTime StartedAt,
+    DateTime UpdatedAt);
+
+public sealed record AgentSessionTranscriptPartDelta(
+    string SessionId,
+    string ProjectId,
+    int IssueNumber,
+    string WorkflowRunId,
+    string SessionName,
+    string? AgentSessionId,
+    string? WorkId,
+    string? WorkType,
+    string? Stage,
+    string Type,
+    string CorrelationKey,
+    string? CorrelationId,
+    string? TextDelta,
+    string PayloadJson,
+    DateTime FirstSeenAt,
+    DateTime LastSeenAt,
+    int RawEventCount);
 
 public class AgentSessionStore : IAgentSessionStore
 {
@@ -59,14 +96,115 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
-    public async Task SaveTranscriptAsync(string key, AgentSession state, IReadOnlyList<AgentSessionTranscriptSegmentRow> transcriptSegments, CancellationToken ct = default)
+    public async Task SaveTranscriptAsync(string key, AgentSession state, AgentSessionTranscriptFlush transcript, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            db.AgentSessionTranscriptSegments.AddRange(transcriptSegments);
             await StageSessionAsync(db, key, state, ct);
+
+            var turn = transcript.StartNewTurn
+                ? null
+                : await db.AgentSessionTranscriptTurns
+                    .OrderByDescending(t => t.Sequence)
+                    .FirstOrDefaultAsync(t => t.SessionId == transcript.Turn.SessionId, ct);
+            if (turn is null)
+            {
+                var sequence = transcript.StartNewTurn || transcript.Turn.Sequence <= 0
+                    ? (await db.AgentSessionTranscriptTurns
+                        .Where(t => t.SessionId == transcript.Turn.SessionId)
+                        .Select(t => (long?)t.Sequence)
+                        .MaxAsync(ct) ?? 0) + 1
+                    : transcript.Turn.Sequence;
+                turn = new AgentSessionTranscriptTurnRow
+                {
+                    SessionId = transcript.Turn.SessionId,
+                    ProjectId = transcript.Turn.ProjectId,
+                    IssueNumber = transcript.Turn.IssueNumber,
+                    WorkflowRunId = transcript.Turn.WorkflowRunId,
+                    SessionName = transcript.Turn.SessionName,
+                    AgentSessionId = transcript.Turn.AgentSessionId,
+                    Sequence = sequence,
+                    PromptText = transcript.Turn.PromptText,
+                    PromptKind = transcript.Turn.PromptKind,
+                    StartedAt = transcript.Turn.StartedAt,
+                    UpdatedAt = transcript.Turn.UpdatedAt,
+                };
+                db.AgentSessionTranscriptTurns.Add(turn);
+                await db.SaveChangesAsync(ct);
+            }
+            else
+            {
+                turn.ProjectId = transcript.Turn.ProjectId;
+                turn.IssueNumber = transcript.Turn.IssueNumber;
+                turn.WorkflowRunId = transcript.Turn.WorkflowRunId;
+                turn.SessionName = transcript.Turn.SessionName;
+                turn.AgentSessionId = transcript.Turn.AgentSessionId ?? turn.AgentSessionId;
+                if (!string.IsNullOrWhiteSpace(transcript.Turn.PromptText))
+                    turn.PromptText = transcript.Turn.PromptText;
+                turn.PromptKind = transcript.Turn.PromptKind;
+                turn.UpdatedAt = transcript.Turn.UpdatedAt;
+            }
+
+            if (transcript.Parts.Count > 0)
+            {
+                var types = transcript.Parts.Select(p => p.Type).Distinct(StringComparer.Ordinal).ToArray();
+                var keys = transcript.Parts.Select(p => p.CorrelationKey).Distinct(StringComparer.Ordinal).ToArray();
+                var existingParts = await db.AgentSessionTranscriptParts
+                    .Where(p => p.TurnId == turn.Id && types.Contains(p.Type) && keys.Contains(p.CorrelationKey))
+                    .ToListAsync(ct);
+                var existingByKey = existingParts.ToDictionary(p => PartKey(p.Type, p.CorrelationKey), StringComparer.Ordinal);
+                var nextSequence = (await db.AgentSessionTranscriptParts
+                    .Where(p => p.TurnId == turn.Id)
+                    .Select(p => (long?)p.Sequence)
+                    .MaxAsync(ct) ?? 0) + 1;
+
+                foreach (var delta in transcript.Parts)
+                {
+                    var partKey = PartKey(delta.Type, delta.CorrelationKey);
+                    if (existingByKey.TryGetValue(partKey, out var part))
+                    {
+                        part.AgentSessionId = delta.AgentSessionId ?? part.AgentSessionId;
+                        part.WorkId = delta.WorkId ?? part.WorkId;
+                        part.WorkType = delta.WorkType ?? part.WorkType;
+                        part.Stage = delta.Stage ?? part.Stage;
+                        part.CorrelationId = delta.CorrelationId ?? part.CorrelationId;
+                        if (!string.IsNullOrEmpty(delta.TextDelta))
+                            part.Text += delta.TextDelta;
+                        part.PayloadJson = string.IsNullOrWhiteSpace(delta.PayloadJson) ? part.PayloadJson : delta.PayloadJson;
+                        part.LastSeenAt = delta.LastSeenAt;
+                        part.RawEventCount += Math.Max(0, delta.RawEventCount);
+                        continue;
+                    }
+
+                    part = new AgentSessionTranscriptPartRow
+                    {
+                        TurnId = turn.Id,
+                        SessionId = delta.SessionId,
+                        ProjectId = delta.ProjectId,
+                        IssueNumber = delta.IssueNumber,
+                        WorkflowRunId = delta.WorkflowRunId,
+                        SessionName = delta.SessionName,
+                        AgentSessionId = delta.AgentSessionId,
+                        WorkId = delta.WorkId,
+                        WorkType = delta.WorkType,
+                        Stage = delta.Stage,
+                        Sequence = nextSequence++,
+                        Type = delta.Type,
+                        CorrelationKey = delta.CorrelationKey,
+                        CorrelationId = delta.CorrelationId,
+                        Text = delta.TextDelta ?? string.Empty,
+                        PayloadJson = string.IsNullOrWhiteSpace(delta.PayloadJson) ? "{}" : delta.PayloadJson,
+                        FirstSeenAt = delta.FirstSeenAt,
+                        LastSeenAt = delta.LastSeenAt,
+                        RawEventCount = Math.Max(0, delta.RawEventCount),
+                    };
+                    db.AgentSessionTranscriptParts.Add(part);
+                    existingByKey[partKey] = part;
+                }
+            }
+
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -76,6 +214,8 @@ public class AgentSessionStore : IAgentSessionStore
             throw;
         }
     }
+
+    private static string PartKey(string type, string correlationKey) => $"{type}\u001f{correlationKey}";
 
     private static async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
     {

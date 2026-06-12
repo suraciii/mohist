@@ -24,16 +24,18 @@ public class DatabaseInitializationSpecs
         db.Database.Migrate();
 
         Assert.True(await TableExistsAsync(connection, "AgentSessions"));
-        Assert.True(await TableExistsAsync(connection, "AgentSessionRuntimeEvents"));
-        Assert.True(await TableExistsAsync(connection, "AgentSessionTranscriptSegments"));
+        Assert.False(await TableExistsAsync(connection, "AgentSessionRuntimeEvents"));
+        Assert.False(await TableExistsAsync(connection, "AgentSessionTranscriptSegments"));
+        Assert.True(await TableExistsAsync(connection, "AgentSessionTranscriptTurns"));
+        Assert.True(await TableExistsAsync(connection, "AgentSessionTranscriptParts"));
         Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
         Assert.True(await TableExistsAsync(connection, "OrleansQuery"));
         Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
         Assert.True(await OrleansQueryExistsAsync(connection, "UpsertReminderRowKey"));
         Assert.True(await IndexExistsAsync(connection, "IX_AgentSessions_WorkflowRunId_SessionName"));
         Assert.False(await IndexIsUniqueAsync(connection, "IX_AgentSessions_WorkflowRunId_WorkId"));
-        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionRuntimeEvents_SessionId_Sequence"));
-        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionTranscriptSegments_SessionId_Sequence"));
+        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionTranscriptTurns_SessionId_Sequence"));
+        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionTranscriptParts_TurnId_Type_CorrelationKey"));
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
 
