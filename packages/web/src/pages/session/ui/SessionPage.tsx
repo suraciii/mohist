@@ -431,7 +431,7 @@ export function SessionPage() {
   const routeSessionLookup = decodedSessionName ?? routeSessionKey
   const lookupKey = decodedSessionName ?? decodedSessionId
 
-  const hasRoute = !!routeSessionLookup && !!projectId && !!decodedSessionName && issueNumber > 0
+  const hasRoute = !!routeSessionLookup && !!projectId && issueNumber > 0
   const metadataQueryKey = useMemo(
     () => ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
@@ -448,8 +448,8 @@ export function SessionPage() {
   } = useQuery<AgentSessionMetadata | null, Error>({
     queryKey: metadataQueryKey,
     queryFn: async () => {
-      if (!decodedSessionName) return null
-      return getAgentSessionMetadata(issueNumber, decodedSessionName, projectId)
+      if (!routeSessionLookup) return null
+      return getAgentSessionMetadata(issueNumber, routeSessionLookup, projectId)
     },
     enabled: hasRoute,
   })
@@ -459,8 +459,8 @@ export function SessionPage() {
   } = useQuery<AgentSessionTranscriptResponse | null, Error>({
     queryKey: transcriptQueryKey,
     queryFn: async () => {
-      if (!decodedSessionName) return null
-      return getAgentSessionTranscript(issueNumber, decodedSessionName, projectId)
+      if (!routeSessionLookup) return null
+      return getAgentSessionTranscript(issueNumber, routeSessionLookup, projectId)
     },
     enabled: hasRoute && !!metadata,
   })

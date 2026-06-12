@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Workflow.Grain;
@@ -167,8 +169,9 @@ public class WorkflowSessionSpecs
         var sessionId = Guid.NewGuid().ToString("N");
         await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
             .OpenAsync(new OpenAgentSessionCommand(
-                project.Id, issue.Number, workflowRunId, sessionName, _runnerId,
-                sessionName, "task", "Build", issueTitle));
+                _runnerId,
+                "opencode",
+                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, workflowRunId, sessionName, sessionName, "task", "Build", issueTitle)));
 
         return (project, issue, sessionName, workflowRunId);
     }
@@ -192,11 +195,34 @@ public class WorkflowSessionSpecs
     private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        return await db.AgentSessions
-            .Where(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName)
-            .Select(s => s.Id)
+        return await db.AgentSessionLabels
+            .Where(label => label.Key == AgentSessionQueryMetadataKeys.WorkflowRunId && label.Value == workflowRunId)
+            .Join(db.AgentSessionLabels.Where(label => label.Key == AgentSessionQueryMetadataKeys.SessionName && label.Value == sessionName),
+                left => left.SessionId,
+                right => right.SessionId,
+                (left, right) => left.SessionId)
             .SingleAsync();
     }
+
+    private static AgentSessionMetadata WorkflowSessionMetadata(
+        string projectId,
+        int issueNumber,
+        string workflowRunId,
+        string sessionName,
+        string? workId,
+        string? workType,
+        string? stage,
+        string? title) =>
+        new AgentSessionMetadata()
+            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkType, workType)
+            .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
+            .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
 
     private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? AcpSessionId, string Status, string? WorkDir, string? Model);
     private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);

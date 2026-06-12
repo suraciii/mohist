@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Services.Sessions;
 
 namespace Mohist.Server.Api;
 
@@ -94,10 +96,11 @@ public static class RunnerRoutes
             AgentSessionResolver sessions,
             CancellationToken ct) =>
         {
-            var session = await sessions.GetAsync(workflowRunId, sessionName, ct);
+            var labels = WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName);
+            var session = await sessions.GetByLabelsAsync(labels, ct);
             return session is null
                 ? ApiResults.NotFound($"Session {sessionName} not found")
-                : ApiResults.Ok(ToRunnerAgentSession(session));
+                : ApiResults.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/open", async (
@@ -105,27 +108,30 @@ public static class RunnerRoutes
             AgentSessionOpenRequest req, AgentSessionResolver sessions,
             CancellationToken ct) =>
         {
-            var sessionId = await sessions.ResolveAsync(workflowRunId, sessionName, ct) ?? sessions.NewSessionId();
+            var context = WorkflowSessionContext(projectId, workflowRunId, sessionName, req);
+            var lookupLabels = WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName);
+            var sessionId = await sessions.ResolveByLabelsAsync(lookupLabels, ct) ?? sessions.NewSessionId();
             var grain = sessions.GetGrain(sessionId);
             var session = await grain.OpenAsync(new OpenAgentSessionCommand(
-                projectId, req.IssueNumber, workflowRunId, sessionName,
-                runnerId, req.WorkId, req.WorkType, req.Stage, req.Title));
-            return Results.Ok(ToRunnerAgentSession(session));
+                runnerId,
+                "opencode",
+                Metadata: WorkflowAgentSessionMetadata.Metadata(context)));
+            return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/attach", async (
-            string workflowRunId, string sessionName,
+            string projectId, string workflowRunId, string sessionName,
             AgentSessionAttachRequest req, AgentSessionResolver sessions,
             CancellationToken ct) =>
         {
-            var sessionId = await sessions.ResolveAsync(workflowRunId, sessionName, ct);
+            var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
 
             try
             {
                 var session = await sessions.GetGrain(sessionId).AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
                     req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
-                return Results.Ok(ToRunnerAgentSession(session));
+                return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
             }
             catch (InvalidOperationException ex)
             {
@@ -134,25 +140,40 @@ public static class RunnerRoutes
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/runtime-events", async (
-            string workflowRunId, string sessionName,
+            string projectId, string workflowRunId, string sessionName,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
             CancellationToken ct) =>
         {
-            var sessionId = await sessions.ResolveAsync(workflowRunId, sessionName, ct);
+            var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
             if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
 
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(req.WorkId, req.WorkType, req.Stage, runtimeEvents)));
+            return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents)));
         });
 
         return app;
     }
 
-    private static RunnerAgentSessionResponse ToRunnerAgentSession(AgentSessionInfo session) =>
+    private static WorkflowAgentSessionContext WorkflowSessionContext(
+        string projectId,
+        string workflowRunId,
+        string sessionName,
+        AgentSessionOpenRequest req) =>
         new(
-            new RunnerAgentSessionKey(session.ProjectId, session.WorkflowRunId, session.SessionName),
+            projectId,
+            workflowRunId,
+            sessionName,
+            req.IssueNumber is > 0 ? req.IssueNumber : null,
+            req.WorkId,
+            req.WorkType,
+            req.Stage,
+            req.Title);
+
+    private static RunnerAgentSessionResponse ToRunnerAgentSession(string projectId, string workflowRunId, string sessionName, AgentSessionInfo session) =>
+        new(
+            new RunnerAgentSessionKey(projectId, workflowRunId, sessionName),
             session.AgentSessionId,
             session.Status,
             session.WorkDir,

@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata, AgentSessionMetadata, AgentSessionEvent } from '../src/entities/coder-session'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata, AgentSessionMetadata } from '../src/entities/coder-session'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
@@ -16,7 +16,7 @@ const sessionPageMocks = vi.hoisted(() => ({
   issue: null as any,
   detail: null as CoderSessionDetail | null,
   metadata: null as AgentSessionMetadata | null,
-  events: null as AgentSessionEvent[] | null,
+  turns: null as SessionTurn[] | null,
   detailError: null as Error | null,
   detailPending: false,
   params: { number: '123', sessionName: 'session-123' },
@@ -45,10 +45,15 @@ vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
     return Promise.resolve(sessionPageMocks.metadata)
   }),
-  getAgentSessionEvents: vi.fn(() => {
+  getAgentSessionTranscript: vi.fn(() => {
     if (sessionPageMocks.detailPending) return new Promise(() => {})
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    return Promise.resolve({ events: sessionPageMocks.events ?? [] })
+    const turns = sessionPageMocks.turns ?? []
+    return Promise.resolve({
+      turns,
+      partCount: turns.reduce((total, turn) => total + turn.assistant.length, 0),
+      lastActivityAt: turns.at(-1)?.completedAt ?? turns.at(-1)?.startedAt ?? null,
+    })
   }),
 }))
 
@@ -66,7 +71,7 @@ beforeEach(() => {
   sessionPageMocks.issue = null
   sessionPageMocks.detail = null
   sessionPageMocks.metadata = null
-  sessionPageMocks.events = null
+  sessionPageMocks.turns = null
   sessionPageMocks.detailError = null
   sessionPageMocks.detailPending = false
   sessionPageMocks.params = { number: '123', sessionName: 'session-123' }
@@ -98,65 +103,6 @@ function convertLegacyToAgentMetadata(detail: CoderSessionDetail): AgentSessionM
       toolCount: legacy.toolCount ?? 0,
     },
   }
-}
-
-function convertLegacyTurnsToEvents(turns: SessionTurn[]): AgentSessionEvent[] {
-  const events: AgentSessionEvent[] = []
-  let sequence = 1
-  for (const turn of turns) {
-    events.push({
-      id: sequence,
-      sequence,
-      type: 'mohist_prompt',
-      payload: { text: turn.user.text, kind: turn.user.kind, sentAt: turn.user.sentAt },
-      createdAt: turn.startedAt,
-    })
-    sequence += 1
-    for (const part of turn.assistant) {
-      if (part.type === 'text') {
-        events.push({
-          id: sequence,
-          sequence,
-          type: 'agent_message_chunk',
-          payload: { text: part.text },
-          createdAt: part.startedAt,
-        })
-      } else if (part.type === 'reasoning') {
-        events.push({
-          id: sequence,
-          sequence,
-          type: 'agent_thought_chunk',
-          payload: { text: part.text },
-          createdAt: part.startedAt,
-        })
-      } else if (part.type === 'tool') {
-        events.push({
-          id: sequence,
-          sequence,
-          type: 'tool_call',
-          payload: {
-            toolCallId: part.tool.toolCallId,
-            toolName: part.tool.toolName,
-            title: part.tool.title,
-            status: part.tool.status,
-            rawInput: part.tool.rawInput,
-            rawOutput: part.tool.rawOutput,
-          },
-          createdAt: part.tool.startedAt,
-        })
-      } else if (part.type === 'error') {
-        events.push({
-          id: sequence,
-          sequence,
-          type: 'session.liveness',
-          payload: { status: 'failed', failureReason: part.message },
-          createdAt: part.at,
-        })
-      }
-      sequence += 1
-    }
-  }
-  return events
 }
 
 afterEach(() => {
@@ -1804,7 +1750,7 @@ describe('SessionPage header and states', () => {
     issue = null,
     detail = makeMockDetail(),
     metadata = null,
-    events = null,
+    turns = null,
     sessionsLoading = false,
     detailError = null,
     detailPending = false,
@@ -1813,7 +1759,7 @@ describe('SessionPage header and states', () => {
     issue?: any
     detail?: CoderSessionDetail | null
     metadata?: AgentSessionMetadata | null
-    events?: AgentSessionEvent[] | null
+    turns?: SessionTurn[] | null
     sessionsLoading?: boolean
     detailError?: Error | null
     detailPending?: boolean
@@ -1828,12 +1774,12 @@ describe('SessionPage header and states', () => {
     } else {
       sessionPageMocks.metadata = null
     }
-    if (events) {
-      sessionPageMocks.events = events
+    if (turns) {
+      sessionPageMocks.turns = turns
     } else if (detail?.turns && detail.turns.length > 0) {
-      sessionPageMocks.events = convertLegacyTurnsToEvents(detail.turns)
+      sessionPageMocks.turns = detail.turns
     } else {
-      sessionPageMocks.events = []
+      sessionPageMocks.turns = []
     }
     sessionPageMocks.sessionsLoading = sessionsLoading
     sessionPageMocks.detailError = detailError
@@ -1864,7 +1810,7 @@ describe('SessionPage header and states', () => {
       expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
     })
 
-    it('shows transcript turn count derived from raw events when transcript is rendered', async () => {
+    it('shows transcript turn count derived from persisted transcript when transcript is rendered', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
           status: 'completed',
@@ -1875,12 +1821,12 @@ describe('SessionPage header and states', () => {
           lastActivityAt: '2024-01-01T10:05:00.000Z',
         }),
       })
-      const events: AgentSessionEvent[] = [
-        { id: 1, sequence: 1, type: 'mohist_prompt', payload: { text: 'first', kind: 'task' }, createdAt: '2024-01-01T10:00:00.000Z' },
-        { id: 2, sequence: 2, type: 'mohist_prompt', payload: { text: 'second', kind: 'task' }, createdAt: '2024-01-01T10:01:00.000Z' },
-        { id: 3, sequence: 3, type: 'mohist_prompt', payload: { text: 'third', kind: 'task' }, createdAt: '2024-01-01T10:02:00.000Z' },
+      const turns: SessionTurn[] = [
+        makeTurn({ id: 'turn-1', user: { role: 'mohist', text: 'first', kind: 'task', sentAt: '2024-01-01T10:00:00.000Z' } }),
+        makeTurn({ id: 'turn-2', startedAt: '2024-01-01T10:01:00.000Z', user: { role: 'mohist', text: 'second', kind: 'task', sentAt: '2024-01-01T10:01:00.000Z' } }),
+        makeTurn({ id: 'turn-3', startedAt: '2024-01-01T10:02:00.000Z', user: { role: 'mohist', text: 'third', kind: 'task', sentAt: '2024-01-01T10:02:00.000Z' } }),
       ]
-      setupSessionPage({ detail, events })
+      setupSessionPage({ detail, turns })
 
       renderWithQueryClient(<SessionPage />)
 
@@ -1910,14 +1856,14 @@ describe('SessionPage header and states', () => {
       const api = await import('../src/entities/coder-session/api/client')
       const callOrder: string[] = []
       const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
-      const eventsMock = api.getAgentSessionEvents as unknown as ReturnType<typeof vi.fn>
+      const transcriptMock = api.getAgentSessionTranscript as unknown as ReturnType<typeof vi.fn>
       metadataMock.mockImplementationOnce(async (..._args) => {
         callOrder.push('metadata')
         return sessionPageMocks.metadata
       })
-      eventsMock.mockImplementationOnce(async (..._args) => {
-        callOrder.push('events')
-        return { events: sessionPageMocks.events ?? [] }
+      transcriptMock.mockImplementationOnce(async (..._args) => {
+        callOrder.push('transcript')
+        return { turns: sessionPageMocks.turns ?? [], partCount: 0, lastActivityAt: null }
       })
 
       sessionPageMocks.params = { number: '51', sessionName: 'T-003.1' } as any
@@ -1937,11 +1883,11 @@ describe('SessionPage header and states', () => {
         expect(callOrder[0]).toBe('metadata')
       })
       await waitFor(() => {
-        expect(callOrder).toContain('events')
+        expect(callOrder).toContain('transcript')
       })
-      expect(callOrder.indexOf('metadata')).toBeLessThan(callOrder.indexOf('events'))
+      expect(callOrder.indexOf('metadata')).toBeLessThan(callOrder.indexOf('transcript'))
       expect(metadataMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
-      expect(eventsMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+      expect(transcriptMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
     })
 
     it('does not request raw events when metadata has not yet loaded', async () => {
@@ -1957,8 +1903,8 @@ describe('SessionPage header and states', () => {
         detailPending: true,
       })
 
-      const eventsMock = api.getAgentSessionEvents as unknown as ReturnType<typeof vi.fn>
-      eventsMock.mockClear()
+      const transcriptMock = api.getAgentSessionTranscript as unknown as ReturnType<typeof vi.fn>
+      transcriptMock.mockClear()
 
       renderWithQueryClient(<SessionPage />)
 
@@ -1966,7 +1912,7 @@ describe('SessionPage header and states', () => {
         expect(screen.getByText(/loading/i)).toBeInTheDocument()
       })
 
-      expect(eventsMock).not.toHaveBeenCalled()
+      expect(transcriptMock).not.toHaveBeenCalled()
     })
 
     it('loads workflow session metadata by route session name', async () => {
@@ -1988,7 +1934,7 @@ describe('SessionPage header and states', () => {
         expect(api.getAgentSessionMetadata).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
       })
       await waitFor(() => {
-        expect(api.getAgentSessionEvents).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
+        expect(api.getAgentSessionTranscript).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
       })
     })
 
@@ -2209,7 +2155,7 @@ describe('SessionHeader navigation', () => {
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
 
     const link = screen.getByRole('link')
-    expect(link.getAttribute('href')).toBe('/issues/42/workflow/sessions/plan')
+    expect(link.getAttribute('href')).toBe('/Test%20Project/issues/42/workflow/sessions/plan')
   })
 
   it('session header shows session label', async () => {
@@ -2263,7 +2209,7 @@ describe('SessionHeader navigation', () => {
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} showTranscriptLink />)
 
     const link = screen.getByRole('link')
-    expect(link.getAttribute('href')).toBe('/issues/42/workflow/sessions/T-001.2')
+    expect(link.getAttribute('href')).toBe('/Test%20Project/issues/42/workflow/sessions/T-001.2')
     expect(screen.getByText('View transcript')).toBeInTheDocument()
   })
 
@@ -2291,7 +2237,7 @@ describe('SessionHeader navigation', () => {
 
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
 
-    expect(screen.getByRole('link').getAttribute('href')).toBe('/issues/42/workflow/sessions/check%2Fretry')
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/Test%20Project/issues/42/workflow/sessions/check%2Fretry')
   })
 
   it('getSessionLabel returns title when present', async () => {
@@ -2581,9 +2527,6 @@ describe('Terminal session events trigger refetch', () => {
 
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        issueId: '123',
-        projectId: 'project-1',
-        executionId: 'exec-123',
         acpSessionId: 'acp-123',
         status: 'failed',
         lastDataAt: '2024-01-01T00:00:02.000Z',

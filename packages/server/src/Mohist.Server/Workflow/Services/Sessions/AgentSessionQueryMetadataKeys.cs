@@ -1,0 +1,14 @@
+namespace Mohist.Server.Workflow.Services.Sessions;
+
+public static class AgentSessionQueryMetadataKeys
+{
+    public const string ProjectId = "mohist.io/project-id";
+    public const string IssueNumber = "mohist.io/issue-number";
+    public const string SourceKind = "mohist.io/source-kind";
+    public const string WorkflowRunId = "mohist.io/source-id";
+    public const string SessionName = "mohist.io/session-name";
+    public const string WorkId = "mohist.io/work-id";
+    public const string WorkType = "mohist.io/work-type";
+    public const string Stage = "mohist.io/stage";
+    public const string Title = "mohist.io/title";
+}

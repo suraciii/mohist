@@ -117,11 +117,8 @@ function normalizeTranscriptDetail(
   eventName: string,
   innerPayload?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const issueNumber = readEnvelopeField(candidate, 'issueNumber', 'IssueNumber')
-    ?? readEnvelopeField(candidate, 'issueNo', 'IssueNo')
   const agentSessionId = readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
   const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
-  const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
   const normalized: Record<string, unknown> = {
     ...candidate,
     ...(innerPayload ?? {}),
@@ -151,17 +148,8 @@ function normalizeTranscriptDetail(
   if (innerPayload) {
     normalized.payload = innerPayload
   }
-  if (normalized.issueId === undefined && issueNumber !== undefined) {
-    normalized.issueId = String(issueNumber)
-  }
-  if (normalized.issueNumber === undefined && issueNumber !== undefined) {
-    normalized.issueNumber = issueNumber
-  }
   if (normalized.acpSessionId === undefined) {
     normalized.acpSessionId = agentSessionId ?? sessionId
-  }
-  if (normalized.executionId === undefined) {
-    normalized.executionId = workId
   }
   if (normalized.coderSessionId === undefined) {
     normalized.coderSessionId = sessionId

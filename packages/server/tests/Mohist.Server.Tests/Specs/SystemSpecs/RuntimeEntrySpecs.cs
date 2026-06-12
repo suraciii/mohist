@@ -11,6 +11,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.SystemSpecs;
@@ -215,11 +216,11 @@ public class RuntimeEntrySpecs
     {
         var now = DateTime.UtcNow;
         var metadata = new AgentSessionMetadata()
-            .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
-            .WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.ToString())
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
-            .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, workId);
+            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, workId);
         var session = AgentSession.Create(
             $"session-{Guid.NewGuid():N}",
             runnerId,

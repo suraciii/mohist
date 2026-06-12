@@ -1,5 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Workflow.Services.Sessions;
 
 namespace Mohist.Server.Tests.Support.TestData;
 
@@ -38,14 +39,7 @@ public static class AgentSessionTestData
         var row = new AgentSessionRow
         {
             Id = id,
-            ProjectId = projectId,
-            IssueNumber = issueNumber,
-            WorkflowRunId = workflowRunId,
-            SessionName = sessionName,
             RunnerId = runnerId,
-            WorkId = workId,
-            WorkType = workType,
-            Stage = stage,
             Status = "running",
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
@@ -57,13 +51,13 @@ public static class AgentSessionTestData
         string projectId, int issueNumber, string workflowRunId, string sessionName,
         string? workId, string? workType, string? stage, string title) =>
         new AgentSessionMetadata()
-            .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
-            .WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.ToString())
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
-            .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, sessionName)
-            .WithLabel(AgentSessionMetadataKeys.WorkId, workId)
-            .WithLabel(AgentSessionMetadataKeys.WorkType, workType)
-            .WithLabel(AgentSessionMetadataKeys.Stage, stage)
-            .WithAnnotation(AgentSessionMetadataKeys.Title, title);
+            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkType, workType)
+            .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
+            .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
 }

@@ -10,27 +10,6 @@ public sealed class AgentSession
     public AgentSessionSettings Settings { get; set; } = new();
     public AgentSessionStatusSnapshot Status { get; set; } = AgentSessionStatusSnapshot.Created(DateTime.UtcNow);
 
-    [JsonIgnore]
-    public string ProjectId => Metadata.Label(AgentSessionMetadataKeys.ProjectId) ?? string.Empty;
-    [JsonIgnore]
-    public int IssueNumber => int.TryParse(Metadata.Label(AgentSessionMetadataKeys.IssueNumber), out var value) ? value : 0;
-    [JsonIgnore]
-    public string RunId => Metadata.Label(AgentSessionMetadataKeys.SourceId) ?? string.Empty;
-    [JsonIgnore]
-    public string SessionName => Metadata.Label(AgentSessionMetadataKeys.SessionName) ?? string.Empty;
-    [JsonIgnore]
-    public string? SourceKind => Metadata.Label(AgentSessionMetadataKeys.SourceKind);
-    [JsonIgnore]
-    public string? TaskId => Metadata.Label(AgentSessionMetadataKeys.WorkId);
-    [JsonIgnore]
-    public string? TaskKind => Metadata.Label(AgentSessionMetadataKeys.WorkType);
-    [JsonIgnore]
-    public string? Phase => Metadata.Label(AgentSessionMetadataKeys.Stage);
-    [JsonIgnore]
-    public string? Title => Metadata.Annotation(AgentSessionMetadataKeys.Title);
-    [JsonIgnore]
-    public string? ChangeDir => null;
-
     public static AgentSession Create(
         string id,
         string runnerId,
@@ -52,29 +31,10 @@ public sealed class AgentSession
     }
 }
 
-public static class AgentSessionMetadataKeys
-{
-    public const string ProjectId = "mohist.io/project-id";
-    public const string IssueNumber = "mohist.io/issue-number";
-    public const string SourceKind = "mohist.io/source-kind";
-    public const string SourceId = "mohist.io/source-id";
-    public const string SessionName = "mohist.io/session-name";
-    public const string WorkId = "mohist.io/work-id";
-    public const string WorkType = "mohist.io/work-type";
-    public const string Stage = "mohist.io/stage";
-    public const string Title = "mohist.io/title";
-}
-
-public static class AgentSessionKey
-{
-    public const string Workflow = "workflow";
-
-    public static string WorkflowSession(string workflowRunId, string sessionName) => $"workflows/{workflowRunId}/{sessionName}";
-}
-
+[GenerateSerializer]
 public sealed record AgentSessionMetadata(
-    IReadOnlyDictionary<string, string>? Labels = null,
-    IReadOnlyDictionary<string, string>? Annotations = null)
+    [property: Id(0)] IReadOnlyDictionary<string, string>? Labels = null,
+    [property: Id(1)] IReadOnlyDictionary<string, string>? Annotations = null)
 {
     public string? Label(string key) => Labels is not null && Labels.TryGetValue(key, out var value) ? value : null;
 
@@ -85,6 +45,19 @@ public sealed record AgentSessionMetadata(
 
     public AgentSessionMetadata WithAnnotation(string key, string? value) =>
         value is null ? this : this with { Annotations = With(Annotations, key, value) };
+
+    public AgentSessionMetadata Merge(AgentSessionMetadata? other)
+    {
+        if (other is null) return this;
+        var next = this;
+        if (other.Labels is not null)
+            foreach (var (key, value) in other.Labels)
+                next = next.WithLabel(key, value);
+        if (other.Annotations is not null)
+            foreach (var (key, value) in other.Annotations)
+                next = next.WithAnnotation(key, value);
+        return next;
+    }
 
     private static IReadOnlyDictionary<string, string> With(IReadOnlyDictionary<string, string>? source, string key, string value)
     {

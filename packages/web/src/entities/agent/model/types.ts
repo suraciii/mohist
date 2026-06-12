@@ -59,23 +59,28 @@ export type PlanRoundCompleteEvent = {
   verdict?: string
 }
 
+type SessionRuntimeBase = {
+  acpSessionId?: string
+  coderSessionId?: string
+}
+
 export type AgentDetailEventMap = {
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
   coder_text_chunk: { issueId: string; projectId: string; executionId?: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   coder_thought_chunk: { issueId: string; projectId: string; executionId?: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
   coder_tool_call: { issueId: string; projectId: string; executionId?: string; acpSessionId: string; toolName: string; state?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; status?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; coderSessionId?: string; model?: string }
-  'session.input': { issueId: string; projectId: string; executionId?: string; acpSessionId: string; coderSessionId?: string; text: string; kind?: string; sentAt?: string; sessionName?: string; workId?: string; workType?: string; stage?: string | null }
-  'message.delta': { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
-  'reasoning.delta': { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string }
-  'tool_call.started': { issueId: string; projectId: string; executionId: string; acpSessionId: string; toolName: string; state: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; coderSessionId?: string; model?: string }
+  'session.input': SessionRuntimeBase & { text: string; kind?: string; sentAt?: string }
+  'message.delta': SessionRuntimeBase & { text: string; model?: string }
+  'reasoning.delta': SessionRuntimeBase & { text: string; model?: string }
+  'tool_call.started': SessionRuntimeBase & { toolName: string; state: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; model?: string }
   'tool_call.updated': AgentDetailEventMap['tool_call.started']
   'tool_call.completed': AgentDetailEventMap['tool_call.started']
   plan_round_start: PlanRoundStartEvent
   plan_session_update: PlanSessionUpdateEvent
   plan_round_complete: PlanRoundCompleteEvent
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
-  'session.liveness': { issueId: string; projectId: string; executionId: string; acpSessionId: string; sessionName?: string; workId?: string; workType?: string; stage?: string | null; status: 'probing' | 'running' | 'failed'; lastDataAt: string; lastActivityType?: string; probeSentAt?: string; probeDeadlineAt?: string; probeVersion?: number; dataVersion?: number; postProbeActivity?: boolean; activeProbeVersion?: number; satisfiedProbeVersion?: number; failureReason?: string }
+  'session.liveness': SessionRuntimeBase & { status: 'probing' | 'running' | 'failed'; lastDataAt: string; lastActivityType?: string; probeSentAt?: string; probeDeadlineAt?: string; probeVersion?: number; dataVersion?: number; postProbeActivity?: boolean; activeProbeVersion?: number; satisfiedProbeVersion?: number; failureReason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string; title?: string | null }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
   coder_session_failed: { issueId: string; projectId: string; coderSessionId: string; reason?: string }
@@ -85,11 +90,8 @@ export type AgentDetailEventMap = {
   check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
   check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
   stage_task_update: { issueId: string; projectId: string; stage: string; taskId: string; taskTitle: string; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt: number; artifacts: string[] }
-  'session.closed': { issueId: string; projectId: string; executionId?: string; acpSessionId: string; coderSessionId?: string; status: 'completed' | 'failed' | 'cancelled' | string; failureReason?: string | null; failureCategory?: string | null; exitCode?: number | null; sessionName?: string; workId?: string; workType?: string; stage?: string | null }
+  'session.closed': SessionRuntimeBase & { status: 'completed' | 'failed' | 'cancelled' | string; failureReason?: string | null; failureCategory?: string | null; exitCode?: number | null }
   'usage.updated': {
-    issueId: string
-    projectId: string
-    executionId?: string
     acpSessionId?: string
     coderSessionId?: string
     inputTokens?: number
@@ -102,7 +104,7 @@ export type AgentDetailEventMap = {
     contextWindowSize?: number
     contextWindowUsed?: number
   }
-  'model.resolved': { issueId: string; projectId: string; executionId?: string; acpSessionId?: string; coderSessionId?: string; model: string }
+  'model.resolved': SessionRuntimeBase & { model: string }
   'com.mohist.agent-session.runtime-bound': { issueId: string; projectId: string }
   'com.mohist.agent-session.usage-recorded': { issueId: string; projectId: string }
   'com.mohist.agent-session.model-changed': { issueId: string; projectId: string }

@@ -10,11 +10,9 @@ public class AgentSessionDomainSpecs
     private static AgentSession CreateSession()
     {
         var metadata = new AgentSessionMetadata()
-            .WithLabel(AgentSessionMetadataKeys.ProjectId, "proj")
-            .WithLabel(AgentSessionMetadataKeys.IssueNumber, "1")
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
-            .WithLabel(AgentSessionMetadataKeys.SourceId, "wf")
-            .WithLabel(AgentSessionMetadataKeys.SessionName, "session");
+            .WithLabel("owner", "proj")
+            .WithLabel("source", "wf")
+            .WithLabel("name", "session");
 
         return AgentSession.Create(
             "proj/wf/session",
@@ -35,14 +33,11 @@ public class AgentSessionDomainSpecs
         var session = CreateSession();
 
         Assert.Equal("proj/wf/session", session.Id);
-        Assert.Equal("proj", session.ProjectId);
-        Assert.Equal("wf", session.RunId);
-        Assert.Equal("session", session.SessionName);
-        Assert.Equal(1, session.IssueNumber);
-        Assert.Null(session.TaskId);
-        Assert.Null(session.TaskKind);
-        Assert.Null(session.Phase);
-        Assert.Null(session.Title);
+        Assert.Equal("proj", session.Metadata.Label("owner"));
+        Assert.Equal("wf", session.Metadata.Label("source"));
+        Assert.Equal("session", session.Metadata.Label("name"));
+        Assert.Null(session.Metadata.Label("work"));
+        Assert.Null(session.Metadata.Annotation("title"));
         Assert.Equal("runner-1", session.Runtime.RunnerId);
         Assert.Equal("opencode", session.Runtime.AgentRuntime);
         Assert.Equal("/work", session.Runtime.WorkDir);

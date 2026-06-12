@@ -5,9 +5,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Issue.Api;
@@ -272,7 +274,7 @@ public class IssueSessionApiSpecs
         Assert.True(root.ValueKind == JsonValueKind.Object, $"{label} response should be an object");
     }
 
-    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, AgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
+    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
         var projectName = $"isa-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -289,22 +291,26 @@ public class IssueSessionApiSpecs
             Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
         sessionName ??= work.WorkId;
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
-        var session = await grain.OpenAsync(new OpenAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
+        var info = await grain.OpenAsync(new OpenAgentSessionCommand(
+            _runnerId,
+            "opencode",
+            Metadata: WorkflowSessionMetadata(project.Id, issue.Number, work.WorkflowRunId, sessionName, work.WorkId, work.WorkType, work.Stage, work.Title)));
+        var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
             await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
     }
 
-    private string RunnerAgentSessionAttachPath(AgentSessionInfo session) =>
+    private string RunnerAgentSessionAttachPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/attach";
 
-    private string RunnerAgentSessionRuntimeEventsPath(AgentSessionInfo session) =>
+    private string RunnerAgentSessionRuntimeEventsPath(CreatedSession session) =>
         $"{RunnerSessionPath(session)}/runtime-events";
 
-    private string RunnerSessionPath(AgentSessionInfo session) =>
+    private string RunnerSessionPath(CreatedSession session) =>
         $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";
 
-    private async Task<AgentSessionInfo> OpenRunnerSessionAsync(string projectId, int issueNumber, string workflowRunId, string sessionName, WorkDispatch work, string title)
+    private async Task<CreatedSession> OpenRunnerSessionAsync(string projectId, int issueNumber, string workflowRunId, string sessionName, WorkDispatch work, string title)
     {
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/open", new
         {
@@ -317,20 +323,53 @@ public class IssueSessionApiSpecs
 
         var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
         var session = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
-        return session ?? throw new InvalidOperationException($"Session {workflowRunId}/{sessionName} was not created.");
+        return new CreatedSession(projectId, issueNumber, workflowRunId, sessionName, session ?? throw new InvalidOperationException($"Session {workflowRunId}/{sessionName} was not created."));
     }
 
     private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        return await db.AgentSessions
-            .Where(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName)
-            .Select(s => s.Id)
+        return await db.AgentSessionLabels
+            .Where(label => label.Key == AgentSessionQueryMetadataKeys.WorkflowRunId && label.Value == workflowRunId)
+            .Join(db.AgentSessionLabels.Where(label => label.Key == AgentSessionQueryMetadataKeys.SessionName && label.Value == sessionName),
+                left => left.SessionId,
+                right => right.SessionId,
+                (left, right) => left.SessionId)
             .SingleAsync();
     }
 
+    private static AgentSessionMetadata WorkflowSessionMetadata(
+        string projectId,
+        int issueNumber,
+        string workflowRunId,
+        string sessionName,
+        string? workId,
+        string? workType,
+        string? stage,
+        string? title) =>
+        new AgentSessionMetadata()
+            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkType, workType)
+            .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
+            .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
+
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(string Id, int Number, string Title);
+    private sealed record CreatedSession(
+        string ProjectId,
+        int IssueNumber,
+        string WorkflowRunId,
+        string SessionName,
+        AgentSessionInfo Info)
+    {
+        public string Id => Info.Id;
+    }
+
     private sealed record IssueSessionTranscriptResponseDto(IssueSessionTranscriptTurnDto[] Turns, int PartCount, string? LastActivityAt);
     private sealed record IssueSessionTranscriptTurnDto(string Id, string StartedAt, string? CompletedAt, bool Incomplete, IssueSessionTranscriptUserDto User, IssueSessionTranscriptPartDto[] Assistant);
     private sealed record IssueSessionTranscriptUserDto(string Text, string Kind, string SentAt);

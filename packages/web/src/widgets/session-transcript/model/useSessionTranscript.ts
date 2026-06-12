@@ -726,9 +726,13 @@ export function useSessionTranscript({
 
     mountedRef.current = true
     const unsubs: Array<() => void> = []
+    const isCurrentSessionEvent = (detail: { acpSessionId?: string | null; coderSessionId?: string | null; sessionId?: string | null }) => {
+      if (!mountedRef.current) return false
+      if (acpSessionId && detail.acpSessionId === acpSessionId) return true
+      return detail.coderSessionId === sessionId || detail.sessionId === sessionId
+    }
     const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
-      if (detail.issueId !== issueId || !mountedRef.current) return
-      if (detail.acpSessionId !== acpSessionId) return
+      if (!isCurrentSessionEvent(detail)) return
 
       hasLiveTailRef.current = true
       const now = new Date().toISOString()
@@ -873,8 +877,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('session.input', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
         setTurns((prev) => appendInputTurn(prev, {
@@ -889,8 +892,24 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('message.delta', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
+
+        hasLiveTailRef.current = true
+        setIsStreaming(true)
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, new Date().toISOString())
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = appendTextToTurn(lastTurn, detail.text)
+          return next
+        })
+        setIsThinking(false)
+        markNewContentRef.current()
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_text_chunk', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
         setIsStreaming(true)
@@ -907,8 +926,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('reasoning.delta', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
         setIsStreaming(true)
@@ -938,9 +956,17 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
+      onAgentEvent('coder_tool_call', (detail) => {
+        handleToolDetail({
+          ...detail,
+          state: (detail.state ?? detail.status ?? 'started') as AgentDetailEventMap['tool_call.started']['state'],
+        })
+      }),
+    )
+
+    unsubs.push(
       onAgentEvent('session.closed', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
         const now = new Date().toISOString()
@@ -970,10 +996,60 @@ export function useSessionTranscript({
       }),
     )
 
+    const handleLegacyTerminalEvent = (
+      detail: { coderSessionId?: string | null; sessionId?: string | null; acpSessionId?: string | null; reason?: string | null },
+      status: 'completed' | 'failed' | 'cancelled',
+    ) => {
+      if (!isCurrentSessionEvent(detail)) return
+
+      hasLiveTailRef.current = true
+      const now = new Date().toISOString()
+      setTurns((prev) => closeLatestTurn(prev, now))
+
+      if (status === 'failed' || status === 'cancelled') {
+        const errorPart = createErrorPart(
+          detail.reason ?? `Session ${status}`,
+          status === 'cancelled' ? 'cancelled' : 'failed',
+          now,
+        )
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, now)
+          const lastTurn = next[next.length - 1]
+          next[next.length - 1] = {
+            ...lastTurn,
+            assistant: [...lastTurn.assistant, errorPart],
+          }
+          return next
+        })
+      }
+
+      setIsThinking(false)
+      clearStreaming()
+      invalidateAndRefetch()
+      markNewContentRef.current()
+    }
+
+    unsubs.push(
+      onAgentEvent('coder_session_completed', (detail) => {
+        handleLegacyTerminalEvent(detail, 'completed')
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_session_failed', (detail) => {
+        handleLegacyTerminalEvent(detail, 'failed')
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('coder_session_cancelled', (detail) => {
+        handleLegacyTerminalEvent(detail, 'cancelled')
+      }),
+    )
+
     unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
         const now = new Date().toISOString()
@@ -1008,8 +1084,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('session.liveness', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        if (detail.acpSessionId !== acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
 
         hasLiveTailRef.current = true
         const timestamp = detail.probeSentAt ?? detail.lastDataAt ?? new Date().toISOString()

@@ -325,6 +325,13 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     mountedRef.current = true
     const issueId = String(issueNumber)
     const unsubs: Array<() => void> = []
+    const isCurrentSessionEvent = (detail: { acpSessionId?: string | null; coderSessionId?: string | null; sessionId?: string | null }) => {
+      if (!mountedRef.current) return false
+      const s = sessionRef.current
+      if (!s) return true
+      if (detail.acpSessionId === s.acpSessionId) return true
+      return detail.coderSessionId === s.id || detail.sessionId === s.id
+    }
 
     unsubs.push(
       onAgentEvent('plan_round_start', (detail) => {
@@ -440,9 +447,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('message.delta', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        const s = sessionRef.current
-        if (s && detail.acpSessionId !== s.acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
         setRoundsRef.current((prev) => {
           if (prev.length === 0) return prev
           const next = [...prev]
@@ -456,9 +461,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('reasoning.delta', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
-        const s = sessionRef.current
-        if (s && detail.acpSessionId !== s.acpSessionId) return
+        if (!isCurrentSessionEvent(detail)) return
         setRoundsRef.current((prev) => {
           if (prev.length === 0) return prev
           const next = [...prev]
@@ -471,15 +474,13 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     )
 
     const handleToolEvent = (detail: AgentDetailEventMap['tool_call.started']) => {
-      if (detail.issueId !== issueId || !mountedRef.current) return
-      const s = sessionRef.current
-      if (s && detail.acpSessionId !== s.acpSessionId) return
+      if (!isCurrentSessionEvent(detail)) return
       const map = liveToolCallMapRef.current
       const existing = map.get(detail.toolCallId)
 
       if (detail.state === 'started') {
         const entry: ToolCallEntry = {
-          executionId: detail.executionId,
+          executionId: detail.coderSessionId ?? detail.acpSessionId ?? '',
           toolName: detail.toolName,
           state: 'started',
           timestamp: Date.now(),
@@ -575,7 +576,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
     unsubs.push(
       onAgentEvent('session.liveness', (detail) => {
-        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (!isCurrentSessionEvent(detail)) return
         const status = mapLivenessToRecoveryStatus(detail.status)
         const attempt = detail.activeProbeVersion ?? detail.satisfiedProbeVersion ?? detail.probeVersion ?? 1
         const reason = detail.failureReason

@@ -23,6 +23,7 @@ using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 
@@ -58,6 +59,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
+        services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         services.AddSingleton<ProjectQuerier>();
         services.AddSingleton<ProjectRefResolver>();
         services.AddSingleton<IssueRepositoryResolver>();
@@ -68,6 +70,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();
         services.AddScoped<IEventStore, EventStore>();
+        services.AddScoped<AgentSessionQuery>();
         services.AddScoped<AgentSessionQuerier>();
         services.AddScoped<AgentSessionResolver>();
         services.AddScoped<WorkflowActivityQuerier>();

@@ -8,22 +8,9 @@ public static partial class AgentSessionExtensions
 
         public bool IsOpened => session.Status.Phase == AgentSessionStatus.Opened;
 
-        public IReadOnlyList<AgentSessionEvent> MergeContext(
-            string? runnerId,
-            string? workId,
-            string? workType,
-            string? stage,
-            string? title,
-            int? issueNumber)
+        public IReadOnlyList<AgentSessionEvent> MergeMetadata(AgentSessionMetadata? metadata)
         {
-            _ = runnerId;
-            if (session.IssueNumber == 0 && issueNumber is > 0)
-                session.Metadata = session.Metadata.WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.Value.ToString());
-            session.Metadata = session.Metadata
-                .WithLabel(AgentSessionMetadataKeys.WorkId, workId)
-                .WithLabel(AgentSessionMetadataKeys.WorkType, workType)
-                .WithLabel(AgentSessionMetadataKeys.Stage, stage)
-                .WithAnnotation(AgentSessionMetadataKeys.Title, title);
+            session.Metadata = session.Metadata.Merge(metadata);
             return [];
         }
 

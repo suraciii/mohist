@@ -1,3 +1,5 @@
+using Mohist.Server.Sessions.Domain;
+
 namespace Mohist.Server.Sessions.Grains;
 
 public interface IAgentSessionGrain : IGrainWithStringKey
@@ -10,15 +12,11 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
 [GenerateSerializer]
 public sealed record OpenAgentSessionCommand(
-    [property: Id(0)] string ProjectId,
-    [property: Id(1)] int? IssueNumber,
-    [property: Id(2)] string WorkflowRunId,
-    [property: Id(3)] string SessionName,
-    [property: Id(4)] string RunnerId,
-    [property: Id(5)] string? WorkId = null,
-    [property: Id(6)] string? WorkType = null,
-    [property: Id(7)] string? Stage = null,
-    [property: Id(8)] string? Title = null);
+    [property: Id(0)] string RunnerId,
+    [property: Id(1)] string AgentRuntime,
+    [property: Id(2)] string? WorkDir = null,
+    [property: Id(3)] string? Model = null,
+    [property: Id(4)] AgentSessionMetadata? Metadata = null);
 
 [GenerateSerializer]
 public sealed record AttachPhysicalSessionCommand(
@@ -30,10 +28,7 @@ public sealed record AttachPhysicalSessionCommand(
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
-    [property: Id(0)] string? WorkId = null,
-    [property: Id(1)] string? WorkType = null,
-    [property: Id(2)] string? Stage = null,
-    [property: Id(3)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!);
+    [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
@@ -43,54 +38,39 @@ public sealed record AgentSessionRuntimeEventInput(
 [GenerateSerializer]
 public sealed record AgentSessionInfo(
     [property: Id(0)] string Id,
-    [property: Id(1)] string ProjectId,
-    [property: Id(2)] int? IssueNumber,
-    [property: Id(3)] string WorkflowRunId,
-    [property: Id(4)] string SessionName,
-    [property: Id(5)] string? WorkId,
-    [property: Id(6)] string? WorkType,
-    [property: Id(7)] string? Stage,
-    [property: Id(8)] string? Title,
-    [property: Id(9)] string? RunnerId,
-    [property: Id(10)] string? AgentSessionId,
-    [property: Id(11)] string Status,
-    [property: Id(12)] string? Model,
-    [property: Id(13)] string? WorkDir,
-    [property: Id(14)] string? ChangeDir,
-    [property: Id(15)] int? ProcessPid,
-    [property: Id(16)] string CreatedAt,
-    [property: Id(17)] string? StartedAt,
-    [property: Id(18)] string? LastDataAt,
-    [property: Id(19)] string? CompletedAt,
-    [property: Id(20)] string? FailureReason,
-    [property: Id(21)] int? ExitCode,
-    [property: Id(22)] string? ResolvedModel,
-    [property: Id(23)] long? InputTokens,
-    [property: Id(24)] long? OutputTokens,
-    [property: Id(25)] long? TotalTokens,
-    [property: Id(26)] long? CachedReadTokens,
-    [property: Id(27)] long? ThoughtTokens,
-    [property: Id(28)] double? CostAmount,
-    [property: Id(29)] string? CostCurrency,
-    [property: Id(30)] long? ContextWindowUsed,
-    [property: Id(31)] long? ContextWindowSize,
-    [property: Id(32)] string? FailureCategory,
-    [property: Id(33)] int? ToolCallCount,
-    [property: Id(34)] int? ToolErrorCount);
+    [property: Id(1)] string? RunnerId,
+    [property: Id(2)] string? AgentSessionId,
+    [property: Id(3)] string Status,
+    [property: Id(4)] string? Model,
+    [property: Id(5)] string? WorkDir,
+    [property: Id(6)] string? ChangeDir,
+    [property: Id(7)] int? ProcessPid,
+    [property: Id(8)] string CreatedAt,
+    [property: Id(9)] string? StartedAt,
+    [property: Id(10)] string? LastDataAt,
+    [property: Id(11)] string? CompletedAt,
+    [property: Id(12)] string? FailureReason,
+    [property: Id(13)] int? ExitCode,
+    [property: Id(14)] string? ResolvedModel,
+    [property: Id(15)] long? InputTokens,
+    [property: Id(16)] long? OutputTokens,
+    [property: Id(17)] long? TotalTokens,
+    [property: Id(18)] long? CachedReadTokens,
+    [property: Id(19)] long? ThoughtTokens,
+    [property: Id(20)] double? CostAmount,
+    [property: Id(21)] string? CostCurrency,
+    [property: Id(22)] long? ContextWindowUsed,
+    [property: Id(23)] long? ContextWindowSize,
+    [property: Id(24)] string? FailureCategory,
+    [property: Id(25)] int? ToolCallCount,
+    [property: Id(26)] int? ToolErrorCount);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
-    [property: Id(2)] string ProjectId,
-    [property: Id(3)] int IssueNumber,
-    [property: Id(4)] string WorkflowRunId,
-    [property: Id(5)] string SessionName,
-    [property: Id(6)] string? AgentSessionId,
-    [property: Id(7)] string? WorkId,
-    [property: Id(8)] string? WorkType,
-    [property: Id(9)] string? Stage,
-    [property: Id(10)] long Sequence,
-    [property: Id(11)] string Type,
-    [property: Id(12)] string PayloadJson,
-    [property: Id(13)] string CreatedAt);
+    [property: Id(2)] string? AgentSessionId,
+    [property: Id(3)] long Sequence,
+    [property: Id(4)] string Type,
+    [property: Id(5)] string PayloadJson,
+    [property: Id(6)] string CreatedAt);
