@@ -314,7 +314,7 @@ public sealed class SkillsInstallSpecs
         services.AddSingleton<IFileSystem>(_files);
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(_environment);
-        services.AddSingleton<SystemdServiceInstaller>();
+        services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(output, error, _files, sp.GetRequiredService<ICommandExecutor>()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(assets ?? BuildDefaultAssetService());
         services.AddSingleton<SkillInstallService>(_ => new SkillInstallService(

@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Mohist.Cli;
 
-internal sealed class SystemdServiceInstaller
+internal sealed class SystemdServiceInstaller : IServiceInstaller
 {
     private const string ServerUnit = "mohist.service";
     private const string RunnerUnit = "mohist-runner.service";
@@ -293,67 +293,6 @@ internal sealed class SystemdServiceInstaller
         if (value.All(c => char.IsLetterOrDigit(c) || c is '/' or '.' or '_' or '-' or ':' or '='))
             return value;
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
-    }
-}
-
-
-
-internal sealed record ServiceInstallOptions(
-    bool DryRun,
-    string? UnitDir,
-    string? RepoRoot,
-    string? ListenUrl,
-    string? ServerUrl,
-    string? RunnerRoot)
-{
-    public static ServiceInstallOptions From(string[] args) => new(
-        DryRun: args.Contains("--dry-run"),
-        UnitDir: Option(args, "--unit-dir"),
-        RepoRoot: Option(args, "--repo-root"),
-        ListenUrl: Option(args, "--listen-url"),
-        ServerUrl: Option(args, "--server-url"),
-        RunnerRoot: Option(args, "--runner-root"));
-
-    private static string? Option(string[] args, string name)
-    {
-        for (var i = 0; i < args.Length; i++)
-        {
-            if (args[i] != name) continue;
-            if (i + 1 >= args.Length) throw new ArgumentException($"{name} requires a value");
-            return args[i + 1];
-        }
-        return null;
-    }
-}
-
-internal sealed record ServiceCommandOptions(
-    bool DryRun,
-    string? UnitDir,
-    int Lines,
-    bool Follow)
-{
-    public static ServiceCommandOptions From(string[] args) => new(
-        DryRun: args.Contains("--dry-run"),
-        UnitDir: Option(args, "--unit-dir"),
-        Lines: ParseLines(Option(args, "--lines", "-n")),
-        Follow: args.Contains("--follow") || args.Contains("-f"));
-
-    private static int ParseLines(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return 100;
-        if (int.TryParse(value, out var lines) && lines > 0) return lines;
-        throw new ArgumentException("--lines requires a positive integer");
-    }
-
-    private static string? Option(string[] args, params string[] names)
-    {
-        for (var i = 0; i < args.Length; i++)
-        {
-            if (!names.Contains(args[i])) continue;
-            if (i + 1 >= args.Length) throw new ArgumentException($"{args[i]} requires a value");
-            return args[i + 1];
-        }
-        return null;
     }
 }
 

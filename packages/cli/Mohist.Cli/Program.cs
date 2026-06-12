@@ -16,8 +16,8 @@ internal static class CliProgram
         var fileSystem = RealFileSystem.Instance;
         var commandExecutor = new SystemCommandExecutor();
         var api = new MohistCliApi(http, Console.Out, Console.Error, fileSystem, commandExecutor, Console.In);
-        var systemd = new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor);
-        var updater = new SourceCodeUpdater(Console.Out, Console.Error, systemd, commandExecutor, fileSystem, environment);
+        var installer = new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor);
+        var updater = new SourceCodeUpdater(Console.Out, Console.Error, installer, commandExecutor, fileSystem, environment);
 
         var services = new ServiceCollection();
         services.AddSingleton(api);
@@ -26,7 +26,7 @@ internal static class CliProgram
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
-        services.AddSingleton(systemd);
+        services.AddSingleton<IServiceInstaller>(_ => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(Console.Out, Console.Error, fileSystem, commandExecutor) : new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor));
         services.AddSingleton(updater);
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
