@@ -72,14 +72,16 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await ToInfoAsync(_session);
     }
 
-    private AgentSession CreateSession(OpenAgentSessionCommand command) =>
-        AgentSession.Create(
+    private AgentSession CreateSession(OpenAgentSessionCommand command)
+    {
+        var session = AgentSession.Create(
             SessionId,
             command.RunnerId ?? string.Empty,
-            string.IsNullOrWhiteSpace(command.AgentRuntime) ? "opencode" : command.AgentRuntime,
             command.WorkDir,
-            command.Model,
             command.Metadata);
+        session.Settings = new AgentSessionSettings(command.Model);
+        return session;
+    }
 
     public async Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command)
     {
@@ -272,14 +274,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         AgentSessionJsonHelper.StatusName(s),
         s.Settings.Model,
         s.Runtime.WorkDir,
-        null,
-        null,
         s.Status.CreatedAt.ToString("o"),
         s.Status.BoundAt?.ToString("o"),
         s.Status.LastDataAt?.ToString("o"),
-        null,
-        null,
-        null,
         eventSummary.ResolvedModel,
         usage.InputTokens,
         usage.OutputTokens,

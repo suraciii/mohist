@@ -14,13 +14,14 @@ public class AgentSessionDomainSpecs
             .WithLabel("source", "wf")
             .WithLabel("name", "session");
 
-        return AgentSession.Create(
+        var session = AgentSession.Create(
             "proj/wf/session",
             "runner-1",
-            "opencode",
             "/work",
             metadata: metadata,
             now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc));
+        session.Settings = new AgentSessionSettings("opencode");
+        return session;
     }
 
     private static AgentUsageSummary Usage(AgentSession session) => session.Status.UsageSummary ?? new AgentUsageSummary();
@@ -39,7 +40,6 @@ public class AgentSessionDomainSpecs
         Assert.Null(session.Metadata.Label("work"));
         Assert.Null(session.Metadata.Annotation("title"));
         Assert.Equal("runner-1", session.Runtime.RunnerId);
-        Assert.Equal("opencode", session.Runtime.AgentRuntime);
         Assert.Equal("/work", session.Runtime.WorkDir);
         Assert.Equal(AgentSessionStatus.Opened, session.Status.Phase);
         Assert.Equal(new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc), session.Status.CreatedAt);

@@ -224,7 +224,6 @@ public class RuntimeEntrySpecs
         var session = AgentSession.Create(
             $"session-{Guid.NewGuid():N}",
             runnerId,
-            "opencode",
             null,
             metadata: metadata,
             now: now);
