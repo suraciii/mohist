@@ -110,11 +110,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
         private static void DropAgentSessionIndexes(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(name: "IX_AgentSessions_AgentSessionId", table: "AgentSessions");
-            migrationBuilder.DropIndex(name: "IX_AgentSessions_ProjectId_IssueNumber_CreatedAt", table: "AgentSessions");
-            migrationBuilder.DropIndex(name: "IX_AgentSessions_ProjectId_Status_CreatedAt", table: "AgentSessions");
-            migrationBuilder.DropIndex(name: "IX_AgentSessions_WorkflowRunId_SessionName", table: "AgentSessions");
-            migrationBuilder.DropIndex(name: "IX_AgentSessions_WorkflowRunId_WorkId", table: "AgentSessions");
+            migrationBuilder.Sql("""DROP INDEX IF EXISTS "IX_AgentSessions_AgentSessionId";""");
+            migrationBuilder.Sql("""DROP INDEX IF EXISTS "IX_AgentSessions_ProjectId_IssueNumber_CreatedAt";""");
+            migrationBuilder.Sql("""DROP INDEX IF EXISTS "IX_AgentSessions_ProjectId_Status_CreatedAt";""");
+            migrationBuilder.Sql("""DROP INDEX IF EXISTS "IX_AgentSessions_WorkflowRunId_SessionName";""");
+            migrationBuilder.Sql("""DROP INDEX IF EXISTS "IX_AgentSessions_WorkflowRunId_WorkId";""");
         }
 
         private static void CreateAgentSessionIndexes(MigrationBuilder migrationBuilder)
