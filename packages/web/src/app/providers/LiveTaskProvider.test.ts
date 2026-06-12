@@ -23,22 +23,17 @@ describe('LiveTaskProvider transcript routing', () => {
     })
   })
 
-  it('normalizes server transcript metadata into live agent detail fields', () => {
+  it('normalizes server transcript metadata into session-scoped detail fields', () => {
     const unwrapped = __testing__.unwrapTranscriptEnvelope({
       type: 'reasoning.delta',
-      sessionId: 'proj/wr/plan',
-      issueNumber: 84,
+      sessionId: 'session-84',
       agentSessionId: 'acp-84',
-      workId: 'T-008.3',
       payload: { text: 'thinking' },
     })
 
     expect(unwrapped?.detail).toMatchObject({
-      issueId: '84',
-      issueNumber: 84,
       acpSessionId: 'acp-84',
-      coderSessionId: 'proj/wr/plan',
-      executionId: 'T-008.3',
+      coderSessionId: 'session-84',
       text: 'thinking',
     })
   })

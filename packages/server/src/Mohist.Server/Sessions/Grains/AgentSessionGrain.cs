@@ -29,6 +29,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     };
 
     private readonly IAgentSessionStore _stateStore;
+    private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventPublisher _eventPublisher;
     private readonly ITranscriptEventPublisher _transcriptPublisher;
@@ -39,12 +40,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public AgentSessionGrain(
         IAgentSessionStore stateStore,
+        IAgentSessionTranscriptStore transcriptStore,
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventPublisher eventPublisher,
         ITranscriptEventPublisher transcriptPublisher,
         ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
+        _transcriptStore = transcriptStore;
         _dbFactory = dbFactory;
         _eventPublisher = eventPublisher;
         _transcriptPublisher = transcriptPublisher;
@@ -68,7 +71,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (transcript is null)
             return;
 
-        await _stateStore.SaveTranscriptAsync(SessionId, _session, transcript, ct);
+        await _transcriptStore.SaveAsync(transcript, ct);
     }
 
     public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
@@ -79,11 +82,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         else
         {
-            _ = _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+            _ = _session.MergeMetadata(command.Metadata);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
-        await UpdateProjectionAsync(command);
         return await ToInfoAsync(_session);
     }
 
@@ -91,33 +93,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         AgentSession.Create(
             SessionId,
             command.RunnerId ?? string.Empty,
-            "opencode",
-            null,
-            metadata: BuildMetadata(command));
-
-    private static AgentSessionMetadata BuildMetadata(OpenAgentSessionCommand command) =>
-        new AgentSessionMetadata()
-            .WithLabel(AgentSessionMetadataKeys.ProjectId, command.ProjectId)
-            .WithLabel(AgentSessionMetadataKeys.IssueNumber, command.IssueNumber is > 0 ? command.IssueNumber.Value.ToString() : null)
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
-            .WithLabel(AgentSessionMetadataKeys.SourceId, command.WorkflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, command.SessionName)
-            .WithLabel(AgentSessionMetadataKeys.WorkId, command.WorkId)
-            .WithLabel(AgentSessionMetadataKeys.WorkType, command.WorkType)
-            .WithLabel(AgentSessionMetadataKeys.Stage, command.Stage)
-            .WithAnnotation(AgentSessionMetadataKeys.Title, command.Title);
-
-    private async Task UpdateProjectionAsync(OpenAgentSessionCommand command)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.AgentSessions.FindAsync(SessionId);
-        if (row is null) return;
-
-        row.WorkId ??= command.WorkId;
-        row.WorkType ??= command.WorkType;
-        row.Stage ??= command.Stage;
-        await db.SaveChangesAsync();
-    }
+            string.IsNullOrWhiteSpace(command.AgentRuntime) ? "opencode" : command.AgentRuntime,
+            command.WorkDir,
+            command.Model,
+            command.Metadata);
 
     public async Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command)
     {
@@ -141,7 +120,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var now = DateTime.UtcNow;
         var events = new List<AgentSessionEvent>();
         events.AddRange(session.RecordActivity(now));
-        var projection = await LoadProjectionAsync(session.Id);
 
         var entries = new List<AgentSessionRuntimeEventEnvelope>();
         foreach (var e in command.RuntimeEvents)
@@ -152,14 +130,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
-                ProjectId = session.ProjectId,
-                IssueNumber = session.IssueNumber,
-                WorkflowRunId = session.RunId,
-                SessionName = session.SessionName,
                 AgentSessionId = session.Status.AgentRuntimeSessionId,
-                WorkId = command.WorkId ?? projection?.WorkId,
-                WorkType = command.WorkType ?? projection?.WorkType,
-                Stage = command.Stage ?? projection?.Stage,
                 Sequence = ++_realtimeSequence,
                 Type = e.Type,
                 PayloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson,
@@ -173,11 +144,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             now,
             forceFlushPending: command.RuntimeEvents.Count > 1);
 
-        if (events.Count > 0 || transcript is not null)
-            if (transcript is not null)
-                await _stateStore.SaveTranscriptAsync(SessionId, session, transcript);
-            else
-                await _stateStore.SaveAsync(SessionId, session, events);
+        if (events.Count > 0)
+            await _stateStore.SaveAsync(SessionId, session, events);
+        if (transcript is not null)
+            await _transcriptStore.SaveAsync(transcript);
         _session = session;
 
         await FanOutRealtimeAsync(
@@ -199,7 +169,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             try
             {
-                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.SessionName);
+                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.Id);
             }
             catch (Exception ex)
             {
@@ -232,14 +202,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             var envelope = new TranscriptEnvelope(
                 Id: row.Id.ToString(),
                 SessionId: row.SessionId,
-                ProjectId: row.ProjectId,
-                IssueNumber: row.IssueNumber,
-                WorkflowRunId: row.WorkflowRunId,
-                SessionName: row.SessionName,
                 AgentSessionId: row.AgentSessionId,
-                WorkId: row.WorkId,
-                WorkType: row.WorkType,
-                Stage: row.Stage,
                 Sequence: row.Sequence,
                 Type: row.Type,
                 Payload: payload,
@@ -281,7 +244,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             try
             {
-                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.SessionName);
+                await PublishAgentSessionLifecycleAsync(domainEvent, source, session.Id);
             }
             catch (InvalidOperationException)
             {
@@ -323,18 +286,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)
     {
         var eventSummary = await LoadEventSummaryAsync(s.Id);
-        var row = await LoadProjectionAsync(s.Id);
         var usage = s.Status.UsageSummary ?? new AgentUsageSummary();
         return new AgentSessionInfo(
         s.Id,
-        s.ProjectId,
-        s.IssueNumber == 0 ? null : s.IssueNumber,
-        s.RunId,
-        s.SessionName,
-        row?.WorkId,
-        row?.WorkType,
-        row?.Stage,
-        null,
         s.Runtime.RunnerId,
         s.Status.AgentRuntimeSessionId,
         StatusName(s),
@@ -373,10 +327,16 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var transcriptParts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(e => e.SessionId == sessionId)
-            .OrderBy(e => e.Sequence)
+        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .Select(t => t.Id)
             .ToListAsync();
+        var transcriptParts = turnIds.Count == 0
+            ? new List<AgentSessionTranscriptPartRow>()
+            : await db.AgentSessionTranscriptParts.AsNoTracking()
+                .Where(e => turnIds.Contains(e.TurnId))
+                .OrderBy(e => e.Sequence)
+                .ToListAsync();
         var events = transcriptParts
             .Select(ToEventEnvelope)
             .OrderBy(e => e.Sequence)
@@ -430,14 +390,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private static AgentSessionRuntimeEventInfo ToEventInfo(AgentSessionRuntimeEventEnvelope e) => new(
         e.Id.ToString(),
         e.SessionId,
-        e.ProjectId,
-        e.IssueNumber,
-        e.WorkflowRunId,
-        e.SessionName,
         e.AgentSessionId,
-        e.WorkId,
-        e.WorkType,
-        e.Stage,
         e.Sequence,
         e.Type,
         e.PayloadJson,
@@ -446,15 +399,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private static AgentSessionRuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptPartRow part) => new()
     {
         Id = part.Id,
-        SessionId = part.SessionId,
-        ProjectId = part.ProjectId,
-        IssueNumber = part.IssueNumber,
-        WorkflowRunId = part.WorkflowRunId,
-        SessionName = part.SessionName,
-        AgentSessionId = part.AgentSessionId,
-        WorkId = part.WorkId,
-        WorkType = part.WorkType,
-        Stage = part.Stage,
         Sequence = part.Sequence,
         Type = part.Type,
         PayloadJson = part.PayloadJson,
@@ -605,14 +549,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         public long Id { get; init; }
         public string SessionId { get; init; } = string.Empty;
-        public string ProjectId { get; init; } = string.Empty;
-        public int IssueNumber { get; init; }
-        public string WorkflowRunId { get; init; } = string.Empty;
-        public string SessionName { get; init; } = string.Empty;
         public string? AgentSessionId { get; init; }
-        public string? WorkId { get; init; }
-        public string? WorkType { get; init; }
-        public string? Stage { get; init; }
         public long Sequence { get; init; }
         public string Type { get; init; } = string.Empty;
         public string PayloadJson { get; init; } = "{}";
@@ -689,15 +626,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             }
 
             _pending ??= new PendingTextSegment(
-                row.SessionId,
-                row.ProjectId,
-                row.IssueNumber,
-                row.WorkflowRunId,
-                row.SessionName,
-                row.AgentSessionId,
-                row.WorkId,
-                row.WorkType,
-                row.Stage,
                 type,
                 correlationId,
                 row.Type,
@@ -718,15 +646,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
             var row = new AgentSessionRuntimeEventEnvelope
             {
-                SessionId = _pending.SessionId,
-                ProjectId = _pending.ProjectId,
-                IssueNumber = _pending.IssueNumber,
-                WorkflowRunId = _pending.WorkflowRunId,
-                SessionName = _pending.SessionName,
-                AgentSessionId = _pending.AgentSessionId ?? session.Status.AgentRuntimeSessionId,
-                WorkId = _pending.WorkId ?? session.TaskId,
-                WorkType = _pending.WorkType ?? session.TaskKind,
-                Stage = _pending.Stage ?? session.Phase,
                 CreatedAt = now,
             };
             FlushPending(row, parts);
@@ -768,15 +687,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             int rawEventCount,
             DateTime firstSeenAt,
             DateTime lastSeenAt) => new(
-                row.SessionId,
-                row.ProjectId,
-                row.IssueNumber,
-                row.WorkflowRunId,
-                row.SessionName,
-                row.AgentSessionId,
-                row.WorkId,
-                row.WorkType,
-                row.Stage,
                 type,
                 correlationKey,
                 correlationId,
@@ -813,11 +723,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
             return new AgentSessionTranscriptTurnUpsert(
                 session.Id,
-                session.ProjectId,
-                session.IssueNumber,
-                session.RunId,
-                session.SessionName,
-                session.Status.AgentRuntimeSessionId,
                 Sequence: input is null ? 0 : 1,
                 promptText,
                 NormalizePromptKind(promptKind),
@@ -889,29 +794,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private sealed class PendingTextSegment
     {
         public PendingTextSegment(
-            string sessionId,
-            string projectId,
-            int issueNumber,
-            string workflowRunId,
-            string sessionName,
-            string? agentSessionId,
-            string? workId,
-            string? workType,
-            string? stage,
             string type,
             string? correlationId,
             string sourceEventType,
             DateTime startedAt)
         {
-            SessionId = sessionId;
-            ProjectId = projectId;
-            IssueNumber = issueNumber;
-            WorkflowRunId = workflowRunId;
-            SessionName = sessionName;
-            AgentSessionId = agentSessionId;
-            WorkId = workId;
-            WorkType = workType;
-            Stage = stage;
             Type = type;
             CorrelationId = correlationId;
             SourceEventType = sourceEventType;
@@ -919,15 +806,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             UpdatedAt = startedAt;
         }
 
-        public string SessionId { get; }
-        public string ProjectId { get; }
-        public int IssueNumber { get; }
-        public string WorkflowRunId { get; }
-        public string SessionName { get; }
-        public string? AgentSessionId { get; }
-        public string? WorkId { get; }
-        public string? WorkType { get; }
-        public string? Stage { get; }
         public string Type { get; }
         public string? CorrelationId { get; }
         public string SourceEventType { get; private set; }

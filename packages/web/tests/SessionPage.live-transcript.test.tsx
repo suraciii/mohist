@@ -273,9 +273,6 @@ describe('useSessionTranscript live parity and convergence', () => {
     const { result } = renderLiveTranscript()
     act(() => {
       dispatchAgentEvent('session.liveness', {
-        issueId: '123',
-        projectId: 'project-1',
-        executionId: 'exec-123',
         acpSessionId: 'acp-123',
         status: 'probing',
         lastDataAt: '2024-01-01T00:00:00.000Z',
@@ -285,9 +282,6 @@ describe('useSessionTranscript live parity and convergence', () => {
         activeProbeVersion: 4,
       })
       dispatchAgentEvent('session.liveness', {
-        issueId: '123',
-        projectId: 'project-1',
-        executionId: 'exec-123',
         acpSessionId: 'acp-123',
         status: 'running',
         lastDataAt: '2024-01-01T00:00:02.000Z',

@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Services.Sessions;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Events;
@@ -303,7 +305,9 @@ public class AgentSessionLifecycleDedupSpecs
         var session = await _fixture.Grains
             .GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"))
             .OpenAsync(new OpenAgentSessionCommand(
-                project.Id, issue.Number, workflowRunId, sessionName, _runnerId, sessionName, "task", "Build", $"Dedup {name}"));
+                _runnerId,
+                "opencode",
+                Metadata: WorkflowSessionMetadata(project.Id, issue.Number, workflowRunId, sessionName, sessionName, "task", "Build", $"Dedup {name}")));
 
         return new CreatedSession(project.Id, workflowRunId, sessionName, session.Id);
     }
@@ -340,6 +344,26 @@ public class AgentSessionLifecycleDedupSpecs
                 new { type = "session.liveness", payload = new { status } }
             }
         });
+
+    private static AgentSessionMetadata WorkflowSessionMetadata(
+        string projectId,
+        int issueNumber,
+        string workflowRunId,
+        string sessionName,
+        string? workId,
+        string? workType,
+        string? stage,
+        string? title) =>
+        new AgentSessionMetadata()
+            .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+            .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkId, workId)
+            .WithLabel(AgentSessionQueryMetadataKeys.WorkType, workType)
+            .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
+            .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(string Id, int Number, string Title);

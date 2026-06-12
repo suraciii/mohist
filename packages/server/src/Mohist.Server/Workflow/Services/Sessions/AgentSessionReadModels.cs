@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Mohist.Server.Sessions.Services;
+namespace Mohist.Server.Workflow.Services.Sessions;
 
 public sealed record AgentSessionDto(
     string Id,

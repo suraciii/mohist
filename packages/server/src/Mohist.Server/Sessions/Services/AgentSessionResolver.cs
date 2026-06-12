@@ -1,32 +1,27 @@
-using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Sessions.Services;
 
 public sealed class AgentSessionResolver
 {
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly AgentSessionQuery _query;
     private readonly IGrainFactory _grains;
 
-    public AgentSessionResolver(IDbContextFactory<MohistDbContext> dbFactory, IGrainFactory grains)
+    public AgentSessionResolver(AgentSessionQuery query, IGrainFactory grains)
     {
-        _dbFactory = dbFactory;
+        _query = query;
         _grains = grains;
     }
 
-    public async Task<string?> ResolveAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
+    public async Task<string?> ResolveByLabelsAsync(IReadOnlyDictionary<string, string> labels, CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.AgentSessions.AsNoTracking()
-            .Where(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName)
-            .Select(s => s.Id)
-            .FirstOrDefaultAsync(ct);
+        var record = await _query.FirstByLabelsAsync(labels, ct: ct);
+        return record?.Session.Id;
     }
 
-    public async Task<AgentSessionInfo?> GetAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
+    public async Task<AgentSessionInfo?> GetByLabelsAsync(IReadOnlyDictionary<string, string> labels, CancellationToken ct = default)
     {
-        var sessionId = await ResolveAsync(workflowRunId, sessionName, ct);
+        var sessionId = await ResolveByLabelsAsync(labels, ct);
         if (sessionId is null) return null;
         return await _grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
     }

@@ -77,9 +77,6 @@ describe('useSessionTranscript', () => {
 
     act(() => {
       dispatchAgentEvent('message.delta', {
-        issueId: '84',
-        projectId: 'project',
-        executionId: 'work',
         acpSessionId: 'acp-84',
         text: ' live',
       })
@@ -98,9 +95,6 @@ describe('useSessionTranscript', () => {
 
     act(() => {
       dispatchAgentEvent('message.delta', {
-        issueId: '84',
-        projectId: 'project',
-        executionId: 'work',
         acpSessionId: 'acp-84',
         text: ' live',
       })
