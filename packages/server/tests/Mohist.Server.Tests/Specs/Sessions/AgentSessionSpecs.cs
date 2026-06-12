@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
@@ -40,15 +39,15 @@ public class AgentSessionSpecs
     public async Task LoadLatestEventsActivity_DoesNotSuppressTerminalOrLivenessEventTypes()
     {
         var (project, issue, _, session) = await CreateStartedAgentSessionAsync("activity-no-filter", title: "Activity no filter");
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
                 new
                 {
-                    type = "agent_session_terminal",
+                    type = "session.closed",
                     payload = new { status = "completed", exitCode = 0 }
                 }
             }
@@ -57,7 +56,7 @@ public class AgentSessionSpecs
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.NotNull(card.LastActivity);
-        Assert.Equal("agent_session_terminal", card.LastActivity!.Text);
+        Assert.Equal("session_closed", card.LastActivity!.Text);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -70,19 +69,17 @@ public class AgentSessionSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
-                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "plan"))
-            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "agent_thought_chunk", payload = new { content = new { text = "thinking" } } },
-                new { type = "agent_message_chunk", payload = new { text = "hello" } },
+                new { type = "reasoning.delta", payload = new { content = new { text = "thinking" } } },
+                new { type = "message.delta", payload = new { text = "hello" } },
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new
                     {
                         toolCallId = "meta-tool-1",
@@ -94,7 +91,7 @@ public class AgentSessionSpecs
                 },
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 100,
@@ -110,17 +107,17 @@ public class AgentSessionSpecs
                 },
                 new
                 {
-                    type = "agent_session_model_resolved",
+                    type = "model.resolved",
                     payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
                 },
                 new
                 {
-                    type = "tool_call_update",
+                    type = "tool_call.updated",
                     payload = new { toolCallId = "meta-tool-1", kind = "read", status = "failed", title = "Read README" }
                 },
                 new
                 {
-                    type = "agent_session_terminal",
+                    type = "session.closed",
                     payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 }
             }
@@ -139,8 +136,8 @@ public class AgentSessionSpecs
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(7, metadata.GetProperty("eventCount").GetInt32());
-        Assert.Equal(2, metadata.GetProperty("toolCount").GetInt32());
+        Assert.Equal(7, metadata.GetProperty("segmentCount").GetInt32());
+        Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
         Assert.Equal("anthropic/claude-sonnet-4", root.GetProperty("resolvedModel").GetString());
         Assert.Equal(100, root.GetProperty("inputTokens").GetInt64());
         Assert.Equal(50, root.GetProperty("outputTokens").GetInt64());
@@ -171,41 +168,30 @@ public class AgentSessionSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
-                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "plan"))
-            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "mohist_prompt", payload = new { text = "do the thing", kind = "task" } },
-                new { type = "agent_message_chunk", payload = new { text = "first message" } },
-                new { type = "agent_message_chunk", payload = new { text = "second message" } }
+                new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
+                new { type = "message.delta", payload = new { text = "first message" } },
+                new { type = "message.delta", payload = new { text = "second message" } }
             }
         });
 
-        var response = await _client.GetDataAsync<AgentSessionRuntimeEventsTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/events");
+        var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
 
-        Assert.Equal(2, response.Events.Length);
-        Assert.Equal(new[] { "mohist_prompt", "agent_message" }, response.Events.Select(e => e.Type).ToArray());
-        var sequences = response.Events.Select(e => e.Sequence).ToArray();
-        Assert.Equal(sequences.OrderBy(s => s).ToArray(), sequences);
-
-        var prompt = response.Events[0];
-        Assert.True(prompt.Id > 0);
-        Assert.Equal("mohist_prompt", prompt.Type);
-        Assert.Equal("task", prompt.Payload?.GetProperty("kind").GetString());
-        Assert.Equal("do the thing", prompt.Payload?.GetProperty("text").GetString());
-        Assert.False(string.IsNullOrEmpty(prompt.CreatedAt));
-
-        var second = response.Events[1];
-        Assert.Equal("agent_message", second.Type);
-        Assert.Equal("first messagesecond message", second.Payload?.GetProperty("text").GetString());
+        Assert.Equal(2, response.SegmentCount);
+        var turn = Assert.Single(response.Turns);
+        Assert.Equal("mohist", turn.User.Role);
+        Assert.Equal("task", turn.User.Kind);
+        Assert.Equal("do the thing", turn.User.Text);
+        var part = Assert.Single(turn.Assistant);
+        Assert.Equal("text", part.Type);
+        Assert.Equal("first messagesecond message", part.Text);
 
         var serialized = JsonSerializer.Serialize(response);
-        Assert.DoesNotContain("turns", serialized, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("assistant", serialized, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("workflowLogs", serialized, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -226,10 +212,10 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AgentSessionGrain_ForAgentWork_CreatesDeterministicSessionAndKeepsPollIdempotent()
+    public async Task AgentSessionGrain_ForAgentWork_CreatesGuidSessionAndKeepsPollIdempotent()
     {
         var (_, _, work, session) = await CreateStartedAgentSessionAsync("idempotent", start: false);
-        Assert.Equal(GrainKey.AgentSession(work.Issue!.ProjectId, work.WorkflowRunId, work.WorkId), session.Id);
+        Assert.True(Guid.TryParseExact(session.Id, "N", out _));
 
         var repeated = await _fixture.Grains
             .GetGrain<IAgentSessionGrain>(session.Id)
@@ -241,19 +227,34 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task RunnerAttach_DifferentPhysicalSession_ReturnsConflict()
+    {
+        var (_, _, _, session) = await CreateStartedAgentSessionAsync("attach-conflict", start: false);
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = "acp-1", workDir = "/work", processPid = 1234 });
+
+        using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = "acp-2", workDir = "/work", processPid = 1234 });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("already attached", body);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task RunnerAppendsSessionEvents_ConcurrentChunks_BuffersUntilFlush()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("sequence");
 
         await Task.WhenAll(
-            PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "first"),
-            PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "second"));
+            PostEventEntriesAsync(session, "first"),
+            PostEventEntriesAsync(session, "second"));
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
 
@@ -263,9 +264,8 @@ public class AgentSessionSpecs
             .OrderBy(e => e.Sequence)
             .ToArrayAsync();
         Assert.Equal([1L, 2L], segments.Select(e => e.Sequence).ToArray());
-        Assert.Equal("agent_message", segments[0].Kind);
-        Assert.Equal("agent_session_terminal", segments[1].Kind);
-        Assert.Equal(0, await db.AgentSessionRuntimeEvents.AsNoTracking().CountAsync(e => e.SessionId == session.Id));
+        Assert.Equal("assistant_text", segments[0].Kind);
+        Assert.Equal("session_closed", segments[1].Kind);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -274,24 +274,21 @@ public class AgentSessionSpecs
     public async Task RunnerAppendsManyChunks_PersistsAggregatedTranscriptSegmentsOnly()
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("chunk-aggregation");
-        var events = Enumerable.Range(0, 96)
-            .Select(i => new { type = "agent_thought_chunk", payload = new { text = i.ToString("D2") } })
+        var runtimeEvents = Enumerable.Range(0, 96)
+            .Select(i => new { type = "reasoning.delta", payload = new { text = i.ToString("D2") } })
             .Cast<object>()
             .ToArray();
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new { events });
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeEvents });
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var rawCount = await db.AgentSessionRuntimeEvents.AsNoTracking()
-            .CountAsync(e => e.SessionId == session.Id);
         var segments = await db.AgentSessionTranscriptSegments.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToArrayAsync();
 
-        Assert.Equal(0, rawCount);
         Assert.Equal(3, segments.Length);
-        Assert.All(segments, segment => Assert.Equal("agent_thought", segment.Kind));
+        Assert.All(segments, segment => Assert.Equal("assistant_reasoning", segment.Kind));
         Assert.All(segments, segment => Assert.Equal(32, segment.RawEventCount));
     }
 
@@ -310,53 +307,53 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("terminal-lock");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_liveness_status", payload = new { status = "probing", failureReason = "late" } }
+                new { type = "session.liveness", payload = new { status = "probing", failureReason = "late" } }
             }
         });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "failed", failureReason = "late-failure", exitCode = 1 } }
+                new { type = "session.closed", payload = new { status = "failed", failureReason = "late-failure", exitCode = 1 } }
             }
         });
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("completed", grainSession.Status);
-        Assert.Equal(0, grainSession.ExitCode);
+        Assert.Equal("active", grainSession.Status);
+        Assert.Null(grainSession.ExitCode);
         Assert.Null(grainSession.FailureReason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task AgentSessionEnsure_TerminalSessionExists_ReopensSameSessionForRetry()
+    public async Task AgentSessionOpen_ClosedRuntimeObservation_DoesNotRebindSession()
     {
         var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-reuse");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "failed", failureReason = "first attempt", exitCode = 1 } }
+                new { type = "session.closed", payload = new { status = "failed", failureReason = "first attempt", exitCode = 1 } }
             }
         });
 
         var retryRunnerId = $"{_runnerId}-retry";
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
-        var reopened = await grain.EnsureAsync(new EnsureAgentSessionCommand(
+        var reopened = await grain.OpenAsync(new OpenAgentSessionCommand(
             project.Id,
             session.IssueNumber,
             session.WorkflowRunId,
@@ -368,11 +365,11 @@ public class AgentSessionSpecs
             work.Title));
 
         Assert.Equal(session.Id, reopened.Id);
-        Assert.Equal("failed", reopened.Status);
+        Assert.Equal("active", reopened.Status);
         Assert.Equal(_runnerId, reopened.RunnerId);
 
         var nextRunnerId = $"{_runnerId}-next";
-        var repeated = await grain.EnsureAsync(new EnsureAgentSessionCommand(
+        var repeated = await grain.OpenAsync(new OpenAgentSessionCommand(
             project.Id,
             session.IssueNumber,
             session.WorkflowRunId,
@@ -384,36 +381,41 @@ public class AgentSessionSpecs
             work.Title));
 
         Assert.Equal(session.Id, repeated.Id);
-        Assert.Equal("failed", repeated.Status);
+        Assert.Equal("active", repeated.Status);
         Assert.Equal(_runnerId, repeated.RunnerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task RunnerUnregisters_WorkInFlight_FailsRunningSession()
+    public async Task RuntimeEvents_AfterFailedClosedObservation_KeepSessionActive()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister");
 
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).FailIfRunningAsync("Runner unregistered");
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeEvents = new object[]
+            {
+                new { type = "session.closed", payload = new { status = "failed", failureReason = "Runner unregistered", exitCode = 1 } },
+                new { type = "message.delta", payload = new { text = "new data" } },
+            }
+        });
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("failed", grainSession.Status);
-        Assert.Contains("unregistered", grainSession.FailureReason);
+        Assert.Equal("active", grainSession.Status);
+        Assert.Null(grainSession.FailureReason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task EnsureAgentSession_TerminalSessionExists_KeepsTerminalSessionClosed()
+    public async Task OpenAgentSession_ExistingBoundSessionKeepsRuntimeBinding()
     {
         var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-terminal");
 
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).FailIfRunningAsync("Session liveness probe timed out");
-
-        var ensured = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
-            .EnsureAsync(new EnsureAgentSessionCommand(
+        var opened = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
+            .OpenAsync(new OpenAgentSessionCommand(
                 project.Id,
                 work.Issue!.IssueNumber,
                 work.WorkflowRunId,
@@ -424,31 +426,31 @@ public class AgentSessionSpecs
                 work.Stage,
                 work.Title));
 
-        Assert.Equal(session.Id, ensured.Id);
-        Assert.Equal("failed", ensured.Status);
-        Assert.Contains("liveness", ensured.FailureReason);
+        Assert.Equal(session.Id, opened.Id);
+        Assert.Equal("active", opened.Status);
+        Assert.NotNull(opened.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task EnsureAgentSession_TerminalSessionKeyStaysClosedForDifferentWork()
+    public async Task OpenAgentSession_ClosedObservationKeepsRuntimeBinding()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
             workId = work.WorkId,
             workType = work.WorkType,
             stage = work.Stage,
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
 
-        var ensured = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
-            .EnsureAsync(new EnsureAgentSessionCommand(
+        var opened = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
+            .OpenAsync(new OpenAgentSessionCommand(
                 project.Id,
                 issue.Number,
                 work.WorkflowRunId,
@@ -459,11 +461,11 @@ public class AgentSessionSpecs
                 "check",
                 "Fix review findings"));
 
-        Assert.Equal(session.Id, ensured.Id);
-        Assert.Equal("completed", ensured.Status);
-        Assert.Equal(work.WorkId, ensured.WorkId);
-        Assert.NotNull(ensured.CompletedAt);
-        Assert.Null(ensured.FailureReason);
+        Assert.Equal(session.Id, opened.Id);
+        Assert.Equal("active", opened.Status);
+        Assert.NotNull(opened.AgentSessionId);
+        Assert.Null(opened.CompletedAt);
+        Assert.Null(opened.FailureReason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -473,13 +475,13 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-accumulate");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 10,
@@ -495,7 +497,7 @@ public class AgentSessionSpecs
                 },
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 20,
@@ -532,13 +534,13 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-partial");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 10,
@@ -550,7 +552,7 @@ public class AgentSessionSpecs
                 },
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new { inputTokens = 20 }
                 }
             }
@@ -572,21 +574,21 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-terminal");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 10,
@@ -600,19 +602,18 @@ public class AgentSessionSpecs
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("completed", grainSession.Status);
-        Assert.Null(grainSession.InputTokens);
-        Assert.Null(grainSession.CostAmount);
+        Assert.Equal("active", grainSession.Status);
+        Assert.Equal(10, grainSession.InputTokens);
+        Assert.Equal(0.001, grainSession.CostAmount);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var events = await db.AgentSessionTranscriptSegments
+        var runtimeEvents = await db.AgentSessionTranscriptSegments
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
-        Assert.Equal(2, events.Count);
-        Assert.Equal("agent_session_terminal", events[0].Kind);
-        Assert.Equal("agent_usage_update", events[1].Kind);
-        Assert.Equal(0, await db.AgentSessionRuntimeEvents.CountAsync(e => e.SessionId == session.Id));
+        Assert.Equal(2, runtimeEvents.Count);
+        Assert.Equal("session_closed", runtimeEvents[0].Kind);
+        Assert.Equal("usage", runtimeEvents[1].Kind);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -622,13 +623,13 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
                 new
                 {
-                    type = "agent_session_model_resolved",
+                    type = "model.resolved",
                     payload = new { resolvedModel = "anthropic/claude-sonnet-4-20250514", source = "newSession" }
                 }
             }
@@ -646,13 +647,13 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
                 new
                 {
-                    type = "agent_session_terminal",
+                    type = "session.closed",
                     payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 }
             }
@@ -660,8 +661,8 @@ public class AgentSessionSpecs
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
-        Assert.Equal("failed", grainSession.Status);
-        Assert.Equal("probe timed out", grainSession.FailureReason);
+        Assert.Equal("active", grainSession.Status);
+        Assert.Null(grainSession.FailureReason);
         Assert.Equal("probe_timeout", grainSession.FailureCategory);
     }
 
@@ -672,28 +673,28 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("tool-calls");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new[]
+            runtimeEvents = new[]
             {
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read file" }
                 },
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new { toolCallId = "tool-2", kind = "edit", status = "in_progress", title = "Edit file" }
                 },
                 new
                 {
-                    type = "tool_call_update",
+                    type = "tool_call.updated",
                     payload = new { toolCallId = "tool-1", kind = "read", status = "completed", title = "Read file" }
                 },
                 new
                 {
-                    type = "tool_call_update",
+                    type = "tool_call.updated",
                     payload = new { toolCallId = "tool-2", kind = "edit", status = "failed", title = "Edit file" }
                 }
             }
@@ -713,13 +714,13 @@ public class AgentSessionSpecs
     {
         var (project, _, _, session) = await CreateStartedAgentSessionAsync("activity-observability");
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 100,
@@ -735,22 +736,22 @@ public class AgentSessionSpecs
                 },
                 new
                 {
-                    type = "agent_session_model_resolved",
+                    type = "model.resolved",
                     payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
                 },
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read file" }
                 },
                 new
                 {
-                    type = "tool_call_update",
+                    type = "tool_call.updated",
                     payload = new { toolCallId = "tool-1", kind = "read", status = "failed", title = "Read file" }
                 },
                 new
                 {
-                    type = "agent_session_terminal",
+                    type = "session.closed",
                     payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 }
             }
@@ -923,8 +924,7 @@ public class AgentSessionSpecs
         var work = await PollUntilAgentWorkAsync(issue.Number);
 
         var sessionName = work.WorkId;
-        var sessionId = GrainKey.AgentSession(project.Id, work.WorkflowRunId, sessionName);
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{work.WorkflowRunId}/{sessionName}/ensure", new
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{work.WorkflowRunId}/{sessionName}/open", new
         {
             workId = work.WorkId,
             workType = work.WorkType,
@@ -943,6 +943,7 @@ public class AgentSessionSpecs
             exitCode = 1
         });
 
+        var sessionId = await ResolveSessionIdAsync(work.WorkflowRunId, sessionName);
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
@@ -1016,18 +1017,52 @@ public class AgentSessionSpecs
             Title: issueTitle,
             Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
         sessionName ??= work.WorkId;
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(project.Id, work.WorkflowRunId, sessionName));
-        var session = await grain.EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
+        var session = await grain.OpenAsync(new OpenAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
         if (start)
-            await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
     }
 
-    private Task PostEventEntriesAsync(string projectId, string workflowRunId, string sessionName, string text) => _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{projectId}/{workflowRunId}/{sessionName}/events", new
+    private string RunnerAgentSessionAttachPath(AgentSessionInfo session) =>
+        $"{RunnerSessionPath(session)}/attach";
+
+    private string RunnerAgentSessionRuntimeEventsPath(AgentSessionInfo session) =>
+        $"{RunnerSessionPath(session)}/runtime-events";
+
+    private string RunnerSessionPath(AgentSessionInfo session) =>
+        $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";
+
+    private async Task<AgentSessionInfo> OpenRunnerSessionAsync(string projectId, int issueNumber, string workflowRunId, string sessionName, WorkDispatch work, string title)
     {
-        events = new[]
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/open", new
         {
-            new { type = "agent_message_chunk", payload = new { text } }
+            workId = work.WorkId,
+            workType = work.WorkType,
+            stage = work.Stage,
+            title,
+            issueNumber
+        });
+
+        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
+        var session = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
+        return session ?? throw new InvalidOperationException($"Session {workflowRunId}/{sessionName} was not created.");
+    }
+
+    private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
+    {
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        return await db.AgentSessions
+            .Where(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName)
+            .Select(s => s.Id)
+            .SingleAsync();
+    }
+
+    private Task PostEventEntriesAsync(AgentSessionInfo session, string text) => _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+    {
+        runtimeEvents = new[]
+        {
+            new { type = "message.delta", payload = new { text } }
         }
     });
 
@@ -1061,6 +1096,8 @@ public class AgentSessionSpecs
     private sealed record ActivityTaskProgressDto(int Completed, int Total);
     private sealed record ActivityPreviewDto(string Kind, string Text, string CreatedAt);
     private sealed record ActivityWaitingDto(int IssueNumber, string IssueTitle, string Label);
-    private sealed record AgentSessionRuntimeEventsTestResponse(AgentSessionRuntimeEventTestDto[] Events);
-    private sealed record AgentSessionRuntimeEventTestDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
+    private sealed record AgentSessionTranscriptTestResponse(AgentSessionTranscriptTurnTestDto[] Turns, int SegmentCount, string? LastActivityAt);
+    private sealed record AgentSessionTranscriptTurnTestDto(string Id, AgentSessionTranscriptUserTestDto User, AgentSessionTranscriptPartTestDto[] Assistant, string StartedAt, string? CompletedAt, bool Incomplete);
+    private sealed record AgentSessionTranscriptUserTestDto(string Role, string Text, string Kind, string SentAt);
+    private sealed record AgentSessionTranscriptPartTestDto(string Id, string Type, string? Text, string? Message, string? Kind);
 }

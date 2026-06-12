@@ -13,7 +13,7 @@ public class AgentSessionRow
     public string? Stage { get; set; }
     public string? RunnerId { get; set; }
     public string? AgentSessionId { get; set; }
-    public string Status { get; set; } = "created";
+    public string Status { get; set; } = "opened";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastDataAt { get; set; }
     public DateTime? CompletedAt { get; set; }

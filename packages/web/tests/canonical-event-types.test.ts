@@ -78,18 +78,15 @@ describe('canonical event types', () => {
   })
 
   it('includes the reverse-DNS names for agent-session events', () => {
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionStarted)
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted)
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionFailed)
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled)
-    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged)
   })
 
   it('reverse-DNS names match the documented format', () => {
     expect(REVERSE_DNS_EVENT_TYPES.StageStarted).toBe('com.mohist.workflow.stage.started')
     expect(REVERSE_DNS_EVENT_TYPES.StageApprovalRequested).toBe('com.mohist.workflow.stage.approval-requested')
-    expect(REVERSE_DNS_EVENT_TYPES.AgentSessionStarted).toBe('com.mohist.agent-session.started')
-    expect(REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged).toBe('com.mohist.agent-session.status-changed')
+    expect(REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound).toBe('com.mohist.agent-session.runtime-bound')
   })
 
   it('every legacy event is in LEGACY_EVENT_TYPES', () => {
@@ -106,11 +103,9 @@ describe('canonical event types', () => {
     const expected = new Set<string>([
       ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
       ...TRANSCRIPT_EVENT_TYPES,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionStarted,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionFailed,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,
     ])
     expect(new Set(AGENT_DETAIL_EVENTS as readonly string[])).toEqual(expected)
   })
@@ -153,11 +148,9 @@ describe('canonical event types', () => {
       REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged,
       REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded,
       REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionStarted,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionFailed,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled,
-      REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,
     ] as readonly EventName[]
     for (const name of eventNameValues) {
       expect(EVENT_TYPES).toContain(name)

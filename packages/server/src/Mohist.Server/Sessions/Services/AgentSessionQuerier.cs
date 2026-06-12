@@ -14,6 +14,8 @@ namespace Mohist.Server.Sessions.Services;
 
 public class AgentSessionQuerier
 {
+    private static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;
 
@@ -59,8 +61,16 @@ public class AgentSessionQuerier
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         IQueryable<AgentSessionRow> query = db.AgentSessions.AsNoTracking().Where(s => s.ProjectId == projectId);
-        if (!string.IsNullOrWhiteSpace(status) && AgentSessionStatusNames.TryParse(status, out var s))
-            query = query.Where(x => x.Status == AgentSessionStatusNames.ToName(s));
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var cutoff = DateTime.UtcNow - ActiveRuntimeEventWindow;
+            query = status.Trim().ToLowerInvariant() switch
+            {
+                "active" => query.Where(x => x.AgentSessionId != null && x.LastDataAt != null && x.LastDataAt >= cutoff),
+                "inactive" => query.Where(x => x.AgentSessionId == null || x.LastDataAt == null || x.LastDataAt < cutoff),
+                _ => query
+            };
+        }
         var rows = await query.OrderByDescending(s => s.CreatedAt).Take(limit).ToListAsync(ct);
         rows = await ReconcileActiveSessionsAsync(db, rows, ct);
         var issueTitles = await LoadIssueTitlesAsync(db, projectId, rows.Select(r => r.IssueNumber), ct);
@@ -80,7 +90,7 @@ public class AgentSessionQuerier
             s.Settings.Model,
             null,
             s.Status.CreatedAt.ToString("o"),
-            s.Status.CompletedAt?.ToString("o"),
+            null,
             LastActivityAt(s).ToString("o"),
             events?.ResolvedModel,
             usage.InputTokens,
@@ -131,7 +141,7 @@ public class AgentSessionQuerier
             session.Stage,
             domainSession.Title,
             domainSession.Status.CreatedAt.ToString("o"),
-            domainSession.Status.CompletedAt?.ToString("o"),
+            null,
             eventSummary.ResolvedModel,
             usage.InputTokens,
             usage.OutputTokens,
@@ -205,11 +215,11 @@ public class AgentSessionQuerier
 
         waiting ??= [];
         var summary = new ActivitySummaryDto(
-            cards.Count(c => c.Status is "created" or "running" or "probing"),
+            cards.Count(c => c.Status == "active"),
             waiting.Count,
-            cards.Count(c => c.Status == "completed"),
-            cards.Count(c => c.Status is "failed" or "cancelled"),
-            new ActivitySlotUsageDto(cards.Count(c => c.Status is "created" or "running" or "probing"), (runnerIds?.Count ?? 0) + 1));
+            0,
+            0,
+            new ActivitySlotUsageDto(cards.Count(c => c.Status == "active"), (runnerIds?.Count ?? 0) + 1));
 
         return new ActivityDto(summary, cards, waiting.ToList());
     }
@@ -349,12 +359,12 @@ public class AgentSessionQuerier
             s.Settings.Model,
             null,
             s.Status.CreatedAt.ToString("o"),
-            s.Status.CompletedAt?.ToString("o"),
+            null,
             lastActivityAt,
             new ActivityWorkItemDto(row.WorkType ?? "task", row.WorkId ?? s.SessionName, row.WorkId ?? s.SessionName, row.Stage, null),
             taskProgress,
             latestEvent is null ? null : ToPreview(latestEvent),
-            s.Status.FailureReason,
+            null,
             eventSummary?.ResolvedModel,
             usage.InputTokens,
             usage.OutputTokens,
@@ -453,8 +463,8 @@ public class AgentSessionQuerier
             s.Id, s.ProjectId, IssueNumber(s), s.RunId, s.SessionName,
             row.WorkId, row.WorkType, row.Stage, s.Title, s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
             StatusName(s), s.Settings.Model, s.Runtime.WorkDir, s.ChangeDir, null,
-            s.Status.CreatedAt.ToString("o"), s.Status.StartedAt?.ToString("o"), s.Status.CompletedAt?.ToString("o"),
-            s.Status.LastDataAt?.ToString("o"), s.Status.FailureReason, s.Status.ExitCode,
+            s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), null,
+            s.Status.LastDataAt?.ToString("o"), null, null,
             null, usage.InputTokens, usage.OutputTokens,
             usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
             usage.CostAmount, usage.CostCurrency,
@@ -466,17 +476,17 @@ public class AgentSessionQuerier
         s.Id, s.RunId, s.SessionName, s.Status.AgentRuntimeSessionId,
         s.ProjectId, IssueNumber(s) == 0 ? null : IssueNumber(s), s.Runtime.RunnerId,
         StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null,
-        s.Status.CreatedAt.ToString("o"), s.Status.StartedAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
-        s.Status.CompletedAt?.ToString("o"), s.Status.FailureReason, s.Status.ExitCode);
+        s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
+        null, null, null);
 
     private static AgentSessionSummaryDto ToSummaryDto(AgentSession s, AgentSessionRow row)
     {
         var usage = Usage(s);
         return new AgentSessionSummaryDto(
             s.Id, s.SessionName, s.Status.AgentRuntimeSessionId ?? s.Id, row.WorkId, s.Title,
-            StatusName(s), s.Status.CreatedAt.ToString("o"), s.Status.CompletedAt?.ToString("o"),
+            StatusName(s), s.Status.CreatedAt.ToString("o"), null,
             s.Settings.Model, null, row.Stage, s.Title,
-            s.Status.LastDataAt?.ToString("o"), null, null, s.Status.FailureReason,
+            s.Status.LastDataAt?.ToString("o"), null, null, null,
             null, usage.InputTokens, usage.OutputTokens,
             usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
             usage.CostAmount, usage.CostCurrency,
@@ -485,9 +495,14 @@ public class AgentSessionQuerier
     }
 
     private static int IssueNumber(AgentSession session) => session.IssueNumber;
-    private static string StatusName(AgentSession session) => AgentSessionStatusNames.ToName(session.Status.Phase);
+    private static string StatusName(AgentSession session) =>
+        session.Status.AgentRuntimeSessionId is not null
+        && session.Status.LastDataAt is not null
+        && DateTime.UtcNow - session.Status.LastDataAt.Value <= ActiveRuntimeEventWindow
+            ? "active"
+            : "inactive";
     private static DateTime LastActivityAt(AgentSession session) =>
-        session.Status.LastDataAt ?? session.Status.StartedAt ?? session.Status.CreatedAt;
+        session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;
     private static AgentUsageSummary Usage(AgentSession session) => session.Status.UsageSummary ?? new AgentUsageSummary();
 
     private static async Task<List<AgentSessionTranscriptSegmentRow>> LoadTranscriptSegmentsAsync(MohistDbContext db, string sessionId, CancellationToken ct) =>
@@ -869,8 +884,7 @@ public class AgentSessionQuerier
     }
 
     private static bool IsActiveSession(AgentSessionRow session) =>
-        session.CompletedAt is null
-        && session.Status is "created" or "running" or "probing";
+        session.AgentSessionId is not null;
 }
 
 internal sealed record TranscriptEventProjection

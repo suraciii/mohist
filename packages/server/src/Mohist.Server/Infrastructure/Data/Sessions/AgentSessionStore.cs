@@ -146,7 +146,7 @@ public static class AgentSessionJson
         Status = AgentSessionStatusNames.ToName(session.Status.Phase),
         CreatedAt = session.Status.CreatedAt,
         LastDataAt = session.Status.LastDataAt,
-        CompletedAt = session.Status.CompletedAt,
+        CompletedAt = null,
         UpdatedAt = updatedAt,
     };
 
@@ -173,15 +173,14 @@ public static class AgentSessionJson
             session.Runtime = session.Runtime with { AgentRuntime = "opencode" };
         if (session.Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state is missing CreatedAt.");
-        var phase = session.Status.Phase;
-        if (phase == AgentSessionStatus.Created && !string.Equals(row.Status, AgentSessionStatusNames.ToName(AgentSessionStatus.Created), StringComparison.OrdinalIgnoreCase))
-            phase = AgentSessionStatusNames.Parse(row.Status);
+        var phase = !string.IsNullOrWhiteSpace(session.Status.AgentRuntimeSessionId) || !string.IsNullOrWhiteSpace(row.AgentSessionId)
+            ? AgentSessionStatus.Bound
+            : AgentSessionStatus.Opened;
         session.Status = session.Status with
         {
             Phase = phase,
             AgentRuntimeSessionId = session.Status.AgentRuntimeSessionId ?? row.AgentSessionId,
             LastDataAt = session.Status.LastDataAt ?? row.LastDataAt,
-            CompletedAt = session.Status.CompletedAt ?? row.CompletedAt,
             UsageSummary = session.Status.UsageSummary ?? new AgentUsageSummary()
         };
         return session;

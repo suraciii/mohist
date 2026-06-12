@@ -1,7 +1,8 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
@@ -34,19 +35,18 @@ public class IssueSessionApiSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
-                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "plan"))
-            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "agent_message_chunk", payload = new { text = "hello" } },
+                new { type = "session.input", payload = new { text = "Plan session", kind = "task" } },
+                new { type = "message.delta", payload = new { text = "hello" } },
                 new
                 {
-                    type = "agent_usage_update",
+                    type = "usage.updated",
                     payload = new
                     {
                         inputTokens = 100,
@@ -62,12 +62,12 @@ public class IssueSessionApiSpecs
                 },
                 new
                 {
-                    type = "agent_session_model_resolved",
+                    type = "model.resolved",
                     payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
                 },
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new
                     {
                         toolCallId = "tool-1",
@@ -79,15 +79,15 @@ public class IssueSessionApiSpecs
                 },
                 new
                 {
-                    type = "tool_call_update",
+                    type = "tool_call.updated",
                     payload = new { toolCallId = "tool-1", kind = "read", status = "failed", title = "Read README" }
                 },
                 new
                 {
-                    type = "agent_session_terminal",
+                    type = "session.closed",
                     payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 },
-                new { type = "agent_message_chunk", payload = new { text = "world" } }
+                new { type = "message.delta", payload = new { text = "world" } }
             }
         });
 
@@ -119,8 +119,8 @@ public class IssueSessionApiSpecs
         Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(7, metadata.GetProperty("eventCount").GetInt32());
-        Assert.Equal(2, metadata.GetProperty("toolCount").GetInt32());
+        Assert.Equal(8, metadata.GetProperty("segmentCount").GetInt32());
+        Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
 
         Assert.False(root.TryGetProperty("events", out _));
         Assert.False(root.TryGetProperty("turns", out _));
@@ -139,25 +139,17 @@ public class IssueSessionApiSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
-                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "build"))
-            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "build", _runnerId, work.WorkId, work.WorkType, work.Stage, "Build session"));
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "build", work, "Build session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
 
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "mohist_prompt", payload = new { text = "do the thing", kind = "task" } }
-            }
-        });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
-        {
-            events = new object[]
-            {
+                new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new
                     {
                         toolCallId = "tool-1",
@@ -169,15 +161,15 @@ public class IssueSessionApiSpecs
                 }
             }
         });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "agent_message_chunk", payload = new { text = "first" } },
-                new { type = "agent_thought_chunk", payload = new { content = new { text = "thinking" } } },
+                new { type = "message.delta", payload = new { text = "first" } },
+                new { type = "reasoning.delta", payload = new { content = new { text = "thinking" } } },
                 new
                 {
-                    type = "tool_call_update",
+                    type = "tool_call.updated",
                     payload = new
                     {
                         toolCallId = "tool-1",
@@ -186,45 +178,29 @@ public class IssueSessionApiSpecs
                         rawOutput = new { text = "result" }
                     }
                 },
-                new { type = "agent_message_chunk", payload = new { text = "second" } }
+                new { type = "message.delta", payload = new { text = "second" } }
             }
         });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+                new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
 
-        var response = await _client.GetDataAsync<IssueSessionEventsResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/events");
+        var response = await _client.GetDataAsync<IssueSessionTranscriptResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/transcript");
 
-        var types = response.Events.Select(e => e.Type).ToArray();
+        Assert.Equal(7, response.SegmentCount);
+        var turn = Assert.Single(response.Turns);
+        Assert.Equal("do the thing", turn.User.Text);
+        Assert.Equal("task", turn.User.Kind);
         Assert.Equal(
-            new[] { "mohist_prompt", "tool_call", "agent_message", "agent_thought", "tool_call_update", "agent_message", "agent_session_terminal" },
-            types);
-
-        var sequences = response.Events.Select(e => e.Sequence).ToArray();
-        Assert.Equal(sequences.OrderBy(s => s).ToArray(), sequences);
-        Assert.Equal(Enumerable.Range(1, response.Events.Length).Select(i => (long)i).ToArray(), sequences);
-
-        var prompt = response.Events.First(e => e.Type == "mohist_prompt");
-        Assert.Equal("task", prompt.Payload?.GetProperty("kind").GetString());
-        Assert.Equal("do the thing", prompt.Payload?.GetProperty("text").GetString());
-
-        var toolUpdate = response.Events.First(e => e.Type == "tool_call_update");
-        Assert.Equal("tool-1", toolUpdate.Payload?.GetProperty("toolCallId").GetString());
-        Assert.Equal("completed", toolUpdate.Payload?.GetProperty("status").GetString());
-
-        var terminal = response.Events.First(e => e.Type == "agent_session_terminal");
-        Assert.Equal("completed", terminal.Payload?.GetProperty("status").GetString());
-        Assert.Equal(0, terminal.Payload?.GetProperty("exitCode").GetInt32());
-
-        foreach (var entry in response.Events)
-        {
-            Assert.True(entry.Id > 0);
-            Assert.False(string.IsNullOrEmpty(entry.CreatedAt));
-        }
+            new[] { "tool", "text", "reasoning", "text" },
+            turn.Assistant.Select(p => p.Type).ToArray());
+        Assert.Contains(turn.Assistant, p => p.Type == "tool" && p.Tool?.ToolCallId == "tool-1" && p.Tool.Status == "completed");
+        Assert.NotNull(turn.CompletedAt);
+        Assert.NotNull(response.LastActivityAt);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -237,18 +213,16 @@ public class IssueSessionApiSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
-                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "plan"))
-            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
         {
-            events = new object[]
+            runtimeEvents = new object[]
             {
-                new { type = "mohist_prompt", payload = new { text = "do the thing", kind = "task" } },
+                new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
                 new
                 {
-                    type = "tool_call",
+                    type = "tool_call.started",
                     payload = new
                     {
                         toolCallId = "tool-1",
@@ -258,16 +232,16 @@ public class IssueSessionApiSpecs
                         rawInput = new { filePath = "README.md" }
                     }
                 },
-                new { type = "agent_message_chunk", payload = new { text = "first" } },
-                new { type = "agent_thought_chunk", payload = new { content = new { text = "thinking" } } }
+                new { type = "message.delta", payload = new { text = "first" } },
+                new { type = "reasoning.delta", payload = new { content = new { text = "thinking" } } }
             }
         });
 
         var metadataRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
-        var eventsRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/events");
+        var transcriptRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
 
         using (var metadataDoc = JsonDocument.Parse(metadataRaw))
-        using (var eventsDoc = JsonDocument.Parse(eventsRaw))
+        using (var transcriptDoc = JsonDocument.Parse(transcriptRaw))
         {
             var metadataRoot = metadataDoc.RootElement.GetProperty("data");
             AssertNoProjectionFields(metadataRoot, "metadata");
@@ -276,12 +250,14 @@ public class IssueSessionApiSpecs
             Assert.False(metadataRoot.TryGetProperty("workflowLogs", out _));
             Assert.False(metadataRoot.TryGetProperty("events", out _));
 
-            var eventsRoot = eventsDoc.RootElement.GetProperty("data");
-            AssertNoProjectionFields(eventsRoot, "events");
-            Assert.False(eventsRoot.TryGetProperty("turns", out _));
-            Assert.False(eventsRoot.TryGetProperty("assistant", out _));
-            Assert.False(eventsRoot.TryGetProperty("workflowLogs", out _));
-            Assert.True(eventsRoot.TryGetProperty("events", out _));
+            var transcriptRoot = transcriptDoc.RootElement.GetProperty("data");
+            Assert.True(transcriptRoot.TryGetProperty("turns", out _));
+            Assert.True(transcriptRoot.TryGetProperty("segmentCount", out _));
+            Assert.True(transcriptRoot.TryGetProperty("lastActivityAt", out _));
+            Assert.False(transcriptRoot.TryGetProperty("events", out _));
+            Assert.False(transcriptRoot.TryGetProperty("assistant", out _));
+            Assert.False(transcriptRoot.TryGetProperty("workflowLogs", out _));
+            Assert.False(transcriptRoot.TryGetProperty("metadata", out _));
         }
     }
 
@@ -312,15 +288,52 @@ public class IssueSessionApiSpecs
             Title: issueTitle,
             Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
         sessionName ??= work.WorkId;
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(project.Id, work.WorkflowRunId, sessionName));
-        var session = await grain.EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(Guid.NewGuid().ToString("N"));
+        var session = await grain.OpenAsync(new OpenAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
         if (start)
-            await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
+            await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
+    }
+
+    private string RunnerAgentSessionAttachPath(AgentSessionInfo session) =>
+        $"{RunnerSessionPath(session)}/attach";
+
+    private string RunnerAgentSessionRuntimeEventsPath(AgentSessionInfo session) =>
+        $"{RunnerSessionPath(session)}/runtime-events";
+
+    private string RunnerSessionPath(AgentSessionInfo session) =>
+        $"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(session.ProjectId)}/{Uri.EscapeDataString(session.WorkflowRunId)}/{Uri.EscapeDataString(session.SessionName)}";
+
+    private async Task<AgentSessionInfo> OpenRunnerSessionAsync(string projectId, int issueNumber, string workflowRunId, string sessionName, WorkDispatch work, string title)
+    {
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{Uri.EscapeDataString(projectId)}/{Uri.EscapeDataString(workflowRunId)}/{Uri.EscapeDataString(sessionName)}/open", new
+        {
+            workId = work.WorkId,
+            workType = work.WorkType,
+            stage = work.Stage,
+            title,
+            issueNumber
+        });
+
+        var sessionId = await ResolveSessionIdAsync(workflowRunId, sessionName);
+        var session = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
+        return session ?? throw new InvalidOperationException($"Session {workflowRunId}/{sessionName} was not created.");
+    }
+
+    private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
+    {
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        return await db.AgentSessions
+            .Where(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName)
+            .Select(s => s.Id)
+            .SingleAsync();
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(string Id, int Number, string Title);
-    private sealed record IssueSessionEventsResponseDto(IssueSessionEventDto[] Events);
-    private sealed record IssueSessionEventDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
+    private sealed record IssueSessionTranscriptResponseDto(IssueSessionTranscriptTurnDto[] Turns, int SegmentCount, string? LastActivityAt);
+    private sealed record IssueSessionTranscriptTurnDto(string Id, string StartedAt, string? CompletedAt, bool Incomplete, IssueSessionTranscriptUserDto User, IssueSessionTranscriptPartDto[] Assistant);
+    private sealed record IssueSessionTranscriptUserDto(string Text, string Kind, string SentAt);
+    private sealed record IssueSessionTranscriptPartDto(string Id, string Type, string? Text, IssueSessionTranscriptToolDto? Tool, string? Message, string? Kind, string? StartedAt, string? CompletedAt, string? At);
+    private sealed record IssueSessionTranscriptToolDto(string ToolCallId, string ToolName, string Status, string? Title, string? Input, string? Output, string? Error, string StartedAt, string? CompletedAt);
 }

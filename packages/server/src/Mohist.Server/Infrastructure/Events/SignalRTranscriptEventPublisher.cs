@@ -14,7 +14,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// <para>
 /// This implementation deliberately does NOT consult
 /// <see cref="IUserNotificationDispatcher"/> or publish through
-/// <see cref="IEventPublisher"/>: transcript events are observation
+/// <see cref="IEventPublisher"/>: transcript events are runtime
 /// data, not domain events, and mixing them into the domain bus would
 /// pollute audit logs and force unwanted fan-out to consumers that
 /// have explicitly opted out of transcript data.

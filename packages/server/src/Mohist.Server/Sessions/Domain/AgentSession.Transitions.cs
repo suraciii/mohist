@@ -4,9 +4,9 @@ public static partial class AgentSessionExtensions
 {
     extension(AgentSession session)
     {
-        public bool IsTerminal => session.Status.Phase is AgentSessionStatus.Completed or AgentSessionStatus.Failed or AgentSessionStatus.Cancelled;
+        public bool IsBound => session.Status.Phase == AgentSessionStatus.Bound;
 
-        public bool IsCreated => session.Status.Phase == AgentSessionStatus.Created;
+        public bool IsOpened => session.Status.Phase == AgentSessionStatus.Opened;
 
         public IReadOnlyList<AgentSessionEvent> MergeContext(
             string? runnerId,
@@ -27,7 +27,7 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
-        public IReadOnlyList<AgentSessionEvent> AttachAgent(
+        public IReadOnlyList<AgentSessionEvent> AttachPhysicalSession(
             string agentSessionId,
             string? model,
             string? workDir,
@@ -35,7 +35,6 @@ public static partial class AgentSessionExtensions
             int? processPid,
             DateTime now)
         {
-            if (session.IsTerminal) return [];
             _ = changeDir;
             _ = processPid;
             var oldModel = session.Settings.Model;
@@ -49,34 +48,31 @@ public static partial class AgentSessionExtensions
             {
                 WorkDir = session.Runtime.WorkDir ?? workDir
             };
-            session.Status = session.Status with { AgentRuntimeSessionId = existingAgentSessionId ?? agentSessionId };
-            session.Start(model, now);
+            session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
+            session.Status = session.Status with
+            {
+                Phase = AgentSessionStatus.Bound,
+                AgentRuntimeSessionId = existingAgentSessionId ?? agentSessionId,
+                BoundAt = session.Status.BoundAt ?? now,
+                LastDataAt = now,
+                FailureReason = null,
+                CompletedAt = null,
+                ExitCode = null
+            };
             var events = new List<AgentSessionEvent>();
             if (string.IsNullOrWhiteSpace(existingAgentSessionId))
-                events.Add(new AgentSessionStarted(agentSessionId));
+                events.Add(new AgentSessionRuntimeBound(agentSessionId));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));
             return events;
         }
 
-        public IReadOnlyList<AgentSessionEvent> EnsureActive(DateTime now)
+        public IReadOnlyList<AgentSessionEvent> ResolveModel(string? model, DateTime now)
         {
-            if (session.IsCreated)
-                return session.MarkActive("running", now);
-            return [];
-        }
-
-        public IReadOnlyList<AgentSessionEvent> Start(string? model, DateTime now)
-        {
-            if (session.IsTerminal) return [];
+            if (string.IsNullOrWhiteSpace(model)) return [];
             var oldModel = session.Settings.Model;
-            session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
-            session.Status = session.Status with
-            {
-                Phase = AgentSessionStatus.Running,
-                StartedAt = session.Status.StartedAt ?? now,
-                LastDataAt = now
-            };
+            session.Settings = session.Settings with { Model = model };
+            session.Status = session.Status with { LastDataAt = now };
             return !string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal)
                 ? [new AgentSessionModelChanged(session.Settings.Model)]
                 : [];
@@ -84,65 +80,8 @@ public static partial class AgentSessionExtensions
 
         public IReadOnlyList<AgentSessionEvent> RecordActivity(DateTime now)
         {
-            if (session.IsTerminal) return [];
             session.Status = session.Status with { LastDataAt = now };
             return [];
-        }
-
-        public IReadOnlyList<AgentSessionEvent> MarkActive(string status, DateTime now, string? failureReason = null)
-        {
-            if (session.IsTerminal) return [];
-            var phase = AgentSessionStatusNames.ParseActive(status);
-            var changed = session.Status.Phase != phase;
-            session.Status = session.Status with
-            {
-                Phase = phase,
-                LastDataAt = now,
-                FailureReason = failureReason ?? session.Status.FailureReason
-            };
-            return changed ? [new AgentSessionActivated(AgentSessionStatusNames.ToName(phase))] : [];
-        }
-
-        public IReadOnlyList<AgentSessionEvent> Complete(DateTime now, int? exitCode)
-        {
-            if (session.IsTerminal) return [];
-            session.Status = session.Status with
-            {
-                Phase = AgentSessionStatus.Completed,
-                CompletedAt = now,
-                LastDataAt = now,
-                ExitCode = exitCode ?? session.Status.ExitCode,
-                FailureReason = null
-            };
-            return [new AgentSessionCompleted(session.Status.ExitCode)];
-        }
-
-        public IReadOnlyList<AgentSessionEvent> Fail(DateTime now, string? reason, int? exitCode = null)
-        {
-            if (session.IsTerminal) return [];
-            session.Status = session.Status with
-            {
-                Phase = AgentSessionStatus.Failed,
-                CompletedAt = now,
-                LastDataAt = now,
-                FailureReason = reason ?? session.Status.FailureReason,
-                ExitCode = exitCode ?? session.Status.ExitCode
-            };
-            return [new AgentSessionFailed(session.Status.FailureReason, session.Status.ExitCode)];
-        }
-
-        public IReadOnlyList<AgentSessionEvent> Cancel(DateTime now, string? reason, int? exitCode = null)
-        {
-            if (session.IsTerminal) return [];
-            session.Status = session.Status with
-            {
-                Phase = AgentSessionStatus.Cancelled,
-                CompletedAt = now,
-                LastDataAt = now,
-                FailureReason = reason ?? session.Status.FailureReason,
-                ExitCode = exitCode ?? session.Status.ExitCode
-            };
-            return [new AgentSessionCancelled(session.Status.FailureReason, session.Status.ExitCode)];
         }
 
         public IReadOnlyList<AgentSessionEvent> ApplyUsage(
@@ -156,8 +95,6 @@ public static partial class AgentSessionExtensions
             long? contextWindowUsed,
             long? contextWindowSize)
         {
-            if (session.IsTerminal) return [];
-
             var usage = session.Status.UsageSummary ?? new AgentUsageSummary();
             session.Status = session.Status with
             {

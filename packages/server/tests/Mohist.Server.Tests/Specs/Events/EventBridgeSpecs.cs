@@ -120,13 +120,13 @@ public class EventBridgeSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task EventBridge_ReverseDnsAgentSessionStarted_TwoSubscribedConnections_BothReceive()
+    public async Task EventBridge_ReverseDnsAgentSessionRuntimeBound_TwoSubscribedConnections_BothReceive()
     {
         var registry = new ConnectionSubscriptionRegistry();
         registry.RegisterConnection("conn-A");
         registry.RegisterConnection("conn-B");
-        registry.Subscribe("conn-A", EventCatalog.ReverseDns.AgentSessionStarted);
-        registry.Subscribe("conn-B", EventCatalog.ReverseDns.AgentSessionStarted);
+        registry.Subscribe("conn-A", EventCatalog.ReverseDns.AgentSessionRuntimeBound);
+        registry.Subscribe("conn-B", EventCatalog.ReverseDns.AgentSessionRuntimeBound);
 
         var hub = new RecordingHubContext();
         var bridge = BuildBridge(registry, hub);
@@ -134,7 +134,7 @@ public class EventBridgeSpecs
 
         await bus.PublishAsync(
             data: new { },
-            type: EventCatalog.ReverseDns.AgentSessionStarted,
+            type: EventCatalog.ReverseDns.AgentSessionRuntimeBound,
             source: "/mohist/agent-session/sess-1");
 
         Assert.Equal(2, hub.Messages.Count);

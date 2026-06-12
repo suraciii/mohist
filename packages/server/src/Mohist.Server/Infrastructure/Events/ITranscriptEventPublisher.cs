@@ -1,18 +1,18 @@
 namespace Mohist.Server.Infrastructure.Events;
 
 /// <summary>
-/// Publishes a transcript (non-domain, observation-only) event from
-/// <c>AgentSessionGrain.AppendSessionEventsAsync</c> to subscribed SignalR
+/// Publishes a transcript (non-domain runtime) event from
+/// <c>AgentSessionGrain.AppendRuntimeEventsAsync</c> to subscribed SignalR
 /// connections on the dedicated <c>OnTranscriptEvent</c> channel.
 ///
 /// <para>
 /// Transcript events are NOT domain events: they describe what the
 /// agent session is doing (input, text/reasoning deltas, tool calls,
-/// usage/model observations, liveness, and close notices) without changing the
+/// usage/model runtime events, liveness, and close notices) without changing the
 /// <c>AgentSession</c> lifecycle. They therefore do not — and must
 /// not — flow through <see cref="IEventPublisher"/> /
 /// <see cref="Mohist.Server.Events.Hub.EventBridge"/>. This publisher
-/// is the <b>only</b> realtime path for transcript observation data.
+/// is the <b>only</b> realtime path for transcript runtime event data.
 /// </para>
 ///
 /// <para>

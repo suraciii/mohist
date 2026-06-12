@@ -11,19 +11,15 @@ internal static class AgentSessionEventSerializer
 
     /// <summary>
     /// CloudEvents 1.0.2 reverse-DNS <c>type</c> for the agent-session domain event.
-    /// Mirrors <see cref="WorkflowEventSerializer.BusType"/>. Lifecycle variants
-    /// (Started / Activated / Completed / Failed / Cancelled / StatusChanged) each
-    /// resolve to a stable reverse-DNS string so producers and consumers agree
-    /// on the wire format.
+    /// Mirrors <see cref="WorkflowEventSerializer.BusType"/>. Each aggregate
+    /// event resolves to a stable reverse-DNS string so producers and consumers
+    /// agree on the wire format.
     /// </summary>
     public static string BusType(AgentSessionEvent payload) => Unwrap(payload) switch
     {
-        AgentSessionStarted => EventCatalog.ReverseDns.AgentSessionStarted,
-        AgentSessionActivated => EventCatalog.ReverseDns.AgentSessionActivated,
-        AgentSessionCompleted => EventCatalog.ReverseDns.AgentSessionCompleted,
-        AgentSessionFailed => EventCatalog.ReverseDns.AgentSessionFailed,
-        AgentSessionCancelled => EventCatalog.ReverseDns.AgentSessionCancelled,
-        AgentSessionStatusChanged => EventCatalog.ReverseDns.AgentSessionStatusChanged,
+        AgentSessionRuntimeBound => EventCatalog.ReverseDns.AgentSessionRuntimeBound,
+        AgentSessionUsageRecorded => EventCatalog.ReverseDns.AgentSessionUsageRecorded,
+        AgentSessionModelChanged => EventCatalog.ReverseDns.AgentSessionModelChanged,
         _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
     };
 
@@ -32,14 +28,9 @@ internal static class AgentSessionEventSerializer
 
     public static object Unwrap(AgentSessionEvent payload) => payload switch
     {
-        AgentSessionStarted x => (object)x,
-        AgentSessionActivated x => x,
+        AgentSessionRuntimeBound x => (object)x,
         AgentSessionUsageRecorded x => x,
         AgentSessionModelChanged x => x,
-        AgentSessionCompleted x => x,
-        AgentSessionFailed x => x,
-        AgentSessionCancelled x => x,
-        AgentSessionStatusChanged x => x,
         null => throw new InvalidOperationException("Null agent session event"),
     };
 }

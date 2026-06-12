@@ -22,7 +22,7 @@ function buildSessionMetadata(
   turnCount: number,
   acpSessionId: string,
 ): SessionMetadata {
-  const isRunning = meta.status === 'running' || meta.status === 'probing'
+  const isRunning = meta.status === 'active' || meta.status === 'running' || meta.status === 'probing'
   return {
     sessionId: meta.id,
     sessionName: meta.sessionName,
@@ -97,7 +97,9 @@ function getSessionStatusKind(
     return 'failed'
   }
   if (rawStatus === 'completed') return 'completed'
+  if (rawStatus === 'inactive') return 'stale'
   if (rawStatus === 'probing') return 'probing'
+  if (rawStatus === 'active') return lastActivityAt ? 'live' : 'stale'
   if (isRunning && completedAt) return 'finalizing'
   if (!isRunning) {
     return 'completed'
@@ -495,7 +497,7 @@ export function SessionPage() {
 
   const rawStatus = detail?.metadata?.status ?? detail?.status ?? session?.status
   const apiStatusKind = detail?.metadata?.statusKind
-  const isRunning = (rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
+  const isRunning = (rawStatus === 'active' || rawStatus === 'running' || rawStatus === 'probing') && apiStatusKind !== 'completed' && apiStatusKind !== 'failed'
   const acpSessionId = detail?.acpSessionId ?? session?.acpSessionId ?? ''
 
   const statusKind: StatusKind = detail

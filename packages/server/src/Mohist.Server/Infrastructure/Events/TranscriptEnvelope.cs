@@ -9,7 +9,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// Durable history is queried from compact transcript segments.
 ///
 /// <para>
-/// This is a <i>non-domain</i> envelope: it is observation data, not a
+/// This is a <i>non-domain</i> envelope: it is runtime event data, not a
 /// fact that changes lifecycle state. The <see cref="IEventPublisher"/>
 /// bus never sees a <see cref="TranscriptEnvelope"/>, and
 /// <see cref="Mohist.Server.Events.Hub.EventBridge"/> never forwards one.

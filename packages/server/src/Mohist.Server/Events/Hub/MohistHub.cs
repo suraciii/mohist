@@ -16,7 +16,7 @@ public interface IEventsClient
     Task OnEvent(string eventName, object? data);
 
     /// <summary>
-    /// Receive a transcript (non-domain, observation-only) event from the
+    /// Receive a transcript (non-domain runtime) event from the
     /// dedicated <see cref="ITranscriptEventPublisher"/> channel. Carries a
     /// <see cref="TranscriptEnvelope"/> whose <c>Type</c> is the generic
     /// session event name (e.g. <c>message.delta</c> or
@@ -45,7 +45,7 @@ public interface IEventsClient
 /// <see cref="IEventsClient.OnEvent"/> (domain events, fanned out
 /// by <see cref="EventBridge"/> from the CloudEventBus) and
 /// <see cref="IEventsClient.OnTranscriptEvent"/> (non-domain
-/// observation data, fanned out by
+/// runtime event data, fanned out by
 /// <see cref="Mohist.Server.Infrastructure.Events.SignalRTranscriptEventPublisher"/>
 /// directly). Both are filtered by the same per-connection
 /// subscription set in <see cref="ConnectionSubscriptionRegistry"/>,

@@ -493,19 +493,10 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
   const manager = context.acpSessionManager
   const projectId = context.projectId
 
-  if (sessionName && context.serverConnection && projectId) {
-    await context.serverConnection.ensureWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
-      workId: context.workId,
-      workType: context.workType,
-      stage: context.stage,
-      title: context.title,
-      issueNumber: context.issueNumber,
-    }, context.signal)
-  }
-
   if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.key(context.workflowRunId, sessionName)
-    const session = await context.serverConnection.ensureWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
+    const existing = await context.serverConnection.getWorkflowAgentSession(projectId, context.workflowRunId, sessionName, context.signal)
+    const session = existing ?? await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
       workId: context.workId,
       workType: context.workType,
       stage: context.stage,
@@ -524,6 +515,16 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
     const result = await runNewWorkflowAgentSession(context, prompt)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
     return result
+  }
+
+  if (sessionName && context.serverConnection && projectId) {
+    await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
+      workId: context.workId,
+      workType: context.workType,
+      stage: context.stage,
+      title: context.title,
+      issueNumber: context.issueNumber,
+    }, context.signal)
   }
 
   return runEphemeralWorkflowAgentSession(context, prompt)
@@ -1028,11 +1029,15 @@ async function emitSessionStarted(context: ActionContext, agentSessionId: string
 }
 
 async function attachSessionToServer(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined, resolvedModel?: string) {
-  const sessionName = sessionNameFromContext(context)
-  const projectId = context.projectId
-  if (sessionName && context.serverConnection && projectId) {
-    await context.serverConnection.attachWorkflowAgentSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }, context.signal)
-  }
+  const target = sessionTargetFromContext(context)
+  if (!target || !context.serverConnection) return
+
+  await context.serverConnection.attachWorkflowAgentSession(
+    target.projectId,
+    target.workflowRunId,
+    target.sessionName,
+    { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) },
+    context.signal)
 }
 
 async function emitResolvedModelEvent(context: ActionContext, agentSessionId: string, resolvedModel: string | undefined, resolvedModelSource: "newSession" | "resumeSession" | "config_option_update") {
@@ -1043,11 +1048,22 @@ async function emitResolvedModelEvent(context: ActionContext, agentSessionId: st
 }
 
 async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
+  const target = sessionTargetFromContext(context)
+  if (!target || !context.serverConnection) return
+
+  await context.serverConnection.workflowAgentSessionRuntimeEvents(
+    target.projectId,
+    target.workflowRunId,
+    target.sessionName,
+    { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] },
+    context.signal)
+}
+
+function sessionTargetFromContext(context: ActionContext): { projectId: string; workflowRunId: string; sessionName: string } | null {
   const sessionName = sessionNameFromContext(context)
   const projectId = context.projectId
-  if (sessionName && context.serverConnection && projectId) {
-    await context.serverConnection.workflowAgentSessionEvents(projectId, context.workflowRunId, sessionName, { workId: context.workId, workType: context.workType, stage: context.stage, events: [{ type, payload }] }, context.signal)
-  }
+  if (!sessionName || !projectId) return null
+  return { projectId, workflowRunId: context.workflowRunId, sessionName }
 }
 
 function sessionNameFromContext(context: ActionContext) {

@@ -2,15 +2,14 @@ namespace Mohist.Server.Sessions.Grains;
 
 public interface IAgentSessionGrain : IGrainWithStringKey
 {
-    Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command);
-    Task<AgentSessionInfo> AttachAgentAsync(AttachAgentCommand command);
-    Task<IReadOnlyList<AgentSessionEventInfo>> AppendSessionEventsAsync(AppendAgentSessionEventsCommand command);
-    Task<AgentSessionInfo?> FailIfRunningAsync(string reason);
+    Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command);
+    Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
+    Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<AgentSessionInfo?> GetAsync();
 }
 
 [GenerateSerializer]
-public sealed record EnsureAgentSessionCommand(
+public sealed record OpenAgentSessionCommand(
     [property: Id(0)] string ProjectId,
     [property: Id(1)] int? IssueNumber,
     [property: Id(2)] string WorkflowRunId,
@@ -22,7 +21,7 @@ public sealed record EnsureAgentSessionCommand(
     [property: Id(8)] string? Title = null);
 
 [GenerateSerializer]
-public sealed record AttachAgentCommand(
+public sealed record AttachPhysicalSessionCommand(
     [property: Id(0)] string AgentSessionId,
     [property: Id(1)] string? Model = null,
     [property: Id(2)] string? WorkDir = null,
@@ -30,14 +29,14 @@ public sealed record AttachAgentCommand(
     [property: Id(4)] int? ProcessPid = null);
 
 [GenerateSerializer]
-public sealed record AppendAgentSessionEventsCommand(
+public sealed record AppendAgentSessionRuntimeEventsCommand(
     [property: Id(0)] string? WorkId = null,
     [property: Id(1)] string? WorkType = null,
     [property: Id(2)] string? Stage = null,
-    [property: Id(3)] IReadOnlyList<AgentSessionEventInput> Events = null!);
+    [property: Id(3)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!);
 
 [GenerateSerializer]
-public sealed record AgentSessionEventInput(
+public sealed record AgentSessionRuntimeEventInput(
     [property: Id(0)] string Type,
     [property: Id(1)] string PayloadJson);
 
@@ -80,7 +79,7 @@ public sealed record AgentSessionInfo(
     [property: Id(34)] int? ToolErrorCount);
 
 [GenerateSerializer]
-public sealed record AgentSessionEventInfo(
+public sealed record AgentSessionRuntimeEventInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
     [property: Id(2)] string ProjectId,

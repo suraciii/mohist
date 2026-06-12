@@ -256,6 +256,7 @@ interface RecentCardProps {
 export function RecentCard({ card }: RecentCardProps) {
   const toProjectPath = useProjectPath()
   const isFailed = card.status === 'failed'
+  const isInactive = card.status === 'inactive'
   const stageColor = STAGE_COLORS[card.issueStage.toLowerCase()] ?? 'bg-gray-100 text-gray-700'
   const workTitle = card.title ?? card.taskDescription ?? card.currentWorkTitle
 
@@ -267,8 +268,8 @@ export function RecentCard({ card }: RecentCardProps) {
       <div className="p-3">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
-            <span className={`text-xs ${isFailed ? 'text-red-500' : 'text-green-500'}`}>
-              {isFailed ? '\u2717' : '\u2713'}
+            <span className={`text-xs ${isFailed ? 'text-red-500' : isInactive ? 'text-gray-400' : 'text-green-500'}`}>
+              {isFailed ? '\u2717' : isInactive ? '\u25cf' : '\u2713'}
             </span>
             <span className="text-xs font-mono text-gray-400">#{card.issueNumber}</span>
             <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${stageColor}`}>

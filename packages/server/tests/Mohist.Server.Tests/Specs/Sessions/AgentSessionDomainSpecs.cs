@@ -46,7 +46,7 @@ public class AgentSessionDomainSpecs
         Assert.Equal("runner-1", session.Runtime.RunnerId);
         Assert.Equal("opencode", session.Runtime.AgentRuntime);
         Assert.Equal("/work", session.Runtime.WorkDir);
-        Assert.Equal(AgentSessionStatus.Created, session.Status.Phase);
+        Assert.Equal(AgentSessionStatus.Opened, session.Status.Phase);
         Assert.Equal(new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc), session.Status.CreatedAt);
         Assert.NotNull(session.Status.UsageSummary);
     }
@@ -58,7 +58,7 @@ public class AgentSessionDomainSpecs
     {
         var session = CreateSession();
 
-        session.AttachAgent("acp-1", "intent-model", "/work", "/change", 123, DateTime.UtcNow);
+        session.AttachPhysicalSession("acp-1", "intent-model", "/work", "/change", 123, DateTime.UtcNow);
         session.ApplyUsage(10, 5, 15, 1, 2, 0.01, "USD", 100, 200);
         var json = JsonSerializer.Serialize(session);
 
@@ -103,37 +103,60 @@ public class AgentSessionDomainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void AttachAgent_ReturnsStartedAndModelChangedEvents()
+    public void AttachPhysicalSession_FirstBinding_ReturnsStartedAndModelChangedEvents()
     {
         var session = CreateSession();
 
-        var events = session.AttachAgent("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
+        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
 
         Assert.Collection(events,
-            e => Assert.Equal("runtime-session-1", Assert.IsType<AgentSessionStarted>(e.Value).AgentRuntimeSessionId),
+            e => Assert.Equal("runtime-session-1", Assert.IsType<AgentSessionRuntimeBound>(e.Value).AgentRuntimeSessionId),
             e => Assert.Equal("model-a", Assert.IsType<AgentSessionModelChanged>(e.Value).Model));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void TerminalTransitions_ReturnSessionEvents()
+    public void AttachPhysicalSession_SamePhysicalSession_IsIdempotent()
     {
-        var completed = CreateSession();
-        var completedEvents = completed.Complete(DateTime.UtcNow, 0);
-        Assert.Equal(0, Assert.IsType<AgentSessionCompleted>(Assert.Single(completedEvents).Value).ExitCode);
+        var session = CreateSession();
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
 
-        var failed = CreateSession();
-        var failedEvents = failed.Fail(DateTime.UtcNow, "error", 1);
-        var failedEvent = Assert.IsType<AgentSessionFailed>(Assert.Single(failedEvents).Value);
-        Assert.Equal("error", failedEvent.Reason);
-        Assert.Equal(1, failedEvent.ExitCode);
+        var events = session.AttachPhysicalSession("runtime-session-1", "model-a", "/other", null, null, DateTime.UtcNow);
 
-        var cancelled = CreateSession();
-        var cancelledEvents = cancelled.Cancel(DateTime.UtcNow, "stopped", 2);
-        var cancelledEvent = Assert.IsType<AgentSessionCancelled>(Assert.Single(cancelledEvents).Value);
-        Assert.Equal("stopped", cancelledEvent.Reason);
-        Assert.Equal(2, cancelledEvent.ExitCode);
+        Assert.Empty(events);
+        Assert.Equal("runtime-session-1", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("/work", session.Runtime.WorkDir);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void AttachPhysicalSession_DifferentPhysicalSession_Throws()
+    {
+        var session = CreateSession();
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            session.AttachPhysicalSession("runtime-session-2", "model-a", "/work", null, null, DateTime.UtcNow));
+        Assert.Contains("already attached", ex.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RuntimeActivity_AfterClosedObservation_CanContinue()
+    {
+        var session = CreateSession();
+        var first = new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc);
+        var second = first.AddMinutes(1);
+
+        session.RecordActivity(first);
+        session.ApplyUsage(10, 5, 15, null, null, null, null, null, null);
+        session.RecordActivity(second);
+
+        Assert.Equal(second, session.Status.LastDataAt);
+        Assert.Equal(10, Usage(session).InputTokens);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -209,15 +232,15 @@ public class AgentSessionDomainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void ApplyUsage_TerminalSession_DoesNotMutate()
+    public void ApplyUsage_AfterRuntimeCloseObservation_StillMutates()
     {
         var session = CreateSession();
-        session.Fail(DateTime.UtcNow, "error");
+        session.RecordActivity(DateTime.UtcNow);
 
         session.ApplyUsage(10, 5, 15, null, null, 0.001, "USD", 100, 200);
 
-        Assert.Null(Usage(session).InputTokens);
-        Assert.Null(Usage(session).CostAmount);
+        Assert.Equal(10, Usage(session).InputTokens);
+        Assert.Equal(0.001, Usage(session).CostAmount);
     }
 
 }

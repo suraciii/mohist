@@ -23,24 +23,18 @@ export const REVERSE_DNS_EVENT_TYPES = {
   IssuePriorityChanged: 'com.mohist.issue.priority-changed',
   IssuePrerequisiteAdded: 'com.mohist.issue.prerequisite-added',
   IssuePrerequisiteRemoved: 'com.mohist.issue.prerequisite-removed',
-  AgentSessionStarted: 'com.mohist.agent-session.started',
-  AgentSessionActivated: 'com.mohist.agent-session.activated',
-  AgentSessionCompleted: 'com.mohist.agent-session.completed',
-  AgentSessionFailed: 'com.mohist.agent-session.failed',
-  AgentSessionCancelled: 'com.mohist.agent-session.cancelled',
-  AgentSessionStatusChanged: 'com.mohist.agent-session.status-changed',
+  AgentSessionRuntimeBound: 'com.mohist.agent-session.runtime-bound',
+  AgentSessionUsageRecorded: 'com.mohist.agent-session.usage-recorded',
+  AgentSessionModelChanged: 'com.mohist.agent-session.model-changed',
 } as const
 
 export type ReverseDnsEventType =
   (typeof REVERSE_DNS_EVENT_TYPES)[keyof typeof REVERSE_DNS_EVENT_TYPES]
 
 export const REVERSE_DNS_AGENT_SESSION_EVENT_TYPES = [
-  REVERSE_DNS_EVENT_TYPES.AgentSessionStarted,
-  REVERSE_DNS_EVENT_TYPES.AgentSessionActivated,
-  REVERSE_DNS_EVENT_TYPES.AgentSessionCompleted,
-  REVERSE_DNS_EVENT_TYPES.AgentSessionFailed,
-  REVERSE_DNS_EVENT_TYPES.AgentSessionCancelled,
-  REVERSE_DNS_EVENT_TYPES.AgentSessionStatusChanged,
+  REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
+  REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
+  REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,
 ] as const
 
 export const TRANSCRIPT_EVENT_TYPES = [
