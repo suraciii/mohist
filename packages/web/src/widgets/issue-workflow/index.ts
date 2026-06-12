@@ -1,6 +1,7 @@
 export { BranchBar } from './ui/BranchBar'
 export { FullReportModal, ResultBadge } from './ui/ReviewReportModal'
 export { TaskProgressPanel } from './ui/TaskProgressPanel'
+export { WorkflowSessionsPanel } from './ui/WorkflowSessionsPanel'
 export { WorkflowConvergencePanel } from './ui/WorkflowConvergencePanel'
 export { WorkflowView } from './ui/WorkflowView'
 export { IssueWorkflowProfileEditor } from './ui/IssueWorkflowProfileEditor'

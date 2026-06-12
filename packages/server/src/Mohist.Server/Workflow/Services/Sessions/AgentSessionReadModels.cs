@@ -160,7 +160,7 @@ public sealed record WorkflowSessionDto(
     string Id,
     string WorkflowRunId,
     string SessionName,
-    string? AgentSessionId,
+    [property: JsonPropertyName("acpSessionId")] string? AgentSessionId,
     string? ProjectId,
     int? IssueNumber,
     string? RunnerId,
@@ -173,7 +173,20 @@ public sealed record WorkflowSessionDto(
     string? LastDataAt,
     string? CompletedAt,
     string? FailureReason,
-    int? ExitCode);
+    int? ExitCode,
+    string? ResolvedModel,
+    long? InputTokens,
+    long? OutputTokens,
+    long? TotalTokens,
+    long? CachedReadTokens,
+    long? ThoughtTokens,
+    double? CostAmount,
+    string? CostCurrency,
+    long? ContextWindowUsed,
+    long? ContextWindowSize,
+    string? FailureCategory,
+    int? ToolCallCount,
+    int? ToolErrorCount);
 
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 

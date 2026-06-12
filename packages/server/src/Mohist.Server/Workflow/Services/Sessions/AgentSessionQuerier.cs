@@ -28,12 +28,12 @@ public class AgentSessionQuerier
         _sessionQuery = sessionQuery;
     }
 
-    public async Task<IReadOnlyList<AgentSessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<WorkflowSessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
     {
         var sessions = await _sessionQuery.ListByLabelsAsync(
             Labels((AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)),
             ct: ct);
-        return sessions.Select(ToAgentSessionDto).ToList();
+        return sessions.Select(ToWorkflowDto).ToList();
     }
 
     public async Task<WorkflowSessionDetailDto?> GetByWorkflowAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
@@ -507,6 +507,7 @@ public class AgentSessionQuerier
     private static WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record)
     {
         var s = record.Session;
+        var usage = Usage(s);
         var issueNumber = IssueNumber(record);
         return new(
         s.Id,
@@ -518,7 +519,12 @@ public class AgentSessionQuerier
         s.Runtime.RunnerId,
         StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
-        null, null, null);
+        null, null, null,
+        null, usage.InputTokens, usage.OutputTokens,
+        usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
+        usage.CostAmount, usage.CostCurrency,
+        usage.ContextWindowUsed, usage.ContextWindowSize, null,
+        null, null);
     }
 
     private static AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
