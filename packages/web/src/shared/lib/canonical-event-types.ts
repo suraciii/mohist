@@ -88,6 +88,9 @@ export const LEGACY_ISSUE_EVENT_TYPES = [
 export const LEGACY_AGENT_DETAIL_EVENT_TYPES = [
   'agent_text_chunk',
   'main_tool_call',
+  'coder_text_chunk',
+  'coder_thought_chunk',
+  'coder_tool_call',
   'coder_session_started',
   'coder_session_completed',
   'coder_session_failed',

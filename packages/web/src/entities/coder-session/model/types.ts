@@ -1,10 +1,15 @@
+import type { SessionEvent } from '../../session/model/view'
+
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface AgentSessionMetadataCounts {
-  segmentCount: number
+  segmentCount?: number
+  eventCount?: number
   toolCount: number
   promptCount?: number
 }
+
+export type AgentSessionEvent = SessionEvent
 
 export interface AgentSessionMetadata {
   id: string
@@ -122,6 +127,7 @@ export interface SessionMetadata {
   probeDeadlineAt?: string | null
   failureReason?: string | null
   segmentCount?: number
+  eventCount?: number
   toolCount?: number
   turnCount?: number
   changedFiles?: FileChangeSummary[]

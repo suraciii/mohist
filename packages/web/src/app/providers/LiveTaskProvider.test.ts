@@ -2,13 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { __testing__ } from './LiveTaskProvider'
 
 describe('LiveTaskProvider transcript routing', () => {
-  it('routes persisted transcript segments through the same live detail events as chunks', () => {
-    expect(__testing__.routeTranscriptEventName('message.delta')).toBe('coder_text_chunk')
-    expect(__testing__.routeTranscriptEventName('reasoning.delta')).toBe('coder_thought_chunk')
-    expect(__testing__.routeTranscriptEventName('tool_call.started')).toBe('coder_tool_call')
-    expect(__testing__.routeTranscriptEventName('session.input')).toBe('session.input')
-  })
-
   it('unwraps transcript envelopes with runtime metadata and payload', () => {
     const envelope = {
       type: 'message.delta',
