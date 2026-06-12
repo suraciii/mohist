@@ -5,29 +5,12 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Domain.Events;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions.Grains;
 
 public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
-    private const int TranscriptFlushRawEventThreshold = 32;
-    private const int TranscriptFlushTextLengthThreshold = 4096;
-    private static readonly TimeSpan TranscriptFlushAgeThreshold = TimeSpan.FromSeconds(2);
-
-    private static readonly HashSet<string> TranscriptEventTypes = new(StringComparer.Ordinal)
-    {
-        "session.input",
-        "message.delta",
-        "reasoning.delta",
-        "tool_call.started",
-        "tool_call.updated",
-        "tool_call.completed",
-        "session.liveness",
-        "usage.updated",
-        "model.resolved",
-        "session.closed",
-    };
-
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -125,12 +108,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var events = new List<AgentSessionEvent>();
         events.AddRange(session.RecordActivity(now));
 
-        var entries = new List<AgentSessionRuntimeEventEnvelope>();
+        var entries = new List<RuntimeEventEnvelope>();
         foreach (var e in command.RuntimeEvents)
         {
             events.AddRange(ApplyRuntimeEventToDomain(session, e, now));
 
-            entries.Add(new AgentSessionRuntimeEventEnvelope
+            entries.Add(new RuntimeEventEnvelope
             {
                 Id = -(_realtimeSequence + 1),
                 SessionId = session.Id,
@@ -163,7 +146,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     private async Task FanOutRealtimeAsync(
         AgentSession session,
-        IReadOnlyList<AgentSessionRuntimeEventEnvelope> entries,
+        IReadOnlyList<RuntimeEventEnvelope> entries,
         IReadOnlyList<AgentSessionEvent> domainEvents)
     {
         var source = AgentSessionSource(session);
@@ -186,7 +169,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         foreach (var row in entries)
         {
-            if (!TranscriptEventTypes.Contains(row.Type))
+            if (!TranscriptAccumulator.EventTypes.Contains(row.Type))
                 continue;
 
             JsonElement payload;
@@ -251,7 +234,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             }
             catch (InvalidOperationException)
             {
-                // Non-lifecycle AgentSession events are persisted but are not CloudEventBus notifications.
             }
             catch (Exception ex)
             {
@@ -279,22 +261,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             ct: CancellationToken.None);
     }
 
-    private static long DurationMs(AgentSession session)
-    {
-        var start = session.Status.BoundAt ?? session.Status.CreatedAt;
-        var end = DateTime.UtcNow;
-        return Math.Max(0, (long)(end - start).TotalMilliseconds);
-    }
-
     private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)
     {
         var eventSummary = await LoadEventSummaryAsync(s.Id);
-        var usage = s.Status.UsageSummary ?? new AgentUsageSummary();
+        var usage = AgentSessionJsonHelper.Usage(s);
         return new AgentSessionInfo(
         s.Id,
         s.Runtime.RunnerId,
         s.Status.AgentRuntimeSessionId,
-        StatusName(s),
+        AgentSessionJsonHelper.StatusName(s),
         s.Settings.Model,
         s.Runtime.WorkDir,
         null,
@@ -319,13 +294,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount);
     }
-
-    private static string StatusName(AgentSession session) =>
-        session.Status.AgentRuntimeSessionId is not null
-        && session.Status.LastDataAt is not null
-        && DateTime.UtcNow - session.Status.LastDataAt.Value <= TimeSpan.FromMinutes(5)
-            ? "active"
-            : "inactive";
 
     private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
     {
@@ -356,22 +324,22 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             if (e.Type == "model.resolved" || e.Type == "model")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                resolvedModel = GetStringProp(payload, "resolvedModel") ?? resolvedModel;
+                resolvedModel = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? resolvedModel;
             }
             else if (e.Type == "session.closed" || e.Type == "session_closed")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                failureCategory = GetStringProp(payload, "failureCategory") ?? failureCategory;
+                failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory") ?? failureCategory;
             }
             else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call" || e.Type == "tool")
             {
                 var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                var toolCallId = GetToolStringProp(payload, "toolCallId")
-                    ?? GetToolStringProp(payload, "id")
-                    ?? GetToolStringProp(payload, "callId")
+                var toolCallId = AgentSessionJsonHelper.GetToolStringProp(payload, "toolCallId")
+                    ?? AgentSessionJsonHelper.GetToolStringProp(payload, "id")
+                    ?? AgentSessionJsonHelper.GetToolStringProp(payload, "callId")
                     ?? e.Sequence.ToString();
                 toolCallIds.Add(toolCallId);
-                var status = GetToolStringProp(payload, "status") ?? GetToolStringProp(payload, "state");
+                var status = AgentSessionJsonHelper.GetToolStringProp(payload, "status") ?? AgentSessionJsonHelper.GetToolStringProp(payload, "state");
                 if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
                     failedToolCallIds.Add(toolCallId);
             }
@@ -384,13 +352,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count);
     }
 
-    private async Task<AgentSessionRow?> LoadProjectionAsync(string sessionId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId);
-    }
-
-    private static AgentSessionRuntimeEventInfo ToEventInfo(AgentSessionRuntimeEventEnvelope e) => new(
+    private static AgentSessionRuntimeEventInfo ToEventInfo(RuntimeEventEnvelope e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.AgentSessionId,
@@ -399,7 +361,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         e.PayloadJson,
         e.CreatedAt.ToString("o"));
 
-    private static AgentSessionRuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptPartRow part) => new()
+    private static RuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptPartRow part) => new()
     {
         Id = part.Id,
         Sequence = part.Sequence,
@@ -419,127 +381,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             "session.liveness" => session.RecordActivity(now),
             "session.closed" => session.RecordActivity(now),
             "usage.updated" => session.ApplyUsage(
-                GetLongProp(payload, "inputTokens"),
-                GetLongProp(payload, "outputTokens"),
-                GetLongProp(payload, "totalTokens"),
-                GetLongProp(payload, "cachedReadTokens"),
-                GetLongProp(payload, "thoughtTokens"),
-                GetCostAmount(payload),
-                GetCostCurrency(payload),
-                GetContextWindowUsed(payload),
-                GetContextWindowSize(payload)),
+                AgentSessionJsonHelper.GetLongProp(payload, "inputTokens"),
+                AgentSessionJsonHelper.GetLongProp(payload, "outputTokens"),
+                AgentSessionJsonHelper.GetLongProp(payload, "totalTokens"),
+                AgentSessionJsonHelper.GetLongProp(payload, "cachedReadTokens"),
+                AgentSessionJsonHelper.GetLongProp(payload, "thoughtTokens"),
+                AgentSessionJsonHelper.GetCostAmount(payload),
+                AgentSessionJsonHelper.GetCostCurrency(payload),
+                AgentSessionJsonHelper.GetContextWindowUsed(payload),
+                AgentSessionJsonHelper.GetContextWindowSize(payload)),
             "model.resolved" => session.ResolveModel(
-                GetStringProp(payload, "resolvedModel") ?? GetStringProp(payload, "model"),
+                AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? AgentSessionJsonHelper.GetStringProp(payload, "model"),
                 now),
             _ => []
         };
-    }
-
-    private static double? GetCostAmount(JsonElement payload)
-    {
-        var direct = GetDoubleProp(payload, "costAmount");
-        if (direct is not null) return direct;
-        return payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("cost", out var costProp)
-            && costProp.ValueKind == JsonValueKind.Object
-            ? GetDoubleProp(costProp, "amount")
-            : null;
-    }
-
-    private static string? GetCostCurrency(JsonElement payload)
-    {
-        var direct = GetStringProp(payload, "costCurrency");
-        if (direct is not null) return direct;
-        return payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("cost", out var costProp)
-            && costProp.ValueKind == JsonValueKind.Object
-            ? GetStringProp(costProp, "currency")
-            : null;
-    }
-
-    private static long? GetContextWindowUsed(JsonElement payload)
-    {
-        var direct = GetLongProp(payload, "contextWindowUsed");
-        if (direct is not null) return direct;
-        return payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("contextWindow", out var cwProp)
-            && cwProp.ValueKind == JsonValueKind.Object
-            ? GetLongProp(cwProp, "used")
-            : null;
-    }
-
-    private static long? GetContextWindowSize(JsonElement payload)
-    {
-        var direct = GetLongProp(payload, "contextWindowSize");
-        if (direct is not null) return direct;
-        return payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("contextWindow", out var cwProp)
-            && cwProp.ValueKind == JsonValueKind.Object
-            ? GetLongProp(cwProp, "size")
-            : null;
-    }
-
-    private static string ExtractText(string json)
-    {
-        try
-        {
-            var payload = JsonSerializer.Deserialize<JsonElement>(json);
-            if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("text", out var text))
-                return text.GetString() ?? string.Empty;
-            if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Object && content.TryGetProperty("text", out var contentText))
-                return contentText.GetString() ?? string.Empty;
-            if (payload.ValueKind == JsonValueKind.String)
-                return payload.GetString() ?? string.Empty;
-        }
-        catch (Exception ex)
-        {
-            _ = ex;
-        }
-        return string.Empty;
-    }
-
-    private static string? GetStringProp(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object) return null;
-        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
-            ? prop.GetString()
-            : null;
-    }
-
-    private static string? GetToolStringProp(JsonElement payload, string name)
-    {
-        if (payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("toolCall", out var toolCall))
-        {
-            var nested = GetStringProp(toolCall, name);
-            if (nested is not null) return nested;
-        }
-
-        return GetStringProp(payload, name);
-    }
-
-    private static int? GetIntProp(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object) return null;
-        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
-            ? prop.GetInt32()
-            : null;
-    }
-
-    private static long? GetLongProp(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object) return null;
-        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
-            ? prop.GetInt64()
-            : null;
-    }
-
-    private static double? GetDoubleProp(JsonElement element, string name)
-    {
-        if (element.ValueKind != JsonValueKind.Object) return null;
-        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
-            ? prop.GetDouble()
-            : null;
     }
 
     private sealed record AgentSessionEventSummary(
@@ -547,282 +402,4 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         string? FailureCategory,
         int? ToolCallCount,
         int? ToolErrorCount);
-
-    private sealed record AgentSessionRuntimeEventEnvelope
-    {
-        public long Id { get; init; }
-        public string SessionId { get; init; } = string.Empty;
-        public string? AgentSessionId { get; init; }
-        public long Sequence { get; init; }
-        public string Type { get; init; } = string.Empty;
-        public string PayloadJson { get; init; } = "{}";
-        public DateTime CreatedAt { get; init; }
-    }
-
-    private sealed class TranscriptAccumulator
-    {
-        private PendingTextSegment? _pending;
-
-        public bool HasPending => _pending is not null;
-
-        public AgentSessionTranscriptFlush? Accept(
-            AgentSession session,
-            IReadOnlyList<AgentSessionRuntimeEventEnvelope> rows,
-            DateTime now,
-            bool forceFlushPending)
-        {
-            var parts = new List<AgentSessionTranscriptPartDelta>();
-            foreach (var row in rows)
-            {
-                var textType = ToTextPartType(row.Type);
-                if (textType is not null)
-                {
-                    AppendText(row, textType, now, parts);
-                    continue;
-                }
-
-                if (!TranscriptEventTypes.Contains(row.Type))
-                    continue;
-
-                FlushInto(session, now, parts);
-                var type = ToTranscriptPartType(row.Type);
-                if (type == "input")
-                    continue;
-
-                parts.Add(CreatePartDelta(
-                    row,
-                    type,
-                    CorrelationKey(type, row.PayloadJson),
-                    ExtractCorrelationId(row.PayloadJson),
-                    textDelta: null,
-                    payloadJson: row.PayloadJson,
-                    rawEventCount: 1,
-                    firstSeenAt: row.CreatedAt,
-                    lastSeenAt: row.CreatedAt));
-            }
-
-            if (forceFlushPending)
-                FlushInto(session, now, parts);
-
-            return ToFlush(session, rows, parts, now);
-        }
-
-        public AgentSessionTranscriptFlush? Flush(AgentSession session, DateTime now)
-        {
-            var parts = new List<AgentSessionTranscriptPartDelta>();
-            FlushInto(session, now, parts);
-            return parts.Count == 0 ? null : new AgentSessionTranscriptFlush(false, BuildTurn(session, null, now), parts);
-        }
-
-        private void AppendText(AgentSessionRuntimeEventEnvelope row, string type, DateTime now, List<AgentSessionTranscriptPartDelta> parts)
-        {
-            var text = ExtractText(row.PayloadJson);
-            if (string.IsNullOrEmpty(text))
-                return;
-
-            var correlationId = ExtractCorrelationId(row.PayloadJson);
-            if (_pending is not null
-                && (!string.Equals(_pending.Type, type, StringComparison.Ordinal)
-                    || !string.Equals(_pending.CorrelationId, correlationId, StringComparison.Ordinal)))
-            {
-                FlushPending(row, parts);
-            }
-
-            _pending ??= new PendingTextSegment(
-                type,
-                correlationId,
-                row.Type,
-                row.CreatedAt);
-
-            _pending.Append(text, row.Type, row.CreatedAt);
-
-            if (_pending.RawEventCount >= TranscriptFlushRawEventThreshold
-                || _pending.Text.Length >= TranscriptFlushTextLengthThreshold
-                || now - _pending.StartedAt >= TranscriptFlushAgeThreshold)
-                FlushPending(row, parts);
-        }
-
-        private void FlushInto(AgentSession session, DateTime now, List<AgentSessionTranscriptPartDelta> parts)
-        {
-            if (_pending is null)
-                return;
-
-            var row = new AgentSessionRuntimeEventEnvelope
-            {
-                CreatedAt = now,
-            };
-            FlushPending(row, parts);
-        }
-
-        private void FlushPending(AgentSessionRuntimeEventEnvelope row, List<AgentSessionTranscriptPartDelta> parts)
-        {
-            if (_pending is null)
-                return;
-
-            var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["text"] = _pending.Text.ToString(),
-                ["sourceEventType"] = _pending.SourceEventType,
-                ["rawEventCount"] = _pending.RawEventCount,
-                ["correlationId"] = _pending.CorrelationId,
-            });
-
-            parts.Add(CreatePartDelta(
-                row,
-                _pending.Type,
-                _pending.CorrelationId ?? _pending.Type,
-                _pending.CorrelationId,
-                _pending.Text.ToString(),
-                payload,
-                _pending.RawEventCount,
-                _pending.StartedAt,
-                _pending.UpdatedAt));
-            _pending = null;
-        }
-
-        private static AgentSessionTranscriptPartDelta CreatePartDelta(
-            AgentSessionRuntimeEventEnvelope row,
-            string type,
-            string correlationKey,
-            string? correlationId,
-            string? textDelta,
-            string payloadJson,
-            int rawEventCount,
-            DateTime firstSeenAt,
-            DateTime lastSeenAt) => new(
-                type,
-                correlationKey,
-                correlationId,
-                textDelta,
-                string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson,
-                firstSeenAt,
-                lastSeenAt,
-                rawEventCount);
-
-        private static AgentSessionTranscriptFlush? ToFlush(
-            AgentSession session,
-            IReadOnlyList<AgentSessionRuntimeEventEnvelope> rows,
-            IReadOnlyList<AgentSessionTranscriptPartDelta> parts,
-            DateTime now)
-        {
-            var input = rows.FirstOrDefault(row => row.Type == "session.input");
-            if (parts.Count == 0 && input is null)
-                return null;
-            return new AgentSessionTranscriptFlush(input is not null, BuildTurn(session, input, now), parts);
-        }
-
-        private static AgentSessionTranscriptTurnUpsert BuildTurn(
-            AgentSession session,
-            AgentSessionRuntimeEventEnvelope? input,
-            DateTime now)
-        {
-            var payload = input is null ? default(JsonElement?) : ParsePayload(input.PayloadJson);
-            var promptText = payload is null
-                ? string.Empty
-                : GetStringProp(payload.Value, "text") ?? GetStringProp(payload.Value, "prompt") ?? string.Empty;
-            var promptKind = payload is null
-                ? "task"
-                : GetStringProp(payload.Value, "kind") ?? GetStringProp(payload.Value, "source") ?? "task";
-
-            return new AgentSessionTranscriptTurnUpsert(
-                session.Id,
-                Sequence: input is null ? 0 : 1,
-                promptText,
-                NormalizePromptKind(promptKind),
-                input?.CreatedAt ?? session.Status.CreatedAt,
-                now);
-        }
-
-        private static string? ToTextPartType(string eventType) => eventType switch
-        {
-            "message.delta" => "text",
-            "reasoning.delta" => "reasoning",
-            _ => null
-        };
-
-        private static string ToTranscriptPartType(string eventType) => eventType switch
-        {
-            "session.input" => "input",
-            "tool_call.started" or "tool_call.updated" or "tool_call.completed" => "tool",
-            "session.liveness" => "status",
-            "usage.updated" => "usage",
-            "model.resolved" => "model",
-            "session.closed" => "session_closed",
-            _ => eventType
-        };
-
-        private static string CorrelationKey(string type, string json) => type switch
-        {
-            "tool" => ExtractCorrelationId(json) ?? "tool",
-            "text" or "reasoning" => ExtractCorrelationId(json) ?? type,
-            _ => type,
-        };
-
-        private static string NormalizePromptKind(string? kind) => kind switch
-        {
-            "initial" or "task" or "retry" or "followup" or "recovery" => kind,
-            _ => "task"
-        };
-
-        private static JsonElement? ParsePayload(string json)
-        {
-            try
-            {
-                return JsonSerializer.Deserialize<JsonElement>(json);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string? ExtractCorrelationId(string json)
-        {
-            try
-            {
-                var payload = JsonSerializer.Deserialize<JsonElement>(json);
-                return GetStringProp(payload, "messageId")
-                    ?? GetStringProp(payload, "partId")
-                    ?? GetToolStringProp(payload, "toolCallId")
-                    ?? GetToolStringProp(payload, "id")
-                    ?? GetToolStringProp(payload, "callId");
-            }
-            catch
-            {
-                return null;
-            }
-        }
-    }
-
-    private sealed class PendingTextSegment
-    {
-        public PendingTextSegment(
-            string type,
-            string? correlationId,
-            string sourceEventType,
-            DateTime startedAt)
-        {
-            Type = type;
-            CorrelationId = correlationId;
-            SourceEventType = sourceEventType;
-            StartedAt = startedAt;
-            UpdatedAt = startedAt;
-        }
-
-        public string Type { get; }
-        public string? CorrelationId { get; }
-        public string SourceEventType { get; private set; }
-        public DateTime StartedAt { get; }
-        public DateTime UpdatedAt { get; private set; }
-        public int RawEventCount { get; private set; }
-        public System.Text.StringBuilder Text { get; } = new();
-
-        public void Append(string text, string sourceEventType, DateTime at)
-        {
-            Text.Append(text);
-            SourceEventType = sourceEventType;
-            UpdatedAt = at;
-            RawEventCount += 1;
-        }
-    }
 }

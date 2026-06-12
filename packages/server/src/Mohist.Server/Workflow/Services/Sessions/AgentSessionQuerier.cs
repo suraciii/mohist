@@ -15,8 +15,6 @@ namespace Mohist.Server.Workflow.Services.Sessions;
 
 public class AgentSessionQuerier
 {
-    private static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
-
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;
     private readonly AgentSessionQuery _sessionQuery;
@@ -47,7 +45,7 @@ public class AgentSessionQuerier
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
-        return new WorkflowSessionDetailDto(ToWorkflowDto(session), BuildTranscriptResponse(transcript));
+        return new WorkflowSessionDetailDto(ToWorkflowDto(session), SessionTranscriptBuilder.Build(transcript));
     }
 
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -167,7 +165,7 @@ public class AgentSessionQuerier
         if (session is null) return null;
 
         var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
-        return BuildTranscriptResponse(transcript);
+        return SessionTranscriptBuilder.Build(transcript);
     }
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
@@ -457,28 +455,14 @@ public class AgentSessionQuerier
 
     private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
 
-    private static JsonElement? ParsePayload(string json)
-    {
-        try
-        {
-            return JsonDocument.Parse(json).RootElement.Clone();
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private static JsonElement? ParsePayload(string json) =>
+        AgentSessionJsonHelper.ParsePayload(json);
 
     private static JsonElement ParsePayloadOrEmpty(string json) =>
-        ParsePayload(json) ?? JsonDocument.Parse("{}").RootElement.Clone();
+        AgentSessionJsonHelper.ParsePayloadOrEmpty(json);
 
-    private static string? GetStringProp(JsonElement? element, string name)
-    {
-        if (element is null || element.Value.ValueKind != JsonValueKind.Object) return null;
-        return element.Value.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
-            ? prop.GetString()
-            : null;
-    }
+    private static string? GetStringProp(JsonElement? element, string name) =>
+        AgentSessionJsonHelper.GetStringProp(element, name);
 
     private static AgentSessionDto ToAgentSessionDto(AgentSessionRecord record)
     {
@@ -580,14 +564,11 @@ public class AgentSessionQuerier
     }
 
     private static string StatusName(AgentSession session) =>
-        session.Status.AgentRuntimeSessionId is not null
-        && session.Status.LastDataAt is not null
-        && DateTime.UtcNow - session.Status.LastDataAt.Value <= ActiveRuntimeEventWindow
-            ? "active"
-            : "inactive";
+        AgentSessionJsonHelper.StatusName(session);
     private static DateTime LastActivityAt(AgentSession session) =>
-        session.Status.LastDataAt ?? session.Status.BoundAt ?? session.Status.CreatedAt;
-    private static AgentUsageSummary Usage(AgentSession session) => session.Status.UsageSummary ?? new AgentUsageSummary();
+        AgentSessionJsonHelper.LastActivityAt(session);
+    private static AgentUsageSummary Usage(AgentSession session) =>
+        AgentSessionJsonHelper.Usage(session);
 
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(MohistDbContext db, string sessionId, CancellationToken ct)
     {
@@ -605,227 +586,11 @@ public class AgentSessionQuerier
         return new AgentSessionTranscriptData(turns, parts);
     }
 
-    private static AgentSessionTranscriptResponse BuildTranscriptResponse(AgentSessionTranscriptData transcript)
-    {
-        var responseTurns = new List<AgentSessionTranscriptTurnDto>();
-        var partsByTurn = transcript.Parts
-            .GroupBy(p => p.TurnId)
-            .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Sequence).ThenBy(p => p.Id).ToList());
-        var toolPartIndex = new Dictionary<string, AgentSessionTranscriptPartDto>(StringComparer.Ordinal);
-
-        foreach (var turn in transcript.Turns)
-        {
-            var at = turn.StartedAt.ToString("o");
-            var dto = new AgentSessionTranscriptTurnDto
-            {
-                Id = $"turn-{turn.Sequence}",
-                StartedAt = at,
-                CompletedAt = null,
-                Incomplete = false,
-                User = new AgentSessionTranscriptUserDto
-                {
-                    Text = turn.PromptText,
-                    Kind = NormalizePromptKind(turn.PromptKind),
-                    SentAt = at,
-                },
-            };
-            toolPartIndex.Clear();
-
-            if (partsByTurn.TryGetValue(turn.Id, out var parts))
-            {
-                var partIndex = 0;
-                foreach (var part in parts)
-                {
-                    var payload = ParsePayloadOrEmpty(part.PayloadJson);
-                    var partAt = part.FirstSeenAt.ToString("o");
-                    if (part.Type == "text" || part.Type == "reasoning")
-                    {
-                        dto.Assistant.Add(new AgentSessionTranscriptPartDto
-                        {
-                            Id = $"{dto.Id}-p{++partIndex}",
-                            Type = part.Type,
-                            Text = part.Text,
-                            StartedAt = partAt,
-                            CompletedAt = null,
-                        });
-                        continue;
-                    }
-
-                    if (part.Type == "tool")
-                    {
-                        UpsertTranscriptToolPart(dto, toolPartIndex, part, payload, partAt, ref partIndex);
-                        continue;
-                    }
-
-                    if (part.Type == "status")
-                    {
-                        if (GetStringProp(payload, "status") == "failed")
-                        {
-                            dto.Assistant.Add(new AgentSessionTranscriptPartDto
-                            {
-                                Id = $"{dto.Id}-p{++partIndex}",
-                                Type = "error",
-                                Message = GetStringProp(payload, "failureReason") ?? "Liveness failed",
-                                Kind = "recovery",
-                                At = partAt,
-                            });
-                        }
-                        continue;
-                    }
-
-                    if (part.Type == "session_closed")
-                    {
-                        var status = GetStringProp(payload, "status") ?? "completed";
-                        if (status is "failed" or "cancelled")
-                        {
-                            dto.Assistant.Add(new AgentSessionTranscriptPartDto
-                            {
-                                Id = $"{dto.Id}-p{++partIndex}",
-                                Type = "error",
-                                Message = GetStringProp(payload, "failureReason") ?? $"Session {status}",
-                                Kind = status == "cancelled" ? "cancelled" : "failed",
-                                At = partAt,
-                            });
-                        }
-                    }
-                }
-            }
-
-            responseTurns.Add(dto);
-        }
-
-        var lastActivityAt = transcript.Parts.Count > 0
-            ? transcript.Parts.Max(p => p.LastSeenAt).ToString("o")
-            : transcript.Turns.LastOrDefault()?.UpdatedAt.ToString("o");
-
-        return new AgentSessionTranscriptResponse
-        {
-            Turns = responseTurns,
-            PartCount = transcript.Parts.Count,
-            LastActivityAt = lastActivityAt,
-        };
-    }
-
-    private static void UpsertTranscriptToolPart(
-        AgentSessionTranscriptTurnDto turn,
-        IDictionary<string, AgentSessionTranscriptPartDto> toolPartIndex,
-        AgentSessionTranscriptPartRow partRow,
-        JsonElement payload,
-        string at,
-        ref int partIndex)
-    {
-        var toolCallId = GetToolStringProp(payload, "toolCallId")
-            ?? GetToolStringProp(payload, "id")
-            ?? GetToolStringProp(payload, "callId");
-        if (string.IsNullOrWhiteSpace(toolCallId))
-            return;
-
-        var status = MapTranscriptToolStatus(GetToolStringProp(payload, "status") ?? GetToolStringProp(payload, "state"));
-        var rawInput = GetToolRaw(payload, "rawInput") ?? GetToolRaw(payload, "input");
-        var rawOutput = GetToolRaw(payload, "rawOutput") ?? GetToolRaw(payload, "output");
-
-        if (toolPartIndex.TryGetValue(toolCallId, out var existing) && existing.Tool is not null)
-        {
-            existing.Tool.Status = status;
-            existing.Tool.Title = GetToolStringProp(payload, "title") ?? existing.Tool.Title;
-            existing.Tool.Input = rawInput ?? existing.Tool.Input;
-            existing.Tool.Output = rawOutput ?? existing.Tool.Output;
-            existing.Tool.RawInput = rawInput ?? existing.Tool.RawInput;
-            existing.Tool.RawOutput = rawOutput ?? existing.Tool.RawOutput;
-            existing.Tool.Error = status == "failed" ? rawOutput : existing.Tool.Error;
-            if (status is "completed" or "failed" or "cancelled")
-            {
-                existing.Tool.CompletedAt = at;
-                existing.CompletedAt = at;
-            }
-            return;
-        }
-
-        var toolName = GetToolStringProp(payload, "toolName")
-            ?? GetToolStringProp(payload, "kind")
-            ?? GetToolStringProp(payload, "name")
-            ?? "unknown";
-        var title = GetToolStringProp(payload, "title");
-        var completedAt = status is "completed" or "failed" or "cancelled" ? at : null;
-        var part = new AgentSessionTranscriptPartDto
-        {
-            Id = $"{turn.Id}-p{++partIndex}",
-            Type = "tool",
-            StartedAt = at,
-            CompletedAt = completedAt,
-            Tool = new AgentSessionTranscriptToolDto
-            {
-                ToolCallId = toolCallId,
-                ToolName = toolName,
-                NormalizedName = NormalizeToolName(toolName, title),
-                Status = status,
-                Title = title,
-                Input = rawInput,
-                Output = rawOutput,
-                RawInput = rawInput,
-                RawOutput = rawOutput,
-                Error = status == "failed" ? rawOutput : null,
-                StartedAt = at,
-                CompletedAt = completedAt,
-            },
-        };
-        toolPartIndex[toolCallId] = part;
-        turn.Assistant.Add(part);
-    }
-
-    private static string NormalizePromptKind(string? kind) => kind switch
-    {
-        "initial" or "task" or "retry" or "followup" or "recovery" or "legacy-missing" => kind,
-        _ => "task"
-    };
-
-    private static string MapTranscriptToolStatus(string? status) => status switch
-    {
-        "completed" => "completed",
-        "failed" or "timeout" => "failed",
-        "cancelled" => "cancelled",
-        "running" or "in_progress" or "started" => "running",
-        _ => "pending"
-    };
-
-    private static string NormalizeToolName(string toolName, string? title)
-    {
-        var value = !string.IsNullOrWhiteSpace(toolName) ? toolName : title;
-        if (string.IsNullOrWhiteSpace(value)) return "unknown";
-        return value.Trim().ToLowerInvariant().Replace(' ', '_');
-    }
-
-    private static string? GetToolStringProp(JsonElement payload, string name)
-    {
-        var direct = GetStringProp(payload, name);
-        if (direct is not null) return direct;
-        return payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("toolCall", out var toolCall)
-            ? GetStringProp(toolCall, name)
-            : null;
-    }
+    private static string? GetToolStringProp(JsonElement payload, string name) =>
+        AgentSessionJsonHelper.GetToolStringProp(payload, name);
 
     private static string? GetToolStringProp(JsonElement? payload, string name) =>
-        payload is null ? null : GetToolStringProp(payload.Value, name);
-
-    private static string? GetToolRaw(JsonElement payload, string name)
-    {
-        if (TryGetRaw(payload, name, out var raw)) return raw;
-        if (payload.ValueKind == JsonValueKind.Object
-            && payload.TryGetProperty("toolCall", out var toolCall)
-            && TryGetRaw(toolCall, name, out raw))
-            return raw;
-        return null;
-    }
-
-    private static bool TryGetRaw(JsonElement payload, string name, out string? raw)
-    {
-        raw = null;
-        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty(name, out var prop))
-            return false;
-        raw = prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText();
-        return true;
-    }
+        AgentSessionJsonHelper.GetToolStringProp(payload, name);
 
     private static TranscriptEventProjection ToProjection(string sessionId, AgentSessionTranscriptPartRow part) => new()
     {
