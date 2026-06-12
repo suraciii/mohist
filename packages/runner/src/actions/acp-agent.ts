@@ -1038,7 +1038,15 @@ async function emitSessionEvent(context: ActionContext, type: string, payload: J
 }
 
 function sessionNameFromContext(context: ActionContext) {
-  return stringInput(context.with, "session") ?? context.workId
+  const requested = stringInput(context.with, "session")
+  if (!requested) return context.workId
+  if (!context.workId || requested === context.workId) return requested
+  if (context.stage && requested === context.stage && isRetryAttemptWorkId(context.workId)) return `${requested}:${context.workId}`
+  return requested
+}
+
+function isRetryAttemptWorkId(workId: string) {
+  return /(?:^|[.:])\d*[2-9]\d*$/.test(workId)
 }
 
 function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {

@@ -159,6 +159,26 @@ describe("mohist/acp-agent", () => {
     )
   })
 
+  it("NamedWorkflowSessionUsesWorkAttemptSuffix_SessionRowsDoNotCollideAcrossRetries", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "review retry",
+      session: "check",
+    }, undefined, {
+      workId: "ai-review.2",
+      workType: "task",
+      stage: "check",
+    }))
+
+    expect(result.status).toBe("success")
+    const sessionNames = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "ensureWorkflowAgentSession" || entry.event === "attachWorkflowAgentSession" || entry.event === "workflowAgentSessionEvents")
+      .map((entry) => entry.sessionName)
+    expect(sessionNames).toContain("check:ai-review.2")
+    expect(sessionNames).not.toContain("check")
+  })
+
   it("ExistingSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
 
@@ -968,20 +988,20 @@ function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-f
 }
 
 class FakeServerConnection {
-  readonly calls: Array<{ event: string; type?: string; payload?: unknown; args?: unknown[] }> = []
+  readonly calls: Array<{ event: string; type?: string; payload?: unknown; args?: unknown[]; sessionName?: string }> = []
   nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
 
-  async ensureWorkflowAgentSession() {
-    this.calls.push({ event: "ensureWorkflowAgentSession" })
+  async ensureWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string) {
+    this.calls.push({ event: "ensureWorkflowAgentSession", sessionName })
     return this.nextEnsureWorkflowAgentSession
   }
 
-  async attachWorkflowAgentSession(...args: unknown[]) {
-    this.calls.push({ event: "attachWorkflowAgentSession", args })
+  async attachWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string, ...args: unknown[]) {
+    this.calls.push({ event: "attachWorkflowAgentSession", sessionName, args })
   }
 
-  async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, _sessionName: string, payload: { events: Array<{ type: string; payload: unknown }> }) {
-    for (const event of payload.events) this.calls.push({ event: "workflowAgentSessionEvents", type: event.type, payload: event.payload })
+  async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events: Array<{ type: string; payload: unknown }> }) {
+    for (const event of payload.events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
   }
 }
 
