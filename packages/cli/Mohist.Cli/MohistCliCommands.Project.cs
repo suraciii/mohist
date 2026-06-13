@@ -14,6 +14,7 @@ internal static class ProjectCommands
         project.Subcommands.Add(BuildShow(api));
         project.Subcommands.Add(BuildUse(api));
         project.Subcommands.Add(BuildDelete(api));
+        project.Subcommands.Add(ProjectRepoCommands.Build(api));
 
         return project;
     }

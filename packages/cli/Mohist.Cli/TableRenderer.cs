@@ -52,6 +52,29 @@ internal sealed class TableRenderer
     private void RenderProjectList(JsonNode? data)
     {
         var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No projects");
+            return;
+        }
+
+        var hasBaseBranch = rows.Any(r => !string.IsNullOrEmpty(StringOf(r, "baseBranch")));
+
+        if (!hasBaseBranch)
+        {
+            foreach (var row in rows)
+            {
+                var id = StringOf(row, "id");
+                var name = StringOf(row, "name");
+                var marker = !string.IsNullOrEmpty(_activeProjectId) &&
+                             string.Equals(id, _activeProjectId, StringComparison.Ordinal)
+                    ? "* "
+                    : "  ";
+                _out.WriteLine($"{marker}{name}");
+            }
+            return;
+        }
+
         var headers = new[] { "*", "id", "name", "base branch" };
         var widths = new[] { 1, IdSoftCap, TitleSoftCap, 16 };
 

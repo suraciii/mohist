@@ -296,7 +296,9 @@ public class AgentSessionLifecycleDedupSpecs
     {
         var projectName = $"dedup-{name}-{Guid.NewGuid():N}";
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects",
-            new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+            new { name = projectName });
+        await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories",
+            new { name = "main", gitUrl = "https://example.com/repo.git", baseBranch = "main", isDefault = true });
         var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues",
             new { title = $"Dedup {name}", body = "track lifecycle emits", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
 
@@ -365,7 +367,7 @@ public class AgentSessionLifecycleDedupSpecs
             .WithLabel(AgentSessionQueryMetadataKeys.Stage, stage)
             .WithAnnotation(AgentSessionQueryMetadataKeys.Title, title);
 
-    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record CreatedSession(string ProjectId, string WorkflowRunId, string SessionName, string Id);
 }

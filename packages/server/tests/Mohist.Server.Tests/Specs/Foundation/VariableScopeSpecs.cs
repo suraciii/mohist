@@ -117,7 +117,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MohistWorkflowUsesExpressionInputs()
     {
-        await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
+        await StartWorkflowAsync(MohistPlanDefinitionWithoutArtifacts());
 
         var (proposal, r1) = await PollWorkAnyAsync();
         Assert.DoesNotContain("changeDir", proposal.With);
@@ -156,7 +156,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MohistWorkflowUsesCoreActionsForGenericChecks()
     {
-        await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
+        await StartWorkflowAsync(MohistPlanDefinitionWithoutArtifacts());
 
         for (var i = 0; i < 5; i++)
         {
@@ -194,4 +194,63 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Contains("\"expect\"", proposal.With);
         Assert.Contains("${{ openspecChangeDir }}/proposal.md", proposal.With);
     }
+
+    private static WorkflowDefinition MohistPlanDefinitionWithoutArtifacts() =>
+        new("spec/mohist-plan-test",
+        [
+            new StageDefinition("plan",
+                [
+                    new("proposal", "Generate proposal", "mohist/acp-agent", With("""
+                    {
+                      "session": "plan",
+                      "prompt": "${{ prompts.proposal }}",
+                      "agent": "${{ vars.agent }}",
+                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/proposal.md" } ] }
+                    }
+                    """)),
+                    new("specs", "Write specs", "mohist/acp-agent", With("""
+                    {
+                      "session": "plan",
+                      "prompt": "${{ prompts.specs }}",
+                      "agent": "${{ vars.agent }}",
+                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/specs" } ] }
+                    }
+                    """)),
+                    new("design", "Create design", "mohist/acp-agent", With("""
+                    {
+                      "session": "plan",
+                      "prompt": "${{ prompts.design }}",
+                      "agent": "${{ vars.agent }}",
+                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/design.md" } ] }
+                    }
+                    """)),
+                    new("tasks", "Generate tasks", "mohist/acp-agent", With("""
+                    {
+                      "session": "plan",
+                      "prompt": "${{ prompts.tasks }}",
+                      "agent": "${{ vars.agent }}",
+                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/tasks.json" } ] }
+                    }
+                    """)),
+                    new("self-review", "Self review", "mohist/acp-agent", With("""
+                    {
+                      "session": "plan",
+                      "prompt": "${{ prompts.self-review }}",
+                      "agent": "${{ vars.agent }}",
+                      "expect": { "files": [ { "path": "${{ openspecChangeDir }}/self-review.md" } ] }
+                    }
+                    """)),
+                ],
+                [
+                    new("proposal-complete", "Proposal complete", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/proposal.md\"").RootElement.Clone() }),
+                    new("specs-complete", "Spec complete", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/specs\"").RootElement.Clone() }),
+                    new("design-complete", "Design complete", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/design.md\"").RootElement.Clone() }),
+                    new("tasks-valid", "Tasks valid", "core/artifact-exists", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/tasks.json\"").RootElement.Clone() }),
+                    new("self-review-passed", "Self review passed", "core/marker", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"${{ openspecChangeDir }}/self-review.md\"").RootElement.Clone(), ["expect"] = JsonDocument.Parse("\"<promise>PASS</promise>\"").RootElement.Clone() }),
+                    new("health", "Health", "core/script", new Dictionary<string, JsonElement?> { ["run"] = JsonDocument.Parse("\"git diff --check\"").RootElement.Clone() }),
+                ])
+        ]);
+
+    private static new Dictionary<string, JsonElement?> With(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
 }

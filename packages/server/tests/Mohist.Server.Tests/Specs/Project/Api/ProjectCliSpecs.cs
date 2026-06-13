@@ -135,7 +135,7 @@ public class ProjectCliSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "list"],
+            ["project", "list", "--output", "table"],
             output,
             error,
             files,
