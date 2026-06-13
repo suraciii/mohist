@@ -1150,7 +1150,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             StageApprovalRequested => DisableWorkHeartbeatAsync(),
             StageApprovalResolved x => OnApprovalResolvedAsync(x),
             TaskCompleted => EnsureWorkHeartbeatAsync(),
-            TaskFailed => Task.CompletedTask,
+            TaskFailed => EnsureWorkHeartbeatAsync(),
             CheckPassed => EnsureWorkHeartbeatAsync(),
             CheckFailed => Task.CompletedTask,
             CheckPending => EnsureWorkHeartbeatAsync(),

@@ -46,6 +46,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         var projectName = $"project-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
         await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await UseNoArtifactTemplateAsync(project.Id);
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -164,6 +165,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}" });
         await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await UseNoArtifactTemplateAsync(project.Id);
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -212,6 +214,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}" });
         await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await UseNoArtifactTemplateAsync(project.Id);
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project stage variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
@@ -318,6 +321,107 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Contains("stages:", response.Yaml);
         Assert.Contains("agent: ${{ vars.agent }}", response.Yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", response.Yaml);
+    }
+
+    private const string NoArtifactTemplateYaml = """
+        id: mohist-test-noartifacts
+        variables:
+          agent:
+            type: opencode
+        stages:
+          - stage: plan
+            requiresApproval: true
+            tasks:
+              - id: proposal
+                title: Generate proposal
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.proposal }}
+                  agent: ${{ vars.agent }}
+              - id: specs
+                title: Write specs
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.specs }}
+                  agent: ${{ vars.agent }}
+              - id: design
+                title: Create design
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.design }}
+                  agent: ${{ vars.agent }}
+              - id: tasks
+                title: Generate tasks
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.tasks }}
+                  agent: ${{ vars.agent }}
+              - id: self-review
+                title: Self review
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.self-review }}
+                  agent: ${{ vars.agent }}
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+          - stage: build
+            tasks:
+              - id: load-tasks
+                title: Load tasks from plan
+                uses: mohist/openspec-tasks
+                with:
+                  path: ${{ openspecChangeDir }}/tasks.json
+                  task:
+                    uses: mohist/acp-agent
+                    with:
+                      agent: ${{ vars.agent }}
+                      prompt:
+                        uses: mohist/openspec-task-prompt
+                        with:
+                          file: ${{ openspecChangeDir }}/tasks.json
+                          items: tasks
+                          base: ${{ prompts.build }}
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+          - stage: check
+            requiresApproval: true
+            tasks:
+              - id: ai-review
+                title: AI review
+                uses: mohist/acp-agent
+                with:
+                  session: check
+                  prompt: ${{ prompts.review }}
+                  agent: ${{ vars.agent }}
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+        """;
+
+    private async Task UseNoArtifactTemplateAsync(string projectId)
+    {
+        await _client.PostOkAsync(
+            $"/api/projects/{projectId}/workflow-templates",
+            new { yaml = NoArtifactTemplateYaml });
+        await _client.PutAsJsonAsync(
+            $"/api/projects/{projectId}/workflow-profile/default-template",
+            new { templateId = "mohist-test-noartifacts" });
     }
 
     private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)

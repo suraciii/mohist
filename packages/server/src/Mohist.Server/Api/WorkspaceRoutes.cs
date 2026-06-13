@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Services;
@@ -21,7 +20,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/diff", async (
             HttpContext context, int number,
             IGitService git,
-            IWorkflowRunStore workflowRunStore,
+            WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -32,7 +31,7 @@ public static class WorkspaceRoutes
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Ok(Unavailable("not_started", "Issue has no active workflow"));
 
-            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
                 return ApiResults.Ok(Unavailable("workspace_removed", "The workflow workspace is not available"));
 
@@ -77,7 +76,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/commits", async (
             HttpContext context, int number,
             IGitService git,
-            IWorkflowRunStore workflowRunStore,
+            WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -88,7 +87,7 @@ public static class WorkspaceRoutes
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Ok(Unavailable("not_started", "Issue has no active workflow"));
 
-            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
                 return ApiResults.Ok(Unavailable("workspace_removed", "The workflow workspace is not available"));
 
@@ -131,7 +130,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/commits/{hash}/diff", async (
             HttpContext context, int number, string hash,
             IGitService git,
-            IWorkflowRunStore workflowRunStore,
+            WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -142,7 +141,7 @@ public static class WorkspaceRoutes
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow", hash, diff = "" });
 
-            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
                 return ApiResults.Ok(new { available = false, reason = "workspace_removed", message = "The workflow workspace is not available", hash, diff = "" });
 
@@ -171,7 +170,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/workspace-status", async (
             HttpContext context, int number,
             IGitService git,
-            IWorkflowRunStore workflowRunStore,
+            WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -182,7 +181,7 @@ public static class WorkspaceRoutes
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "not_started" });
 
-            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
                 return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "workspace_removed" });
 
@@ -208,7 +207,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/file-content", async (
             HttpContext context, int number, string path,
             IGitService git,
-            IWorkflowRunStore workflowRunStore,
+            WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
@@ -219,7 +218,7 @@ public static class WorkspaceRoutes
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "not_started" });
 
-            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path) || !Directory.Exists(workspace.Path))
                 return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "workspace_removed" });
 
@@ -240,7 +239,7 @@ public static class WorkspaceRoutes
             }
         });
 
-        issues.MapPost("/cleanup", async (HttpContext context, int number, IGrainFactory grains, IGitService git, IWorkflowRunStore workflowRunStore, WorkflowActivityQuerier projection, IssueQuerier issuesQuery) =>
+        issues.MapPost("/cleanup", async (HttpContext context, int number, IGrainFactory grains, IGitService git, WorkflowQuerier querier, WorkflowActivityQuerier projection, IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
@@ -260,7 +259,7 @@ public static class WorkspaceRoutes
                 return ApiResults.Conflict("Cannot clean workflow workspace while an agent is running", "workspace_agent_running");
             }
 
-            var workspace = await ResolveWorkspaceAsync(workflowRunStore, issue);
+            var workspace = await ResolveWorkspaceAsync(querier, issue);
             if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
             {
                 return ApiResults.Conflict("No workflow workspace to clean", "workspace_missing");
@@ -311,12 +310,11 @@ public static class WorkspaceRoutes
         return string.IsNullOrWhiteSpace(repo.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : repo.BaseBranch;
     }
 
-    private static async Task<WorkspaceIdentity?> ResolveWorkspaceAsync(IWorkflowRunStore store, IssueReadModel issue)
+    private static async Task<WorkspaceIdentity?> ResolveWorkspaceAsync(WorkflowQuerier querier, IssueReadModel issue)
     {
         if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
             return null;
-        var run = await store.LoadAsync(issue.WorkflowRunId);
-        return run?.Workspace;
+        return await querier.GetWorkspaceAsync(issue.WorkflowRunId);
     }
 
     /// <summary>

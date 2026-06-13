@@ -232,6 +232,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-sync-{Guid.NewGuid():N}" });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await UseNoArtifactTemplateAsync(project.Id);
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Active run profile sync issue", projectId = project.Id });
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-sync-runner-{Guid.NewGuid():N}");
 
@@ -343,6 +344,91 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var buildStage = Assert.Single(buildStatus.Workflow!.Stages, s => s.Stage == "build");
         Assert.Contains(buildStage.Tasks, t => t.Id == "brand-new-build-task");
         Assert.Contains(buildStage.Checks, c => c.Name == "build-definition-check");
+    }
+
+    private const string NoArtifactTemplateYaml = """
+        id: mohist-test-noartifacts-profile
+        variables:
+          agent:
+            type: opencode
+        stages:
+          - stage: plan
+            requiresApproval: true
+            tasks:
+              - id: proposal
+                title: Generate proposal
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.proposal }}
+                  agent: ${{ vars.agent }}
+              - id: specs
+                title: Write specs
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.specs }}
+                  agent: ${{ vars.agent }}
+              - id: design
+                title: Create design
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.design }}
+                  agent: ${{ vars.agent }}
+              - id: tasks
+                title: Generate tasks
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.tasks }}
+                  agent: ${{ vars.agent }}
+              - id: self-review
+                title: Self review
+                uses: mohist/acp-agent
+                with:
+                  session: plan
+                  prompt: ${{ prompts.self-review }}
+                  agent: ${{ vars.agent }}
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+          - stage: build
+            tasks:
+              - id: load-tasks
+                title: Load tasks from plan
+                uses: mohist/openspec-tasks
+                with:
+                  path: ${{ openspecChangeDir }}/tasks.json
+                  task:
+                    uses: mohist/acp-agent
+                    with:
+                      agent: ${{ vars.agent }}
+                      prompt:
+                        uses: mohist/openspec-task-prompt
+                        with:
+                          file: ${{ openspecChangeDir }}/tasks.json
+                          items: tasks
+                          base: ${{ prompts.build }}
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+        """;
+
+    private async Task UseNoArtifactTemplateAsync(string projectId)
+    {
+        await _client.PostOkAsync(
+            $"/api/projects/{projectId}/workflow-templates",
+            new { yaml = NoArtifactTemplateYaml });
+        await _client.PutAsJsonAsync(
+            $"/api/projects/{projectId}/workflow-profile/default-template",
+            new { templateId = "mohist-test-noartifacts-profile" });
     }
 
     private async Task StartWorkflowWithRunnerAsync(string projectId, int issueNumber, string runnerId)

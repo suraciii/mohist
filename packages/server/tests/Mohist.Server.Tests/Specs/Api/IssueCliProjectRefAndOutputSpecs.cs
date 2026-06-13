@@ -440,7 +440,7 @@ public class IssueCliProjectRefAndOutputSpecs
         services.AddSingleton<TextWriter>(TextWriter.Null);
         services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<SystemdServiceInstaller>();
+        services.AddSingleton<IServiceInstaller>(new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();

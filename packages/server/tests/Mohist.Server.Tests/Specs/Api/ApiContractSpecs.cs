@@ -151,13 +151,12 @@ public class ApiContractSpecs
     public async Task ProjectApi_CreatesDnsProjectName_AndRejectsInvalidName()
     {
         var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Dns-Project" });
+        response.EnsureSuccessStatusCode();
         var responseJson = await response.Content.ReadFromJsonAsync<JsonElement>();
         var responseId = responseJson.GetProperty("data").GetProperty("id").GetString()!;
         await _fixture.Client.PostAsJsonAsync($"/api/projects/{responseId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("dns-project", payload.GetProperty("data").GetProperty("name").GetString());
+        Assert.Equal("dns-project", responseJson.GetProperty("data").GetProperty("name").GetString());
 
         using var invalid = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Bad Project" });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
@@ -171,12 +170,13 @@ public class ApiContractSpecs
     public async Task ProjectScopedApis_AcceptProjectNameAsProjectRef()
     {
         var projectName = UniqueProjectName("scope");
-        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/project", baseBranch = "main" });
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
+        await _fixture.Client.PostDataAsync<RepositoryDto>($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
         var repos = await _fixture.Client.GetDataAsync<RepositoryDto[]>($"/api/projects/{project.Name}/repositories");
         Assert.Single(repos);
 
-        var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Name }/issues", new { title = "Project name scoped issue", projectId = project.Name });
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Name }/issues", new { title = "Project name scoped issue", projectId = project.Id });
         var issueByName = await _fixture.Client.GetDataAsync<IssueDto>($"/api/projects/{project.Name}/issues/{issue.Number}");
 
         Assert.Equal(issue.Number, issueByName.Number);

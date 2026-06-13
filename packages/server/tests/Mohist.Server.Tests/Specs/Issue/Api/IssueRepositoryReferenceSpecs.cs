@@ -195,9 +195,9 @@ public class IssueRepositoryReferenceSpecs
         var projectId = $"proj_{Guid.NewGuid():N}";
         var grain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         var project = await grain.CreateAsync($"proj-{Guid.NewGuid():N}");
-        await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
-        await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "develop");
-        return (projectId, project);
+        project = await grain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
+        project = await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "develop");
+        return (projectId, project!);
     }
 
     private async Task<string> LoadStateAsync(string projectId, int number)

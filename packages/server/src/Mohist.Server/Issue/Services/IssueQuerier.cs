@@ -123,7 +123,7 @@ public class IssueQuerier
 
     private static bool IsPausedOnApprovalGate(IssueReadModel issue) =>
         string.Equals(issue.Status, "in_progress", StringComparison.OrdinalIgnoreCase)
-        && string.Equals(issue.WorkflowStatus, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
+        && string.Equals(issue.WorkflowStatus, "awaiting-approval", StringComparison.OrdinalIgnoreCase);
 
     private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
     {

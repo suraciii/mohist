@@ -6,6 +6,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
+using WorkspaceIdentity = Mohist.Server.Workflow.Domain.Run.WorkspaceIdentity;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -98,6 +99,20 @@ public class WorkflowQuerier
                     ArtifactSummaries: summaries);
             }
         }
+    }
+
+    public async Task<WorkspaceIdentity?> GetWorkspaceAsync(string workflowRunId)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+
+        var runJson = await db.WorkflowRuns.AsNoTracking()
+            .Where(e => e.WorkflowRunId == workflowRunId)
+            .Select(e => e.State)
+            .FirstOrDefaultAsync();
+        if (runJson is null) return null;
+
+        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, RunJsonOptions);
+        return run?.Workspace;
     }
 
     public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)

@@ -99,6 +99,10 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "secondary",
             "git@secondary.example:repo.git",
             "develop");
+        await projectGrain.AddRepositoryAsync(
+            "main",
+            "git@main.example:repo.git",
+            "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
@@ -130,6 +134,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
+        await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";

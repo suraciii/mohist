@@ -160,8 +160,13 @@ public class WorkflowSessionSpecs
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
             name = projectName,
-            path = Directory.GetCurrentDirectory(),
-            baseBranch = "main"
+        });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        {
+            name = "main",
+            gitUrl = "https://example.com/repo.git",
+            baseBranch = "main",
+            isDefault = true
         });
         var issueTitle = title ?? $"Workflow session {name}";
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
