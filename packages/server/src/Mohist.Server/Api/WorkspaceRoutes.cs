@@ -183,23 +183,27 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
-                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "not_started" });
-
-            var workspace = await ResolveWorkspaceAsync(querier, issue);
-            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
-                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "workspace_removed" });
-
-            if (WorkspaceHeadOrNull(workspace, issue.WorkflowRunId) is null)
-                return ApiResults.Ok(new WorkspaceStatus { Exists = true, Reason = "branch_missing" });
+            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            if (prepared.Unavailable is not null)
+                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = prepared.Unavailable.Reason });
 
             try
             {
+                var unavailable = await EnsureRunnerWorkspaceAvailableAsync(
+                    runnerWorkspace,
+                    pid,
+                    issue.WorkflowRunId!,
+                    prepared.Workspace!,
+                    prepared.BaseBranch!,
+                    context.RequestAborted);
+                if (unavailable is not null)
+                    return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = unavailable.Reason });
+
                 var result = await runnerWorkspace.GetWorkspaceStatusAsync(
                     pid,
-                    issue.WorkflowRunId,
-                    workspace,
-                    ResolveBaseBranch(issue),
+                    issue.WorkflowRunId!,
+                    prepared.Workspace!,
+                    prepared.BaseBranch!,
                     context.RequestAborted);
                 return ApiResults.Ok(result);
             }
@@ -220,23 +224,27 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
-                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "not_started" });
-
-            var workspace = await ResolveWorkspaceAsync(querier, issue);
-            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
-                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "workspace_removed" });
-
-            if (WorkspaceHeadOrNull(workspace, issue.WorkflowRunId) is null)
-                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = "branch_missing" });
+            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            if (prepared.Unavailable is not null)
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = prepared.Unavailable.Reason });
 
             try
             {
+                var unavailable = await EnsureRunnerWorkspaceAvailableAsync(
+                    runnerWorkspace,
+                    pid,
+                    issue.WorkflowRunId!,
+                    prepared.Workspace!,
+                    prepared.BaseBranch!,
+                    context.RequestAborted);
+                if (unavailable is not null)
+                    return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = unavailable.Reason });
+
                 var result = await runnerWorkspace.GetFileContentAsync(
                     pid,
-                    issue.WorkflowRunId,
-                    workspace,
-                    ResolveBaseBranch(issue),
+                    issue.WorkflowRunId!,
+                    prepared.Workspace!,
+                    prepared.BaseBranch!,
                     path,
                     context.RequestAborted);
                 return ApiResults.Ok(new { @base = result.Base, head = result.Head, reason = result.Reason });
@@ -321,7 +329,7 @@ public static class WorkspaceRoutes
         return PreparedWorkspaceQuery.Ready(workspace, ResolveBaseBranch(issue));
     }
 
-    private static async Task<object?> EnsureRunnerWorkspaceAvailableAsync(
+    private static async Task<WorkspaceUnavailable?> EnsureRunnerWorkspaceAvailableAsync(
         IRunnerWorkspaceClient runnerWorkspace,
         string projectId,
         string workflowRunId,
@@ -365,7 +373,7 @@ public static class WorkspaceRoutes
             || string.Equals(status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static object Unavailable(string reason, string message) => new { available = false, reason, message };
+    private static WorkspaceUnavailable Unavailable(string reason, string message) => new(false, reason, message);
 
     private static string MessageForUnavailableReason(string reason) => reason switch
     {
@@ -376,12 +384,8 @@ public static class WorkspaceRoutes
         _ => "Workspace unavailable",
     };
 
-    private static object ToCommitDiffUnavailable(object unavailable, string hash)
-    {
-        var reason = unavailable.GetType().GetProperty("reason")?.GetValue(unavailable) as string ?? "git_error";
-        var message = unavailable.GetType().GetProperty("message")?.GetValue(unavailable) as string ?? "Workspace unavailable";
-        return new { available = false, reason, message, hash, diff = "" };
-    }
+    private static object ToCommitDiffUnavailable(WorkspaceUnavailable unavailable, string hash) =>
+        new { available = false, reason = unavailable.Reason, message = unavailable.Message, hash, diff = "" };
 
     private static object ToCleanupResponse(WorkspaceRemovalResult removal) => new
     {
@@ -399,9 +403,11 @@ public static class WorkspaceRoutes
         },
     };
 
-    private sealed record PreparedWorkspaceQuery(WorkspaceIdentity? Workspace, string? BaseBranch, object? Unavailable)
+    private sealed record PreparedWorkspaceQuery(WorkspaceIdentity? Workspace, string? BaseBranch, WorkspaceUnavailable? Unavailable)
     {
         public static PreparedWorkspaceQuery Ready(WorkspaceIdentity workspace, string baseBranch) => new(workspace, baseBranch, null);
-        public static PreparedWorkspaceQuery UnavailableResult(object unavailable) => new(null, null, unavailable);
+        public static PreparedWorkspaceQuery UnavailableResult(WorkspaceUnavailable unavailable) => new(null, null, unavailable);
     }
 }
+
+public sealed record WorkspaceUnavailable(bool Available, string Reason, string Message);
