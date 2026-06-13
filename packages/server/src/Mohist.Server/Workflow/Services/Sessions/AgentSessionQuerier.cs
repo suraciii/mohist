@@ -616,14 +616,16 @@ public class AgentSessionQuerier
             .ToList();
     }
 
+    private static readonly JsonSerializerOptions RunJsonOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private static WorkflowRun? DeserializeWorkflowRun(string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, new JsonSerializerOptions
-        {
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            PropertyNameCaseInsensitive = true,
-            Converters = { new JsonStringEnumConverter() }
-        }); }
+        try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
         catch { return null; }
     }
 
