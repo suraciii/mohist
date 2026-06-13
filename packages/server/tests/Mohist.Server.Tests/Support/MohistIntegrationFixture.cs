@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
@@ -27,6 +28,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IServiceProvider Services => _factory.Services;
     public IEventPublisher EventBus => _factory.Services.GetRequiredService<IEventPublisher>();
     public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
+    public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
 
@@ -106,6 +108,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IGitService>();
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
+            services.RemoveAll<IRunnerWorkspaceClient>();
+            services.AddSingleton<FakeRunnerWorkspaceClient>();
+            services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
             services.RemoveAll<ConfigService>();
             services.RemoveAll<IEnvironmentVariableProvider>();
             services.AddSingleton<IEnvironmentVariableProvider>(_ =>

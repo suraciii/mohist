@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs"
+import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
-import { runCommand } from "../system/process.js"
+import { deleteDirectory, runCommand } from "../system/process.js"
 
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
 
-  constructor(serverUrl: string, runnerId: string) {
+  constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string) {
     const baseUrl = serverUrl.replace(/\/$/, "")
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(`${baseUrl}/hubs/runner?runnerId=${encodeURIComponent(runnerId)}`)
@@ -142,6 +143,21 @@ export class RunnerSignalRClient {
         head: headResult.exitCode === 0 ? headResult.stdout : null,
       }
     })
+
+    this.connection.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
+      if (!query?.workspacePath) return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
+      const workspacePath = resolve(query.workspacePath)
+      if (!existsSync(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+      if (!isUnderRunnerRoot(this.runnerRoot, workspacePath)) {
+        return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
+      }
+      try {
+        await deleteDirectory(workspacePath)
+        return removal(true, "removed", workspacePath, null, "Workspace removed")
+      } catch (error) {
+        return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))
+      }
+    })
   }
 }
 
@@ -249,4 +265,15 @@ function parseNumstatTotal(numstat: string): { filesChanged: number; additions: 
     filesChanged++
   }
   return { filesChanged, additions, deletions }
+}
+
+export function isUnderRunnerRoot(root: string, candidate: string): boolean {
+  const rootPath = resolve(root)
+  const target = resolve(candidate)
+  const rel = relative(rootPath, target)
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
+}
+
+function removal(removed: boolean, status: string, path: string | null, reason: string | null, message: string) {
+  return { removed, status, path, reason, message }
 }

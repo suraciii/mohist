@@ -1,4 +1,4 @@
-import { join } from "node:path"
+import { isAbsolute, join, relative, resolve } from "node:path"
 import type { ActionContext, JsonObject, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
@@ -45,13 +45,14 @@ export class WorkExecutor {
         return failure(work, formatUnresolvedError(work, unresolved))
       }
       const renderedWith = renderTemplate(work.with, variables)
-      const workDir = await this.resolveWorkDir(renderedWith, variables)
+      const workspaceRoot = this.workspaceRoot(variables)
+      const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
       const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
       const normalized = normalize(work, result)
       if (normalized.status !== "completed") {
         return normalized
       }
-      return await this.captureAndUploadArtifacts(work, workDir, normalized, result, variables, signal)
+      return await this.captureAndUploadArtifacts(work, workspaceRoot, workDir, normalized, result, variables, signal)
     } catch (error) {
       return failure(work, error instanceof Error ? error.message : String(error))
     }
@@ -71,7 +72,7 @@ export class WorkExecutor {
           return { name: check.name, status: "fail", message: formatCheckUnresolvedError(unresolved) }
         }
         const renderedWith = renderTemplate(check.with ?? null, variables)
-        const workDir = await this.resolveWorkDir(renderedWith, variables)
+        const workDir = await this.resolveWorkDir(renderedWith, this.workspaceRoot(variables))
         const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
         return { name: check.name, status: toCheckStatus(result.status), message: result.message, output: result.output }
       } catch (error) {
@@ -102,8 +103,14 @@ export class WorkExecutor {
     return { ...(work.variables ?? {}), runner: runnerVariables(), workspace: { path: workspace.path, branch: workspace.branch ?? null, changeDir: workspace.changeDir ?? null } }
   }
 
-  private async resolveWorkDir(withInput: JsonObject | null, variables: JsonObject) {
-    const workDir = stringInput(withInput, "working-directory") ?? stringAt(variables, ["workspace", "path"]) ?? join(this.fallbackWorkDir, "default")
+  private workspaceRoot(variables: JsonObject) {
+    return stringAt(variables, ["workspace", "path"]) ?? join(this.fallbackWorkDir, "default")
+  }
+
+  private async resolveWorkDir(withInput: JsonObject | null, workspaceRoot: string) {
+    const requested = stringInput(withInput, "working-directory")
+    const root = resolve(workspaceRoot)
+    const workDir = requested ? resolveWorkspacePath(root, requested) : root
     await ensureDir(workDir)
     return workDir
   }
@@ -118,6 +125,7 @@ export class WorkExecutor {
    */
   private async captureAndUploadArtifacts(
     work: WorkItem,
+    workspaceRoot: string,
     workDir: string,
     result: WorkItemResult,
     actionResult: import("../core/types.js").ActionResult,
@@ -163,7 +171,14 @@ export class WorkExecutor {
     const dynamicInputs = actionProducedArtifacts(actionResult)
     let captureOutcome
     try {
-      captureOutcome = await captureArtifacts({ work, workDir, dynamicArtifacts: dynamicInputs, renderedArtifacts })
+      const declaredOutcome = await captureArtifacts({ work, workDir: workspaceRoot, renderedArtifacts })
+      const dynamicOutcome = dynamicInputs.length === 0
+        ? { captures: [], failures: [] }
+        : await captureArtifacts({ work: { ...work, artifacts: null }, workDir, dynamicArtifacts: dynamicInputs })
+      captureOutcome = {
+        captures: [...declaredOutcome.captures, ...dynamicOutcome.captures],
+        failures: [...declaredOutcome.failures, ...dynamicOutcome.failures],
+      }
     } catch (error) {
       return {
         ...result,
@@ -248,6 +263,15 @@ function stringAt(value: JsonObject, path: string[]) {
     return (current as JsonObject)[part]
   }, value)
   return typeof found === "string" ? found : undefined
+}
+
+function resolveWorkspacePath(workspaceRoot: string, requested: string) {
+  const resolved = isAbsolute(requested) ? resolve(requested) : resolve(workspaceRoot, requested)
+  const rel = relative(workspaceRoot, resolved)
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`working-directory '${requested}' escapes workspace.path`)
+  }
+  return resolved
 }
 
 function formatUnresolvedError(work: WorkItem, unresolved: string[]): string {

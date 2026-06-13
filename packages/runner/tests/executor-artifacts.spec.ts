@@ -309,6 +309,55 @@ describe("WorkExecutor artifact capture", () => {
     expect(connection.uploads[0].contentType).toBe("application/x-mohist-artifact-directory")
   })
 
+  it("capturesDeclaredArtifactsFromWorkspaceRootWhenActionUsesSubdirectoryWorkingDirectory", async () => {
+    await mkdir(join(workDir, "subdir"), { recursive: true })
+    await writeFile(join(workDir, "review.md"), "workspace review", "utf8")
+
+    const work = buildWork({ files: [{ path: "review.md" }] })
+    work.with = { "working-directory": "subdir" }
+
+    let actionWorkDir = ""
+    const connection = new FakeServerConnection()
+    const executor = new WorkExecutor(
+      makeRegistry(async (ctx) => {
+        actionWorkDir = ctx.workDir
+        return { status: "success" }
+      }),
+      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      connection as never,
+      {} as never,
+      null,
+      workDir,
+    )
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(actionWorkDir).toBe(join(workDir, "subdir"))
+    expect(connection.uploads).toHaveLength(1)
+    expect(connection.uploads[0].path).toBe("review.md")
+  })
+
+  it("failsTaskWhenWorkingDirectoryEscapesWorkspace", async () => {
+    const work = buildWork(null)
+    work.with = { "working-directory": "../outside" }
+
+    const connection = new FakeServerConnection()
+    const executor = new WorkExecutor(
+      makeRegistry(async () => ({ status: "success" })),
+      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      connection as never,
+      {} as never,
+      null,
+      workDir,
+    )
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.message).toMatch(/escapes workspace\.path/)
+  })
+
   it("failsTaskThroughNormalFailureWhenDeclaredArtifactTemplateVariableIsMissing", async () => {
     // Whole-string unresolvable reference in a declared artifact
     // path: the runner should surface a clean error rather than

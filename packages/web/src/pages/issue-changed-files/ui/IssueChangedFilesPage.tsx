@@ -601,15 +601,18 @@ function getDiffAvailability(
   const workspaceRemoved = diffData?.reason === 'workspace_removed' || commitsData?.reason === 'workspace_removed'
   const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
   const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
+  const runnerUnavailable = diffData?.reason === 'runner_unavailable' || commitsData?.reason === 'runner_unavailable'
   const unavailableMessage = notStarted
     ? 'No changes yet'
-    : workspaceRemoved
-      ? 'Changes unavailable — workspace removed'
-      : branchMissing
-        ? 'Changes unavailable — branch missing'
-        : diffData?.available === false
-          ? diffData.message ?? 'Failed to load changes'
-          : null
+    : runnerUnavailable
+      ? 'Changes unavailable — runner not connected'
+      : workspaceRemoved
+        ? 'Changes unavailable — workspace removed'
+        : branchMissing
+          ? 'Changes unavailable — branch missing'
+          : diffData?.available === false
+            ? diffData.message ?? 'Failed to load changes'
+            : null
 
   return {
     diffAvailable: diffData?.available === true,
