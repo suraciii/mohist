@@ -115,6 +115,7 @@ public static class MohistServiceRegistration
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<RunnerConnectionTracker>();
+        services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
         services.AddScoped<RunnerStatusService>();
         services.AddSignalR();
 

@@ -37,6 +37,7 @@ export class RunnerHost {
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
+      options.runnerRoot,
     )
   }
 

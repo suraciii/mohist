@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveWorkspaceQuery } from "../src/server/runner-signalr.js"
+import { isUnderRunnerRoot, resolveWorkspaceQuery } from "../src/server/runner-signalr.js"
 
 describe("RunnerSignalRClient workspace queries", () => {
   it("WorkspaceQuery_UsesExplicitWorkspaceAndBaseBranch", () => {
@@ -35,5 +35,11 @@ describe("RunnerSignalRClient workspace queries", () => {
     })
 
     expect(query).toBeNull()
+  })
+
+  it("WorkspaceRemoval_OnlyAllowsPathsUnderRunnerRoot", () => {
+    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects/app/workspaces/issue-1")).toBe(true)
+    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects")).toBe(true)
+    expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/other/issue-1")).toBe(false)
   })
 })

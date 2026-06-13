@@ -110,16 +110,19 @@ export function ChangesPanel({
   const workspaceRemoved = diffData?.reason === 'workspace_removed' || commitsData?.reason === 'workspace_removed'
   const branchMissing = diffData?.reason === 'branch_missing' || commitsData?.reason === 'branch_missing'
   const notStarted = diffData?.reason === 'not_started' || commitsData?.reason === 'not_started'
+  const runnerUnavailable = diffData?.reason === 'runner_unavailable' || commitsData?.reason === 'runner_unavailable'
 
   const showUnavailable = notStarted
     ? <p className="text-sm text-gray-400">No changes yet</p>
-    : workspaceRemoved
-      ? <p className="text-sm text-orange-600">Changes unavailable — workspace removed</p>
-      : branchMissing
-        ? <p className="text-sm text-orange-600">Changes unavailable — branch missing</p>
-        : diffUnavailable
-          ? <p className="text-sm text-orange-600">{diffData?.message ?? 'Failed to load changes'}</p>
-          : null
+    : runnerUnavailable
+      ? <p className="text-sm text-orange-600">Changes unavailable — runner not connected</p>
+      : workspaceRemoved
+        ? <p className="text-sm text-orange-600">Changes unavailable — workspace removed</p>
+        : branchMissing
+          ? <p className="text-sm text-orange-600">Changes unavailable — branch missing</p>
+          : diffUnavailable
+            ? <p className="text-sm text-orange-600">{diffData?.message ?? 'Failed to load changes'}</p>
+            : null
 
   const available = diffData?.available === true && commitsData?.available === true
 
