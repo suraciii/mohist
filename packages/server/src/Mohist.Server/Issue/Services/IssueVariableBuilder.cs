@@ -22,7 +22,7 @@ namespace Mohist.Server.Issue.Services;
 /// was never populated.
 ///
 /// The built-in context (<c>mohist</c>, <c>issue</c>, <c>project</c>,
-/// <c>repository</c>, <c>workspace</c>, <c>openspecChangeName</c>,
+/// <c>repository</c>, <c>workspace</c>,
 /// <c>openspecChangeDir</c>) is composed by
 /// <c>IssueGrain.BuildIssueVariables</c> and merged on top of this user
 /// bundle before dispatch. This class only handles the user-variable

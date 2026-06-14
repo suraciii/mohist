@@ -84,7 +84,6 @@ public class MohistDefaultWorkflowProfileSpecs
         var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
 
         using var document = JsonDocument.Parse(variables);
-        Assert.Equal("issue-154", document.RootElement.GetProperty("openspecChangeName").GetString());
         Assert.Equal("openspec/changes/issue-154", document.RootElement.GetProperty("openspecChangeDir").GetString());
         Assert.False(document.RootElement.TryGetProperty("artifacts", out _));
     }
