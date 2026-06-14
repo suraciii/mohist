@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
+import { MarkdownContent } from '@/shared/ui/components/markdown-content'
 import { IssueStatus, IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
@@ -94,33 +93,6 @@ function HealthPill({ health }: { health: IssueHealth }) {
       />
       {statusLabel(health)}
     </span>
-  )
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  return (
-    <Markdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        code({ children, className }) {
-          const match = /language-(\w+)/.exec(className ?? '')
-          const isInline = !match && !className
-          if (isInline) {
-            return <code className="px-1 py-0.5 bg-gray-100 rounded text-gray-800 text-xs font-mono">{children}</code>
-          }
-          return (
-            <code className={`${className ?? ''} block overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono`}>
-              {children}
-            </code>
-          )
-        },
-        pre({ children }) {
-          return <pre className="overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono">{children}</pre>
-        },
-      }}
-    >
-      {content}
-    </Markdown>
   )
 }
 

@@ -1,21 +1,32 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { FileIcon, FolderIcon, ArrowLeftIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
+import { MarkdownContent } from '@/shared/ui/components/markdown-content'
 import { useIssueWorkflowArtifactContent, type WorkflowArtifactDirectoryEntry } from '../../../entities/issue'
 
 interface ArtifactContentViewerProps {
   issueNumber: number
   artifactId: string
   path?: string
+  size?: number | null
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+  return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(1)} TB`
+}
+
+function isMarkdownPath(path?: string): boolean {
+  if (!path) return false
+  const lower = path.toLowerCase()
+  return lower.endsWith('.md') || lower.endsWith('.markdown')
 }
 
 function DirectoryEntryList({
@@ -43,8 +54,11 @@ function DirectoryEntryList({
   )
 }
 
-export function ArtifactContentViewer({ issueNumber, artifactId, path, open, onOpenChange }: ArtifactContentViewerProps) {
+export function ArtifactContentViewer({ issueNumber, artifactId, path, size, open, onOpenChange }: ArtifactContentViewerProps) {
   const [selectedEntry, setSelectedEntry] = useState<WorkflowArtifactDirectoryEntry | null>(null)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle')
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const { data, isLoading, error } = useIssueWorkflowArtifactContent(
     issueNumber,
     artifactId,
@@ -52,31 +66,95 @@ export function ArtifactContentViewer({ issueNumber, artifactId, path, open, onO
     open,
   )
 
+  const clearCopyResetTimer = () => {
+    if (copyResetTimerRef.current !== null) {
+      clearTimeout(copyResetTimerRef.current)
+      copyResetTimerRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      clearCopyResetTimer()
+    }
+  }, [])
+
+  const setCopyStatusWithReset = (status: 'idle' | 'copied' | 'error') => {
+    clearCopyResetTimer()
+    setCopyStatus(status)
+    if (status !== 'idle') {
+      copyResetTimerRef.current = setTimeout(() => {
+        setCopyStatus('idle')
+        copyResetTimerRef.current = null
+      }, 2000)
+    }
+  }
+
+  const handleCopy = () => {
+    if (!data || data.kind !== 'text') return
+    if (!navigator.clipboard?.writeText) {
+      setCopyStatusWithReset('error')
+      return
+    }
+    navigator.clipboard.writeText(data.content).then(
+      () => {
+        setCopyStatusWithReset('copied')
+      },
+      () => {
+        setCopyStatusWithReset('error')
+      },
+    )
+  }
+
   const title = selectedEntry
     ? `${path ?? 'artifact'} / ${selectedEntry.relativePath}`
     : (path ?? 'Artifact')
 
+  const sizeLabel = selectedEntry
+    ? formatBytes(selectedEntry.size)
+    : data?.kind === 'directory'
+      ? `${(data.entries?.length ?? 0)} files · ${formatBytes(data.totalSize ?? 0)}`
+      : size != null
+        ? formatBytes(size)
+        : 'Recorded artifact content'
+
   return (
     <Dialog open={open} onOpenChange={(next) => {
-      if (!next) setSelectedEntry(null)
+      if (!next) {
+        clearCopyResetTimer()
+        setSelectedEntry(null)
+        setCopyStatus('idle')
+      }
       onOpenChange(next)
     }}>
       <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-hidden flex flex-col p-0">
         <DialogHeader className="px-4 pt-4">
-          <div className="flex items-center gap-2">
-            {selectedEntry && (
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              {selectedEntry && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setSelectedEntry(null)}
+                  title="Back to directory"
+                >
+                  <ArrowLeftIcon className="h-4 w-4" />
+                </Button>
+              )}
+              <DialogTitle className="text-sm font-medium truncate">{title}</DialogTitle>
+            </div>
+            {!isLoading && !error && data?.kind === 'text' && (
               <Button
                 variant="ghost"
-                size="icon-sm"
-                onClick={() => setSelectedEntry(null)}
-                title="Back to directory"
+                size="sm"
+                onClick={handleCopy}
+                className="h-7 px-2 text-xs flex-shrink-0"
               >
-                <ArrowLeftIcon className="h-4 w-4" />
+                {copyStatus === 'copied' ? 'Copied!' : copyStatus === 'error' ? 'Unable to copy' : 'Copy'}
               </Button>
             )}
-            <DialogTitle className="text-sm font-medium truncate">{title}</DialogTitle>
           </div>
-          <p className="text-xs text-muted-foreground">Recorded artifact content</p>
+          <p className="text-xs text-muted-foreground">{sizeLabel}</p>
         </DialogHeader>
         <div className="flex-1 overflow-auto px-4 pb-4 min-h-0">
           {isLoading && <div className="text-xs text-muted-foreground py-4">Loading artifact content...</div>}
@@ -110,9 +188,15 @@ export function ArtifactContentViewer({ issueNumber, artifactId, path, open, onO
                   <span>{formatBytes(selectedEntry.size)}</span>
                 </div>
               )}
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-700 bg-gray-50 rounded-md p-3 border">
-                {data.content}
-              </pre>
+              {isMarkdownPath(selectedEntry?.relativePath ?? path) ? (
+                <div className="text-sm text-gray-800">
+                  <MarkdownContent content={data.content} />
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-700 bg-gray-50 rounded-md p-3 border">
+                  {data.content}
+                </pre>
+              )}
             </div>
           )}
         </div>
