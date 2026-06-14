@@ -532,7 +532,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 var taskWith = t.With is not null
                     ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
                     : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
-                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId, t.Artifacts);
+                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId, t.Artifacts, t.Outputs);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -550,7 +550,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
-    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null)
+    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
@@ -592,6 +592,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = GrainKey }, WorkflowVariableJson.Options);
         payload["stage"] = JsonSerializer.SerializeToElement(new { name = stage }, WorkflowVariableJson.Options);
         payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = workType, title, attempt }, WorkflowVariableJson.Options);
+
+        // Merge runtime task outputs after dispatch scope so tasks.<id>.outputs.<name>
+        // is available in ${{ }} templates and overrides lower-precedence sources.
+        if (_run?.RuntimeVariables is { Count: > 0 })
+        {
+            payload = MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
+        }
 
         // --- 2. Load prompts from profile (independent from vars, same priority chain) ---
         var prompts = await _profileManager.LoadPromptsAsync(GrainKey);
@@ -635,6 +642,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             ? JSON.Serialize(artifacts)
             : null;
 
+        var outputsStr = outputs is not null && outputs.Count > 0
+            ? JsonSerializer.Serialize(outputs)
+            : null;
+
         var dispatch = new WorkDispatch(
             WorkflowRunId: GrainKey,
             WorkId: workId,
@@ -645,7 +656,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             Stage: stage,
             Title: title,
             Issue: issueRef,
-            Artifacts: artifactsStr);
+            Artifacts: artifactsStr,
+            Outputs: outputsStr);
         _leaseState.State = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
         _lastRunnerId = runnerId;
         return dispatch;
@@ -705,6 +717,48 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         JsonValueKind.Null => null,
         _ => element.GetRawText(),
     };
+
+    private static JsonElement BuildRuntimeVariablesElement(IReadOnlyDictionary<string, JsonElement> runtimeVariables)
+    {
+        var root = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var (key, value) in runtimeVariables)
+        {
+            var segments = key.Split('.');
+            var current = root;
+            for (var i = 0; i < segments.Length - 1; i++)
+            {
+                if (!current.TryGetValue(segments[i], out var existing) || existing is not Dictionary<string, object?> dict)
+                {
+                    dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    current[segments[i]] = dict;
+                }
+                current = dict;
+            }
+            current[segments[^1]] = JsonElementToObject(value.Clone());
+        }
+        return JsonSerializer.SerializeToElement(root, WorkflowVariableJson.Options);
+    }
+
+    private static Dictionary<string, JsonElement?> JsonElementToDictionary(JsonElement element)
+    {
+        var result = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        if (element.ValueKind != JsonValueKind.Object)
+            return result;
+
+        foreach (var property in element.EnumerateObject())
+            result[property.Name] = property.Value.Clone();
+        return result;
+    }
+
+    internal static Dictionary<string, JsonElement?> MergeRuntimeVariablesIntoPayload(
+        Dictionary<string, JsonElement?> payload,
+        IReadOnlyDictionary<string, JsonElement> runtimeVariables)
+    {
+        var runtimeElement = BuildRuntimeVariablesElement(runtimeVariables);
+        var payloadElement = JsonSerializer.SerializeToElement(payload, WorkflowVariableJson.Options);
+        var merged = DeepMergeSkippingNulls(payloadElement, runtimeElement) ?? payloadElement;
+        return JsonElementToDictionary(merged);
+    }
 
     private void LogDispatchAgentDiagnostics(
         string stage,
@@ -888,6 +942,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         if (result.Status == "completed")
         {
+            CaptureTaskOutputs(run, currentTask, result.CapturedOutputs);
             events.AddRange(run.CompleteTask());
         }
         else
@@ -896,6 +951,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         return events;
+    }
+
+    internal static void CaptureTaskOutputs(WorkflowRun run, TaskRun? task, Dictionary<string, JsonElement>? capturedOutputs)
+    {
+        if (task is null || capturedOutputs is null || capturedOutputs.Count == 0)
+            return;
+
+        var declaredNames = task.Outputs?.Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+        if (declaredNames is null || declaredNames.Count == 0)
+            return;
+
+        var validated = capturedOutputs
+            .Where(kv => declaredNames.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        run.CaptureTaskOutputs(task.DefinitionId, validated);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>?> BindArtifactUploadsAsync(

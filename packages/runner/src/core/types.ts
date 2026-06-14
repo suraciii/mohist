@@ -1,6 +1,11 @@
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type JsonObject = { [key: string]: JsonValue }
 
+export interface TaskOutputDefinition {
+  name: string
+  from: string
+}
+
 export interface WorkDispatchResponse {
   workflowRunId: string
   workId: string
@@ -14,6 +19,7 @@ export interface WorkDispatchResponse {
   issueId?: string | null
   issueNumber?: number | null
   artifacts?: string | null
+  outputs?: string | null
 }
 
 export interface WorkItem {
@@ -28,6 +34,7 @@ export interface WorkItem {
   projectId?: string | null
   issueNumber?: number | null
   artifacts?: JsonObject | null
+  outputs?: TaskOutputDefinition[] | null
 }
 
 export interface WorkItemResult {
@@ -36,6 +43,7 @@ export interface WorkItemResult {
   output?: string | null
   exitCode?: number | null
   artifactUploadIds?: string[] | null
+  capturedOutputs?: Record<string, JsonValue> | null
 }
 
 export interface ActionContext {

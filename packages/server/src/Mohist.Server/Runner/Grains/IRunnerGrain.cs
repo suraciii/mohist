@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Orleans.Concurrency;
 
 namespace Mohist.Server.Runner.Grains;
@@ -46,7 +47,8 @@ public record WorkDispatch(
     string? Stage = null,
     string? Title = null,
     WorkIssueRef? Issue = null,
-    string? Artifacts = null);
+    string? Artifacts = null,
+    string? Outputs = null);
 
 [GenerateSerializer]
 public record WorkIssueRef(
@@ -55,7 +57,13 @@ public record WorkIssueRef(
     int IssueNumber);
 
 [GenerateSerializer]
-public record WorkResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null);
+public record WorkResult(
+    string Status,
+    string? Message = null,
+    string? Output = null,
+    int? ExitCode = null,
+    string[]? ArtifactUploadIds = null,
+    Dictionary<string, JsonElement>? CapturedOutputs = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

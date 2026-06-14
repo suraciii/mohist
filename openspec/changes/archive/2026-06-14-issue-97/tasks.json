@@ -1,0 +1,195 @@
+{
+  "project": "mohist-local",
+  "description": "Enable tasks to declare output variables that are captured at completion and made available to downstream tasks via the existing ${{ }} template syntax.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add task output definition schema",
+      "spec": "specs/workflow-definition/spec.md#task-definition-schema-supports-optional-outputs-array",
+      "description": "Add TaskOutputDefinition record and optional Outputs property to TaskDefinition so workflow definitions can declare runtime output variables with name and from selector.",
+      "acceptanceCriteria": [
+        "TaskOutputDefinition record exists with Name and From properties",
+        "TaskDefinition has optional Outputs list",
+        "Tasks without Outputs behave identically to before"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated TaskDefinition model with Outputs support",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Server-side C# model change."
+    },
+    {
+      "id": "T-002",
+      "title": "Parse and validate outputs in workflow YAML",
+      "spec": "specs/workflow-definition/spec.md#task-definition-schema-supports-optional-outputs-array",
+      "description": "Update the workflow YAML parser and validator to accept the optional outputs array, reject entries missing name or from, and reject duplicate output names within a task.",
+      "acceptanceCriteria": [
+        "YAML with outputs array parses correctly",
+        "Missing name or from is rejected",
+        "Duplicate output names in same task are rejected",
+        "Omitted outputs is valid"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated YAML parser/validator with output validation tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-003",
+      "title": "Extend WorkResult with captured outputs",
+      "spec": "specs/task-output-variables/spec.md#runner-captures-declared-outputs-from-successful-action-results",
+      "description": "Add an optional CapturedOutputs dictionary to the runner-to-server WorkResult contract so runners can report extracted task output variables.",
+      "acceptanceCriteria": [
+        "WorkResult has optional CapturedOutputs field",
+        "Older runners without the field are tolerated",
+        "Serialization round-trips correctly"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated IRunnerGrain/WorkResult contract",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Server-side contract change; field is optional for backward compatibility."
+    },
+    {
+      "id": "T-004",
+      "title": "Add runtime variable store to WorkflowRun",
+      "spec": "specs/workflow-run/spec.md#workflowrun-owns-a-runtime-task-output-variable-store",
+      "description": "Add a runtime variable store to the WorkflowRun aggregate state and a domain method to append captured outputs transactionally on successful task completion.",
+      "acceptanceCriteria": [
+        "WorkflowRun state includes runtime variable store",
+        "Store initializes empty",
+        "Domain method appends outputs under tasks.<id>.outputs.<name>",
+        "Failed results do not modify the store"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated WorkflowRun aggregate with runtime store",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-005",
+      "title": "Capture declared outputs in runner",
+      "spec": "specs/task-output-variables/spec.md#runner-captures-declared-outputs-from-successful-action-results",
+      "description": "Update the runner to parse ActionResult.output as JSON, extract declared outputs using from selectors on successful task completion, and include them in WorkResult.CapturedOutputs.",
+      "acceptanceCriteria": [
+        "Successful tasks with declared outputs populate CapturedOutputs",
+        "Failed tasks produce no CapturedOutputs",
+        "Missing from fields are skipped without failure",
+        "Only declared outputs are captured"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated runner output capture logic and tests",
+      "dependsOn": [
+        "T-001",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "TypeScript runner change."
+    },
+    {
+      "id": "T-006",
+      "title": "Store captured outputs in workflow engine",
+      "spec": "specs/workflow-engine/spec.md#task-result-processing-extracts-declared-outputs",
+      "description": "Update WorkflowGrain.ProcessTaskResultAsync to look up the current task definition, validate reported output names match declared names, and store them in the WorkflowRun runtime variable store on success.",
+      "acceptanceCriteria": [
+        "Successful WorkResult with CapturedOutputs stores variables",
+        "Only outputs declared in task definition are stored",
+        "Failed task results do not store outputs",
+        "Store keys use tasks.<id>.outputs.<name>"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated ProcessTaskResultAsync with output storage",
+      "dependsOn": [
+        "T-001",
+        "T-003",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-007",
+      "title": "Merge runtime variables into dispatch resolution",
+      "spec": "specs/workflow-engine/spec.md#dispatch-variable-resolution-merges-runtime-task-outputs",
+      "description": "Update WorkflowGrain.MakeDispatchAsync to deep-merge the WorkflowRun runtime variable store into the dispatch variable resolution chain after dispatch injection and before final template rendering.",
+      "acceptanceCriteria": [
+        "Runtime variables are included in resolved vars",
+        "Runtime vars take precedence over lower-precedence sources",
+        "Empty runtime store produces unchanged behavior",
+        "tasks.<id>.outputs.<name> is resolvable in templates"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated MakeDispatchAsync with runtime variable merge",
+      "dependsOn": [
+        "T-004",
+        "T-006"
+      ],
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "T-008",
+      "title": "Verify template resolution for task outputs",
+      "spec": "specs/task-output-variables/spec.md#runtime-variables-resolve-through-the-existing-template-chain",
+      "description": "Add tests verifying that ${{ tasks.<id>.outputs.<name> }} resolves correctly in task with and artifacts, missing outputs resolve to empty, and existing template behavior is unchanged.",
+      "acceptanceCriteria": [
+        "${{ tasks.id.outputs.name }} resolves in with values",
+        "${{ tasks.id.outputs.name }} resolves in artifact paths",
+        "Missing runtime outputs resolve to empty",
+        "Existing ${{ }} resolution remains unchanged"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Template resolution tests passing",
+      "dependsOn": [
+        "T-002",
+        "T-007"
+      ],
+      "passes": false,
+      "notes": "May be covered by existing template engine if vars are injected correctly; add explicit tests."
+    },
+    {
+      "id": "T-009",
+      "title": "End-to-end integration test for task output variables",
+      "spec": "specs/task-output-variables/spec.md",
+      "description": "Add an integration test that runs a workflow where one task declares outputs and a downstream task references them via ${{ tasks.<id>.outputs.<name> }}, verifying capture, persistence, and resolution.",
+      "acceptanceCriteria": [
+        "Integration test exercises full output capture flow",
+        "Downstream task receives captured output value",
+        "Failed task produces no outputs",
+        "Test passes"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Integration test passing",
+      "dependsOn": [
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008"
+      ],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}

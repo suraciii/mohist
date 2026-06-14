@@ -175,8 +175,12 @@ function walkForWholeStringUnresolved(
 }
 
 function resolvePath(variables: JsonObject, path: string): JsonValue | undefined {
-  return path.split(".").reduce<JsonValue | undefined>((current, part) => {
+  const result = path.split(".").reduce<JsonValue | undefined>((current, part) => {
     if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
     return current[part]
   }, variables)
+  if (result === undefined && path.startsWith("tasks.")) {
+    return ""
+  }
+  return result
 }

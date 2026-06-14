@@ -222,3 +222,66 @@ describe("wholeStringUnresolvedReferences", () => {
     expect(wholeStringUnresolvedReferences(undefined, {})).toEqual([])
   })
 })
+
+describe("task output variables", () => {
+  it("ResolvesTaskOutputReferenceInWithValue", () => {
+    const rendered = renderTemplate(
+      { path: "${{ tasks.proposal.outputs.openspecName }}/specs" },
+      { tasks: { proposal: { outputs: { openspecName: "issue-97" } } } },
+    ) as { path: string }
+
+    expect(rendered.path).toBe("issue-97/specs")
+  })
+
+  it("ResolvesTaskOutputReferenceInArtifactPath", () => {
+    const rendered = renderTemplate(
+      { files: [{ path: "${{ tasks.proposal.outputs.changeDir }}/review.md" }] },
+      { tasks: { proposal: { outputs: { changeDir: "openspec/changes/issue-97" } } } },
+    ) as { files: Array<{ path: string }> }
+
+    expect(rendered.files[0].path).toBe("openspec/changes/issue-97/review.md")
+  })
+
+  it("MissingTaskOutputReferenceResolvesToEmptyString", () => {
+    const rendered = renderTemplate(
+      { path: "${{ tasks.proposal.outputs.missing }}/specs" },
+      { tasks: { proposal: { outputs: {} } } },
+    ) as { path: string }
+
+    expect(rendered.path).toBe("/specs")
+  })
+
+  it("MissingTaskOutputReferenceAsWholeStringResolvesToEmptyString", () => {
+    const rendered = renderTemplate(
+      { path: "${{ tasks.proposal.outputs.missing }}" },
+      {},
+    ) as { path: string }
+
+    expect(rendered.path).toBe("")
+  })
+
+  it("MissingTaskOutputReferenceIsNotReportedAsUnresolved", () => {
+    const unresolved = wholeStringUnresolvedReferences(
+      { path: "${{ tasks.proposal.outputs.missing }}/specs" },
+      {},
+    )
+    expect(unresolved).toEqual([])
+  })
+
+  it("NonTaskUnresolvedReferenceStillFailsAsBefore", () => {
+    expect(() => renderTemplate({ path: "${{ unknown.var }}" }, {})).toThrow("Template variable 'unknown.var' was not found")
+  })
+
+  it("ExistingTemplateBehaviorWithTaskOutputsUnchanged", () => {
+    const rendered = renderTemplate(
+      { prompt: "Write to ${{ openspecChangeDir }}/proposal.md for ${{ issue.title }}" },
+      {
+        openspecChangeDir: "openspec/changes/issue-97",
+        issue: { title: "Document update" },
+        tasks: { proposal: { outputs: { openspecName: "issue-97" } } },
+      },
+    ) as { prompt: string }
+
+    expect(rendered.prompt).toBe("Write to openspec/changes/issue-97/proposal.md for Document update")
+  })
+})

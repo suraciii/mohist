@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
 using Orleans;
@@ -31,6 +32,7 @@ public sealed class WorkflowRun
     public DateTimeOffset? CompletedAt { get; set; }
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
+    public Dictionary<string, JsonElement> RuntimeVariables { get; init; } = new(StringComparer.Ordinal);
 
     public bool IsClaimed => Claim is not null;
     public string? ClaimedBy => Claim?.RunnerId;

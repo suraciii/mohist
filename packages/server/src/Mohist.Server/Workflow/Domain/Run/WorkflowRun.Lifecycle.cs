@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
 
@@ -31,7 +32,8 @@ public static partial class WorkflowRunExtensions
                 Metadata = metadata ?? new WorkflowRunMetadata(null, DateTimeOffset.UtcNow),
                 Status = WorkflowRunStatus.Pending,
                 CurrentStageId = stages[0].Id,
-                Stages = stages
+                Stages = stages,
+                RuntimeVariables = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
             };
         }
     }
