@@ -17,6 +17,7 @@ public sealed class TaskRun
     public TaskRunStatus Status { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
+    public List<TaskOutputDefinition>? Outputs { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
 }
 
@@ -98,6 +99,7 @@ public static class TaskRunExtensions
                 Status = TaskRunStatus.Pending,
                 RequiredFiles = requiredFiles.Count > 0 ? requiredFiles : null,
                 Artifacts = input.Artifacts,
+                Outputs = input.Outputs,
                 Classification = classification
             };
         }

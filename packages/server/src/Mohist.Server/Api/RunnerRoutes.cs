@@ -77,7 +77,8 @@ public static class RunnerRoutes
                 work.Issue?.ProjectId,
                 work.Issue?.IssueId,
                 work.Issue?.IssueNumber,
-                work.Artifacts));
+                work.Artifacts,
+                work.Outputs));
         });
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
@@ -85,7 +86,7 @@ public static class RunnerRoutes
             if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
                 return ApiResults.BadRequest("workflowRunId is required");
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds);
+            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.CapturedOutputs);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var report = await runner.ReportResultAsync(req.WorkflowRunId, req.WorkId, result);
 
@@ -185,7 +186,7 @@ public static class RunnerRoutes
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
-public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null);
+public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null, Dictionary<string, JsonElement>? CapturedOutputs = null);
 public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus, bool Tracked, string? Reason = null);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
 public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null);
@@ -205,4 +206,5 @@ public record WorkDispatchResponse(
     string? ProjectId = null,
     string? IssueId = null,
     int? IssueNumber = null,
-    string? Artifacts = null);
+    string? Artifacts = null,
+    string? Outputs = null);

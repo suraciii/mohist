@@ -7,6 +7,7 @@ import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
+import { captureOutputs } from "./output-capture.js"
 import {
   actionProducedArtifacts,
   captureArtifacts,
@@ -52,7 +53,14 @@ export class WorkExecutor {
       if (normalized.status !== "completed") {
         return normalized
       }
-      return await this.captureAndUploadArtifacts(work, workspaceRoot, workDir, normalized, result, variables, signal)
+      const finalResult = await this.captureAndUploadArtifacts(work, workspaceRoot, workDir, normalized, result, variables, signal)
+      if (finalResult.status === "completed") {
+        const capturedOutputs = captureOutputs(work.outputs, result)
+        if (capturedOutputs) {
+          return { ...finalResult, capturedOutputs }
+        }
+      }
+      return finalResult
     } catch (error) {
       return failure(work, error instanceof Error ? error.message : String(error))
     }

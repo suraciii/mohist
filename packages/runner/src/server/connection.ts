@@ -1,6 +1,6 @@
 import { hostname } from "node:os"
 import type { RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
-import { parseObject } from "../core/json.js"
+import { parseObject, parseTaskOutputs } from "../core/json.js"
 
 export class ServerConnection {
   constructor(private readonly options: RunnerOptions) {}
@@ -25,7 +25,7 @@ export class ServerConnection {
   }
 
   async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
-    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workflowRunId: work.workflowRunId, workId: work.workId, projectId: work.projectId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode, artifactUploadIds: result.artifactUploadIds ?? null }), signal })
+    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workflowRunId: work.workflowRunId, workId: work.workId, projectId: work.projectId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode, artifactUploadIds: result.artifactUploadIds ?? null, capturedOutputs: result.capturedOutputs ?? null }), signal })
     if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
     try {
       return await response.json() as Record<string, unknown>
@@ -159,6 +159,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
     projectId: dispatch.projectId,
     issueNumber: dispatch.issueNumber ?? undefined,
     artifacts: parseObject(dispatch.artifacts),
+    outputs: parseTaskOutputs(dispatch.outputs),
   }
 }
 
