@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
@@ -631,7 +632,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         WorkIssueRef? issueRef = BuildIssueRef(payload);
 
         var artifactsStr = artifacts is not null && !artifacts.IsEmpty
-            ? JsonSerializer.Serialize(artifacts)
+            ? JSON.Serialize(artifacts)
             : null;
 
         var dispatch = new WorkDispatch(
