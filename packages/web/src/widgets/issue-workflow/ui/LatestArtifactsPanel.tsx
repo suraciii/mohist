@@ -83,6 +83,7 @@ export function LatestArtifactsPanel({ issueNumber, workflowRunId }: LatestArtif
           issueNumber={issueNumber}
           artifactId={selectedArtifact.artifactId}
           path={selectedArtifact.path}
+          size={selectedArtifact.size}
           open={selectedArtifactId !== null}
           onOpenChange={(open) => {
             if (!open) setSelectedArtifactId(null)

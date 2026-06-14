@@ -373,24 +373,36 @@ function TaskArtifactSummaryChip({
   onClick: () => void
 }) {
   const isDirectory = summary.kind === 'directory'
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    onClick()
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          event.stopPropagation()
+          onClick()
+        }
+      }}
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer"
       title={`Open recorded ${summary.path}`}
     >
       {isDirectory ? (
-        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-3.586l-1.707-1.707A1 1 0 009.586 3H4z" />
         </svg>
       ) : (
-        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
         </svg>
       )}
       <span className="font-mono truncate">{summary.path}</span>
-    </button>
+    </span>
   )
 }
 
@@ -450,6 +462,17 @@ function TaskItem({
       >
         {icon}
         <span className="text-sm text-gray-900 flex-1 truncate">{task.title}</span>
+        {task.status === 'completed' && hasArtifacts && (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {artifactSummaries.map((summary) => (
+              <TaskArtifactSummaryChip
+                key={summary.artifactId}
+                summary={summary}
+                onClick={() => setSelectedArtifact(summary)}
+              />
+            ))}
+          </div>
+        )}
         {hasReason && (
           <span className="text-xs text-amber-500 flex-shrink-0" title={task.reason}>reason</span>
         )}
@@ -517,6 +540,7 @@ function TaskItem({
           issueNumber={issueNumber}
           artifactId={selectedArtifact.artifactId}
           path={selectedArtifact.path}
+          size={selectedArtifact.size}
           open={selectedArtifact !== null}
           onOpenChange={(open) => {
             if (!open) setSelectedArtifact(null)

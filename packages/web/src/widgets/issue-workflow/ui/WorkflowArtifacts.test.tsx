@@ -215,7 +215,7 @@ describe('LatestArtifactsPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByText('PASS')).toBeInTheDocument()
-      expect(screen.getByText('Recorded artifact content')).toBeInTheDocument()
+      expect(screen.getByText('123 B')).toBeInTheDocument()
     })
   })
 
@@ -257,7 +257,7 @@ describe('LatestArtifactsPanel', () => {
     fireEvent.click(screen.getByText('workflow.md'))
 
     await waitFor(() => {
-      expect(screen.getByText('# Spec')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Spec' })).toBeInTheDocument()
     })
   })
 })
@@ -297,7 +297,114 @@ describe('Task artifact history rendering', () => {
 
     await waitFor(() => {
       const chips = screen.getAllByText('review.md')
-      expect(chips.length).toBe(2)
+      expect(chips.length).toBeGreaterThanOrEqual(2)
     })
+  })
+})
+
+describe('ArtifactContentViewer rendering edge cases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders .markdown artifacts as markdown (not as <pre> text)', async () => {
+    mockedUseIssueWorkflowArtifacts.mockReturnValue({
+      data: [makeFileArtifact({ artifactId: 'art-doc', path: 'notes.markdown', size: 200 })],
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useIssueWorkflowArtifacts>)
+
+    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
+      data: { kind: 'text', content: '# Heading\n\n- item 1\n- item 2', contentType: 'text/markdown' },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+
+    render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('notes.markdown')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('notes.markdown'))
+
+    await waitFor(() => {
+      // The markdown content is rendered via react-markdown, so we expect a <h1> heading
+      // and <li> list items, NOT a <pre> block with raw markdown text.
+      expect(screen.getByRole('heading', { name: 'Heading', level: 1 })).toBeInTheDocument()
+      expect(screen.getByText('item 1')).toBeInTheDocument()
+      expect(screen.queryByText('# Heading')).not.toBeInTheDocument()
+    })
+  })
+
+  it('falls back to "Recorded artifact content" when size is null', async () => {
+    mockedUseIssueWorkflowArtifacts.mockReturnValue({
+      data: [makeFileArtifact({ artifactId: 'art-unknown-size', path: 'unknown-size.md', size: null })],
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useIssueWorkflowArtifacts>)
+
+    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
+      data: { kind: 'text', content: 'Some content', contentType: 'text/markdown' },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+
+    render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('unknown-size.md')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('unknown-size.md'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Recorded artifact content')).toBeInTheDocument()
+    })
+  })
+
+  it('shows "Unable to copy" feedback when navigator.clipboard is unavailable', async () => {
+    const originalClipboard = (navigator as { clipboard?: { writeText?: unknown } }).clipboard
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      configurable: true,
+    })
+
+    try {
+      mockedUseIssueWorkflowArtifacts.mockReturnValue({
+        data: [makeFileArtifact({ artifactId: 'art-copy', path: 'copy.md', size: 50 })],
+        isLoading: false,
+        error: null,
+      } as ReturnType<typeof useIssueWorkflowArtifacts>)
+
+      mockedUseIssueWorkflowArtifactContent.mockReturnValue({
+        data: { kind: 'text', content: 'Copy me', contentType: 'text/markdown' },
+        isLoading: false,
+        error: null,
+      } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+
+      render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+
+      await waitFor(() => {
+        expect(screen.getByText('copy.md')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('copy.md'))
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Unable to copy' })).toBeInTheDocument()
+      })
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: originalClipboard,
+        configurable: true,
+      })
+    }
   })
 })
