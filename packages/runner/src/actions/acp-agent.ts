@@ -984,7 +984,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       }
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
       await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
-      return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic, failureReason: "probe_timeout" }
+      return { error: diagnostic ? diagnostic.summary : `Session liveness probe timed out ${JSON.stringify(probeState)}`, providerError: diagnostic, failureReason: "probe_timeout" }
     }
     if (probeResult === "data" && probeWasSatisfied(options.livenessState)) {
       await emitLivenessStatusEvent(context, options.livenessState, "running", { acpSessionId: sessionId, satisfiedProbeVersion: activeProbe.probeVersion })
@@ -1009,7 +1009,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     }
     const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
     await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
-    return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic, failureReason: "probe_timeout" }
+    return { error: diagnostic ? diagnostic.summary : `Session liveness probe timed out ${JSON.stringify(probeState)}`, providerError: diagnostic, failureReason: "probe_timeout" }
   }
 }
 
