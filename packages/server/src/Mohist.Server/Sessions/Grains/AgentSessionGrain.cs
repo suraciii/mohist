@@ -11,6 +11,8 @@ namespace Mohist.Server.Sessions.Grains;
 
 public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
+    private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
+
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -20,6 +22,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private long _realtimeSequence;
+    private IDisposable? _persistTimer;
+    private bool _stateDirty;
 
     public AgentSessionGrain(
         IAgentSessionStore stateStore,
@@ -46,15 +50,53 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        if (_session is null || !_transcript.HasPending)
+        _persistTimer?.Dispose();
+        _persistTimer = null;
+
+        if (_session is null)
             return;
 
         var now = DateTime.UtcNow;
-        var transcript = _transcript.Flush(_session, now);
-        if (transcript is null)
-            return;
+        var transcript = _transcript.BuildFlush(_session, now);
+        var stateSaved = !_stateDirty;
 
-        await _transcriptStore.SaveAsync(transcript, ct);
+        if (_stateDirty)
+        {
+            try
+            {
+                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), ct);
+                stateSaved = true;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to flush state on deactivation for {SessionId}",
+                    SessionId);
+            }
+        }
+
+        var transcriptSaved = transcript is null;
+        if (transcript is not null)
+        {
+            try
+            {
+                await _transcriptStore.SaveAsync(transcript, ct);
+                transcriptSaved = true;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to flush transcript on deactivation for {SessionId}; parts={PartCount}",
+                    SessionId, transcript.Parts.Count);
+            }
+        }
+
+        if (stateSaved && transcriptSaved)
+        {
+            if (transcript is not null)
+                _transcript.CommitFlush();
+            _stateDirty = false;
+        }
     }
 
     public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
@@ -109,11 +151,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var now = DateTime.UtcNow;
         var events = new List<AgentSessionEvent>();
         events.AddRange(session.RecordActivity(now));
+        _stateDirty = true;
 
         var entries = new List<RuntimeEventEnvelope>();
         foreach (var e in command.RuntimeEvents)
         {
-            events.AddRange(ApplyRuntimeEventToDomain(session, e, now));
+            var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
+            events.AddRange(domainEvents);
+            if (domainEvents.Count > 0)
+                _stateDirty = true;
 
             entries.Add(new RuntimeEventEnvelope
             {
@@ -127,16 +173,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             });
         }
 
-        var transcript = _transcript.Accept(
-            session,
-            entries,
-            now,
-            forceFlushPending: command.RuntimeEvents.Count > 1);
+        _transcript.Accept(session, entries, now);
 
-        await _stateStore.SaveAsync(SessionId, session, events);
-        if (transcript is not null)
-            await _transcriptStore.SaveAsync(transcript);
         _session = session;
+
+        EnsurePersistenceTimer();
 
         await FanOutRealtimeAsync(
             session,
@@ -207,6 +248,83 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                     row.Type, session.Id);
             }
         }
+    }
+
+    private void EnsurePersistenceTimer()
+    {
+        _persistTimer ??= this.RegisterGrainTimer(
+            _ => PersistCallback(),
+            PersistTimerDueTime,
+            Timeout.InfiniteTimeSpan);
+    }
+
+    private async Task PersistCallback()
+    {
+        if (_session is null)
+        {
+            DisposePersistTimer();
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var transcript = _transcript.BuildFlush(_session, now);
+        var stateSaved = !_stateDirty;
+
+        if (_stateDirty)
+        {
+            try
+            {
+                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), CancellationToken.None);
+                stateSaved = true;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to save state for {SessionId}",
+                    SessionId);
+            }
+        }
+
+        var transcriptSaved = transcript is null;
+        if (transcript is not null)
+        {
+            try
+            {
+                await _transcriptStore.SaveAsync(transcript, CancellationToken.None);
+                transcriptSaved = true;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex,
+                    "AgentSessionGrain failed to save transcript for {SessionId}; parts={PartCount}",
+                    SessionId, transcript.Parts.Count);
+            }
+        }
+
+        if (stateSaved && transcriptSaved)
+        {
+            if (transcript is not null)
+                _transcript.CommitFlush();
+            _stateDirty = false;
+            DisposePersistTimer();
+        }
+        else
+        {
+            // The one-shot timer will not fire again; schedule a retry.
+            RestartPersistenceTimer();
+        }
+    }
+
+    private void RestartPersistenceTimer()
+    {
+        DisposePersistTimer();
+        EnsurePersistenceTimer();
+    }
+
+    private void DisposePersistTimer()
+    {
+        _persistTimer?.Dispose();
+        _persistTimer = null;
     }
 
     public async Task<AgentSessionInfo?> GetAsync()

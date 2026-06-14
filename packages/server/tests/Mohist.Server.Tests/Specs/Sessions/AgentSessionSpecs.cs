@@ -54,6 +54,9 @@ public class AgentSessionSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.NotNull(card.LastActivity);
@@ -124,6 +127,9 @@ public class AgentSessionSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 6);
+
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
@@ -179,6 +185,9 @@ public class AgentSessionSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+
         var summaries = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/coder-sessions");
         var summary = Assert.Single(summaries);
 
@@ -208,6 +217,9 @@ public class AgentSessionSpecs
                 new { type = "message.delta", payload = new { text = "second message" } }
             }
         });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 1);
 
         var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
 
@@ -289,6 +301,9 @@ public class AgentSessionSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2);
+
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
         Assert.Equal([1L, 2L], parts.Select(e => e.Sequence).ToArray());
@@ -315,6 +330,9 @@ public class AgentSessionSpecs
 
         await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new { runtimeEvents });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var parts = await LoadTranscriptPartsAsync(db, session.Id);
 
@@ -328,6 +346,94 @@ public class AgentSessionSpecs
         var transcriptPart = Assert.Single(turn.Assistant);
         Assert.Equal("reasoning", transcriptPart.Type);
         Assert.Equal(string.Concat(Enumerable.Range(0, 96).Select(i => i.ToString("D2"))), transcriptPart.Text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task DeferredPersistence_SessionDetailTranscriptContainsAllTextAndToolParts()
+    {
+        var (project, issue, work, _) = await CreateStartedAgentSessionAsync("deferred-transcript", sessionName: "plan");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        await issueGrain.StartWorkAsync();
+
+        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
+        var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
+
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeEvents = new object[]
+            {
+                new { type = "session.input", payload = new { text = "plan the refactor", kind = "task" } },
+                new { type = "message.delta", payload = new { text = "first", messageId = "msg-1" } },
+                new { type = "message.delta", payload = new { text = " second", messageId = "msg-1" } },
+                new { type = "reasoning.delta", payload = new { text = "thinking", messageId = "reason-1" } },
+                new { type = "reasoning.delta", payload = new { text = "deeper", messageId = "reason-2" } }
+            }
+        });
+
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(session), new
+        {
+            runtimeEvents = new object[]
+            {
+                new
+                {
+                    type = "tool_call.started",
+                    payload = new
+                    {
+                        toolCallId = "tool-1",
+                        kind = "read",
+                        status = "in_progress",
+                        title = "Read README",
+                        rawInput = new { filePath = "README.md" }
+                    }
+                },
+                new
+                {
+                    type = "tool_call.completed",
+                    payload = new
+                    {
+                        toolCallId = "tool-1",
+                        kind = "read",
+                        status = "completed",
+                        title = "Read README",
+                        rawOutput = new { content = "# Project" }
+                    }
+                }
+            }
+        });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var dbParts = await LoadTranscriptPartsAsync(db, session.Id);
+        Assert.Equal(4, dbParts.Length);
+        Assert.Equal(["text", "reasoning", "reasoning", "tool"], dbParts.Select(p => p.Type).ToArray());
+
+        var response = await _client.GetDataAsync<AgentSessionTranscriptTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
+
+        Assert.Equal(4, response.PartCount);
+        var turn = Assert.Single(response.Turns);
+        Assert.Equal("mohist", turn.User.Role);
+        Assert.Equal("task", turn.User.Kind);
+        Assert.Equal("plan the refactor", turn.User.Text);
+
+        Assert.Equal(4, turn.Assistant.Length);
+        Assert.Equal("text", turn.Assistant[0].Type);
+        Assert.Equal("first second", turn.Assistant[0].Text);
+        Assert.Equal("reasoning", turn.Assistant[1].Type);
+        Assert.Equal("thinking", turn.Assistant[1].Text);
+        Assert.Equal("reasoning", turn.Assistant[2].Type);
+        Assert.Equal("deeper", turn.Assistant[2].Text);
+        Assert.Equal("tool", turn.Assistant[3].Type);
+        var toolPart = turn.Assistant[3].Tool;
+        Assert.NotNull(toolPart);
+        Assert.Equal("tool-1", toolPart.ToolCallId);
+        Assert.Equal("read", toolPart.ToolName);
+        Assert.Equal("completed", toolPart.Status);
+        Assert.Equal("Read README", toolPart.Title);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -609,6 +715,9 @@ public class AgentSessionSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2);
+
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("active", grainSession.Status);
@@ -641,6 +750,9 @@ public class AgentSessionSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
+
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("anthropic/claude-sonnet-4-20250514", grainSession.ResolvedModel);
@@ -664,6 +776,9 @@ public class AgentSessionSpecs
                 }
             }
         });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 1);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -704,6 +819,9 @@ public class AgentSessionSpecs
                 }
             }
         });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 2);
 
         var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
@@ -761,6 +879,9 @@ public class AgentSessionSpecs
                 }
             }
         });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(session.Id, 4);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
@@ -1160,5 +1281,6 @@ public class AgentSessionSpecs
     private sealed record AgentSessionTranscriptTestResponse(AgentSessionTranscriptTurnTestDto[] Turns, int PartCount, string? LastActivityAt);
     private sealed record AgentSessionTranscriptTurnTestDto(string Id, AgentSessionTranscriptUserTestDto User, AgentSessionTranscriptPartTestDto[] Assistant, string StartedAt, string? CompletedAt, bool Incomplete);
     private sealed record AgentSessionTranscriptUserTestDto(string Role, string Text, string Kind, string SentAt);
-    private sealed record AgentSessionTranscriptPartTestDto(string Id, string Type, string? Text, string? Message, string? Kind);
+    private sealed record AgentSessionTranscriptPartTestDto(string Id, string Type, string? Text, string? Message, string? Kind, AgentSessionTranscriptToolTestDto? Tool);
+    private sealed record AgentSessionTranscriptToolTestDto(string ToolCallId, string ToolName, string Status, string? Title);
 }
