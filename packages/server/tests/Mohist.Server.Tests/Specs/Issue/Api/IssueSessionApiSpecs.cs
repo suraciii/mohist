@@ -93,6 +93,9 @@ public class IssueSessionApiSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 5);
+
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
@@ -190,6 +193,9 @@ public class IssueSessionApiSpecs
                 new { type = "session.closed", payload = new { status = "completed", exitCode = 0 } }
             }
         });
+
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 4);
 
         var response = await _client.GetDataAsync<IssueSessionTranscriptResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/transcript");
 

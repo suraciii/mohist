@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -14,10 +15,12 @@ public interface IAgentSessionStore : IStateStore<AgentSession>
 public class AgentSessionStore : IAgentSessionStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly ILogger<AgentSessionStore> _log;
 
-    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory)
+    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory, ILogger<AgentSessionStore> log)
     {
         _dbFactory = dbFactory;
+        _log = log;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -58,7 +61,7 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
-    private static async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
+    private async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
     {
         var row = AgentSessionJson.ToRow(state, DateTime.UtcNow);
         row.Id = key;
@@ -74,7 +77,7 @@ public class AgentSessionStore : IAgentSessionStore
         await SyncLabelsAsync(db, key, state.Metadata.Labels, ct);
     }
 
-    private static async Task SyncLabelsAsync(
+    private async Task SyncLabelsAsync(
         MohistDbContext db,
         string sessionId,
         IReadOnlyDictionary<string, string>? labels,
@@ -85,7 +88,13 @@ public class AgentSessionStore : IAgentSessionStore
             .ToListAsync(ct);
         if (existing.Count > 0)
             db.AgentSessionLabels.RemoveRange(existing);
-        if (labels is null) return;
+        if (labels is null)
+        {
+            _log.LogWarning(
+                "AgentSessionStore.SyncLabelsAsync received null labels for session {SessionId}; existing labels will be removed.",
+                sessionId);
+            return;
+        }
         foreach (var (key, value) in labels)
         {
             if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value)) continue;

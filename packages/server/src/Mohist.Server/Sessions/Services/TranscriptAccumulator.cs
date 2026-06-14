@@ -25,34 +25,37 @@ internal sealed class TranscriptAccumulator
     };
 
     private PendingTextSegment? _pending;
+    private readonly List<AgentSessionTranscriptPartDelta> _accumulatedParts = new();
 
-    public bool HasPending => _pending is not null;
+    private string? _promptText;
+    private string? _promptKind;
+    private DateTime? _inputCreatedAt;
 
-    public AgentSessionTranscriptFlush? Accept(
-        AgentSession session,
-        IReadOnlyList<RuntimeEventEnvelope> rows,
-        DateTime now,
-        bool forceFlushPending)
+    public bool HasPending => _pending is not null || _accumulatedParts.Count > 0 || _promptText is not null;
+
+    public void Accept(AgentSession session, IReadOnlyList<RuntimeEventEnvelope> rows, DateTime now)
     {
-        var parts = new List<AgentSessionTranscriptPartDelta>();
         foreach (var row in rows)
         {
             var textType = ToTextPartType(row.Type);
             if (textType is not null)
             {
-                AppendText(row, textType, now, parts);
+                AppendText(row, textType, now);
                 continue;
             }
 
             if (!EventTypes.Contains(row.Type))
                 continue;
 
-            FlushInto(session, now, parts);
-            var type = ToTranscriptPartType(row.Type);
-            if (type == "input")
+            FlushPendingIntoAccumulated(now);
+            if (row.Type == "session.input")
+            {
+                CaptureInput(row);
                 continue;
+            }
 
-            parts.Add(CreatePartDelta(
+            var type = ToTranscriptPartType(row.Type);
+            _accumulatedParts.Add(CreatePartDelta(
                 row,
                 type,
                 CorrelationKey(type, row.PayloadJson),
@@ -63,21 +66,31 @@ internal sealed class TranscriptAccumulator
                 firstSeenAt: row.CreatedAt,
                 lastSeenAt: row.CreatedAt));
         }
-
-        if (forceFlushPending)
-            FlushInto(session, now, parts);
-
-        return ToFlush(session, rows, parts, now);
     }
 
-    public AgentSessionTranscriptFlush? Flush(AgentSession session, DateTime now)
+    public AgentSessionTranscriptFlush? BuildFlush(AgentSession session, DateTime now)
     {
-        var parts = new List<AgentSessionTranscriptPartDelta>();
-        FlushInto(session, now, parts);
-        return parts.Count == 0 ? null : new AgentSessionTranscriptFlush(false, BuildTurn(session, null, now), parts);
+        FlushPendingIntoAccumulated(now);
+
+        if (_accumulatedParts.Count == 0 && _promptText is null)
+            return null;
+
+        return new AgentSessionTranscriptFlush(
+            _promptText is not null,
+            BuildTurn(session, now),
+            _accumulatedParts.ToList());
     }
 
-    private void AppendText(RuntimeEventEnvelope row, string type, DateTime now, List<AgentSessionTranscriptPartDelta> parts)
+    public void CommitFlush()
+    {
+        _pending = null;
+        _accumulatedParts.Clear();
+        _promptText = null;
+        _promptKind = null;
+        _inputCreatedAt = null;
+    }
+
+    private void AppendText(RuntimeEventEnvelope row, string type, DateTime now)
     {
         var text = AgentSessionJsonHelper.ExtractText(row.PayloadJson);
         if (string.IsNullOrEmpty(text))
@@ -88,7 +101,7 @@ internal sealed class TranscriptAccumulator
             && (!string.Equals(_pending.Type, type, StringComparison.Ordinal)
                 || !string.Equals(_pending.CorrelationId, correlationId, StringComparison.Ordinal)))
         {
-            FlushPending(row, parts);
+            FlushPendingIntoAccumulated(row.CreatedAt);
         }
 
         _pending ??= new PendingTextSegment(
@@ -102,22 +115,10 @@ internal sealed class TranscriptAccumulator
         if (_pending.RawEventCount >= FlushRawEventThreshold
             || _pending.Text.Length >= FlushTextLengthThreshold
             || now - _pending.StartedAt >= FlushAgeThreshold)
-            FlushPending(row, parts);
+            FlushPendingIntoAccumulated(row.CreatedAt);
     }
 
-    private void FlushInto(AgentSession session, DateTime now, List<AgentSessionTranscriptPartDelta> parts)
-    {
-        if (_pending is null)
-            return;
-
-        var row = new RuntimeEventEnvelope
-        {
-            CreatedAt = now,
-        };
-        FlushPending(row, parts);
-    }
-
-    private void FlushPending(RuntimeEventEnvelope row, List<AgentSessionTranscriptPartDelta> parts)
+    private void FlushPendingIntoAccumulated(DateTime lastSeenAt)
     {
         if (_pending is null)
             return;
@@ -130,7 +131,12 @@ internal sealed class TranscriptAccumulator
             ["correlationId"] = _pending.CorrelationId,
         });
 
-        parts.Add(CreatePartDelta(
+        var row = new RuntimeEventEnvelope
+        {
+            CreatedAt = lastSeenAt,
+        };
+
+        _accumulatedParts.Add(CreatePartDelta(
             row,
             _pending.Type,
             _pending.CorrelationId ?? _pending.Type,
@@ -140,7 +146,20 @@ internal sealed class TranscriptAccumulator
             _pending.RawEventCount,
             _pending.StartedAt,
             _pending.UpdatedAt));
+
         _pending = null;
+    }
+
+    private void CaptureInput(RuntimeEventEnvelope row)
+    {
+        var payload = AgentSessionJsonHelper.ParsePayload(row.PayloadJson);
+        _promptText = AgentSessionJsonHelper.GetStringProp(payload, "text")
+            ?? AgentSessionJsonHelper.GetStringProp(payload, "prompt")
+            ?? string.Empty;
+        _promptKind = AgentSessionJsonHelper.GetStringProp(payload, "kind")
+            ?? AgentSessionJsonHelper.GetStringProp(payload, "source")
+            ?? "task";
+        _inputCreatedAt = row.CreatedAt;
     }
 
     private static AgentSessionTranscriptPartDelta CreatePartDelta(
@@ -162,37 +181,17 @@ internal sealed class TranscriptAccumulator
             lastSeenAt,
             rawEventCount);
 
-    private static AgentSessionTranscriptFlush? ToFlush(
-        AgentSession session,
-        IReadOnlyList<RuntimeEventEnvelope> rows,
-        IReadOnlyList<AgentSessionTranscriptPartDelta> parts,
-        DateTime now)
+    private AgentSessionTranscriptTurnUpsert BuildTurn(AgentSession session, DateTime now)
     {
-        var input = rows.FirstOrDefault(row => row.Type == "session.input");
-        if (parts.Count == 0 && input is null)
-            return null;
-        return new AgentSessionTranscriptFlush(input is not null, BuildTurn(session, input, now), parts);
-    }
-
-    private static AgentSessionTranscriptTurnUpsert BuildTurn(
-        AgentSession session,
-        RuntimeEventEnvelope? input,
-        DateTime now)
-    {
-        var payload = input is null ? default(JsonElement?) : AgentSessionJsonHelper.ParsePayload(input.PayloadJson);
-        var promptText = payload is null
-            ? string.Empty
-            : AgentSessionJsonHelper.GetStringProp(payload.Value, "text") ?? AgentSessionJsonHelper.GetStringProp(payload.Value, "prompt") ?? string.Empty;
-        var promptKind = payload is null
-            ? "task"
-            : AgentSessionJsonHelper.GetStringProp(payload.Value, "kind") ?? AgentSessionJsonHelper.GetStringProp(payload.Value, "source") ?? "task";
+        var promptText = _promptText ?? string.Empty;
+        var promptKind = _promptKind ?? "task";
 
         return new AgentSessionTranscriptTurnUpsert(
             session.Id,
-            Sequence: input is null ? 0 : 1,
+            Sequence: _inputCreatedAt.HasValue ? 1 : 0,
             promptText,
             AgentSessionJsonHelper.NormalizePromptKind(promptKind),
-            input?.CreatedAt ?? session.Status.CreatedAt,
+            _inputCreatedAt ?? session.Status.CreatedAt,
             now);
     }
 
