@@ -125,6 +125,7 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
 
         var merge = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:merge");
+        var push = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:push");
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         Assert.Equal("mohist/merge", merge.Uses);
@@ -135,6 +136,11 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("repository.baseBranch", mergeWithJson);
         Assert.Contains("\"conflictResolver\"", mergeWithJson);
         Assert.Contains("Resolve merge conflicts", mergeWithJson);
+        Assert.Equal("mohist/push", push.Uses);
+        var pushWithJson = JsonSerializer.Serialize(push.With);
+        Assert.Contains("${{ project.baseBranch }}", pushWithJson);
+        var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
+        Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:merge", "integrate:push"], integrateTaskIds);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

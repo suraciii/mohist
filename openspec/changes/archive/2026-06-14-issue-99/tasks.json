@@ -1,0 +1,64 @@
+{
+  "project": "mohist-local",
+  "description": "Add a mohist/push action and wire it into the default workflow's integrate stage so merged commits reach the remote base branch.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement and register mohist/push action",
+      "spec": "specs/git-push-action/spec.md#Requirement: git-push-action pushes the current branch to a remote, specs/git-push-action/spec.md#Requirement: git-push-action is registered in the runner action registry",
+      "description": "Add a pushAction function in packages/runner/src/actions/registry.ts that reads target (default current branch) and remote (default origin) inputs, invokes git push <remote> <target> via the shared git runner, and returns task failure with combined git output on rejection. Register the action as mohist/push in createDefaultRegistry.",
+      "acceptanceCriteria": [
+        "pushAction exists in packages/runner/src/actions/registry.ts and uses the module-level git runner",
+        "createDefaultRegistry registers mohist/push",
+        "Default remote is origin and default target resolves to the current branch when not provided",
+        "Failed push returns status failure with git combined output included in the failure evidence"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/registry.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow the existing mergeAction pattern for git invocation and failure formatting. Keep the action in registry.ts per design decision 1."
+    },
+    {
+      "id": "T-002",
+      "title": "Add unit tests for mohist/push action",
+      "spec": "specs/git-push-action/spec.md#Scenario: Default push to origin, specs/git-push-action/spec.md#Scenario: Push to configured remote, specs/git-push-action/spec.md#Scenario: Push target branch, specs/git-push-action/spec.md#Scenario: Push failure is terminal, specs/git-push-action/spec.md#Scenario: Pure git operation",
+      "description": "Add tests in packages/runner/tests/push.spec.ts that mock the shared git runner via setMergeGitRunnerForTest and verify pushAction handles default inputs, explicit target/remote, successful push, and terminal push failure with git error output.",
+      "acceptanceCriteria": [
+        "Tests verify git is called with push origin <current-branch> when no inputs are provided",
+        "Tests verify explicit remote and target are passed to git push",
+        "Tests verify successful push returns status success",
+        "Tests verify rejected push returns status failure and includes git error output",
+        "All runner tests pass and the shared git runner is reset in afterEach"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/runner/tests/push.spec.ts with passing test suite",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Mirror the merge.spec.ts pattern. Export pushAction from registry.ts if it is not already exported."
+    },
+    {
+      "id": "T-003",
+      "title": "Add integrate:push task to default workflow",
+      "spec": "specs/workflow-definition/spec.md#Requirement: Integrate stage declares integrate:push as the final delivery task",
+      "description": "Update packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml to add an integrate:push task immediately after integrate:merge and before the health:integrate check. Configure it to use mohist/push with target set to ${{ project.baseBranch }}.",
+      "acceptanceCriteria": [
+        "integrate:push is present in the integrate stage tasks list",
+        "integrate:push is ordered after integrate:merge",
+        "health:integrate check remains ordered after all integrate tasks",
+        "Workflow YAML parses without syntax errors"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use explicit target: ${{ project.baseBranch }} for clarity even though the action defaults to the current branch."
+    }
+  ]
+}

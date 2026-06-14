@@ -51,6 +51,7 @@ export function createDefaultRegistry() {
   registry.register("mohist/rebase-status", rebaseStatusAction)
   registry.register("mohist/merge-ready", mergeReadyAction)
   registry.register("mohist/merge", mergeAction)
+  registry.register("mohist/push", pushAction)
   return registry
 }
 
@@ -220,6 +221,23 @@ export async function mergeAction(context: ActionContext): Promise<ActionResult>
   }
   const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
   return mergeFailure(source, target, strategy, result.combinedOutput, diagnostics, result.exitCode)
+}
+
+export async function pushAction(context: ActionContext): Promise<ActionResult> {
+  const remote = stringInput(context.with, "remote") ?? "origin"
+  const target = stringInput(context.with, "target") ?? await resolveCurrentBranch(context.workDir, context.signal)
+  if (!target) return { status: "failure", message: "Push action could not resolve current branch" }
+
+  const result = await git(context.workDir, ["push", remote, target], context.signal)
+  const output = JSON.stringify({ kind: "push", remote, target, output: result.combinedOutput })
+  return result.success
+    ? { status: "success", message: "Push completed", output, exitCode: result.exitCode }
+    : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
+}
+
+async function resolveCurrentBranch(workDir: string, signal: AbortSignal) {
+  const result = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
+  return result.success ? result.stdout.trim() : null
 }
 
 async function resolveMergeConflict(
