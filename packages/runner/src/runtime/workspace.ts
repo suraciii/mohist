@@ -19,9 +19,7 @@ export class WorkspaceManager {
     const issueNumber = numberAt(variables, ["issue", "number"])
 
     if (!gitUrl || issueNumber === undefined) {
-      const fallback = resolve(join(this.runnerRoot, "fallback", work.workId))
-      await ensureDir(fallback)
-      return { path: fallback, changeDir: stringAt(variables, ["openspecChangeDir"]) }
+      throw new Error(`Workspace requires repository.gitUrl and issue.number in variables. Got gitUrl=${gitUrl ?? "null"}, issueNumber=${issueNumber ?? "undefined"}`)
     }
 
     const projectId = stringAt(variables, ["project", "id"]) ?? "project"
