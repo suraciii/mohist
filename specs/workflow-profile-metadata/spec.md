@@ -42,25 +42,18 @@ The `mohist/default` workflow profile YAML SHALL include a `description` field t
 - **AND** the description SHALL describe the full pipeline: plan, design, build, check, integrate
 - **AND** the description SHALL note that it is not suitable for simple fixes, experiments, or pure refactoring
 
-### Requirement: New example profiles demonstrate distinct metadata
+### Requirement: System profile catalog exposes only executable profiles
 
-The system SHALL include at least two new workflow profiles (`quick-fix` and `experiment`) in addition to `mohist/default`, each with a distinct `description` that clearly differentiates its intended use. Each new profile SHALL reuse the existing stage definitions and SHALL differ only in metadata.
+The system SHALL expose a workflow profile only when its metadata and execution definition describe the same behavior. It SHALL NOT list metadata-only variants that reuse `mohist/default` while promising a lighter or different workflow.
 
-#### Scenario: quick-fix profile exists
+#### Scenario: default profile is listed
 - **WHEN** the system lists available profiles
-- **THEN** a profile with id `mohist/quick-fix` SHALL be present
-- **AND** its description SHALL indicate suitability for simple bug fixes and small, low-risk changes
-- **AND** it SHALL describe faster, lighter workflow with fewer approvals
+- **THEN** the `mohist/default` profile SHALL be present
 
-#### Scenario: experiment profile exists
-- **WHEN** the system lists available profiles
-- **THEN** a profile with id `mohist/experiment` SHALL be present
-- **AND** its description SHALL indicate suitability for exploration, prototyping, and spikes
-- **AND** it SHALL indicate that deliverable artifacts are not required
-
-#### Scenario: Distinct descriptions enable AI selection
-- **WHEN** an external agent reads all profile descriptions
-- **THEN** the three profiles SHALL have sufficiently distinct descriptions that an AI can match an issue's semantics to a profile
+#### Scenario: unimplemented profiles are not listed
+- **WHEN** a profile such as `mohist/quick-fix` or `mohist/experiment` has no distinct executable definition
+- **THEN** it SHALL NOT be returned by the system profile catalog
+- **AND** it SHALL NOT be resolvable as a system template
 
 ### Requirement: Profile metadata is backward compatible
 

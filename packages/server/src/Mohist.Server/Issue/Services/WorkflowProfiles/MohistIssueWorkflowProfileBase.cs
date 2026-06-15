@@ -54,24 +54,18 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
         var agentConfig = BuildAgentConfig(globalAgentConfig);
         var prompts = GetMergedPromptsAsync(issue.ProjectId).GetAwaiter().GetResult();
 
-        // Keep this profile-driven path aligned with IssueGrain.BuildIssueVariables:
-        // expose the runner workspace and repository metadata, not project or
-        // repository checkout paths.
-        var runBranch = WorkflowRunBranch.For(workflowRunId);
-        var workspacePath = MohistWorkspaceLayout.IssueWorkspacePath(
-            MohistWorkspaceLayout.DefaultRunnerRoot(), project.Name, issue.Number);
-
-        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["mohist"] = JsonSerializer.SerializeToElement(new { runId = workflowRunId }, WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number }, WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name }, WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, gitUrl = project.RepositoryGitUrl, baseBranch = project.RepositoryBaseBranch }, WorkflowVariableJson.Options),
-            ["workspace"] = JsonSerializer.SerializeToElement(new { path = workspacePath, branch = runBranch, changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number) }, WorkflowVariableJson.Options),
-            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
-            ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options),
-            ["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options),
-        };
+        var workspace = IssueVariableBuilder.BuildWorkspaceIdentity(
+            workflowRunId,
+            issue,
+            project,
+            MohistWorkspaceLayout.DefaultRunnerRoot());
+        var variables = IssueVariableBuilder.BuildRootVariables(
+            workflowRunId,
+            issue,
+            project,
+            workspace,
+            agentConfig,
+            prompts);
         return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
     }
 

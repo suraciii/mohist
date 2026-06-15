@@ -39,16 +39,6 @@ public class ProjectWorkflowProfileManager
                 Name: "Mohist Default",
                 Description: defaultDescription,
                 IsDefault: true),
-            new SystemTemplateInfo(
-                Id: IssueWorkflowProfiles.QuickFixId,
-                Name: "Mohist Quick Fix",
-                Description: MohistQuickFixIssueWorkflowProfile.HardcodedDescription,
-                IsDefault: false),
-            new SystemTemplateInfo(
-                Id: IssueWorkflowProfiles.ExperimentId,
-                Name: "Mohist Experiment",
-                Description: MohistExperimentIssueWorkflowProfile.HardcodedDescription,
-                IsDefault: false),
         ];
     }
 
@@ -81,9 +71,7 @@ public class ProjectWorkflowProfileManager
 
     public static WorkflowDefinition? GetSystemTemplateDefinition(string templateId)
     {
-        if (string.Equals(templateId, IssueWorkflowProfiles.DefaultId, StringComparison.Ordinal)
-            || string.Equals(templateId, IssueWorkflowProfiles.QuickFixId, StringComparison.Ordinal)
-            || string.Equals(templateId, IssueWorkflowProfiles.ExperimentId, StringComparison.Ordinal))
+        if (string.Equals(templateId, IssueWorkflowProfiles.DefaultId, StringComparison.Ordinal))
             return MohistWorkflow.Definition;
         return null;
     }

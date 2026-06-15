@@ -138,7 +138,7 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("Resolve merge conflicts", mergeWithJson);
         Assert.Equal("mohist/push", push.Uses);
         var pushWithJson = JsonSerializer.Serialize(push.With);
-        Assert.Contains("${{ project.baseBranch }}", pushWithJson);
+        Assert.Contains("${{ repository.baseBranch }}", pushWithJson);
         var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:merge", "integrate:push"], integrateTaskIds);
     }
@@ -885,9 +885,9 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("plan (proposal, specs, design, tasks, self-review)", description!);
         Assert.Contains("build", description);
         Assert.Contains("check (AI review, merge readiness)", description);
-        Assert.Contains("integrate (spec sync, archive, merge)", description);
-        Assert.Contains("quick-fix", description);
-        Assert.Contains("experiment", description);
+        Assert.Contains("integrate (spec sync, archive, merge, push)", description);
+        Assert.DoesNotContain("use quick-fix", description);
+        Assert.DoesNotContain("use experiment", description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

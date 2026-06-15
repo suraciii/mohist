@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 using Mohist.Server.Tests.Support;
 using MohistIssue = Mohist.Server.Issue.Domain.Issue;
@@ -37,6 +38,9 @@ public class IssueVariableBuilderSpecs
     private static VariableBundle BundleFrom(string json) =>
         VariableBundle.FromJson(json);
 
+    private static WorkspaceIdentity TestWorkspace(int number = 80) =>
+        new($"/runner/mohist-local/workspaces/issue-{number}", "mohist/run-wr_x", $"openspec/changes/issue-{number}");
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
@@ -52,7 +56,7 @@ public class IssueVariableBuilderSpecs
         var issueBundle = VariableBundle.Empty;
 
         var result = IssueVariableBuilder.Build(
-            projectBundle, issueBundle, "wr_x", TestIssue(), Project);
+            projectBundle, issueBundle, "wr_x", TestIssue(), Project, TestWorkspace());
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         // VariableBundle.Vars *is* the vars namespace — agent is a direct child.
@@ -83,7 +87,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            projectBundle, issueBundle, "wr_x", TestIssue(), Project);
+            projectBundle, issueBundle, "wr_x", TestIssue(), Project, TestWorkspace());
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
@@ -96,20 +100,24 @@ public class IssueVariableBuilderSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void BuildReturnsEmptyUserBundle_WhenNoProjectOrIssueConfig()
+    public void BuildReturnsRuntimeContext_WhenNoProjectOrIssueConfig()
     {
-        // The built-in context (mohist, issue, project, repository, workspace,
-        // openspec*) is now composed exclusively by IssueGrain.BuildIssueVariables
-        // and merged on top of this user bundle before dispatch. This test
-        // pins the user-bundle-only contract for IssueVariableBuilder.
         var result = IssueVariableBuilder.Build(
             projectBundle: VariableBundle.Empty,
             issueBundle: VariableBundle.Empty,
             workflowRunId: "wr_x",
             issue: TestIssue(number: 80),
-            project: Project);
+            project: Project,
+            workspace: TestWorkspace());
 
-        Assert.True(result.Vars is null || result.Vars.Value.ValueKind == JsonValueKind.Object);
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
+        Assert.Equal("wr_x", doc.RootElement.GetProperty("mohist").GetProperty("runId").GetString());
+        Assert.Equal(80, doc.RootElement.GetProperty("issue").GetProperty("number").GetInt32());
+        Assert.False(doc.RootElement.GetProperty("project").TryGetProperty("baseBranch", out _));
+        Assert.Equal("master", doc.RootElement.GetProperty("repository").GetProperty("baseBranch").GetString());
+        Assert.Equal("mohist/run-wr_x", doc.RootElement.GetProperty("workspace").GetProperty("branch").GetString());
+        Assert.Equal("openspec/changes/issue-80", doc.RootElement.GetProperty("openspecChangeDir").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -149,7 +157,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            projectBundle, issueBundle, "wr_x", TestIssue(), Project);
+            projectBundle, issueBundle, "wr_x", TestIssue(), Project, TestWorkspace());
 
         // Per-stage variables live in VariableBundle.Stages, not Vars.
         Assert.NotNull(result.Stages);
@@ -186,7 +194,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            projectBundle, issueBundle, "wr_x", TestIssue(), Project);
+            projectBundle, issueBundle, "wr_x", TestIssue(), Project, TestWorkspace());
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");

@@ -14,13 +14,9 @@ public class IssueWorkflowProfileRegistry
         IDbContextFactory<MohistDbContext> dbFactory)
     {
         var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, dbFactory);
-        var quickFix = new MohistQuickFixIssueWorkflowProfile(promptLoader, dbFactory);
-        var experiment = new MohistExperimentIssueWorkflowProfile(promptLoader, dbFactory);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
             [defaults.Id] = defaults,
-            [quickFix.Id] = quickFix,
-            [experiment.Id] = experiment,
         };
     }
 
