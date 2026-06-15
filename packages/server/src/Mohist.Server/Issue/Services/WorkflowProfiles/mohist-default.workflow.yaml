@@ -248,9 +248,11 @@ stages:
     tasks:
       - id: integrate:spec-sync
         title: Sync specs
-        uses: mohist/openspec-sync
+        uses: mohist/acp-agent
         with:
-          changeDir: ${{ openspecChangeDir }}
+          session: integrate
+          prompt: ${{ prompts.spec-sync }}
+          agent: ${{ vars.agent }}
       - id: integrate:archive-change
         title: Archive change
         uses: mohist/archive-change
