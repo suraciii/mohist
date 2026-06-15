@@ -24,13 +24,33 @@ public class ProjectWorkflowProfileManager
     /// <summary>
     /// Hardcoded system templates (in-binary, read-only).
     /// </summary>
-    private static readonly SystemTemplateInfo[] SystemTemplates =
-    [
-        new(
-            Id: "mohist/default",
-            Name: "Mohist Default",
-            Description: "Plan, build, check, and integrate an issue using OpenSpec artifacts.")
-    ];
+    private static readonly SystemTemplateInfo[] SystemTemplates = BuildSystemTemplates();
+
+    private static SystemTemplateInfo[] BuildSystemTemplates()
+    {
+        var definition = MohistWorkflow.Definition;
+        var defaultDescription = string.IsNullOrWhiteSpace(definition.Description)
+            ? "No description provided"
+            : definition.Description!;
+        return
+        [
+            new SystemTemplateInfo(
+                Id: IssueWorkflowProfiles.DefaultId,
+                Name: "Mohist Default",
+                Description: defaultDescription,
+                IsDefault: true),
+            new SystemTemplateInfo(
+                Id: IssueWorkflowProfiles.QuickFixId,
+                Name: "Mohist Quick Fix",
+                Description: MohistQuickFixIssueWorkflowProfile.HardcodedDescription,
+                IsDefault: false),
+            new SystemTemplateInfo(
+                Id: IssueWorkflowProfiles.ExperimentId,
+                Name: "Mohist Experiment",
+                Description: MohistExperimentIssueWorkflowProfile.HardcodedDescription,
+                IsDefault: false),
+        ];
+    }
 
     public ProjectWorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
@@ -51,9 +71,19 @@ public class ProjectWorkflowProfileManager
         return Task.FromResult<IReadOnlyList<SystemTemplateInfo>>(SystemTemplates);
     }
 
+    public static SystemTemplateInfo? GetSystemTemplateInfo(string templateId)
+    {
+        foreach (var template in SystemTemplates)
+            if (string.Equals(template.Id, templateId, StringComparison.Ordinal))
+                return template;
+        return null;
+    }
+
     public static WorkflowDefinition? GetSystemTemplateDefinition(string templateId)
     {
-        if (string.Equals(templateId, "mohist/default", StringComparison.Ordinal))
+        if (string.Equals(templateId, IssueWorkflowProfiles.DefaultId, StringComparison.Ordinal)
+            || string.Equals(templateId, IssueWorkflowProfiles.QuickFixId, StringComparison.Ordinal)
+            || string.Equals(templateId, IssueWorkflowProfiles.ExperimentId, StringComparison.Ordinal))
             return MohistWorkflow.Definition;
         return null;
     }

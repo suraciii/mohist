@@ -43,6 +43,7 @@ public sealed record WorkflowDefinition(
     string Id,
     List<StageDefinition> Stages,
     string? Name = null,
+    string? Description = null,
     Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, JsonElement?>? Defaults = null,
     Dictionary<string, string>? Artifacts = null);

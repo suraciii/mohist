@@ -28,5 +28,8 @@ public class WorkflowEventsCollection;
 [CollectionDefinition("SkillsCli", DisableParallelization = true)]
 public sealed class SkillsCliCollection;
 
+[CollectionDefinition("WorkflowCli", DisableParallelization = true)]
+public sealed class WorkflowCliCollection;
+
 [CollectionDefinition("EventPublishing", DisableParallelization = true)]
 public class EventPublishingCollection : ICollectionFixture<EventPublishingIntegrationFixture>;

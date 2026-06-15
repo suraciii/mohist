@@ -13,19 +13,21 @@ public struct WorkflowDefinitionSurrogate
     [Id(3)] public Dictionary<string, JsonElement?>? Variables;
     [Id(4)] public Dictionary<string, JsonElement?>? Defaults;
     [Id(5)] public Dictionary<string, string>? Artifacts;
+    [Id(6)] public string? Description;
 }
 
 [RegisterConverter]
 public sealed class WorkflowDefinitionSurrogateConverter : IConverter<WorkflowDefinition, WorkflowDefinitionSurrogate>
 {
     public WorkflowDefinition ConvertFromSurrogate(in WorkflowDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Stages, surrogate.Name, surrogate.Variables, surrogate.Defaults, surrogate.Artifacts);
+        new(surrogate.Id, surrogate.Stages, surrogate.Name, surrogate.Description, surrogate.Variables, surrogate.Defaults, surrogate.Artifacts);
 
     public WorkflowDefinitionSurrogate ConvertToSurrogate(in WorkflowDefinition value) => new()
     {
         Id = value.Id,
         Stages = value.Stages,
         Name = value.Name,
+        Description = value.Description,
         Variables = value.Variables,
         Defaults = value.Defaults,
         Artifacts = value.Artifacts,

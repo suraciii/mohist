@@ -1,0 +1,94 @@
+{
+  "project": "mohist",
+  "description": "Add description metadata to workflow profiles, create example profiles, add mo workflow list CLI, and update Web UI",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: Add description field to WorkflowDefinition YAML schema and model",
+      "spec": "specs/workflow-profile-metadata/spec.md#workflow-profile-yaml-supports-a-multi-line-description-field",
+      "description": "Add optional Description property to WorkflowDefinition record. Parse the top-level description key from workflow YAML block scalars in WorkflowYamlSerializer.FromYaml and emit it in ToYaml. Add a multi-line description block to mohist-default.workflow.yaml. Update MohistDefaultIssueWorkflowProfile.Description, SystemTemplates list, and SystemRoutes detail endpoint to source description from the parsed WorkflowDefinition rather than hardcoded strings. Handle missing description with fallback 'No description provided'.",
+      "acceptanceCriteria": [
+        "mohist-default.workflow.yaml has a multi-line description field using YAML block scalar",
+        "WorkflowDefinition.Description returns the parsed multi-line text from YAML",
+        "WorkflowYamlSerializer round-trip (FromYaml → ToYaml → FromYaml) preserves description",
+        "SystemTemplateInfo gains IsDefault field; SystemTemplates list carries correct isDefault values",
+        "GET /api/workflow-templates/system returns description from YAML and isDefault boolean",
+        "GET /api/workflow-templates/system/mohist/default returns description from YAML",
+        "Profile YAML without description field uses fallback 'No description provided'",
+        "Workflow engine execution is unaffected by description field presence"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowDefinition.Description populated from YAML; mohist-default.workflow.yaml updated; API responses carry multi-line description",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "WorkflowYamlSerializer already uses IgnoreUnmatchedProperties() so existing YAML files without description won't break. Description is passive metadata — not consumed by the workflow engine."
+    },
+    {
+      "id": "T-002",
+      "title": "Server: Create quick-fix and experiment workflow profiles",
+      "spec": "specs/workflow-profile-metadata/spec.md#new-example-profiles-demonstrate-distinct-metadata",
+      "description": "Create MohistQuickFixIssueWorkflowProfile and MohistExperimentIssueWorkflowProfile classes implementing IIssueWorkflowProfile. Both reuse MohistWorkflow.Definition for stages but have distinct Id, DisplayName, and multi-line Description. Register in IssueWorkflowProfileRegistry. Add entries to ProjectWorkflowProfileManager.SystemTemplates. Extend GetSystemTemplateDefinition to return MohistWorkflow.Definition for mohist/quick-fix and mohist/experiment. Add profile ID constants to IssueWorkflowProfiles.",
+      "acceptanceCriteria": [
+        "mohist/quick-fix profile appears in system template list with distinct description indicating fast simple fixes",
+        "mohist/experiment profile appears in system template list with distinct description indicating exploration/prototyping",
+        "Both profiles reuse MohistWorkflow.Definition stages",
+        "IssueWorkflowProfileRegistry.List() returns all three profiles",
+        "GetSystemTemplateDefinition returns definition for all three profile IDs",
+        "All three profile descriptions are sufficiently distinct for AI semantic matching"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Three distinct workflow profiles available: mohist/default, mohist/quick-fix, mohist/experiment",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "New profiles are class-based with hardcoded metadata. They share MohistWorkflow.Definition for stages since the only difference is metadata. No separate YAML files needed."
+    },
+    {
+      "id": "T-003",
+      "title": "CLI: Add mo workflow list command",
+      "spec": "specs/cli-workflow-list/spec.md",
+      "description": "Create the CLI workflow command group with a list subcommand. Implements mo workflow list calling GET /api/workflow-templates/system. Human-readable output shows display name (with default indicator) and description with preserved formatting. --json flag outputs valid JSON array suitable for agent skill consumption. Follows the existing thin-client pattern: no local YAML parsing or business logic. Handles server-not-running error with standard messaging. Uses the server-provided isDefault field rather than deriving it locally.",
+      "acceptanceCriteria": [
+        "mo workflow --help shows list subcommand",
+        "mo workflow list displays all profiles with display name, description, and default indicator",
+        "Multi-line descriptions render with preserved formatting in human output",
+        "mo workflow list --json outputs valid JSON array with id, displayName, description, isDefault",
+        "JSON isDefault value matches server response (not derived by CLI)",
+        "JSON output is self-contained with no transient or environment data",
+        "Command shows standard 'Server is not running' error when server is down",
+        "CLI does not parse YAML or compute metadata locally"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "cli/commands/workflow.ts providing mo workflow list with human and --json output",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The API endpoint GET /api/workflow-templates/system already exists and returns profiles. The CLI simply formats the response. Follow the pattern from mo skills list."
+    },
+    {
+      "id": "T-004",
+      "title": "Web UI: Render multi-line workflow profile descriptions prominently",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Update WorkflowProfilesSection components to render full multi-line descriptions with preserved line breaks. In ProfileCard, use whitespace-pre-line to show full description text rather than single-line truncation. In ProfileDetail, move description to the top of the view (above stages and YAML) and render with readable formatting. Update the entities/settings frontend types if needed (WorkflowProfileInfo.description already exists as string). Ensure single-line descriptions still display without truncation issues.",
+      "acceptanceCriteria": [
+        "ProfileCard in profile list renders multi-line description with preserved line breaks",
+        "ProfileDetail shows full description at top of view, above stages and YAML sections",
+        "Description uses readable proportional font (not monospaced) in detail view",
+        "Single-line descriptions still render without truncation or layout issues",
+        "YAML section remains accessible below description and stages",
+        "TypeScript types for WorkflowProfileInfo/WorkflowProfileDetail remain compatible"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated WorkflowProfilesSection.tsx rendering multi-line descriptions prominently",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The backend API already returns multi-line description via SystemTemplateInfo. The frontend just needs CSS whitespace-pre-line and layout reordering. The frontend's getWorkflowProfiles() can use server-provided isDefault after T-001 adds it to SystemTemplateInfo."
+    }
+  ]
+}

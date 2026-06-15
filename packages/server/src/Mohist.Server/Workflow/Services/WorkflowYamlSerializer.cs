@@ -24,6 +24,7 @@ public static class WorkflowYamlSerializer
             string.IsNullOrWhiteSpace(workflowId) ? id : workflowId,
             stages,
             Name: NullIfEmpty(String(document, "name")),
+            Description: NullIfEmpty(String(document, "description")),
             Variables: JsonElementMap(OptionalMap(document, "variables")),
             Defaults: JsonElementMap(OptionalMap(document, "defaults")),
             Artifacts: OptionalMap(document, "artifacts")?.ToDictionary(kv => kv.Key, kv => kv.Value?.ToString() ?? ""));
@@ -35,6 +36,7 @@ public static class WorkflowYamlSerializer
         {
             ["id"] = definition.Id,
             ["name"] = definition.Name,
+            ["description"] = definition.Description,
             ["variables"] = ObjectMap(definition.Variables),
             ["defaults"] = ObjectMap(definition.Defaults),
             ["artifacts"] = definition.Artifacts,
