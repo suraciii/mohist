@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { pushAction, setMergeGitRunnerForTest } from "../src/actions/registry.js"
+import { pushAction, setMergeConflictResolverForTest, setMergeGitRunnerForTest } from "../src/actions/registry.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 afterEach(() => {
   setMergeGitRunnerForTest(null)
+  setMergeConflictResolverForTest(null)
 })
 
 describe("mohist/push", () => {
@@ -101,8 +102,16 @@ describe("mohist/push", () => {
     expect(output.output).toContain("Successfully rebased")
   })
 
-  it("NonFastForwardWithRebaseConflict_ReturnsStructuredFailure", async () => {
+  it("NonFastForwardWithRebaseConflict_UsesDefaultResolver", async () => {
     const calls: string[] = []
+    let resolverRan = false
+    setMergeConflictResolverForTest(async (resolverContext) => {
+      resolverRan = true
+      expect(resolverContext.workId).toBe("integrate:push.1-push-rebase-resolve-1")
+      expect(resolverContext.title).toBe("Resolve push rebase conflicts")
+      expect(String(resolverContext.with?.prompt)).toContain("file.txt")
+      return { status: "failure", message: "resolver failed", output: "resolver failed", exitCode: 1 }
+    })
     setMergeGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
@@ -125,7 +134,7 @@ describe("mohist/push", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(result.message.toLowerCase()).toContain("remote branch advanced")
+    expect(resolverRan).toBe(true)
     expect(calls).toEqual([
       "push origin main",
       "fetch origin main",
@@ -139,7 +148,69 @@ describe("mohist/push", () => {
       target: "main",
       status: "remote_advanced_rebase_conflict",
       conflictFiles: ["file.txt"],
+      resolveAttempts: 1,
     })
+    expect(output.output).toContain("resolver failed")
+  })
+
+  it("NonFastForwardWithConfiguredConflictResolver_ResolvesRebaseThenPushes", async () => {
+    const calls: string[] = []
+    let resolverRan = false
+    let pushAttempts = 0
+    setMergeConflictResolverForTest(async (resolverContext) => {
+      resolverRan = true
+      expect(resolverContext.workId).toBe("integrate:push.1-push-rebase-resolve-1")
+      expect(resolverContext.title).toBe("Resolve push rebase conflicts")
+      expect(String(resolverContext.with?.prompt)).toContain("git rebase origin/main")
+      expect(String(resolverContext.with?.prompt)).toContain("file.txt")
+      return { status: "success", message: "resolved", output: "resolver completed" }
+    })
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "push origin main":
+          pushAttempts++
+          if (pushAttempts === 2) return ok("To origin\n   abc123..def456  main -> main")
+          return fail("! [rejected]        main -> main (non-fast-forward)")
+        case "fetch origin main":
+          return ok("From origin\n * branch main -> FETCH_HEAD")
+        case "checkout main":
+          return ok("Switched to branch 'main'")
+        case "rebase origin/main":
+          return fail("CONFLICT (content): Merge conflict in file.txt")
+        case "diff --name-only --diff-filter=U":
+          return ok(resolverRan ? "" : "file.txt\n")
+        case "rev-parse --git-path rebase-merge":
+          return ok(".git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok(".git/rebase-apply\n")
+        case "diff --check":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await pushAction(context({
+      target: "main",
+      conflictResolver: {
+        title: "Resolve push rebase conflicts",
+        with: {},
+      },
+      maxConflictRetries: 1,
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output).toMatchObject({
+      kind: "push",
+      remote: "origin",
+      target: "main",
+      status: "remote_advanced_rebased_and_pushed",
+      conflictFiles: ["file.txt"],
+      resolveAttempts: 1,
+    })
+    expect(output.output).toContain("resolver completed")
   })
 
   it("MissingTargetAndRepositoryBaseBranch_ReturnsFailureWithoutInvokingPush", async () => {
