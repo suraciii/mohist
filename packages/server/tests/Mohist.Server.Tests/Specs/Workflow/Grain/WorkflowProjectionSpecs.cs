@@ -35,9 +35,9 @@ public class WorkflowProjectionSpecs
         var view = WorkflowStatusMapper.BuildStatusView(run, definition: null);
 
         var userTask = view!.Stages[0].Tasks[0];
-        var orchTask = view.Stages[0].Tasks[1];
+        var agentTask = view.Stages[0].Tasks[1];
         Assert.Equal(TaskClassification.UserFacing, userTask.Classification);
-        Assert.Equal(TaskClassification.Orchestration, orchTask.Classification);
+        Assert.Equal(TaskClassification.UserFacing, agentTask.Classification);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -421,9 +421,9 @@ public class WorkflowProjectionSpecs
                             Attempt = 1,
                             Title = "Sync spec",
                             Status = TaskRunStatus.Running,
-                            Uses = "mohist/openspec-sync",
+                            Uses = "mohist/acp-agent",
                             RequiredFiles = null,
-                            Classification = TaskClassification.Orchestration
+                            Classification = TaskClassification.UserFacing
                         }
                     ]
                 }
