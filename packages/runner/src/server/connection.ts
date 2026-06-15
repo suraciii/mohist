@@ -106,11 +106,11 @@ export class ServerConnection {
     return `${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
   }
 
-  async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null } | null> {
+  async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null; contextWindowUsed?: number | null; contextWindowSize?: number | null } | null> {
     const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { method: "GET", signal })
     if (response.status === 404) return null
     if (!response.ok) throw new Error(`session lookup failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
+    return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null; contextWindowUsed?: number | null; contextWindowSize?: number | null }>
   }
 
   async openWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
@@ -130,6 +130,11 @@ export class ServerConnection {
 
   async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
+  }
+
+  async resetWorkflowAgentSessionRuntime(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<void> {
+    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/reset-runtime`), { method: "POST", signal })
+    if (!response.ok) throw new Error(`session reset failed: ${response.status} ${await response.text()}`)
   }
 
   async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
