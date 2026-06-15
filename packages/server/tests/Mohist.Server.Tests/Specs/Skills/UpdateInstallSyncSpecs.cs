@@ -268,7 +268,7 @@ public sealed class UpdateInstallSyncSpecs
         public readonly List<(string FileName, string[] Args, string? WorkingDirectory)> ExecutedCommands = new();
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-            string fileName, string[] args, string? workingDirectory = null)
+            string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
         {
             ExecutedCommands.Add((fileName, args, workingDirectory));
             return Task.FromResult((0, string.Empty, string.Empty));

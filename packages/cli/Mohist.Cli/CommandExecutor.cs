@@ -5,13 +5,13 @@ namespace Mohist.Cli;
 internal interface ICommandExecutor
 {
     Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-        string fileName, string[] args, string? workingDirectory = null);
+        string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default);
 }
 
 internal sealed class SystemCommandExecutor : ICommandExecutor
 {
     public async Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-        string fileName, string[] args, string? workingDirectory = null)
+        string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo(fileName)
@@ -34,9 +34,31 @@ internal sealed class SystemCommandExecutor : ICommandExecutor
             return (1, "", $"Failed to run {fileName}: {ex.Message}");
         }
 
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return (process.ExitCode, stdout, stderr);
+        if (cancellationToken.CanBeCanceled)
+        {
+            cancellationToken.Register(() =>
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        try
+        {
+            var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken);
+            return (process.ExitCode, stdout, stderr);
+        }
+        catch (OperationCanceledException)
+        {
+            return (-1, "", "");
+        }
     }
 }

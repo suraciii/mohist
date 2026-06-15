@@ -552,7 +552,7 @@ public class UpdateSpecs
         public void SetExitCodeFor(string fileName, Func<string[], bool> match, int code) => _exitCodeRules.Add((fileName, match, code));
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-            string fileName, string[] args, string? workingDirectory = null)
+            string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
         {
             ExecutedCommands.Add((fileName, args, workingDirectory));
             var rule = _exitCodeRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
