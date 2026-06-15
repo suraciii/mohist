@@ -12,6 +12,8 @@ import { git as defaultGit } from "./git.js"
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 type GitRunner = typeof defaultGit
 type ConflictResolverRunner = typeof acpAgentAction
+type GitResult = Awaited<ReturnType<GitRunner>>
+type RemoteAlignResult = GitResult & { aligned?: boolean }
 
 let git: GitRunner = defaultGit
 let mergeConflictResolverRunner: ConflictResolverRunner = acpAgentAction
@@ -150,6 +152,7 @@ export async function mergeReadyAction(context: ActionContext): Promise<ActionRe
 export async function mergeAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? "HEAD"
   const target = stringInput(context.with, "target")
+  const remote = stringInput(context.with, "remote") ?? "origin"
   const strategy = stringInput(context.with, "strategy") ?? "squash"
   const message = stringInput(context.with, "message") ?? "Mohist merge"
   const maxRetries = numberInput(context.with, "maxConflictRetries") ?? 3
@@ -176,7 +179,14 @@ export async function mergeAction(context: ActionContext): Promise<ActionResult>
     })
   }
 
+  let remoteAlign: RemoteAlignResult | null = null
   if (target?.trim()) {
+    const fetch = await fetchTargetRemote(workDir, remote, target, context.signal)
+    if (!fetch.success) {
+      const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
+      return mergeFailure(source, target, strategy, fetch.combinedOutput, diagnostics, fetch.exitCode)
+    }
+
     const checkout = await git(workDir, ["checkout", target], context.signal)
     if (!checkout.success) {
       const checkoutConflicts = await mergeConflictFiles(workDir, context.signal)
@@ -195,6 +205,12 @@ export async function mergeAction(context: ActionContext): Promise<ActionResult>
 
       const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
       return mergeFailure(source, target, strategy, checkout.combinedOutput, diagnostics, checkout.exitCode)
+    }
+
+    remoteAlign = await fastForwardCheckedOutTargetToRemote(workDir, remote, target, fetch.combinedOutput, context.signal)
+    if (!remoteAlign.success) {
+      const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
+      return mergeFailure(source, target, strategy, remoteAlign.combinedOutput, diagnostics, remoteAlign.exitCode)
     }
   }
 
@@ -215,7 +231,7 @@ export async function mergeAction(context: ActionContext): Promise<ActionResult>
   }
 
   const head = result.success ? await git(workDir, ["rev-parse", "HEAD"], context.signal) : null
-  const output = JSON.stringify({ kind: "merge", source, target, strategy, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: result.combinedOutput })
+  const output = JSON.stringify({ kind: "merge", source, target, strategy, remoteAligned: remoteAlign?.aligned === true, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: [remoteAlign?.combinedOutput, result.combinedOutput].filter(Boolean).join("\n") })
   if (result.success) {
     return { status: "success", message: "Merge completed", output, exitCode: result.exitCode }
   }
@@ -229,7 +245,11 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   if (!target) return { status: "failure", message: "Push action requires target or repository.baseBranch" }
 
   const result = await git(context.workDir, ["push", remote, target], context.signal)
-  const output = JSON.stringify({ kind: "push", remote, target, output: result.combinedOutput })
+  if (!result.success && isNonFastForward(result.combinedOutput)) {
+    return await recoverNonFastForwardPush(context, remote, target, result.combinedOutput)
+  }
+
+  const output = JSON.stringify({ kind: "push", remote, target, status: result.success ? "pushed" : "failed", output: result.combinedOutput })
   return result.success
     ? { status: "success", message: "Push completed", output, exitCode: result.exitCode }
     : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
@@ -321,6 +341,79 @@ async function runMergeConflictResolver(
     title: stringInput(conflictResolver, "title") ?? "Resolve merge conflicts",
     with: resolverWith,
   })
+}
+
+async function fetchTargetRemote(workDir: string, remote: string, target: string, signal: AbortSignal): Promise<GitResult> {
+  return await git(workDir, ["fetch", remote, target], signal)
+}
+
+async function fastForwardCheckedOutTargetToRemote(workDir: string, remote: string, target: string, fetchOutput: string, signal: AbortSignal): Promise<RemoteAlignResult> {
+  const remoteRef = `${remote}/${target}`
+  const remoteHead = await git(workDir, ["rev-parse", "--verify", remoteRef], signal)
+  if (!remoteHead.success) {
+    return { success: true, stdout: "", stderr: "", exitCode: 0, combinedOutput: combinedGitOutput([fetchOutput, remoteHead.combinedOutput]), aligned: false }
+  }
+
+  const ff = await git(workDir, ["merge", "--ff-only", remoteRef], signal)
+  return {
+    ...ff,
+    combinedOutput: combinedGitOutput([fetchOutput, ff.combinedOutput]),
+    aligned: ff.success,
+  }
+}
+
+async function recoverNonFastForwardPush(context: ActionContext, remote: string, target: string, initialOutput: string): Promise<ActionResult> {
+  const fetch = await git(context.workDir, ["fetch", remote, target], context.signal)
+  if (!fetch.success) {
+    const output = JSON.stringify({ kind: "push", remote, target, status: "remote_advanced_fetch_failed", output: combinedGitOutput([initialOutput, fetch.combinedOutput]) })
+    return { status: "failure", message: fetch.combinedOutput, output, exitCode: fetch.exitCode }
+  }
+
+  const checkout = await git(context.workDir, ["checkout", target], context.signal)
+  if (!checkout.success) {
+    const output = JSON.stringify({ kind: "push", remote, target, status: "remote_advanced_checkout_failed", output: combinedGitOutput([initialOutput, fetch.combinedOutput, checkout.combinedOutput]) })
+    return { status: "failure", message: checkout.combinedOutput, output, exitCode: checkout.exitCode }
+  }
+
+  const remoteRef = `${remote}/${target}`
+  const rebase = await git(context.workDir, ["rebase", remoteRef], context.signal)
+  if (!rebase.success) {
+    const conflictFiles = await mergeConflictFiles(context.workDir, context.signal)
+    const output = JSON.stringify({
+      kind: "push",
+      remote,
+      target,
+      status: conflictFiles.length > 0 ? "remote_advanced_rebase_conflict" : "remote_advanced_rebase_failed",
+      conflictFiles,
+      output: combinedGitOutput([initialOutput, fetch.combinedOutput, rebase.combinedOutput]),
+    })
+    return { status: "failure", message: `Remote branch advanced and rebase failed: ${rebase.combinedOutput}`, output, exitCode: rebase.exitCode }
+  }
+
+  const verify = await git(context.workDir, ["diff", "--check"], context.signal)
+  if (!verify.success) {
+    const output = JSON.stringify({ kind: "push", remote, target, status: "remote_advanced_verify_failed", output: combinedGitOutput([initialOutput, fetch.combinedOutput, rebase.combinedOutput, verify.combinedOutput]) })
+    return { status: "failure", message: verify.combinedOutput, output, exitCode: verify.exitCode }
+  }
+
+  const retry = await git(context.workDir, ["push", remote, target], context.signal)
+  if (!retry.success) {
+    const output = JSON.stringify({ kind: "push", remote, target, status: isNonFastForward(retry.combinedOutput) ? "remote_advanced_retry_rejected" : "retry_failed", output: combinedGitOutput([initialOutput, fetch.combinedOutput, rebase.combinedOutput, verify.combinedOutput, retry.combinedOutput]) })
+    return { status: "failure", message: retry.combinedOutput, output, exitCode: retry.exitCode }
+  }
+
+  const output = JSON.stringify({
+    kind: "push",
+    remote,
+    target,
+    status: "remote_advanced_rebased_and_pushed",
+    output: combinedGitOutput([initialOutput, fetch.combinedOutput, rebase.combinedOutput, verify.combinedOutput, retry.combinedOutput]),
+  })
+  return { status: "success", message: "Push completed after rebasing onto remote", output, exitCode: retry.exitCode }
+}
+
+function isNonFastForward(output: string) {
+  return /non-fast-forward|fetch first|tip is behind|Updates were rejected/i.test(output)
 }
 
 function buildMergeConflictPrompt(conflicts: string[], source: string, target: string | undefined, attempt: number) {

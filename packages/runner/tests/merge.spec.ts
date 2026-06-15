@@ -8,6 +8,99 @@ afterEach(() => {
 })
 
 describe("mohist/merge", () => {
+  it("TargetBranchWithRemote_AlignsLocalBaseBeforeMerging", async () => {
+    const calls: string[] = []
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "status --porcelain":
+          return ok("")
+        case "fetch origin master":
+          return ok("From origin\n * branch master -> FETCH_HEAD")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "rev-parse --verify origin/master":
+          return ok("remote-sha\n")
+        case "merge --ff-only origin/master":
+          return ok("Updating base-sha..remote-sha\nFast-forward")
+        case "diff --name-only --diff-filter=U":
+          return ok("")
+        case "merge --squash mo/issue-82":
+          return ok("Squash commit -- not updating HEAD")
+        case "log --format=* %s master..mo/issue-82":
+          return ok("* T-001\n")
+        case "commit -m SignalR realtime push (#82) -m * T-001":
+          return ok("[master abc123] SignalR realtime push (#82)")
+        case "rev-parse HEAD":
+          return ok("abc123\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await mergeAction(context({
+      source: "mo/issue-82",
+      target: "master",
+      strategy: "squash",
+      message: "Complete issue #82",
+      remote: "origin",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(calls.slice(0, 5)).toEqual([
+      "status --porcelain",
+      "diff --name-only --diff-filter=U",
+      "fetch origin master",
+      "checkout master",
+      "rev-parse --verify origin/master",
+    ])
+    expect(calls).toContain("merge --ff-only origin/master")
+    expect(output.remoteAligned).toBe(true)
+  })
+
+  it("TargetBranchRemoteCannotFastForward_FailsBeforeMerging", async () => {
+    const calls: string[] = []
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "status --porcelain":
+          return ok("")
+        case "diff --name-only --diff-filter=U":
+          return ok("")
+        case "fetch origin master":
+          return ok("From origin\n * branch master -> FETCH_HEAD")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "rev-parse --verify origin/master":
+          return ok("remote-sha\n")
+        case "merge --ff-only origin/master":
+          return fail("fatal: Not possible to fast-forward, aborting.")
+        case "rev-parse master":
+          return ok("local-sha\n")
+        case "rev-parse mo/issue-82":
+          return ok("head-sha\n")
+        case "merge-base master mo/issue-82":
+          return ok("merge-base-sha\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await mergeAction(context({
+      source: "mo/issue-82",
+      target: "master",
+      strategy: "squash",
+      remote: "origin",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("fast-forward")
+    expect(calls).not.toContain("merge --squash mo/issue-82")
+    expect(output).toMatchObject({ kind: "merge", targetBranch: "master" })
+  })
+
   it("SquashMergeConflictWithResolver_ResolvesThenCommitsInWorkspace", async () => {
     const calls: string[] = []
     const workDirs: string[] = []
@@ -30,8 +123,12 @@ describe("mohist/merge", () => {
       switch (args.join(" ")) {
         case "status --porcelain":
           return ok("")
+        case "fetch origin master":
+          return ok("")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "rev-parse --verify origin/master":
+          return fail("no remote tracking branch")
         case "merge --squash mo/issue-82":
           return fail("CONFLICT (add/add): Merge conflict in specs/web-ui/spec.md")
         case "diff --name-only --diff-filter=U":
@@ -62,7 +159,9 @@ describe("mohist/merge", () => {
     expect(calls).toEqual([
       "status --porcelain",
       "diff --name-only --diff-filter=U",
+      "fetch origin master",
       "checkout master",
+      "rev-parse --verify origin/master",
       "merge --squash mo/issue-82",
       "diff --name-only --diff-filter=U",
       "diff --name-only --diff-filter=U",
@@ -96,8 +195,12 @@ describe("mohist/merge", () => {
       switch (args.join(" ")) {
         case "status --porcelain":
           return ok("")
+        case "fetch origin master":
+          return ok("")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "rev-parse --verify origin/master":
+          return fail("no remote tracking branch")
         case "merge --squash mo/issue-82":
           return fail("CONFLICT (add/add): Merge conflict in specs/web-ui/spec.md")
         case "diff --name-only --diff-filter=U":
@@ -176,8 +279,12 @@ describe("mohist/merge", () => {
       switch (args.join(" ")) {
         case "status --porcelain":
           return ok("")
+        case "fetch origin master":
+          return ok("")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "rev-parse --verify origin/master":
+          return fail("no remote tracking branch")
         case "merge --squash mo/issue-82":
           return fail("CONFLICT (content): Merge conflict in file.txt")
         case "diff --name-only --diff-filter=U":
