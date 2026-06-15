@@ -539,8 +539,6 @@ function formatValue(value: unknown): string {
   return String(value)
 }
 
-const SESSION_HEALTHY_CONTEXT_USAGE_THRESHOLD = 0.8
-
 async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const sessionName = sessionNameFromContext(context)
   const manager = context.acpSessionManager
@@ -549,26 +547,21 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
   if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.key(context.workflowRunId, sessionName)
     const existing = await context.serverConnection.getWorkflowAgentSession(projectId, context.workflowRunId, sessionName, context.signal)
-
-    if (existing?.acpSessionId && isSessionHealthy(existing)) {
-      const cached = manager.get(key)
-      if (cached?.sessionId === existing.acpSessionId) return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
-      const result = await runResumedWorkflowAgentSession(context, prompt, existing.acpSessionId, existing.workDir ?? context.workDir)
-      if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: existing.workDir ?? context.workDir })
-      return result
-    }
-
-    if (existing?.acpSessionId && !isSessionHealthy(existing)) {
-      await context.serverConnection.resetWorkflowAgentSessionRuntime(projectId, context.workflowRunId, sessionName, context.signal)
-    }
-
-    const session = await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
+    const session = existing ?? await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
       workId: context.workId,
       workType: context.workType,
       stage: context.stage,
       title: context.title,
       issueNumber: context.issueNumber,
     }, context.signal)
+
+    if (session.acpSessionId) {
+      const cached = manager.get(key)
+      if (cached?.sessionId === session.acpSessionId) return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+      const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+      if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
+      return result
+    }
 
     const result = await runNewWorkflowAgentSession(context, prompt)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
@@ -586,14 +579,6 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
   }
 
   return runEphemeralWorkflowAgentSession(context, prompt)
-}
-
-function isSessionHealthy(session: { acpSessionId?: string | null; contextWindowUsed?: number | null; contextWindowSize?: number | null }): boolean {
-  if (!session.acpSessionId) return false
-  const used = session.contextWindowUsed
-  const size = session.contextWindowSize
-  if (used != null && size != null && size > 0 && used / size > SESSION_HEALTHY_CONTEXT_USAGE_THRESHOLD) return false
-  return true
 }
 
 async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {

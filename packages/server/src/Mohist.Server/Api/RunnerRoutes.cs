@@ -155,18 +155,6 @@ public static class RunnerRoutes
             return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents)));
         });
 
-        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/reset-runtime", async (
-            string projectId, string workflowRunId, string sessionName,
-            AgentSessionResolver sessions,
-            CancellationToken ct) =>
-        {
-            var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
-            if (sessionId is null) return ApiResults.NotFound($"Session {sessionName} not found");
-
-            var session = await sessions.GetGrain(sessionId).ResetRuntimeAsync();
-            return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
-        });
-
         return app;
     }
 
@@ -192,9 +180,7 @@ public static class RunnerRoutes
             session.Status,
             session.WorkDir,
             session.Model,
-            session.ResolvedModel,
-            session.ContextWindowUsed,
-            session.ContextWindowSize);
+            session.ResolvedModel);
 }
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
@@ -202,7 +188,7 @@ public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? Proj
 public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null);
 public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus, bool Tracked, string? Reason = null);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
-public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, long? ContextWindowUsed = null, long? ContextWindowSize = null);
+public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null);
 public record AgentSessionOpenRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
 public record AgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents);
