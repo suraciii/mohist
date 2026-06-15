@@ -99,12 +99,12 @@ export function setStageModel(projectId: string | null | undefined, stage: strin
 }
 
 export function getWorkflowProfiles() {
-  return request<Array<{ id: string; name: string; description: string }>>('/workflow-templates/system')
+  return request<Array<{ id: string; name: string; description: string; isDefault: boolean }>>('/workflow-templates/system')
     .then((templates) => templates.map((template) => ({
       id: template.id,
       displayName: template.name,
       description: template.description,
-      isDefault: template.id === 'mohist/default',
+      isDefault: template.isDefault,
     })))
 }
 

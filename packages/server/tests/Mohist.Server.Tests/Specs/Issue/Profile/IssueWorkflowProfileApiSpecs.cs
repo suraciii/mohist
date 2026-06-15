@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Tests.Support;
@@ -429,6 +430,63 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         await _client.PutAsJsonAsync(
             $"/api/projects/{projectId}/workflow-profile/default-template",
             new { templateId = "mohist-test-noartifacts-profile" });
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    public async Task GetSystemTemplates_ReturnsDescriptionAndIsDefaultFlag()
+    {
+        using var response = await _client.GetAsync("/api/workflow-templates/system");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = payload.GetProperty("data");
+        var defaultTemplate = Assert.Single(data.EnumerateArray(), t => t.GetProperty("id").GetString() == "mohist/default");
+
+        Assert.True(defaultTemplate.GetProperty("isDefault").GetBoolean());
+        var description = defaultTemplate.GetProperty("description").GetString();
+        Assert.Equal(MohistWorkflow.Definition.Description, description);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    public async Task GetSystemTemplateDetail_ReturnsDescriptionFromYaml()
+    {
+        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/default");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = payload.GetProperty("data");
+
+        Assert.True(data.GetProperty("isDefault").GetBoolean());
+        Assert.Equal("Mohist Default", data.GetProperty("displayName").GetString());
+        Assert.Equal(MohistWorkflow.Definition.Description, data.GetProperty("description").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    public async Task GetSystemTemplateDetail_UnknownId_ReturnsNotFound()
+    {
+        using var response = await _client.GetAsync("/api/workflow-templates/system/does/not/exist");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
+    public async Task GetSystemTemplateDetail_EmittedYamlRoundTripsBackToSameDescription()
+    {
+        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/default");
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = payload.GetProperty("data");
+
+        var yaml = data.GetProperty("yaml").GetString();
+        Assert.NotNull(yaml);
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml!);
+        Assert.Equal(MohistWorkflow.Definition.Description, reparsed.Description);
     }
 
     private async Task StartWorkflowWithRunnerAsync(string projectId, int issueNumber, string runnerId)

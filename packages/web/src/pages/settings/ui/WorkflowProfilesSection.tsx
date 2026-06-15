@@ -78,7 +78,13 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
             </span>
           )}
         </div>
-        <p className="text-xs text-muted-foreground mt-1">{profile.description}</p>
+        <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{profile.id}</p>
+        <p
+          data-testid="workflow-profile-description"
+          className="text-sm text-foreground/90 mt-3 leading-relaxed whitespace-pre-line"
+        >
+          {profile.description}
+        </p>
       </div>
 
       <div className="space-y-3">
@@ -91,7 +97,10 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
       </div>
 
       <div className="space-y-3">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Definition (YAML)</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Shared Stage Definition (YAML)</h4>
+        <p className="text-[11px] text-muted-foreground/80">
+          quick-fix and experiment reuse these stages from mohist/default; only the metadata above differs.
+        </p>
         <YamlViewer yaml={profile.yaml} />
       </div>
     </div>
@@ -113,8 +122,13 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
           </span>
         )}
       </div>
-      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{profile.description}</p>
-      <p className="text-[11px] text-muted-foreground/70 mt-2 font-mono">{profile.id}</p>
+      <p
+        data-testid={`workflow-profile-${profile.id}-description`}
+        className="text-xs text-foreground/85 mt-2 leading-relaxed whitespace-pre-line"
+      >
+        {profile.description}
+      </p>
+      <p className="text-[10px] text-muted-foreground/70 mt-2 font-mono">{profile.id}</p>
     </button>
   )
 }

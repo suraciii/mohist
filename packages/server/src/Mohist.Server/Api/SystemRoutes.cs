@@ -20,11 +20,14 @@ public static class SystemRoutes
             if (definition is null)
                 return ApiResults.NotFound($"Workflow template '{id}' not found");
 
+            var template = ProjectWorkflowProfileManager.GetSystemTemplateInfo(id)
+                ?? new SystemTemplateInfo(id, id, "No description provided", false);
+
             return ApiResults.Ok(new SystemWorkflowTemplateDetail(
                 id,
-                "Mohist Default",
-                "Plan, build, check, and integrate an issue using OpenSpec artifacts.",
-                true,
+                template.Name,
+                template.Description,
+                template.IsDefault,
                 WorkflowYamlSerializer.ToYaml(definition),
                 definition.Stages.Select(s => new SystemWorkflowTemplateStageSummary(
                     s.Stage,

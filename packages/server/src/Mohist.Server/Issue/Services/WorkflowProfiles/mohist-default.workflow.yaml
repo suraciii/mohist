@@ -1,3 +1,11 @@
+description: |
+  Full Mohist pipeline for shipping user-visible changes end-to-end.
+  Stages: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (spec sync, archive, merge).
+  Requires human approval at the plan and check stages, with the workflow merging the working branch into the project base branch on completion.
+  Typical duration: 20-60 minutes for a focused change.
+  Best suited for: new features, user-visible behavior changes, changes that need a design document or spec delta.
+  Not suited for: simple bug fixes (use quick-fix), exploration or throwaway prototypes (use experiment), or pure refactors with no behavior change.
+
 variables:
   agent:
     type: opencode

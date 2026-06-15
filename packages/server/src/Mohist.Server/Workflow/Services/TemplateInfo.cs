@@ -6,7 +6,8 @@ namespace Mohist.Server.Workflow.Services;
 public sealed record SystemTemplateInfo(
     string Id,
     string Name,
-    string Description);
+    string Description,
+    bool IsDefault);
 
 /// <summary>
 /// Project template metadata.
