@@ -2,18 +2,20 @@
 
 ## ADDED Requirements
 
-### Requirement: git-push-action pushes the current branch to a remote
+### Requirement: git-push-action pushes an explicit delivery branch to a remote
 
-The `mohist/push` workflow action SHALL push the current git branch to a configured remote without invoking an AI agent. The action SHALL treat push failure as a terminal task failure.
+The `mohist/push` workflow action SHALL push a configured target branch to a configured remote without invoking an AI agent. The action SHALL treat push failure as a terminal task failure. If `target` is omitted, the action SHALL use `repository.baseBranch` from workflow variables. It SHALL NOT infer the target from the current git branch.
 
-#### Scenario: Default push to origin
+#### Scenario: Default remote and repository base branch
 - **WHEN** the `mohist/push` action executes with no `remote` input
-- **THEN** it SHALL push the current branch to `origin`
+- **AND** workflow variables include `repository.baseBranch`
+- **THEN** it SHALL push `repository.baseBranch` to `origin`
 - **AND** it SHALL report task success when the remote accepts the push
 
 #### Scenario: Push to configured remote
 - **WHEN** the `mohist/push` action executes with `remote: upstream`
-- **THEN** it SHALL push the current branch to the configured remote name
+- **AND** workflow variables include `repository.baseBranch`
+- **THEN** it SHALL push `repository.baseBranch` to the configured remote name
 - **AND** it SHALL report task success when that remote accepts the push
 
 #### Scenario: Push target branch
@@ -25,6 +27,11 @@ The `mohist/push` workflow action SHALL push the current git branch to a configu
 - **WHEN** the `mohist/push` action executes and the remote rejects the push
 - **THEN** it SHALL report task failure
 - **AND** it SHALL include the git error output in the task failure evidence
+
+#### Scenario: Missing target
+- **WHEN** the `mohist/push` action executes without `target`
+- **AND** workflow variables do not include `repository.baseBranch`
+- **THEN** it SHALL report task failure without invoking `git push`
 
 #### Scenario: Pure git operation
 - **WHEN** the `mohist/push` action executes

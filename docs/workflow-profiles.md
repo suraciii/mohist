@@ -1,6 +1,6 @@
 # Workflow Profile
 
-Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带一个默认 profile（`mohist/default`），未来你可以创建多个，按 issue 选择。
+Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带一个默认 profile（`mohist/default`）。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
 
 ## 默认 Profile
 
@@ -159,14 +159,15 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 ## Profile ID 约定
 
 - `mohist/default` → 官方默认
-- `mohist/<name>` → 官方提供的其他 profile
+- `mohist/<name>` → 官方提供的其他 profile；只有实现了独立执行定义后才会暴露
 - `<your-org>/<name>` → 你自定义的
 
 ## 当前的限制
 
 Roadmap（已知不足）：
 
-- Profile 没有描述性元数据（title、description、risk_level、suitable_for）
+- Profile 目前只有 `description` 描述性元数据；更结构化的 `risk_level`、`suitable_for` 等字段未提供
+- quick-fix、experiment 这类轻量 profile 尚未内置，避免展示与实际执行不一致的假选项
 - 没有"按 issue 内容自动推荐 profile"机制
 - 不能 import/export profile
 - 没有 profile 调试模式（dry run）
@@ -179,9 +180,17 @@ Workflow 里的 `prompts.proposal` 等模板可以在 Settings → Templates 里
 
 模板支持变量：
 
-- `${{ issue.title }}` / `${{ issue.body }}`
+- `${{ issue.number }}` / `${{ issue.id }}`
+- `${{ project.id }}` / `${{ project.name }}`
+- `${{ repository.baseBranch }}`
 - `${{ openspecChangeDir }}`
 - `${{ vars.agent }}`
 - 等等
+
+完整 issue 内容由 Agent 通过 CLI 获取，例如：
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
 
 完整变量列表看 `design/workflow-template-variables.md`。

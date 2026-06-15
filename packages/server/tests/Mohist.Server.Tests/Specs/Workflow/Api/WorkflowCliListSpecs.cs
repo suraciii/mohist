@@ -44,7 +44,7 @@ public class WorkflowCliListSpecs
               "success": true,
               "data": [
                 { "id": "mohist/default", "name": "Mohist Default", "description": "Default profile.", "isDefault": true },
-                { "id": "mohist/quick-fix", "name": "Mohist Quick Fix", "description": "Quick fix profile.", "isDefault": false }
+                { "id": "team/custom", "name": "Team Custom", "description": "Custom profile.", "isDefault": false }
               ]
             }
             """;
@@ -56,9 +56,9 @@ public class WorkflowCliListSpecs
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Equal(string.Empty, stderr);
         Assert.Contains("Mohist Default", stdout);
-        Assert.Contains("Mohist Quick Fix", stdout);
+        Assert.Contains("Team Custom", stdout);
         Assert.Contains("mohist/default", stdout);
-        Assert.Contains("mohist/quick-fix", stdout);
+        Assert.Contains("team/custom", stdout);
         Assert.Contains("(default)", stdout);
     }
 
@@ -99,7 +99,7 @@ public class WorkflowCliListSpecs
               "success": true,
               "data": [
                 { "id": "mohist/default", "name": "Mohist Default", "description": "Default profile.", "isDefault": true },
-                { "id": "mohist/quick-fix", "name": "Mohist Quick Fix", "description": "Quick fix profile.", "isDefault": false }
+                { "id": "team/custom", "name": "Team Custom", "description": "Custom profile.", "isDefault": false }
               ]
             }
             """;
@@ -122,8 +122,8 @@ public class WorkflowCliListSpecs
         Assert.True(first["isDefault"]!.GetValue<bool>());
 
         var second = parsed[1]!.AsObject();
-        Assert.Equal("mohist/quick-fix", second["id"]!.GetValue<string>());
-        Assert.Equal("Mohist Quick Fix", second["displayName"]!.GetValue<string>());
+        Assert.Equal("team/custom", second["id"]!.GetValue<string>());
+        Assert.Equal("Team Custom", second["displayName"]!.GetValue<string>());
         Assert.False(second["isDefault"]!.GetValue<bool>());
     }
 
@@ -286,7 +286,7 @@ public class WorkflowCliListSpecs
               "success": true,
               "data": [
                 { "id": "mohist/default", "name": "Mohist Default", "description": "Default.", "isDefault": true },
-                { "id": "mohist/quick-fix", "name": "Mohist Quick Fix", "description": "Quick.", "isDefault": false }
+                { "id": "team/custom", "name": "Team Custom", "description": "Custom.", "isDefault": false }
               ]
             }
             """;
@@ -298,10 +298,10 @@ public class WorkflowCliListSpecs
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var text = stdout.Replace("\r\n", "\n");
         var defaultIndex = text.IndexOf("Mohist Default", StringComparison.Ordinal);
-        var quickFixIndex = text.IndexOf("Mohist Quick Fix", StringComparison.Ordinal);
+        var customIndex = text.IndexOf("Team Custom", StringComparison.Ordinal);
         Assert.True(defaultIndex >= 0);
-        Assert.True(quickFixIndex > defaultIndex);
-        var between = text.Substring(defaultIndex, quickFixIndex - defaultIndex);
+        Assert.True(customIndex > defaultIndex);
+        var between = text.Substring(defaultIndex, customIndex - defaultIndex);
         Assert.Contains("\n\n", between);
     }
 

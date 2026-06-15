@@ -27,7 +27,7 @@ cat ./my-issue.md | mo issue create "My issue" --body-stdin
 mo issue create "Critical fix" --priority p0 --label bug --label urgent
 
 # 指定 workflow profile
-mo issue create "Quick typo fix" --workflow-profile quick-fix
+mo issue create "Implement search" --workflow-profile mohist/default
 
 # 指定 AI 模型
 mo issue create "Complex refactor" --model claude-sonnet-4

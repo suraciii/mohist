@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.SystemInfo;
@@ -156,7 +155,9 @@ public class IssueGrain : Grain, IIssueGrain
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
 
-        await _issueProfileManager.PatchVariablesAsync(issue.Id, BuildIssueVariables(wrId, issue, projectContext, workspace));
+        await _issueProfileManager.PatchVariablesAsync(
+            issue.Id,
+            IssueVariableBuilder.Build(VariableBundle.Empty, VariableBundle.Empty, wrId, issue, projectContext, workspace));
 
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.Id, key, body);
@@ -404,26 +405,6 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
-    }
-
-    private VariableBundle BuildIssueVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, WorkspaceIdentity workspace)
-    {
-        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["mohist"] = JsonSerializer.SerializeToElement(new { runId = workflowRunId }, WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number }, WorkflowVariableJson.Options),
-            // `project` is a Mohist scope: only identity-level metadata. The
-            // base branch belongs to the repository reference, never the
-            // project, so it is intentionally absent here.
-            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name }, WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, gitUrl = project.RepositoryGitUrl, baseBranch = project.RepositoryBaseBranch }, WorkflowVariableJson.Options),
-            ["workspace"] = JsonSerializer.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch, changeDir = workspace.ChangeDir }, WorkflowVariableJson.Options),
-            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
-        };
-
-        var varsJson = JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
-        var varsElement = JsonSerializer.Deserialize<JsonElement>(varsJson);
-        return new VariableBundle(varsElement);
     }
 
     private async Task EnsurePromptsReferencesResolveAsync(Workflow.Domain.Definition.WorkflowDefinition definition, IReadOnlyDictionary<string, string> mergedPrompts)

@@ -225,19 +225,14 @@ export async function mergeAction(context: ActionContext): Promise<ActionResult>
 
 export async function pushAction(context: ActionContext): Promise<ActionResult> {
   const remote = stringInput(context.with, "remote") ?? "origin"
-  const target = stringInput(context.with, "target") ?? await resolveCurrentBranch(context.workDir, context.signal)
-  if (!target) return { status: "failure", message: "Push action could not resolve current branch" }
+  const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"])
+  if (!target) return { status: "failure", message: "Push action requires target or repository.baseBranch" }
 
   const result = await git(context.workDir, ["push", remote, target], context.signal)
   const output = JSON.stringify({ kind: "push", remote, target, output: result.combinedOutput })
   return result.success
     ? { status: "success", message: "Push completed", output, exitCode: result.exitCode }
     : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
-}
-
-async function resolveCurrentBranch(workDir: string, signal: AbortSignal) {
-  const result = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
-  return result.success ? result.stdout.trim() : null
 }
 
 async function resolveMergeConflict(

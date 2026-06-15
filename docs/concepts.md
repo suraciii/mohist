@@ -70,12 +70,10 @@ Draft → Plan → Build → Check → Integrate → Done
 
 ### Workflow Profile
 
-Workflow 不是写死的。你可以定义多个 **Workflow Profile**，每个 issue 选一个用。
+Workflow 不是写死的。产品模型支持多个 **Workflow Profile**，每个 issue 可以选一个用。
 
-比如：
+当前内置 profile：
 - `mohist/default` — 完整 5 阶段流程（默认）
-- `quick-fix` — 简化流程，跳过 design 适合小改动
-- `experiment` — 全自动不审批，适合试验性改动
 
 详见 [Workflow Profile](workflow-profiles.md)。
 

@@ -7,13 +7,11 @@ afterEach(() => {
 })
 
 describe("mohist/push", () => {
-  it("DefaultInputs_PushesCurrentBranchToOrigin", async () => {
+  it("DefaultRemoteAndRepositoryBaseBranch_PushesBaseBranchToOrigin", async () => {
     const calls: string[] = []
     setMergeGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
-        case "rev-parse --abbrev-ref HEAD":
-          return ok("main")
         case "push origin main":
           return ok("To origin\n   abc123..def456  main -> main")
         default:
@@ -21,11 +19,11 @@ describe("mohist/push", () => {
       }
     })
 
-    const result = await pushAction(context())
+    const result = await pushAction(context({}, { repository: { baseBranch: "main" } }))
 
     expect(result.status).toBe("success")
     expect(calls).toContain("push origin main")
-    expect(calls).toContain("rev-parse --abbrev-ref HEAD")
+    expect(calls).not.toContain("rev-parse --abbrev-ref HEAD")
   })
 
   it("ExplicitRemoteAndTarget_PushesConfiguredRef", async () => {
@@ -79,21 +77,19 @@ describe("mohist/push", () => {
     expect(output.output).toContain("failed to push some refs to 'origin'")
   })
 
-  it("UnresolvableCurrentBranch_ReturnsFailureWithoutInvokingPush", async () => {
+  it("MissingTargetAndRepositoryBaseBranch_ReturnsFailureWithoutInvokingPush", async () => {
     const calls: string[] = []
     setMergeGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
-      if (args.join(" ") === "rev-parse --abbrev-ref HEAD") {
-        return fail("fatal: not a git repository")
-      }
       return fail(`unexpected git call: ${args.join(" ")}`)
     })
 
     const result = await pushAction(context())
 
     expect(result.status).toBe("failure")
-    expect(result.message).toContain("could not resolve current branch")
+    expect(result.message).toContain("requires target or repository.baseBranch")
     expect(calls).not.toContain("push origin main")
+    expect(calls).toEqual([])
   })
 })
 
