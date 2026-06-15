@@ -214,22 +214,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return _session is null ? null : await ToInfoAsync(_session);
     }
 
-    public async Task<AgentSessionInfo> ResetRuntimeAsync()
-    {
-        var session = await GetRequiredAsync();
-        var now = DateTime.UtcNow;
-        session.Status = session.Status with
-        {
-            AgentRuntimeSessionId = null,
-            Phase = AgentSessionStatus.Opened,
-            LastDataAt = null,
-            UsageSummary = new AgentUsageSummary(),
-        };
-        await _stateStore.SaveAsync(SessionId, session);
-        _session = session;
-        return await ToInfoAsync(session);
-    }
-
     private async Task<AgentSession> GetRequiredAsync()
     {
         if (_session is not null) return _session;
