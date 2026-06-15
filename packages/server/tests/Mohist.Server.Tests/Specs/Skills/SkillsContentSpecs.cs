@@ -387,6 +387,7 @@ public sealed class SkillsContentSpecs
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(output, error, _files, sp.GetRequiredService<ICommandExecutor>()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(assets ?? BuildDefaultService());
+        services.AddSingleton<InfoCollector>();
         services.AddSingleton<SkillInstallService>(_ => new SkillInstallService(
             _.GetRequiredService<SkillAssetService>(),
             _.GetRequiredService<IFileSystem>(),

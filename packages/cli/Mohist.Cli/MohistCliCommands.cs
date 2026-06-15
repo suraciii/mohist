@@ -13,6 +13,7 @@ internal static class MohistCliCommands
 
         root.Subcommands.Add(BuildStatusCommand(api));
         root.Subcommands.Add(BuildLogsCommand(api));
+        root.Subcommands.Add(InfoCommands.Build(provider));
         root.Subcommands.Add(ServerCommands.Build(api, provider));
         root.Subcommands.Add(RunnerCommands.Build(api, provider));
         root.Subcommands.Add(InstallCommands.Build(provider));
@@ -91,6 +92,7 @@ internal static class MohistCliCommands
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoCollector>();
         var provider = services.BuildServiceProvider();
         var root = Build(api, provider);
         var config = new InvocationConfiguration { Output = output, Error = error };

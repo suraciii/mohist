@@ -30,6 +30,7 @@ internal static class CliProgram
         services.AddSingleton(updater);
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoCollector>();
 
         var provider = services.BuildServiceProvider();
         var root = MohistCliCommands.Build(api, provider);

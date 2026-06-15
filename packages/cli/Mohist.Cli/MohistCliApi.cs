@@ -24,6 +24,7 @@ internal sealed class MohistCliApi
     internal IFileSystem FileSystem => _fileSystem;
     internal ICommandExecutor CommandExecutor => _commandExecutor;
     internal TextReader StandardInput => _standardInput;
+    internal HttpClient Http => _http;
 
     public MohistCliApi(
         HttpClient http,
@@ -168,22 +169,6 @@ internal sealed class MohistCliApi
         return 0;
     }
 
-    private async Task<string?> TryReadActiveProjectIdAsync()
-    {
-        if (!_fileSystem.Exists(ProjectStatePath))
-            return null;
-        try
-        {
-            var json = await _fileSystem.ReadAllTextAsync(ProjectStatePath);
-            var state = JsonNode.Parse(json);
-            return state?["activeProjectId"]?.GetValue<string>();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     public async Task<JsonNode?> PostDataAsync(string path, object body)
     {
         using var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
@@ -268,10 +253,30 @@ internal sealed class MohistCliApi
     public Task<string?> ResolveProjectIdAsync(string? projectId) =>
         ResolveProjectIdAsync(null, projectId);
 
-    private static string ProjectStatePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".mohist",
-        "cli-state.json");
+    internal Func<string>? ProjectStatePathOverride { get; set; }
+
+    internal string ProjectStatePath => ProjectStatePathOverride is not null
+        ? ProjectStatePathOverride()
+        : Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".mohist",
+            "cli-state.json");
+
+    internal async Task<string?> TryReadActiveProjectIdAsync()
+    {
+        if (!_fileSystem.Exists(ProjectStatePath))
+            return null;
+        try
+        {
+            var json = await _fileSystem.ReadAllTextAsync(ProjectStatePath);
+            var state = JsonNode.Parse(json);
+            return state?["activeProjectId"]?.GetValue<string>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private async Task<JsonNode?> ReadSuccessDataAsync(HttpResponseMessage response)
     {

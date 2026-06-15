@@ -252,6 +252,7 @@ public class IssueCliBodyInputSpecs
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoCollector>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();
@@ -265,7 +266,7 @@ public class IssueCliBodyInputSpecs
 
     private sealed class NoopCommandExecutor : ICommandExecutor
     {
-        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(string fileName, string[] args, string? workingDirectory = null) =>
+        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default) =>
             Task.FromResult((0, "", ""));
     }
 

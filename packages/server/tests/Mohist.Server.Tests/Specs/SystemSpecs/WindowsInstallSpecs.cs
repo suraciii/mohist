@@ -1295,7 +1295,7 @@ public class WindowsInstallSpecs
         public Func<string, string[], (int ExitCode, string Stdout, string Stderr)>? ResponseFactory { get; set; }
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-            string fileName, string[] args, string? workingDirectory = null)
+            string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
         {
             ExecutedCommands.Add((fileName, args, workingDirectory));
             if (ResponseFactory != null)
