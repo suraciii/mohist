@@ -8,7 +8,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<AgentSessionInfo?> GetAsync();
-    Task<AgentSessionInfo> ResetRuntimeAsync();
 }
 
 [GenerateSerializer]

@@ -5,8 +5,6 @@ using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
-using Mohist.Server.Sessions.Services;
-using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Artifacts;
@@ -35,7 +33,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
     private readonly IWorkflowArtifactBindService _artifactBindService;
-    private readonly AgentSessionResolver _sessionResolver;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
@@ -44,7 +41,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
         IWorkflowArtifactBindService artifactBindService,
-        AgentSessionResolver sessionResolver,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
@@ -52,7 +48,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _backlogs = backlogs;
         _profileManager = profileManager;
         _artifactBindService = artifactBindService;
-        _sessionResolver = sessionResolver;
         _log = log;
     }
 
@@ -169,14 +164,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EnsureRun();
         await ReleaseCurrentStageLocksAsync("retried");
         await ClearAndDeleteLeaseAsync();
-
-        var failedTaskId = _run.CurrentStage().Failure?.TaskId;
         var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
-
-        if (failedTaskId is not null)
-            await ResetAgentSessionForTaskAsync(failedTaskId);
-
         await CommitAsync(events);
     }
 
@@ -1281,28 +1270,4 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _leaseState.State is not null
             ? _leaseState.WriteStateAsync()
             : Task.CompletedTask;
-
-    private async Task ResetAgentSessionForTaskAsync(string taskRunId)
-    {
-        try
-        {
-            var current = _run!.CurrentStage();
-            var failedTask = current.Tasks.FirstOrDefault(t => t.Id == taskRunId);
-            if (failedTask is null) return;
-
-            var sessionName = TaskRunExtensions.ExtractSessionName(failedTask.WithInput);
-            if (string.IsNullOrWhiteSpace(sessionName)) return;
-
-            var labels = WorkflowAgentSessionMetadata.LookupLabels(GetProjectId(), GrainKey, sessionName);
-            var sessionId = await _sessionResolver.ResolveByLabelsAsync(labels);
-            if (string.IsNullOrWhiteSpace(sessionId)) return;
-
-            await _sessionResolver.GetGrain(sessionId).ResetRuntimeAsync();
-            _log.LogInformation("Workflow {Id} reset agent session {SessionName} for retried task {TaskId}", GrainKey, sessionName, taskRunId);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Workflow {Id} failed to reset agent session for retried task {TaskId}", GrainKey, taskRunId);
-        }
-    }
 }
