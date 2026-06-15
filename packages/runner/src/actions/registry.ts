@@ -363,6 +363,8 @@ async function fastForwardCheckedOutTargetToRemote(workDir: string, remote: stri
 }
 
 async function recoverNonFastForwardPush(context: ActionContext, remote: string, target: string, initialOutput: string): Promise<ActionResult> {
+  const maxRetries = numberInput(context.with, "maxConflictRetries") ?? 3
+  const conflictResolver = objectInput(context.with, "conflictResolver") ?? {}
   const fetch = await git(context.workDir, ["fetch", remote, target], context.signal)
   if (!fetch.success) {
     const output = JSON.stringify({ kind: "push", remote, target, status: "remote_advanced_fetch_failed", output: combinedGitOutput([initialOutput, fetch.combinedOutput]) })
@@ -379,6 +381,19 @@ async function recoverNonFastForwardPush(context: ActionContext, remote: string,
   const rebase = await git(context.workDir, ["rebase", remoteRef], context.signal)
   if (!rebase.success) {
     const conflictFiles = await mergeConflictFiles(context.workDir, context.signal)
+    if (conflictFiles.length > 0) {
+      return await resolvePushRebaseConflict(context, {
+        remote,
+        target,
+        remoteRef,
+        initialOutput,
+        fetchOutput: fetch.combinedOutput,
+        rebaseOutput: rebase.combinedOutput,
+        conflictFiles,
+        conflictResolver,
+        maxRetries,
+      })
+    }
     const output = JSON.stringify({
       kind: "push",
       remote,
@@ -410,6 +425,143 @@ async function recoverNonFastForwardPush(context: ActionContext, remote: string,
     output: combinedGitOutput([initialOutput, fetch.combinedOutput, rebase.combinedOutput, verify.combinedOutput, retry.combinedOutput]),
   })
   return { status: "success", message: "Push completed after rebasing onto remote", output, exitCode: retry.exitCode }
+}
+
+async function resolvePushRebaseConflict(
+  context: ActionContext,
+  input: {
+    remote: string
+    target: string
+    remoteRef: string
+    initialOutput: string
+    fetchOutput: string
+    rebaseOutput: string
+    conflictFiles: string[]
+    conflictResolver: JsonObject
+    maxRetries: number
+  },
+): Promise<ActionResult> {
+  const outputs = [input.initialOutput, input.fetchOutput, input.rebaseOutput]
+  const allConflicts: string[][] = [input.conflictFiles]
+  let conflicts = input.conflictFiles
+  let attempts = 0
+
+  while (attempts < input.maxRetries) {
+    attempts++
+    const agentResult = await runPushRebaseConflictResolver(context, input.conflictResolver, input.remoteRef, conflicts, attempts)
+    if (agentResult.output) outputs.push(agentResult.output)
+    if (agentResult.status !== "success") {
+      return pushRebaseConflictFailure(input, allConflicts.flat(), attempts, outputs, agentResult.exitCode ?? 1)
+    }
+
+    const verified = await verifyPushRebaseComplete(context, input.remoteRef)
+    outputs.push(verified.output)
+    if (verified.ok) {
+      const verify = await git(context.workDir, ["diff", "--check"], context.signal)
+      outputs.push(verify.combinedOutput)
+      if (!verify.success) {
+        const output = JSON.stringify({ kind: "push", remote: input.remote, target: input.target, status: "remote_advanced_verify_failed", conflictFiles: allConflicts.flat(), resolveAttempts: attempts, output: combinedGitOutput(outputs) })
+        return { status: "failure", message: verify.combinedOutput, output, exitCode: verify.exitCode }
+      }
+
+      const retry = await git(context.workDir, ["push", input.remote, input.target], context.signal)
+      outputs.push(retry.combinedOutput)
+      if (!retry.success) {
+        const output = JSON.stringify({ kind: "push", remote: input.remote, target: input.target, status: isNonFastForward(retry.combinedOutput) ? "remote_advanced_retry_rejected" : "retry_failed", conflictFiles: allConflicts.flat(), resolveAttempts: attempts, output: combinedGitOutput(outputs) })
+        return { status: "failure", message: retry.combinedOutput, output, exitCode: retry.exitCode }
+      }
+
+      const output = JSON.stringify({ kind: "push", remote: input.remote, target: input.target, status: "remote_advanced_rebased_and_pushed", conflictFiles: allConflicts.flat(), resolveAttempts: attempts, output: combinedGitOutput(outputs) })
+      return { status: "success", message: "Push completed after resolving remote rebase conflicts", output, exitCode: retry.exitCode }
+    }
+
+    conflicts = await mergeConflictFiles(context.workDir, context.signal)
+    if (conflicts.length > 0) allConflicts.push(conflicts)
+  }
+
+  return pushRebaseConflictFailure(input, allConflicts.flat(), attempts, outputs, 1)
+}
+
+async function runPushRebaseConflictResolver(
+  context: ActionContext,
+  conflictResolver: JsonObject,
+  remoteRef: string,
+  conflicts: string[],
+  attempt: number,
+): Promise<ActionResult> {
+  const resolverWith: JsonObject = {
+    prompt: buildPushRebaseConflictPrompt(remoteRef, conflicts, attempt),
+    ...objectInput(conflictResolver, "with"),
+  }
+  applyWorkflowAgentDefault(resolverWith, context.variables)
+
+  return mergeConflictResolverRunner({
+    ...context,
+    workId: `${context.workId}-push-rebase-resolve-${attempt}`,
+    workType: "task",
+    title: stringInput(conflictResolver, "title") ?? "Resolve push rebase conflicts",
+    with: resolverWith,
+  })
+}
+
+async function verifyPushRebaseComplete(context: ActionContext, remoteRef: string) {
+  const conflicts = await mergeConflictFiles(context.workDir, context.signal)
+  const rebaseInProgress = await isGitSequencerInProgress(context)
+  const output = [
+    conflicts.length > 0 ? `Conflicts remain:\n${conflicts.join("\n")}` : "",
+    rebaseInProgress ? `Rebase onto ${remoteRef} is still in progress.` : "",
+  ].filter(Boolean).join("\n")
+  return { ok: conflicts.length === 0 && !rebaseInProgress, output }
+}
+
+async function isGitSequencerInProgress(context: ActionContext) {
+  const merge = await git(context.workDir, ["rev-parse", "--git-path", "rebase-merge"], context.signal)
+  if (merge.success && exists(resolveGitPath(context.workDir, merge.stdout.trim()))) return true
+  const apply = await git(context.workDir, ["rev-parse", "--git-path", "rebase-apply"], context.signal)
+  return apply.success && exists(resolveGitPath(context.workDir, apply.stdout.trim()))
+}
+
+function buildPushRebaseConflictPrompt(remoteRef: string, conflicts: string[], attempt: number) {
+  const fileList = conflicts.map((f) => `- ${f}`).join("\n")
+  return [
+    `## Complete Push Rebase Conflict Resolution (attempt ${attempt})`,
+    "",
+    `A \`git rebase ${remoteRef}\` was started because the remote base branch advanced before push.`,
+    "",
+    "Current conflict files:",
+    fileList,
+    "",
+    "Resolution rules:",
+    "1. Preserve both the integrated issue changes and the newer remote base changes.",
+    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>` across the repository; no markers may remain.",
+    "3. Stage resolved files with `git add`.",
+    "4. Run `GIT_EDITOR=true git rebase --continue`.",
+    "5. If more conflicts appear, keep resolving and continuing until the rebase fully completes.",
+    "6. Do not push and do not force push. The runner will verify and push after the rebase is complete.",
+  ].join("\n")
+}
+
+function pushRebaseConflictFailure(
+  input: { remote: string; target: string },
+  conflicts: string[],
+  attempts: number,
+  outputs: string[],
+  exitCode: number,
+): ActionResult {
+  const output = JSON.stringify({
+    kind: "push",
+    remote: input.remote,
+    target: input.target,
+    status: "remote_advanced_rebase_conflict",
+    conflictFiles: conflicts,
+    resolveAttempts: attempts,
+    output: combinedGitOutput(outputs),
+  })
+  return { status: "failure", message: combinedGitOutput(outputs), output, exitCode }
+}
+
+function resolveGitPath(workDir: string, path: string) {
+  return path.match(/^[A-Za-z]:[\\/]|^\//) ? path : join(workDir, path)
 }
 
 function isNonFastForward(output: string) {
