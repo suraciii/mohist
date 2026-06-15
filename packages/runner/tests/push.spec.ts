@@ -60,21 +60,86 @@ describe("mohist/push", () => {
     expect(output).toMatchObject({ kind: "push", remote: "origin", target: "main" })
   })
 
-  it("RejectedPush_ReturnsFailureWithGitErrorOutput", async () => {
+  it("NonFastForwardPush_RebasesOntoRemoteAndRetries", async () => {
+    const calls: string[] = []
+    let pushAttempts = 0
     setMergeGitRunnerForTest(async (_workDir, args) => {
-      if (args.join(" ") === "push origin main") {
-        return fail("! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to 'origin'")
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "push origin main":
+          pushAttempts++
+          if (pushAttempts === 2) return ok("To origin\n   abc123..def456  main -> main")
+          return fail("! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to 'origin'")
+        case "fetch origin main":
+          return ok("From origin\n * branch main -> FETCH_HEAD")
+        case "checkout main":
+          return ok("Switched to branch 'main'")
+        case "rebase origin/main":
+          return ok("Successfully rebased and updated refs/heads/main.")
+        case "diff --check":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
       }
-      return fail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const result = await pushAction(context({ target: "main" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(result.message).toBe("Push completed after rebasing onto remote")
+    expect(calls).toEqual([
+      "push origin main",
+      "fetch origin main",
+      "checkout main",
+      "rebase origin/main",
+      "diff --check",
+      "push origin main",
+    ])
+    expect(output).toMatchObject({ kind: "push", remote: "origin", target: "main" })
+    expect(output.status).toBe("remote_advanced_rebased_and_pushed")
+    expect(output.output).toContain("Successfully rebased")
+  })
+
+  it("NonFastForwardWithRebaseConflict_ReturnsStructuredFailure", async () => {
+    const calls: string[] = []
+    setMergeGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "push origin main":
+          return fail("! [rejected]        main -> main (non-fast-forward)")
+        case "fetch origin main":
+          return ok("From origin\n * branch main -> FETCH_HEAD")
+        case "checkout main":
+          return ok("Switched to branch 'main'")
+        case "rebase origin/main":
+          return fail("CONFLICT (content): Merge conflict in file.txt")
+        case "diff --name-only --diff-filter=U":
+          return ok("file.txt\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
     })
 
     const result = await pushAction(context({ target: "main" }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(result.message).toContain("non-fast-forward")
-    expect(output).toMatchObject({ kind: "push", remote: "origin", target: "main" })
-    expect(output.output).toContain("failed to push some refs to 'origin'")
+    expect(result.message.toLowerCase()).toContain("remote branch advanced")
+    expect(calls).toEqual([
+      "push origin main",
+      "fetch origin main",
+      "checkout main",
+      "rebase origin/main",
+      "diff --name-only --diff-filter=U",
+    ])
+    expect(output).toMatchObject({
+      kind: "push",
+      remote: "origin",
+      target: "main",
+      status: "remote_advanced_rebase_conflict",
+      conflictFiles: ["file.txt"],
+    })
   })
 
   it("MissingTargetAndRepositoryBaseBranch_ReturnsFailureWithoutInvokingPush", async () => {
