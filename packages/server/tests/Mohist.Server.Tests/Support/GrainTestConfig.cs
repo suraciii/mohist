@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
@@ -43,5 +44,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton(eventBus);
         siloBuilder.Services.AddSingleton(eventStore);
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
+        siloBuilder.Services.AddScoped<AgentSessionQuery>();
+        siloBuilder.Services.AddScoped<AgentSessionResolver>();
     }
 }
