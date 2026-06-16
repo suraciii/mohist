@@ -9,6 +9,7 @@ public sealed partial class Issue
     private string? _body;
     private string[] _labels = [];
     private IssuePriority _priority = IssuePriority.Default;
+    private string? _risk;
     private DateTime _updatedAt;
     private DateTime? _archivedAt;
     private string? _activeWorkflowRunId;
@@ -43,6 +44,12 @@ public sealed partial class Issue
     {
         get => _priority.Value;
         init => _priority = IssuePriority.From(value);
+    }
+
+    public string? Risk
+    {
+        get => _risk;
+        init => _risk = IssueRisk.From(value)?.Value;
     }
 
     public DateTime CreatedAt { get; init; }

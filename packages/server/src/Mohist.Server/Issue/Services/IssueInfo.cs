@@ -18,6 +18,7 @@ public class IssueInfo
     public string? ProjectName { get; set; }
     public string[] Labels { get; set; } = [];
     public string Priority { get; set; } = "p2";
+    public string? Risk { get; set; }
     public string? Model { get; set; }
     public Dictionary<string, string>? StageModels { get; set; }
     public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }

@@ -7,4 +7,5 @@ public class IssueRow
     public string? ProjectId { get; set; }
     public int? Number { get; set; }
     public string? WorkflowRunId { get; set; }
+    public string? Risk { get; set; }
 }

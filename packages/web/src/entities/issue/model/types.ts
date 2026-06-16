@@ -160,6 +160,7 @@ export interface Issue {
   comments?: Comment[]
   approvalState?: ApprovalState
   priority?: string | null
+  risk?: string | null
   model?: string | null
   agentConfig?: Record<string, unknown> | null
   stageModels?: Record<string, string> | null

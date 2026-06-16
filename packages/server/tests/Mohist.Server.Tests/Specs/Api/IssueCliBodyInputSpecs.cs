@@ -241,6 +241,192 @@ public class IssueCliBodyInputSpecs
         Assert.Contains("mutually exclusive", err, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void IssueCreate_Help_ListsRiskOption()
+    {
+        var help = RenderHelp(["issue", "create", "--help"]);
+
+        Assert.Contains("--risk", help);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueCreate_BodyFileWithFrontmatter_AutoFillsWorkflowAndRiskAndStripsBlock()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("body.md",
+            "---\n"
+            + "recommended_workflow: feature-flow\n"
+            + "recommended_workflow_reason: Matches scope\n"
+            + "risk: high\n"
+            + "---\n"
+            + "## Background\nReal content.\n");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "create", "Title", "--body-file", "body.md", "--project", "mohist-local"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var body = http.ReadCapturedBody(http.Requests.Single());
+        Assert.Equal("feature-flow", body?["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("high", body?["risk"]?.GetValue<string>());
+        Assert.Equal("## Background\nReal content.\n", body?["body"]?.GetValue<string>());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueCreate_ExplicitWorkflowProfileOverridesFrontmatter()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("body.md",
+            "---\n"
+            + "recommended_workflow: feature-flow\n"
+            + "risk: low\n"
+            + "---\n"
+            + "Body.\n");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "create", "Title", "--body-file", "body.md", "--workflow-profile", "mohist/default", "--project", "mohist-local"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var body = http.ReadCapturedBody(http.Requests.Single());
+        Assert.Equal("mohist/default", body?["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("low", body?["risk"]?.GetValue<string>());
+        Assert.Contains("overrides frontmatter recommended_workflow", error.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueCreate_BodyFileWithoutFrontmatter_EmitsWarningButSucceeds()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("body.md", "# plain body\nno frontmatter\n");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "create", "Title", "--body-file", "body.md", "--project", "mohist-local"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var body = http.ReadCapturedBody(http.Requests.Single());
+        Assert.Equal("# plain body\nno frontmatter\n", body?["body"]?.GetValue<string>());
+        Assert.Null(body?["workflowProfileId"]?.GetValue<string>());
+        Assert.Contains("no frontmatter found", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueCreate_MalformedFrontmatter_EmitsWarningButSendsFullBody()
+    {
+        var files = new FakeFileSystem();
+        var fullBody = "---\nrecommended_workflow feature-flow\n---\nBody after block.\n";
+        files.AddFile("body.md", fullBody);
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "create", "Title", "--body-file", "body.md", "--project", "mohist-local"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var body = http.ReadCapturedBody(http.Requests.Single());
+        Assert.Equal(fullBody, body?["body"]?.GetValue<string>());
+        Assert.Null(body?["workflowProfileId"]?.GetValue<string>());
+        Assert.Contains("malformed", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueCreate_RiskFlag_SentInCreateRequest()
+    {
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "create", "Title", "--body", "x", "--risk", "medium", "--project", "mohist-local"],
+            output,
+            error,
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var body = http.ReadCapturedBody(http.Requests.Single());
+        Assert.Equal("medium", body?["risk"]?.GetValue<string>());
+        Assert.Null(body?["workflowProfileId"]?.GetValue<string>());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueCreate_ExplicitRiskFlagOverridesFrontmatterRisk()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("body.md",
+            "---\n"
+            + "recommended_workflow: feature-flow\n"
+            + "risk: low\n"
+            + "---\n"
+            + "Body.\n");
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": { "id": "issue_1", "number": 1 } }""");
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["issue", "create", "Title", "--body-file", "body.md", "--risk", "high", "--project", "mohist-local"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        var body = http.ReadCapturedBody(http.Requests.Single());
+        Assert.Equal("feature-flow", body?["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("high", body?["risk"]?.GetValue<string>());
+        Assert.Contains("overrides frontmatter risk", error.ToString());
+    }
+
     private static string RenderHelp(string[] args)
     {
         var services = new ServiceCollection();
@@ -248,11 +434,11 @@ public class IssueCliBodyInputSpecs
         services.AddSingleton<TextWriter>(TextWriter.Null);
         services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<IServiceInstaller>(new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton<IServiceInstaller>(_ => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
+        services.AddSingleton<SystemdServiceInstaller>();
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
-        services.AddSingleton<InfoCollector>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();

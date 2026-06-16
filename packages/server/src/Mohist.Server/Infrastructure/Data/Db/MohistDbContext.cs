@@ -191,6 +191,7 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.IssueId);
             entity.Property(e => e.IssueId).HasMaxLength(256);
             entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.Risk).HasMaxLength(16);
             entity.Property(e => e.ProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
             entity.Property(e => e.Number)

@@ -213,6 +213,44 @@ internal sealed class MohistCliApi
         return await ReadSuccessDataAsync(response);
     }
 
+    public async Task<int> PrintWorkflowProfilesDescribedAsync()
+    {
+        var data = await GetDataAsync("/api/workflow-profiles");
+        RenderWorkflowProfilesDescribed(data);
+        return 0;
+    }
+
+    private void RenderWorkflowProfilesDescribed(JsonNode? data)
+    {
+        if (data is not JsonArray profiles || profiles.Count == 0)
+        {
+            _out.WriteLine("No workflow profiles found.");
+            return;
+        }
+
+        foreach (var profile in profiles)
+        {
+            var id = profile?["id"]?.GetValue<string>() ?? "";
+            var displayName = profile?["displayName"]?.GetValue<string>() ?? "";
+            var description = profile?["description"]?.GetValue<string>() ?? "";
+            _out.WriteLine($"{id} — {displayName}");
+            _out.WriteLine($"  {description}");
+
+            var suitableFor = profile?["suitableFor"];
+            if (suitableFor is JsonArray tags && tags.Count > 0)
+            {
+                var items = tags.Select(t => t?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s));
+                _out.WriteLine($"  Suitable for: {string.Join(", ", items)}");
+            }
+            else
+            {
+                _out.WriteLine("  Suitable for: (not specified)");
+            }
+
+            _out.WriteLine();
+        }
+    }
+
     public async Task<int> UseProjectAsync(string identifier)
     {
         try

@@ -92,6 +92,16 @@ export function getPriorityStyle(priority: string): { bg: string; text: string }
   return PRIORITY_COLORS[priority] ?? { bg: '#fef9c3', text: '#ca8a04' }
 }
 
+const RISK_COLORS: Record<string, { bg: string; text: string }> = {
+  low: { bg: '#dcfce7', text: '#16a34a' },
+  medium: { bg: '#fef9c3', text: '#ca8a04' },
+  high: { bg: '#fee2e2', text: '#dc2626' },
+}
+
+export function getRiskStyle(risk: string): { bg: string; text: string } {
+  return RISK_COLORS[risk] ?? { bg: '#f3f4f6', text: '#6b7280' }
+}
+
 export function sortLabels(labels: string[]): string[] {
   const types: string[] = []
   const urgency: string[] = []

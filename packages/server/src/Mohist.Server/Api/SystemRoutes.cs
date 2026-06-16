@@ -1,3 +1,4 @@
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services;
@@ -13,6 +14,9 @@ public static class SystemRoutes
 
         app.MapGet("/api/workflow-templates/system", async (ProjectWorkflowProfileManager profileManager) =>
             ApiResults.Ok(await profileManager.ListSystemTemplatesAsync()));
+
+        app.MapGet("/api/workflow-profiles", (IssueWorkflowProfileRegistry registry) =>
+            ApiResults.Ok(registry.ListDescribed()));
 
         app.MapGet("/api/workflow-templates/system/{*id}", (string id) =>
         {

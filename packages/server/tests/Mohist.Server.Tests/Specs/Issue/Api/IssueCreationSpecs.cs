@@ -39,12 +39,12 @@ public class IssueCreationSpecs
         return project;
     }
 
-    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null)
+    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? risk = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId);
+        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId, risk);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
 
@@ -385,6 +385,64 @@ public class IssueCreationSpecs
 
         Assert.True(eligibility.Startable);
         Assert.Empty(eligibility.WaitingForCompletion);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithRisk_PersistsAndReturnsIt()
+    {
+        var project = await SetupProjectAsync();
+
+        var issue = await CreateIssueAsync(project.Id, "Risked", risk: "high");
+
+        Assert.Equal("high", issue.Risk);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithoutRisk_ReturnsNull()
+    {
+        var project = await SetupProjectAsync();
+
+        var issue = await CreateIssueAsync(project.Id, "NoRisk");
+
+        Assert.Null(issue.Risk);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ReadModel_IncludesRisk_AfterCreate()
+    {
+        var project = await SetupProjectAsync();
+
+        var number = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        await grain.CreateAsync(project.Id, number, "Medium risk", body: null, labels: null, priority: null, repositoryRef: null, issueId: issueId, risk: "medium");
+
+        using var scope = _services.CreateScope();
+        var issuesQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var readModel = await issuesQuery.GetAsync(project.Id, number, project);
+
+        Assert.NotNull(readModel);
+        Assert.Equal("medium", readModel!.Risk);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CreateIssue_WithInvalidRisk_Throws()
+    {
+        var project = await SetupProjectAsync();
+        var number = await _grains.GetGrain<IIssueCounterGrain>(project.Id).NextAsync();
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            grain.CreateAsync(project.Id, number, "Bad", null, null, null, null, issueId, "unknown"));
     }
 
 }
