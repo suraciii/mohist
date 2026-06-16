@@ -99,14 +99,16 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       ? new Date(session.completedAt).getTime() - new Date(session.createdAt).getTime()
       : 0
 
+  const usage = session.usage
+  const eventSummary = session.eventSummary
   const hasUsage =
-    session.totalTokens != null ||
-    session.inputTokens != null ||
-    session.outputTokens != null ||
-    session.cachedReadTokens != null ||
-    session.thoughtTokens != null
+    usage?.totalTokens != null ||
+    usage?.inputTokens != null ||
+    usage?.outputTokens != null ||
+    usage?.cachedReadTokens != null ||
+    usage?.thoughtTokens != null
 
-  const hasContextWindow = session.contextWindowUsed != null
+  const hasContextWindow = usage?.contextWindowUsed != null
 
   const content = (
     <>
@@ -114,11 +116,11 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       <span className="text-sm font-medium text-gray-800 truncate max-w-[200px]">{label}</span>
 
       {/* Model badges */}
-      {session.model && session.resolvedModel && session.model !== session.resolvedModel ? (
+      {session.model && eventSummary?.resolvedModel && session.model !== eventSummary.resolvedModel ? (
         <span className="text-xs text-gray-400">
           <span className="text-gray-500">{session.model}</span>
           <span className="text-gray-300 mx-1">→</span>
-          <span className="text-blue-600">{session.resolvedModel}</span>
+          <span className="text-blue-600">{eventSummary.resolvedModel}</span>
         </span>
       ) : session.model ? (
         <span className="text-xs text-gray-400">{session.model}</span>
@@ -136,11 +138,11 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       {/* Usage badge */}
       {hasUsage && (
         <span className="text-xs text-gray-500">
-          {session.totalTokens != null
-            ? `${formatCompact(session.totalTokens)} tokens`
+          {usage?.totalTokens != null
+            ? `${formatCompact(usage.totalTokens)} tokens`
             : [
-                session.inputTokens != null ? `${formatCompact(session.inputTokens)} in` : '',
-                session.outputTokens != null ? `${formatCompact(session.outputTokens)} out` : '',
+                usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '',
+                usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '',
               ]
                 .filter(Boolean)
                 .join(' · ')}
@@ -148,24 +150,24 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       )}
 
       {/* Cost badge */}
-      {session.costAmount != null && session.costCurrency && (
-        <span className="text-xs text-gray-500">{formatCost(session.costAmount, session.costCurrency)}</span>
+      {usage?.costAmount != null && usage.costCurrency && (
+        <span className="text-xs text-gray-500">{formatCost(usage.costAmount, usage.costCurrency)}</span>
       )}
 
       {/* Context window badge */}
       {hasContextWindow && (
         <span className="text-xs text-gray-500">
-          {session.contextWindowSize != null
-            ? `${formatCompact(session.contextWindowUsed)} / ${formatCompact(session.contextWindowSize)} ctx`
-            : `${formatCompact(session.contextWindowUsed)} ctx used`}
+          {usage?.contextWindowSize != null
+            ? `${formatCompact(usage.contextWindowUsed)} / ${formatCompact(usage.contextWindowSize)} ctx`
+            : `${formatCompact(usage.contextWindowUsed)} ctx used`}
         </span>
       )}
 
       {/* Tool/error counts */}
-      {session.toolCallCount != null && (
-        <span className={`text-xs ${session.toolErrorCount ? 'text-orange-600 font-medium' : 'text-gray-500'}`}>
-          {session.toolCallCount} tool{session.toolCallCount !== 1 ? 's' : ''}
-          {session.toolErrorCount ? ` · ${session.toolErrorCount} error${session.toolErrorCount !== 1 ? 's' : ''}` : ''}
+      {eventSummary?.toolCallCount != null && (
+        <span className={`text-xs ${eventSummary.toolErrorCount ? 'text-orange-600 font-medium' : 'text-gray-500'}`}>
+          {eventSummary.toolCallCount} tool{eventSummary.toolCallCount !== 1 ? 's' : ''}
+          {eventSummary.toolErrorCount ? ` · ${eventSummary.toolErrorCount} error${eventSummary.toolErrorCount !== 1 ? 's' : ''}` : ''}
         </span>
       )}
 

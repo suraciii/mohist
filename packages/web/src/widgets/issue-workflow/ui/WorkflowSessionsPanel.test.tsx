@@ -11,38 +11,35 @@ vi.mock('../../../entities/coder-session', async (importOriginal) => ({
 
 const mockedUseWorkflowRunSessions = vi.mocked(useWorkflowRunSessions)
 
-function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
+function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonNullable<WorkflowRunSession['usage']>>; eventSummary?: Partial<NonNullable<WorkflowRunSession['eventSummary']>> }): WorkflowRunSession {
+  const { usage: usageOverride, eventSummary: eventSummaryOverride, ...rest } = overrides
   return {
-    id: overrides.id ?? 'session-1',
+    id: rest.id ?? 'session-1',
     workflowRunId: 'workflow-run-1',
-    sessionName: overrides.sessionName ?? 'check',
-    acpSessionId: overrides.acpSessionId ?? 'acp-1',
+    sessionName: rest.sessionName ?? 'check',
+    acpSessionId: rest.acpSessionId ?? 'acp-1',
     projectId: 'project-1',
     issueNumber: 55,
     runnerId: 'runner-1',
-    status: overrides.status ?? 'completed',
-    model: overrides.model ?? 'minimax/MiniMax-M3',
+    status: rest.status ?? 'completed',
+    model: rest.model ?? 'minimax/MiniMax-M3',
     workDir: null,
     processPid: null,
-    createdAt: overrides.createdAt ?? '2026-06-12T10:00:00.000Z',
+    createdAt: rest.createdAt ?? '2026-06-12T10:00:00.000Z',
     startedAt: null,
-    completedAt: overrides.completedAt ?? null,
-    lastDataAt: overrides.lastDataAt ?? '2026-06-12T10:05:00.000Z',
-    failureReason: overrides.failureReason ?? null,
+    completedAt: rest.completedAt ?? null,
+    lastDataAt: rest.lastDataAt ?? '2026-06-12T10:05:00.000Z',
+    failureReason: rest.failureReason ?? null,
     exitCode: null,
-    resolvedModel: overrides.resolvedModel ?? null,
-    inputTokens: overrides.inputTokens ?? null,
-    outputTokens: overrides.outputTokens ?? null,
-    totalTokens: overrides.totalTokens ?? null,
-    cachedReadTokens: overrides.cachedReadTokens ?? null,
-    thoughtTokens: overrides.thoughtTokens ?? null,
-    costAmount: overrides.costAmount ?? null,
-    costCurrency: overrides.costCurrency ?? null,
-    contextWindowUsed: overrides.contextWindowUsed ?? null,
-    contextWindowSize: overrides.contextWindowSize ?? null,
-    failureCategory: null,
-    toolCallCount: overrides.toolCallCount ?? null,
-    toolErrorCount: overrides.toolErrorCount ?? null,
+    usage: usageOverride ?? undefined,
+    eventSummary: eventSummaryOverride
+      ? {
+          resolvedModel: eventSummaryOverride.resolvedModel ?? null,
+          failureCategory: eventSummaryOverride.failureCategory ?? null,
+          toolCallCount: eventSummaryOverride.toolCallCount ?? null,
+          toolErrorCount: eventSummaryOverride.toolErrorCount ?? null,
+        }
+      : undefined,
   }
 }
 
@@ -55,11 +52,13 @@ describe('WorkflowSessionsPanel', () => {
           id: 's-check',
           sessionName: 'check',
           status: 'active',
-          totalTokens: 588_371,
-          costAmount: 0,
-          costCurrency: 'USD',
-          contextWindowUsed: 252_565,
-          contextWindowSize: 512_000,
+          usage: {
+            totalTokens: 588_371,
+            costAmount: 0,
+            costCurrency: 'USD',
+            contextWindowUsed: 252_565,
+            contextWindowSize: 512_000,
+          },
           createdAt: '2026-06-12T10:02:00.000Z',
         }),
         session({
@@ -67,17 +66,19 @@ describe('WorkflowSessionsPanel', () => {
           sessionName: 'plan',
           status: 'completed',
           model: 'configured/PlanModel',
-          resolvedModel: 'resolved/PlanModel',
-          totalTokens: 42_000,
-          contextWindowUsed: 32_000,
-          contextWindowSize: 200_000,
+          eventSummary: { resolvedModel: 'resolved/PlanModel' },
+          usage: {
+            totalTokens: 42_000,
+            contextWindowUsed: 32_000,
+            contextWindowSize: 200_000,
+          },
           createdAt: '2026-06-12T10:01:00.000Z',
         }),
         session({
           id: 's-build',
           sessionName: 'build',
           status: 'failed',
-          totalTokens: 10_000,
+          usage: { totalTokens: 10_000 },
           failureReason: 'probe timed out',
           createdAt: '2026-06-12T10:03:00.000Z',
         }),

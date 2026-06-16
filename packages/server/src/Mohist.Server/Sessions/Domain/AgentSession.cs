@@ -27,6 +27,16 @@ public sealed class AgentSession
             Status = AgentSessionStatusSnapshot.Created(createdAt)
         };
     }
+
+    public void ValidateState()
+    {
+        if (string.IsNullOrWhiteSpace(Id))
+            throw new InvalidOperationException("AgentSession state requires a non-empty Id.");
+        if (Runtime is null)
+            throw new InvalidOperationException("AgentSession state requires a Runtime.");
+        if (Status.CreatedAt == default)
+            throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
+    }
 }
 
 [GenerateSerializer]
@@ -74,7 +84,6 @@ public sealed record AgentSessionRuntime(
 public sealed record AgentSessionSettings(string? Model = null);
 
 public sealed record AgentSessionStatusSnapshot(
-    AgentSessionStatus Phase = AgentSessionStatus.Opened,
     string? AgentRuntimeSessionId = null,
     DateTime CreatedAt = default,
     DateTime? BoundAt = null,
@@ -82,7 +91,7 @@ public sealed record AgentSessionStatusSnapshot(
     AgentUsageSummary? UsageSummary = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(AgentSessionStatus.Opened, CreatedAt: now, UsageSummary: new AgentUsageSummary());
+        new(CreatedAt: now, UsageSummary: new AgentUsageSummary());
 }
 
 public sealed record AgentUsageSummary(

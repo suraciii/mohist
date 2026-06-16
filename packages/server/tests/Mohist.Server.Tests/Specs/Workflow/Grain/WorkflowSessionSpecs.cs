@@ -88,7 +88,8 @@ public class WorkflowSessionSpecs
         var listed = Assert.Single(sessions);
         Assert.Equal(sessionName, listed.SessionName);
         Assert.Equal("acp-1", listed.AcpSessionId);
-        Assert.Equal(15, listed.TotalTokens);
+        Assert.NotNull(listed.Usage);
+        Assert.Equal(15, listed.Usage!.TotalTokens);
         Assert.Equal(3, detail.Transcript.PartCount);
         var turn = Assert.Single(detail.Transcript.Turns);
         Assert.Equal("write proposal", turn.User.Text);
@@ -255,7 +256,8 @@ public class WorkflowSessionSpecs
 
     private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? AcpSessionId, string Status, string? WorkDir, string? Model);
     private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Model, long? TotalTokens);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Model, WorkflowSessionUsageDto? Usage);
+    private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);

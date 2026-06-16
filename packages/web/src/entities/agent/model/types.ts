@@ -1,3 +1,5 @@
+import type { AgentSessionEventSummary, AgentSessionUsage } from '../../coder-session/model/types'
+
 export interface AgentProgress {
   stage: string
   roundType?: string
@@ -159,19 +161,8 @@ export interface AgentActivitySession {
   taskProgress: AgentActivityTaskProgress | null
   lastActivity: AgentActivityPreview | null
   failureReason: string | null
-  resolvedModel?: string | null
-  inputTokens?: number | null
-  outputTokens?: number | null
-  totalTokens?: number | null
-  cachedReadTokens?: number | null
-  thoughtTokens?: number | null
-  costAmount?: number | null
-  costCurrency?: string | null
-  contextWindowUsed?: number | null
-  contextWindowSize?: number | null
-  failureCategory?: string | null
-  toolCallCount?: number | null
-  toolErrorCount?: number | null
+  eventSummary?: AgentSessionEventSummary
+  usage?: AgentSessionUsage
 }
 
 export interface AgentActivityWaiting {

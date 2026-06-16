@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -88,19 +87,8 @@ public class AgentSessionQuerier
             s.Status.CreatedAt.ToString("o"),
             null,
             AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
-            events?.ResolvedModel,
-            usage.InputTokens,
-            usage.OutputTokens,
-            usage.TotalTokens,
-            usage.CachedReadTokens,
-            usage.ThoughtTokens,
-            usage.CostAmount,
-            usage.CostCurrency,
-            usage.ContextWindowUsed,
-            usage.ContextWindowSize,
-            events?.FailureCategory,
-            events?.ToolCallCount,
-            events?.ToolErrorCount);
+            ToEventSummaryDto(events),
+            ToUsageDto(usage));
         }).ToList();
     }
 
@@ -128,7 +116,8 @@ public class AgentSessionQuerier
             .Select(part => ToProjection(sessionByTurnId[part.TurnId], part))
             .ToList();
         var partCount = transcriptEvents.Count;
-        var eventSummary = BuildEventSummary(transcriptEvents);
+        var eventSummary = TranscriptEventSummaryProjector.Summarize(
+            transcriptEvents.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson)));
         var toolCount = eventSummary.ToolCallCount ?? 0;
         var usage = AgentSessionJsonHelper.Usage(domainSession);
 
@@ -142,19 +131,8 @@ public class AgentSessionQuerier
             Annotation(domainSession, AgentSessionQueryMetadataKeys.Title),
             domainSession.Status.CreatedAt.ToString("o"),
             null,
-            eventSummary.ResolvedModel,
-            usage.InputTokens,
-            usage.OutputTokens,
-            usage.TotalTokens,
-            usage.CachedReadTokens,
-            usage.ThoughtTokens,
-            usage.CostAmount,
-            usage.CostCurrency,
-            usage.ContextWindowUsed,
-            usage.ContextWindowSize,
-            eventSummary.FailureCategory,
-            eventSummary.ToolCallCount,
-            eventSummary.ToolErrorCount,
+            ToEventSummaryDto(eventSummary),
+            ToUsageDto(usage),
             new AgentSessionMetadataCounts(partCount, toolCount));
     }
 
@@ -293,7 +271,7 @@ public class AgentSessionQuerier
         return result;
     }
 
-    private static async Task<Dictionary<string, TranscriptEventSummary>> LoadEventSummariesAsync(
+    private static async Task<Dictionary<string, AgentSessionTranscriptSummary>> LoadEventSummariesAsync(
         MohistDbContext db, IEnumerable<string> sessionIds, CancellationToken ct)
     {
         var ids = sessionIds.Distinct(StringComparer.Ordinal).ToArray();
@@ -316,50 +294,11 @@ public class AgentSessionQuerier
             .Select(part => ToProjection(sessionByTurnId[part.TurnId], part))
             .OrderBy(e => e.Sequence)
             .GroupBy(e => e.SessionId, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => BuildEventSummary(g), StringComparer.Ordinal);
+            .ToDictionary(g => g.Key, g => TranscriptEventSummaryProjector.Summarize(
+                g.Select(e => new TranscriptSummaryEvent(e.Sequence, e.Type, e.PayloadJson))), StringComparer.Ordinal);
     }
 
-    private static TranscriptEventSummary BuildEventSummary(IEnumerable<TranscriptEventProjection> events)
-    {
-        string? resolvedModel = null;
-        string? failureCategory = null;
-        var toolCallIds = new HashSet<string>(StringComparer.Ordinal);
-        var failedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var e in events)
-        {
-            if (e.Type == "model.resolved" || e.Type == "model")
-            {
-                var payload = AgentSessionJsonHelper.ParsePayload(e.PayloadJson);
-                resolvedModel = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? resolvedModel;
-            }
-            else if (e.Type == "session.closed" || e.Type == "session_closed")
-            {
-                var payload = AgentSessionJsonHelper.ParsePayload(e.PayloadJson);
-                failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory") ?? failureCategory;
-            }
-            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call" || e.Type == "tool")
-            {
-                var payload = AgentSessionJsonHelper.ParsePayload(e.PayloadJson);
-                var toolCallId = AgentSessionJsonHelper.GetToolStringProp(payload, "toolCallId")
-                    ?? AgentSessionJsonHelper.GetToolStringProp(payload, "id")
-                    ?? AgentSessionJsonHelper.GetToolStringProp(payload, "callId")
-                    ?? e.Sequence.ToString();
-                toolCallIds.Add(toolCallId);
-                var status = AgentSessionJsonHelper.GetToolStringProp(payload, "status") ?? AgentSessionJsonHelper.GetToolStringProp(payload, "state");
-                if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
-                    failedToolCallIds.Add(toolCallId);
-            }
-        }
-
-        return new TranscriptEventSummary(
-            resolvedModel,
-            failureCategory,
-            toolCallIds.Count == 0 ? null : toolCallIds.Count,
-            failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count);
-    }
-
-    private static ActivityCardDto ToActivityCard(AgentSessionRecord record, TranscriptEventProjection? latestEvent, TranscriptEventSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
+    private static ActivityCardDto ToActivityCard(AgentSessionRecord record, TranscriptEventProjection? latestEvent, AgentSessionTranscriptSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
     {
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
@@ -387,19 +326,8 @@ public class AgentSessionQuerier
             taskProgress,
             latestEvent is null ? null : ToPreview(latestEvent),
             null,
-            eventSummary?.ResolvedModel,
-            usage.InputTokens,
-            usage.OutputTokens,
-            usage.TotalTokens,
-            usage.CachedReadTokens,
-            usage.ThoughtTokens,
-            usage.CostAmount,
-            usage.CostCurrency,
-            usage.ContextWindowUsed,
-            usage.ContextWindowSize,
-            eventSummary?.FailureCategory,
-            eventSummary?.ToolCallCount,
-            eventSummary?.ToolErrorCount);
+            ToEventSummaryDto(eventSummary),
+            ToUsageDto(usage));
     }
 
     private static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
@@ -472,17 +400,13 @@ public class AgentSessionQuerier
             AgentSessionJsonHelper.StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null, null,
             s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), null,
             s.Status.LastDataAt?.ToString("o"), null, null,
-            null, usage.InputTokens, usage.OutputTokens,
-            usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
-            usage.CostAmount, usage.CostCurrency,
-            usage.ContextWindowUsed, usage.ContextWindowSize, null,
-            null, null);
+            new AgentEventSummaryDto(null, null, null, null),
+            ToUsageDto(usage));
     }
 
     private static WorkflowSessionDto ToWorkflowDto(AgentSessionRecord record)
     {
         var s = record.Session;
-        var usage = AgentSessionJsonHelper.Usage(s);
         var issueNumber = IssueNumber(record);
         return new(
         s.Id,
@@ -495,17 +419,13 @@ public class AgentSessionQuerier
         AgentSessionJsonHelper.StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         null, null, null,
-        null, usage.InputTokens, usage.OutputTokens,
-        usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
-        usage.CostAmount, usage.CostCurrency,
-        usage.ContextWindowUsed, usage.ContextWindowSize, null,
-        null, null);
+        new AgentEventSummaryDto(null, null, null, null),
+        ToUsageDto(s));
     }
 
     private static AgentSessionSummaryDto ToSummaryDto(AgentSessionRecord record)
     {
         var s = record.Session;
-        var usage = AgentSessionJsonHelper.Usage(s);
         return new AgentSessionSummaryDto(
             s.Id,
             Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? string.Empty,
@@ -515,11 +435,8 @@ public class AgentSessionQuerier
             AgentSessionJsonHelper.StatusName(s), s.Status.CreatedAt.ToString("o"), null,
             s.Settings.Model, null, Label(record, AgentSessionQueryMetadataKeys.Stage), Annotation(s, AgentSessionQueryMetadataKeys.Title),
             s.Status.LastDataAt?.ToString("o"), null, null, null,
-            null, usage.InputTokens, usage.OutputTokens,
-            usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
-            usage.CostAmount, usage.CostCurrency,
-            usage.ContextWindowUsed, usage.ContextWindowSize, null,
-            null, null);
+            new AgentEventSummaryDto(null, null, null, null),
+            ToUsageDto(s));
     }
 
     private static string? Label(AgentSessionRecord record, string key) =>
@@ -531,6 +448,17 @@ public class AgentSessionQuerier
             : 0;
 
     private static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
+
+    private static AgentUsageDto ToUsageDto(AgentSession s) =>
+        ToUsageDto(AgentSessionJsonHelper.Usage(s));
+
+    private static AgentUsageDto ToUsageDto(AgentUsageSummary u) =>
+        new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
+            u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize);
+
+    private static AgentEventSummaryDto ToEventSummaryDto(AgentSessionTranscriptSummary? s) =>
+        s is null ? new AgentEventSummaryDto(null, null, null, null)
+                  : new(s.ResolvedModel, s.FailureCategory, s.ToolCallCount, s.ToolErrorCount);
 
     private static IReadOnlyDictionary<string, string> Labels(params (string Key, string? Value)[] values)
     {
@@ -616,16 +544,9 @@ public class AgentSessionQuerier
             .ToList();
     }
 
-    private static readonly JsonSerializerOptions RunJsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
-
     private static WorkflowRun? DeserializeWorkflowRun(string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
+        try { return JsonSerializer.Deserialize<WorkflowRun>(json, Infrastructure.Data.Sessions.AgentSessionJson.JsonOptions); }
         catch { return null; }
     }
 
@@ -676,12 +597,6 @@ internal sealed record TranscriptEventProjection
     public string PayloadJson { get; init; } = "{}";
     public DateTime CreatedAt { get; init; }
 }
-
-internal sealed record TranscriptEventSummary(
-    string? ResolvedModel,
-    string? FailureCategory,
-    int? ToolCallCount,
-    int? ToolErrorCount);
 
 internal sealed record AgentSessionTranscriptData(
     IReadOnlyList<AgentSessionTranscriptTurnRow> Turns,

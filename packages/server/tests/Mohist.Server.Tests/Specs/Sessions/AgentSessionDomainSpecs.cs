@@ -41,7 +41,7 @@ public class AgentSessionDomainSpecs
         Assert.Null(session.Metadata.Annotation("title"));
         Assert.Equal("runner-1", session.Runtime.RunnerId);
         Assert.Equal("/work", session.Runtime.WorkDir);
-        Assert.Equal(AgentSessionStatus.Opened, session.Status.Phase);
+        Assert.Null(session.Status.AgentRuntimeSessionId);
         Assert.Equal(new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc), session.Status.CreatedAt);
         Assert.NotNull(session.Status.UsageSummary);
     }
