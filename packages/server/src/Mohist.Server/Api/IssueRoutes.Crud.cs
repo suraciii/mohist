@@ -46,7 +46,7 @@ public static partial class IssueRoutes
             var number = await counter.NextAsync();
             var issueId = $"issue_{Guid.NewGuid():N}";
             var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
-            await issueGrain.CreateAsync(project.Id, number, req.Title, req.Body, req.Labels, req.Priority, resolution.Repository!.Name, issueId);
+            await issueGrain.CreateAsync(project.Id, number, req.Title, req.Body, req.Labels, req.Priority, resolution.Repository!.Name, issueId, req.Risk);
             var issue = await issuesQuery.GetAsync(project.Id, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });

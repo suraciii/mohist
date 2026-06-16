@@ -13,6 +13,7 @@ public sealed partial class Issue
         string[]? labels = null,
         string priority = "p2",
         string? repositoryRef = null,
+        string? risk = null,
         DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
@@ -26,6 +27,7 @@ public sealed partial class Issue
             Body = body,
             Labels = labelsCopy,
             Priority = priority,
+            Risk = risk,
             RepositoryRef = repositoryRef,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
@@ -34,6 +36,7 @@ public sealed partial class Issue
             Title: title,
             Priority: priority,
             Labels: [.. labelsCopy],
+            Risk: risk,
             RepositoryRef: repositoryRef));
         return issue;
     }

@@ -17,6 +17,12 @@ public class MohistDefaultIssueWorkflowProfile : MohistIssueWorkflowProfileBase
     public override string DisplayName => "Mohist Default";
     public override string Description => ResolveDescription();
     public override bool IsDefault => true;
+    public override IReadOnlyList<string> SuitableFor { get; } = [
+        "feature development involving UI or backend changes",
+        "bug fixes requiring a full plan-build-check-integrate lifecycle",
+        "OpenSpec-driven workflows with structured change artifacts",
+        "issues needing approval gates between stages"
+    ];
 
     private static string ResolveDescription()
     {

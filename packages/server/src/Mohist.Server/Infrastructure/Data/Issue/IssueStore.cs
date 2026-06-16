@@ -29,11 +29,12 @@ public class IssueStore : IStateStore<DomainIssue>
         var json = Serialize(state);
         if (row is null)
         {
-            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json });
+            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json, Risk = state.Risk });
         }
         else
         {
             row.State = json;
+            row.Risk = state.Risk;
         }
         await db.SaveChangesAsync();
     }

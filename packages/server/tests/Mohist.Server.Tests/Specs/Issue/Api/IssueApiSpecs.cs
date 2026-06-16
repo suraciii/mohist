@@ -129,6 +129,22 @@ public class IssueApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task WorkflowProfilesEndpoint_ReturnsIdDisplayNameDescriptionAndSuitableFor()
+    {
+        var profiles = await _client.GetDataAsync<WorkflowProfileDescriptionDto[]>("/api/workflow-profiles");
+
+        var profile = Assert.Single(profiles);
+        Assert.Equal("mohist/default", profile.Id);
+        Assert.Equal("Mohist Default", profile.DisplayName);
+        Assert.Contains("OpenSpec", profile.Description);
+        Assert.NotNull(profile.SuitableFor);
+        Assert.NotEmpty(profile.SuitableFor);
+        Assert.All(profile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task Prerequisites_ProjectIntoStartEligibility()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}" });
@@ -238,6 +254,7 @@ public class IssueApiSpecs
 
     private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, StartEligibilityDto StartEligibility, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
     private sealed record WorkflowProfileDto(string Id, string Name, string Description);
+    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description, string[] SuitableFor);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
     private sealed record PrerequisiteDto(int Number, bool Completed);

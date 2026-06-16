@@ -93,4 +93,47 @@ public class IssueDomainSpecs
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Cancelled, issue.Status);
         Assert.Null(issue.ActiveWorkflowRunId);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Create_WithRisk_StoresValue()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Risked", risk: "high");
+
+        Assert.Equal("high", issue.Risk);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Create_WithoutRisk_LeavesNull()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Plain");
+
+        Assert.Null(issue.Risk);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Create_WithInvalidRisk_Throws()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Bad", risk: "extreme"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void State_RoundTripsRisk()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Risked", risk: "low");
+
+        var json = IssueStore.Serialize(issue);
+        var reloaded = IssueStore.Deserialize(json);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal("low", reloaded!.Risk);
+    }
 }

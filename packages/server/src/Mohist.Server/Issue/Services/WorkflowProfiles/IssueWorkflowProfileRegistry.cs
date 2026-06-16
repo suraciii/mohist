@@ -33,6 +33,12 @@ public class IssueWorkflowProfileRegistry
         .Select(p => new WorkflowProfileInfo(p.Id, p.DisplayName, p.Description, p.IsDefault))
         .ToList();
 
+    public IReadOnlyList<WorkflowProfileDescription> ListDescribed() => _profiles.Values
+        .OrderByDescending(p => p.IsDefault)
+        .ThenBy(p => p.Id, StringComparer.OrdinalIgnoreCase)
+        .Select(p => new WorkflowProfileDescription(p.Id, p.DisplayName, p.Description, p.SuitableFor))
+        .ToList();
+
     public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.DefaultId));
 
     public bool Exists(string? id) => !string.IsNullOrWhiteSpace(id) && _profiles.ContainsKey(id);
@@ -42,3 +48,5 @@ public class IssueWorkflowProfileRegistry
 }
 
 public sealed record WorkflowProfileInfo(string Id, string DisplayName, string Description, bool IsDefault);
+
+public sealed record WorkflowProfileDescription(string Id, string DisplayName, string Description, IReadOnlyList<string> SuitableFor);

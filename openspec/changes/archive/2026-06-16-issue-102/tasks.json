@@ -1,0 +1,118 @@
+{
+  "project": "mohist",
+  "description": "Explore-to-issue structured handoff with YAML frontmatter carrying workflow recommendation and risk",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add risk field to Issue model across server and web types",
+      "spec": "specs/issue-body-frontmatter/spec.md#requirement-issue-body-frontmatter-carries-workflow-recommendation-and-risk-metadata",
+      "description": "Introduce a nullable `risk` field on the Issue model. Extend the server DTO (CreateIssueRequest), Issue grain (persist in CreateAsync), IssueInfo and IssueReadModel (return in queries), and DB schema (nullable column migration). Update the web TypeScript Issue interface and the createIssue API client to accept and return risk.",
+      "acceptanceCriteria": [
+        "CreateIssueRequest.Risk is accepted and persisted by IssueGrain.CreateAsync",
+        "GET /api/issues returns risk in issue responses for both list and detail",
+        "DB migration adds nullable risk column; existing issues have NULL risk",
+        "TypeScript Issue interface includes risk?: string | null and createIssue() sends it",
+        "Server tests: issue created with risk='high' stores and returns it; issue created without risk returns null",
+        "Web API client tests: createIssue with risk includes it in request payload"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Risk field end-to-end: server DTO → DB persistence → query response → web type",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D3. The field is nullable (default NULL). Server-side validation constrains to low/medium/high. The Issue interface in types.ts already has many nullable fields; risk follows the same pattern."
+    },
+    {
+      "id": "T-002",
+      "title": "CLI frontmatter parsing for mo issue create --body-file",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Add frontmatter parsing to the CLI issue create flow. Implement FrontmatterParser that extracts YAML frontmatter (recommended_workflow, recommended_workflow_reason, risk) from body files. Integrate into the create handler: after BodyInputResolver.ResolveAsync returns the body text, parse frontmatter and use extracted values as defaults for --workflow-profile and --risk, with explicit CLI flags taking precedence. Add --risk flag. Emit warning when no frontmatter found or YAML is malformed.",
+      "acceptanceCriteria": [
+        "Body file with frontmatter auto-fills workflowProfileId and risk in create request",
+        "Explicit --workflow-profile flag overrides frontmatter recommended_workflow",
+        "Missing frontmatter emits warning but creation succeeds",
+        "Malformed YAML frontmatter emits warning but body still sent",
+        "Unrecognized frontmatter fields are silently ignored",
+        "Body file without frontmatter (no leading ---) treated as plain body",
+        "New --risk CLI flag accepted and sent in create request",
+        "Unit tests: FrontmatterParser handles valid, missing, malformed, and partial frontmatter",
+        "Integration tests: mo issue create --body-file with frontmatter-filled body.md"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "FrontmatterParser.cs, updated BodyInputResolver or BuildCreate flow, --risk option, unit and integration tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D1-D2. Simple line-scanning parser: find first --- delimited block, split on first : per line. Multi-line recommended_workflow_reason supported via indented continuation. No YAML library dependency."
+    },
+    {
+      "id": "T-003",
+      "title": "mo workflow list --described server endpoint and CLI option",
+      "spec": "specs/explore-issue-handoff/spec.md#requirement-explore-skill-discovers-available-workflows",
+      "description": "Add a --described option to `mo workflow list` that emits each workflow profile's id, displayName, description, and suitableFor metadata. Build a server endpoint (GET /api/workflow-profiles) that reads from IssueWorkflowProfileRegistry and returns the enriched profile list. Wire the CLI option to call the new endpoint and format the described output.",
+      "acceptanceCriteria": [
+        "GET /api/workflow-profiles returns JSON array with id, displayName, description, suitableFor per profile",
+        "mo workflow list --described emits human-readable profile descriptions with suitable_for context",
+        "mo workflow list (without --described) preserves existing behavior",
+        "Server endpoint tests: response schema matches expected fields",
+        "CLI tests: --described flag routes to correct endpoint and formats output"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server endpoint GET /api/workflow-profiles, CLI --described flag on workflow list",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D5. suitableFor metadata is a prerequisite — if absent, endpoint returns empty arrays. The CLI command infrastructure works regardless; matching quality improves when suitable_for is populated. The IssueWorkflowProfileRegistry already tracks all profiles; the endpoint composes from registry entries."
+    },
+    {
+      "id": "T-004",
+      "title": "Web UI create-issue dialog frontmatter detection and risk display",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Add client-side frontmatter parsing to the CreateIssueDialog. When body text starts with ---, extract the YAML frontmatter block and surface recommended_workflow and recommended_workflow_reason above the workflow selector. Pre-fill the workflow selector with the recommendation. Add a risk selector (low/medium/high) that is pre-filled from frontmatter when present. Support one-click acceptance of the recommendation by submitting with pre-filled values.",
+      "acceptanceCriteria": [
+        "Body text with frontmatter shows workflow recommendation panel above workflow selector",
+        "Workflow selector is pre-filled with recommended_workflow from frontmatter",
+        "Recommended workflow reason is displayed alongside the recommendation",
+        "One-click submit with recommendation creates issue with the recommended workflow profile",
+        "User manually changing workflow selector overrides frontmatter recommendation",
+        "Risk selector is pre-filled from frontmatter risk field",
+        "Body text without frontmatter shows no recommendation panel",
+        "Malformed frontmatter is silently ignored, dialog falls back to defaults",
+        "createIssue() API client accepts and sends workflowProfileId in the request body",
+        "Component tests: frontmatter detection, recommendation display, override behavior"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated CreateIssueDialog.tsx with frontmatter-aware recommendation panel and risk selector",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design D4. Frontmatter is parsed client-side with a useMemo hook watching the body textarea. The Issue TS type already has workflowProfileId; we send it in createIssue(). Risk selector uses existing PRIORITIES pattern."
+    },
+    {
+      "id": "T-005",
+      "title": "Update mohist-explore skill packaged guidance for structured issue body production",
+      "spec": "specs/explore-issue-handoff/spec.md, specs/mohist-skill-guidance/spec.md",
+      "description": "Update the packaged skill content at packages/cli/Mohist.Cli/skill-data/mohist-explore/SKILL.md to include: (1) instructions for producing frontmatter-annotated issue body files with recommended_workflow, recommended_workflow_reason, and risk; (2) invocation of `mo workflow list --described` to discover available workflows before recommending; (3) template for the structured body sections (Background, Goal, Non-goals, Acceptance criteria); (4) user confirmation flow before running `mo issue create --body-file`.",
+      "acceptanceCriteria": [
+        "Skill guidance documents frontmatter fields and provides a template",
+        "Skill guidance instructs agent to call mo workflow list --described before recommending",
+        "Skill guidance includes matching logic: compare exploration context to suitable_for descriptions",
+        "Skill guidance defaults to mohist/default when no workflow matches",
+        "Skill guidance documents user confirmation step with body summary",
+        "mo skills get mohist-explore returns updated content with all new sections",
+        "Updated skill content passes skill-asset manifest validation"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated skill-data/mohist-explore/SKILL.md with frontmatter production workflow",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Design D6. The skill-data/ copy is the source of truth served by mo skills get. The repository stub at .agents/skills/mohist-explore/SKILL.md is a hidden discovery stub and does not need updating. Skill content references mo workflow list --described which is built in T-003."
+    }
+  ]
+}

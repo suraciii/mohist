@@ -17,6 +17,7 @@ public sealed record IssueCreated(
     string Title,
     string Priority,
     string[] Labels,
+    string? Risk,
     string? RepositoryRef);
 
 public sealed record IssueLabelsChanged(

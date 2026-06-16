@@ -114,6 +114,7 @@ internal static class IssueCommands
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
+        var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low, medium, high); overrides frontmatter risk" };
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(bodyOpt);
         cmd.Options.Add(bodyFileOpt);
@@ -124,6 +125,7 @@ internal static class IssueCommands
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(workflowProfileOpt);
+        cmd.Options.Add(riskOpt);
         cmd.SetAction(ctx =>
         {
             var title = ctx.GetValue(titleArg);
@@ -136,6 +138,7 @@ internal static class IssueCommands
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
+            var risk = ctx.GetValue(riskOpt);
             return CreateAsync();
 
             async Task<int> CreateAsync()
@@ -148,18 +151,70 @@ internal static class IssueCommands
                 if (resolvedBody is BodyInputResolver.Result.Failure)
                     return 1;
                 var bodyText = ((BodyInputResolver.Result.Success)resolvedBody).Body;
+
+                var (effectiveBody, effectiveWorkflow, effectiveRisk) =
+                    ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
+
                 return await api.PrintPostAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
                 {
                     title,
-                    body = bodyText,
+                    body = effectiveBody,
                     labels = labels ?? [],
                     priority = priority ?? "p2",
                     model,
-                    workflowProfileId = workflowProfile,
+                    workflowProfileId = effectiveWorkflow,
+                    risk = effectiveRisk,
                 });
             }
         });
         return cmd;
+    }
+
+    private static (string Body, string? Workflow, string? Risk) ApplyFrontmatter(
+        TextWriter error,
+        string bodyText,
+        string? bodyFile,
+        string? workflowFlag,
+        string? riskFlag)
+    {
+        var parsed = FrontmatterParser.Parse(bodyText);
+
+        switch (parsed)
+        {
+            case FrontmatterParser.Result.Parsed ok:
+                var workflow = workflowFlag ?? ok.RecommendedWorkflow;
+                var risk = riskFlag ?? ok.Risk;
+                if (workflowFlag is not null
+                    && ok.RecommendedWorkflow is not null
+                    && !string.Equals(workflowFlag, ok.RecommendedWorkflow, StringComparison.Ordinal))
+                {
+                    error.WriteLine(
+                        $"note: --workflow-profile '{workflowFlag}' overrides frontmatter recommended_workflow '{ok.RecommendedWorkflow}'");
+                }
+
+                if (riskFlag is not null
+                    && ok.Risk is not null
+                    && !string.Equals(riskFlag, ok.Risk, StringComparison.Ordinal))
+                {
+                    error.WriteLine(
+                        $"note: --risk '{riskFlag}' overrides frontmatter risk '{ok.Risk}'");
+                }
+
+                return (ok.Body, workflow, risk);
+            case FrontmatterParser.Result.Malformed:
+                if (!string.IsNullOrWhiteSpace(bodyFile))
+                    error.WriteLine(
+                        $"warning: malformed YAML frontmatter in '{bodyFile}'; sending full body text without parsing metadata");
+                else
+                    error.WriteLine(
+                        "warning: malformed YAML frontmatter; sending full body text without parsing metadata");
+                return (bodyText, workflowFlag, riskFlag);
+            default:
+                if (!string.IsNullOrWhiteSpace(bodyFile))
+                    error.WriteLine(
+                        "warning: no frontmatter found in body file. Consider including recommended_workflow and risk.");
+                return (bodyText, workflowFlag, riskFlag);
+        }
     }
 
     private static Command BuildShow(MohistCliApi api)

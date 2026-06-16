@@ -15,11 +15,14 @@ import {
   PopoverTrigger,
 } from '@/shared/ui/components/popover'
 import { createIssue, useLabels } from '../../../entities/issue'
-import { useAvailableModelIds } from '../../../entities/settings'
+import { useAvailableModelIds, useWorkflowProfiles } from '../../../entities/settings'
+import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useProject, useRepositories } from '../../../entities/project'
-import { getPriorityStyle } from '../../../shared/lib/label-colors'
+import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
+import { parseIssueFrontmatter } from '../lib/frontmatter'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
+const RISKS = ['low', 'medium', 'high']
 
 interface Props {
   open: boolean
@@ -186,17 +189,47 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [model, setModel] = useState<string | null>(null)
   const [priority, setPriority] = useState<string>('p2')
   const [repositoryName, setRepositoryName] = useState<string | null>(null)
+  const [workflowProfileId, setWorkflowProfileId] = useState<string | null>(null)
+  const [workflowTouched, setWorkflowTouched] = useState(false)
+  const [risk, setRisk] = useState<string | null>(null)
+  const [riskTouched, setRiskTouched] = useState(false)
   const { projectId, projects } = useProject()
   const currentProject = projects?.find((p) => p.id === projectId)
   const { data: repositories } = useRepositories(currentProject?.id)
+  const { data: workflowProfiles } = useWorkflowProfiles()
   const queryClient = useQueryClient()
   const { data: allLabels } = useLabels()
+
+  const frontmatter = useMemo(() => parseIssueFrontmatter(body), [body])
+  const recommendation = useMemo(() => {
+    if (frontmatter.kind === 'parsed' && frontmatter.recommendedWorkflow) {
+      return {
+        workflow: frontmatter.recommendedWorkflow,
+        reason: frontmatter.recommendedWorkflowReason ?? null,
+      }
+    }
+    return null
+  }, [frontmatter])
+  const frontmatterRisk =
+    frontmatter.kind === 'parsed' ? frontmatter.risk ?? null : null
 
   useEffect(() => {
     if (repositories && repositories.length === 1) {
       setRepositoryName(repositories[0].name)
     }
   }, [repositories])
+
+  useEffect(() => {
+    if (recommendation && !workflowTouched) {
+      setWorkflowProfileId(recommendation.workflow)
+    }
+  }, [recommendation, workflowTouched])
+
+  useEffect(() => {
+    if (frontmatterRisk && !riskTouched) {
+      setRisk(frontmatterRisk)
+    }
+  }, [frontmatterRisk, riskTouched])
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -208,6 +241,8 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
+        ...(workflowProfileId ? { workflowProfileId } : {}),
+        ...(risk ? { risk } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -222,6 +257,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     setModel(null)
     setPriority('p2')
     setRepositoryName(null)
+    setWorkflowProfileId(null)
+    setWorkflowTouched(false)
+    setRisk(null)
+    setRiskTouched(false)
     onClose()
   }
 
@@ -230,6 +269,18 @@ export function CreateIssueDialog({ open, onClose }: Props) {
       prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label],
     )
   }
+
+  const profileOptions: WorkflowProfileInfo[] = useMemo(() => {
+    const list = workflowProfiles ?? []
+    const known = new Set(list.map((p) => p.id))
+    const extras: WorkflowProfileInfo[] =
+      workflowProfileId && !known.has(workflowProfileId)
+        ? [{ id: workflowProfileId, displayName: workflowProfileId, description: '', isDefault: false }]
+        : []
+    return [...list, ...extras]
+  }, [workflowProfiles, workflowProfileId])
+  const defaultProfileId = workflowProfiles?.find((p) => p.isDefault)?.id ?? null
+  const workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
@@ -258,6 +309,84 @@ export function CreateIssueDialog({ open, onClose }: Props) {
               rows={3}
               className="resize-none"
             />
+          </div>
+
+          {recommendation && (
+            <div
+              data-testid="workflow-recommendation"
+              className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2"
+            >
+              <div className="text-xs font-medium text-blue-800">
+                Recommended workflow:{' '}
+                <span className="font-semibold" data-testid="recommended-workflow">
+                  {recommendation.workflow}
+                </span>
+              </div>
+              {recommendation.reason && (
+                <p
+                  className="text-xs text-blue-700 mt-1 whitespace-pre-wrap"
+                  data-testid="recommended-workflow-reason"
+                >
+                  {recommendation.reason}
+                </p>
+              )}
+              <p className="text-[11px] text-blue-600/80 mt-1">
+                Pre-filled below. Change the selector to override.
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Workflow</label>
+            <select
+              aria-label="Workflow"
+              value={workflowSelectValue}
+              onChange={(e) => {
+                setWorkflowProfileId(e.target.value || null)
+                setWorkflowTouched(true)
+              }}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+            >
+              {profileOptions.length === 0 && <option value="">Default</option>}
+              {profileOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.displayName}
+                  {p.isDefault ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Risk</label>
+            <div className="flex gap-1.5" role="group" aria-label="Risk">
+              {RISKS.map((r) => {
+                const style = getRiskStyle(r)
+                return (
+                  <Button
+                    key={r}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={risk === r}
+                    onClick={() => {
+                      setRisk(r)
+                      setRiskTouched(true)
+                    }}
+                    className={`rounded-full capitalize ${
+                      risk === r ? 'ring-1 ring-offset-1' : 'hover:opacity-80'
+                    }`}
+                    style={{
+                      backgroundColor: style.bg,
+                      color: style.text,
+                      ...(risk === r ? { ringColor: style.text } : {}),
+                    }}
+                  >
+                    {r}
+                  </Button>
+                )
+              })}
+            </div>
           </div>
 
           {allLabels && allLabels.length > 0 && (

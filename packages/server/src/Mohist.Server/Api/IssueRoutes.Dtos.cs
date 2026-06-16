@@ -12,7 +12,8 @@ public record CreateIssueRequest(
     Dictionary<string, object?>? AgentConfig = null,
     Dictionary<string, string>? StageModels = null,
     string? WorkflowProfileId = null,
-    string? RepositoryName = null);
+    string? RepositoryName = null,
+    string? Risk = null);
 
 public record UpdateIssueRequest(
     string? Title = null,

@@ -20,6 +20,7 @@ public class IssueReadModel
     public string? ProjectName { get; set; }
     public string[] Labels { get; set; } = [];
     public string Priority { get; set; } = "p2";
+    public string? Risk { get; set; }
     public string? Model { get; set; }
     public Dictionary<string, object?>? AgentConfig { get; set; }
     public Dictionary<string, string>? StageModels { get; set; }
