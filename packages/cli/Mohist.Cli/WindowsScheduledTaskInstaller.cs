@@ -174,6 +174,12 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     public Task<int> StatusRunnerAsync(ServiceCommandOptions options) =>
         StatusAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", isServer: false, options);
 
+    public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
+    {
+        var running = await IsProcessRunningAsync("node");
+        return running;
+    }
+
     public Task<int> LogsServerAsync(ServiceCommandOptions options) =>
         LogsAsync(ServerLogPath(), "Server", options);
 

@@ -58,6 +58,34 @@ public static class SystemRoutes
             return ApiResults.Ok(await updates.GetStatusEnvelopeAsync(ct));
         });
 
+        app.MapPost("/api/system/update/outcome", async (SystemUpdateOutcomeRequest? request, SystemUpdateService updates, CancellationToken ct) =>
+        {
+            var payload = request ?? new SystemUpdateOutcomeRequest();
+            if (string.IsNullOrWhiteSpace(payload.Status) || string.IsNullOrWhiteSpace(payload.Outcome))
+            {
+                return ApiResults.BadRequest("status and outcome are required", "invalid_outcome");
+            }
+
+            try
+            {
+                var response = await updates.RecordCliOutcomeAsync(payload, ct);
+                return ApiResults.Ok(new SystemUpdateOutcomeResponse(response));
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_outcome");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "job_id_mismatch");
+            }
+        });
+
+        app.MapGet("/api/system/consistency", async (SystemUpdateService updates, CancellationToken ct) =>
+        {
+            return ApiResults.Ok(await updates.GetConsistencyAsync(ct));
+        });
+
         return app;
     }
 }

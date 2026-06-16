@@ -18,4 +18,6 @@ internal interface IServiceInstaller
     Task<int> StatusRunnerAsync(ServiceCommandOptions options);
     Task<int> LogsRunnerAsync(ServiceCommandOptions options);
     Task<int> UninstallRunnerAsync(ServiceCommandOptions options);
+
+    Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default);
 }

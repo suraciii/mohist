@@ -351,7 +351,7 @@ public class SystemUpdateServiceSpecs
             "waiting-for-reconnect",
             "Waiting for reconnect",
             true,
-            "oldhash",
+            "newhash",
             "newhash",
             "/repo",
             "mohist.service",
@@ -367,21 +367,19 @@ public class SystemUpdateServiceSpecs
             new(true, true, false, "/assets/app.js", "Bundled asset is not ready"),
             new(true, true, true, "/assets/app.js", null));
         var systemInfo = new SequencedSystemInfo(
-            CreateInfo(runningGitHash: "oldhash", sourceHead: "newhash"),
+            CreateInfo(runningGitHash: "newhash", sourceHead: "newhash"),
             CreateInfo(runningGitHash: "newhash", sourceHead: "newhash"));
         var service = CreateService(systemInfo, store, new RecordingCommandRunner(), readiness);
 
         var first = await service.GetLatestStatusAsync();
         var second = await service.GetLatestStatusAsync();
         var third = await service.GetLatestStatusAsync();
-        var fourth = await service.GetLatestStatusAsync();
 
         Assert.Equal("waiting-for-reconnect", first!.Status);
         Assert.Equal("waiting-for-reconnect", second!.Status);
-        Assert.Equal("waiting-for-reconnect", third!.Status);
-        Assert.Equal("succeeded", fourth!.Status);
-        Assert.Equal("Ready", fourth.Stage);
-        Assert.Contains(fourth.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
+        Assert.Equal("succeeded", third!.Status);
+        Assert.Equal("Ready", third.Stage);
+        Assert.Contains(third.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -396,7 +394,7 @@ public class SystemUpdateServiceSpecs
             "waiting-for-reconnect",
             "Waiting for reconnect",
             true,
-            "oldhash",
+            "newhash",
             "newhash",
             "/repo",
             "mohist.service",
@@ -410,7 +408,7 @@ public class SystemUpdateServiceSpecs
         var readiness = new SequenceReadinessProbe(
             new(false, false, false, null, "API health endpoint is not ready"),
             new(true, true, false, "/assets/app.js", "Bundled asset is not ready"));
-        var service = CreateService(new SequencedSystemInfo(CreateInfo(runningGitHash: "oldhash", sourceHead: "newhash")), store, new RecordingCommandRunner(), readiness);
+        var service = CreateService(new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")), store, new RecordingCommandRunner(), readiness);
 
         var first = await service.GetLatestStatusAsync();
         var second = await service.GetLatestStatusAsync();
@@ -435,7 +433,7 @@ public class SystemUpdateServiceSpecs
             "waiting-for-reconnect",
             "Waiting for reconnect",
             true,
-            "oldhash",
+            "newhash",
             "newhash",
             "/repo",
             "mohist.service",
@@ -447,7 +445,7 @@ public class SystemUpdateServiceSpecs
             null));
 
         var service = CreateService(
-            new SequencedSystemInfo(CreateInfo(runningGitHash: "oldhash", sourceHead: "newhash")),
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
             store,
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(false, false, false, null, "Still waiting")));
@@ -458,6 +456,622 @@ public class SystemUpdateServiceSpecs
         Assert.Equal(200, latest!.Logs.Count);
         Assert.DoesNotContain(latest.Logs, log => log.Message == "entry-0");
         Assert.Contains(latest.Logs, log => log.Message == "Still waiting");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_StaleWaitingForReconnectIsSuperseded()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "currenthash", sourceHead: "currenthash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.Equal("superseded", status!.Status);
+        Assert.Equal("Superseded", status.Stage);
+        Assert.Contains(status.Logs, log => log.Stage == "Superseded" && log.Message.Contains("currenthash"));
+
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("superseded", latest!.Status);
+        Assert.Equal("currenthash", latest.RunningGitHash);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_ActiveWaitingForReconnectIsPreservedWhenHashMatches()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "newhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "still waiting")));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.Equal("waiting-for-reconnect", status!.Status);
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("waiting-for-reconnect", latest!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_EmptyRunningHashDoesNotSupersede()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            null,
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: null, sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(false, false, false, null, "waiting")));
+
+        var status = await service.GetLatestStatusAsync();
+
+        Assert.Equal("waiting-for-reconnect", status!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetLatestStatusAsync_SupersededStatusDoesNotBlockNewUpdateStarts()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "job-1",
+            "superseded",
+            "Superseded",
+            true,
+            "currenthash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Superseded by newer runtime",
+            [new SystemUpdateLogEntry(now, "Superseded", "Superseded by newer runtime")],
+            now,
+            now,
+            now));
+
+        var persisted = await store.GetLatestAsync();
+        Assert.NotNull(persisted);
+        Assert.False(SystemUpdateService.IsActive(persisted!));
+        Assert.True(await store.TryAcquireLockAsync("job-2"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RecordCliOutcomeAsync_PersistsOutcomeViaStore()
+    {
+        var store = new InMemoryUpdateStore();
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var response = await service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-1",
+            Status: "succeeded",
+            Stage: "Verifying workflow runtime",
+            Outcome: "succeeded",
+            UnavailableCapability: null,
+            Logs: [new SystemUpdateLogEntry(DateTimeOffset.UtcNow, "Verifying workflow runtime", "all checks passed")],
+            SourceHead: "newhash",
+            SourcePath: "/repo",
+            ServerUnit: "mohist.service",
+            RunnerUnit: "mohist-runner.service"));
+
+        Assert.Equal("succeeded", response.Status);
+        Assert.Equal("succeeded", response.Outcome);
+        Assert.Null(response.UnavailableCapability);
+        Assert.Equal("cli-job-1", response.JobId);
+        Assert.Equal("newhash", response.SourceHead);
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Equal("cli-job-1", latest!.JobId);
+        Assert.Equal("succeeded", latest.Status);
+        Assert.Equal("succeeded", latest.Outcome);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RecordCliOutcomeAsync_AppendsRequestLogsToPersistedJobLog()
+    {
+        var store = new InMemoryUpdateStore();
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var stageTime = DateTimeOffset.UtcNow;
+        var request = new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-logs",
+            Status: "succeeded",
+            Stage: "Verifying workflow runtime",
+            Outcome: "succeeded",
+            UnavailableCapability: null,
+            Logs:
+            [
+                new SystemUpdateLogEntry(stageTime, "Updating CLI", "starting"),
+                new SystemUpdateLogEntry(stageTime, "Preparing workflow runner", "runner stopped"),
+                new SystemUpdateLogEntry(stageTime, "Verifying workflow runtime", "all checks passed"),
+            ],
+            SourceHead: "newhash",
+            SourcePath: "/repo",
+            ServerUnit: "mohist.service",
+            RunnerUnit: "mohist-runner.service");
+
+        await service.RecordCliOutcomeAsync(request);
+
+        var latest = await store.GetLatestAsync();
+        Assert.NotNull(latest);
+        Assert.Contains(latest!.Logs, entry => entry.Stage == "Updating CLI" && entry.Message == "starting");
+        Assert.Contains(latest.Logs, entry => entry.Stage == "Preparing workflow runner" && entry.Message == "runner stopped");
+        Assert.Contains(latest.Logs, entry => entry.Stage == "Verifying workflow runtime" && entry.Message == "all checks passed");
+        Assert.Contains(latest.Logs, entry => entry.Message.StartsWith("CLI reported outcome"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RecordCliOutcomeAsync_MarksStaleWebJobAsSuperseded()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "web-job-1",
+            "waiting-for-reconnect",
+            "Waiting for reconnect",
+            true,
+            "oldhash",
+            "oldsource",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            "Waiting for old restart",
+            [new SystemUpdateLogEntry(now, "Waiting for reconnect", "Waiting for old restart")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var response = await service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-1",
+            Status: "succeeded",
+            Stage: "Verifying workflow runtime",
+            Outcome: "succeeded",
+            SourceHead: "newhash"));
+
+        Assert.Equal("cli-job-1", response.JobId);
+        Assert.Equal("succeeded", response.Status);
+
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("cli-job-1", latest!.JobId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RecordCliOutcomeAsync_AlwaysPersistsWithoutAcquiringLock()
+    {
+        var store = new InMemoryUpdateStore(acquireLock: true);
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "web-job-active",
+            "running",
+            "Building",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            null,
+            [new SystemUpdateLogEntry(now, "Building", "Building")],
+            now,
+            now,
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var response = await service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-1",
+            Status: "succeeded",
+            Stage: "Ready",
+            Outcome: "succeeded",
+            SourceHead: "newhash"));
+
+        Assert.Equal("cli-job-1", response.JobId);
+        Assert.Equal("succeeded", response.Status);
+
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("cli-job-1", latest!.JobId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RecordCliOutcomeAsync_RejectsJobIdMismatchWithTerminalExistingJob()
+    {
+        var store = new InMemoryUpdateStore();
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new SystemUpdateJobState(
+            "other-job-terminal",
+            "succeeded",
+            "Ready",
+            true,
+            "oldhash",
+            "newhash",
+            "/repo",
+            "mohist.service",
+            "mohist-runner.service",
+            null,
+            [new SystemUpdateLogEntry(now, "Ready", "ready")],
+            now,
+            now,
+            now,
+            "succeeded",
+            null));
+
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-attacker",
+            Status: "succeeded",
+            Stage: "Verifying workflow runtime",
+            Outcome: "succeeded",
+            SourceHead: "newhash")));
+
+        Assert.Contains("other-job-terminal", ex.Message);
+        var latest = await store.GetLatestAsync();
+        Assert.Equal("other-job-terminal", latest!.JobId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RecordCliOutcomeAsync_RejectsUnknownStatus()
+    {
+        var store = new InMemoryUpdateStore();
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-bogus",
+            Status: "bogus",
+            Stage: "Ready",
+            Outcome: "succeeded",
+            SourceHead: "newhash")));
+
+        Assert.Contains("bogus", ex.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConsistencyAsync_AllCoherentReturnsConsistent()
+    {
+        var store = new InMemoryUpdateStore();
+        var manifestDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(manifestDir);
+        File.WriteAllText(Path.Combine(manifestDir, "manifest.json"), "{}");
+        try
+        {
+            var service = CreateConsistencyService(
+                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+                store,
+                new RecordingCommandRunner(),
+                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+                manifestDir);
+
+            var response = await service.GetConsistencyAsync();
+
+            Assert.Equal("consistent", response.Status);
+            Assert.All(response.Components, component => Assert.Equal("consistent", component.Status));
+        }
+        finally
+        {
+            Directory.Delete(manifestDir, recursive: true);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConsistencyAsync_RunnerUnavailableIsReported()
+    {
+        var store = new InMemoryUpdateStore();
+        var manifestDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(manifestDir);
+        File.WriteAllText(Path.Combine(manifestDir, "manifest.json"), "{}");
+        try
+        {
+            var service = CreateConsistencyService(
+                new SequencedSystemInfo(CreateInfo(
+                    runningGitHash: "newhash",
+                    sourceHead: "newhash",
+                    serverServiceStatus: "active",
+                    runnerServiceStatus: "inactive")),
+                store,
+                new RecordingCommandRunner(),
+                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+                manifestDir);
+
+            var response = await service.GetConsistencyAsync();
+
+            Assert.Equal("inconsistent", response.Status);
+            var runner = Assert.Single(response.Components, c => c.Name == "runner");
+            Assert.Equal("unavailable", runner.Status);
+        }
+        finally
+        {
+            Directory.Delete(manifestDir, recursive: true);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RunUpdateAsync_OnBuildFailure_RestoresRunnerAndMarksRecovered()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ScriptedCommandRunner(
+            (0, "dotnet", new SystemCommandResult(1, "build failed")),
+            (1, "systemctl", new SystemCommandResult(0, "runner restart ok")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("recovered", latest!.Status);
+        Assert.Equal("Recovered", latest.Stage);
+        Assert.Equal("recovered", latest.Outcome);
+        Assert.Null(latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Restoring runner");
+        Assert.Contains(latest.Logs, log => log.Stage == "Recovered" && log.Message.Contains("Runner restore succeeded"));
+
+        Assert.Collection(commands.Requests,
+            command =>
+            {
+                Assert.Equal("dotnet", command.FileName);
+                Assert.Equal(["build", "Mohist.sln"], command.Arguments);
+            },
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
+            });
+
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RunUpdateAsync_OnBuildFailure_RunnerRestoreFails_MarksFailedWithUnavailableCapability()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ScriptedCommandRunner(
+            (0, "dotnet", new SystemCommandResult(1, "build failed")),
+            (1, "systemctl", new SystemCommandResult(1, "runner restart failed")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(2);
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("failed", latest!.Status);
+        Assert.Equal("Failed", latest.Stage);
+        Assert.Equal("failed", latest.Outcome);
+        Assert.Equal("Runner", latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Failed" && log.Message.Contains("mo server start --runner"));
+
+        Assert.Collection(commands.Requests,
+            command => Assert.Equal("dotnet", command.FileName),
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
+            });
+
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task RunUpdateAsync_OnServerRestartFailure_RestoresRunnerAndMarksRecovered()
+    {
+        var store = new InMemoryUpdateStore();
+        var commands = new ScriptedCommandRunner(
+            (0, "dotnet", new SystemCommandResult(0, "build ok")),
+            (1, "systemctl", new SystemCommandResult(1, "server restart failed")),
+            (2, "systemctl", new SystemCommandResult(0, "runner restart ok")));
+        var service = CreateService(
+            systemInfo: CreateInfo(),
+            store: store,
+            commandRunner: commands,
+            readinessProbe: new StubReadinessProbe(new(false, false, false, null, "ignored")));
+
+        var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
+        await commands.WaitForCountAsync(3);
+
+        var latest = await store.GetLatestAsync();
+        Assert.True(result.Started);
+        Assert.Equal("recovered", latest!.Status);
+        Assert.Equal("Recovered", latest.Stage);
+        Assert.Equal("recovered", latest.Outcome);
+        Assert.Null(latest.UnavailableCapability);
+        Assert.Contains(latest.Logs, log => log.Stage == "Restoring runner");
+        Assert.Contains(latest.Logs, log => log.Stage == "Recovered" && log.Message.Contains("Runner restore succeeded"));
+
+        Assert.Collection(commands.Requests,
+            command => Assert.Equal("dotnet", command.FileName),
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist.service"], command.Arguments);
+            },
+            command =>
+            {
+                Assert.Equal("systemctl", command.FileName);
+                Assert.Equal(["--user", "restart", "mohist-runner.service"], command.Arguments);
+            });
+
+        Assert.True(await store.TryAcquireLockAsync("job-next"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenManifestMissing()
+    {
+        var store = new InMemoryUpdateStore();
+        var missingDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
+        try
+        {
+            var service = CreateConsistencyService(
+                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+                store,
+                new RecordingCommandRunner(),
+                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+                missingDir);
+
+            var response = await service.GetConsistencyAsync();
+
+            Assert.Equal("inconsistent", response.Status);
+            var managed = Assert.Single(response.Components, c => c.Name == "managed-assets");
+            Assert.Equal("mismatched", managed.Status);
+        }
+        finally
+        {
+            if (Directory.Exists(missingDir))
+                Directory.Delete(missingDir, recursive: true);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenManifestHashDiffersFromRunning()
+    {
+        var store = new InMemoryUpdateStore();
+        var manifestDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(manifestDir);
+        File.WriteAllText(Path.Combine(manifestDir, "manifest.json"),
+            "{\"schemaVersion\":1,\"cliVersion\":\"1.0.0\",\"gitHash\":\"stalehash\",\"skills\":[\"mohist\"]}");
+        try
+        {
+            var service = CreateConsistencyService(
+                new SequencedSystemInfo(CreateInfo(runningGitHash: "newhash", sourceHead: "newhash")),
+                store,
+                new RecordingCommandRunner(),
+                new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
+                manifestDir);
+
+            var response = await service.GetConsistencyAsync();
+
+            Assert.Equal("inconsistent", response.Status);
+            var managed = Assert.Single(response.Components, c => c.Name == "managed-assets");
+            Assert.Equal("mismatched", managed.Status);
+            Assert.Contains("stalehash", managed.Reason);
+            Assert.Contains("newhash", managed.Reason);
+        }
+        finally
+        {
+            if (Directory.Exists(manifestDir))
+                Directory.Delete(manifestDir, recursive: true);
+        }
     }
 
     private static SystemUpdateService CreateService(
@@ -506,15 +1120,40 @@ public class SystemUpdateServiceSpecs
         string? runningGitHash = "oldhash",
         string? sourceHead = "newhash",
         string installMode = "local-source",
-        string? sourcePath = "/repo")
+        string? sourcePath = "/repo",
+        string? serverServiceStatus = "active",
+        string? runnerServiceStatus = "active")
     {
         return new SystemInfoResponse(
             new RunningInfo("1.2.3", runningGitHash, DateTimeOffset.UtcNow),
             new SourceInfo(sourcePath, "main", sourceHead, sourceDirty),
             new InstallInfo(installMode, "systemd-user", "mohist.service", "mohist-runner.service", installMode),
             new UpdateInfo(updateStatus, available, updateStatus),
-            new ServiceInfo("active", "active"),
+            new ServiceInfo(serverServiceStatus, runnerServiceStatus),
             new SystemPaths("/db", "/config", "/logs", "/opencode"));
+    }
+
+    private static SystemUpdateService CreateConsistencyService(
+        SequencedSystemInfo systemInfo,
+        ISystemUpdateStore store,
+        ISystemUpdateCommandRunner commandRunner,
+        ISystemReadinessProbe readinessProbe,
+        string managedAssetsPath)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Mohist:SystemUpdate:Enabled"] = "true",
+            ["Mohist:CliSkillDataPath"] = managedAssetsPath
+        }).Build();
+
+        return new SystemUpdateService(
+            systemInfo.GetSystemInfoAsync,
+            store,
+            commandRunner,
+            readinessProbe,
+            configuration,
+            new MockEnvironmentVariableProvider(),
+            NullLogger<SystemUpdateService>.Instance);
     }
 
     private sealed class InMemoryUpdateStore : ISystemUpdateStore
@@ -558,6 +1197,18 @@ public class SystemUpdateServiceSpecs
             _latest = state;
             return Task.CompletedTask;
         }
+
+        public Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default)
+        {
+            if (_latest is null
+                || !string.Equals(_latest.JobId, expected.JobId, StringComparison.Ordinal)
+                || !string.Equals(_latest.Status, expected.Status, StringComparison.Ordinal))
+            {
+                return Task.FromResult(false);
+            }
+            _latest = next;
+            return Task.FromResult(true);
+        }
     }
 
     private sealed class RecordingCommandRunner : ISystemUpdateCommandRunner
@@ -571,6 +1222,48 @@ public class SystemUpdateServiceSpecs
             _commandsSeen.TrySetResult();
 
             return Task.FromResult(new SystemCommandResult(0, $"ok:{command.Stage}"));
+        }
+
+        public async Task WaitForCountAsync(int count)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (Requests.Count < count)
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                await _commandsSeen.Task.WaitAsync(cts.Token);
+                if (Requests.Count < count)
+                    await Task.Delay(25, cts.Token);
+            }
+        }
+    }
+
+    private sealed class ScriptedCommandRunner : ISystemUpdateCommandRunner
+    {
+        private readonly (int Index, string FileName, SystemCommandResult Result)[] _script;
+        private readonly TaskCompletionSource _commandsSeen = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<SystemCommandRequest> Requests { get; } = [];
+
+        public ScriptedCommandRunner(params (int Index, string FileName, SystemCommandResult Result)[] script)
+        {
+            _script = script;
+        }
+
+        public Task<SystemCommandResult> RunAsync(SystemCommandRequest command, CancellationToken cancellationToken = default)
+        {
+            var index = Requests.Count;
+            Requests.Add(command);
+            _commandsSeen.TrySetResult();
+
+            if (index >= _script.Length)
+                return Task.FromResult(new SystemCommandResult(0, "ok"));
+
+            var entry = _script[index];
+            if (!string.Equals(entry.FileName, command.FileName, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new SystemCommandResult(-1, $"unexpected command at index {index}: expected {entry.FileName} but got {command.FileName}"));
+            }
+
+            return Task.FromResult(entry.Result);
         }
 
         public async Task WaitForCountAsync(int count)

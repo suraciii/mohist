@@ -11,6 +11,7 @@ public interface ISystemUpdateStore
     Task<bool> TryAcquireLockAsync(string jobId, CancellationToken cancellationToken = default);
     Task ReleaseLockAsync(string jobId, CancellationToken cancellationToken = default);
     Task SaveAsync(SystemUpdateJobState state, CancellationToken cancellationToken = default);
+    Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default);
 }
 
 public interface ISystemUpdateCommandRunner
@@ -53,7 +54,13 @@ public sealed record SystemUpdateJobState(
     IReadOnlyList<SystemUpdateLogEntry> Logs,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    string? Outcome = null,
+    string? UnavailableCapability = null)
+{
+    public static readonly IReadOnlyList<string> ActiveStatuses = ["running", "waiting-for-reconnect"];
+    public static readonly IReadOnlyList<string> TerminalStatuses = ["succeeded", "failed", "recovered", "superseded", "cancelled"];
+}
 
 public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
 {
@@ -154,6 +161,35 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
             }
 
             File.Move(tempPath, _statePath, overwrite: true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool> SaveIfCurrentAsync(SystemUpdateJobState expected, SystemUpdateJobState next, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var current = await ReadLatestUnlockedAsync(cancellationToken);
+            if (current is null)
+                return false;
+            if (!string.Equals(current.JobId, expected.JobId, StringComparison.Ordinal)
+                || !string.Equals(current.Status, expected.Status, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var tempPath = _statePath + ".tmp";
+            await using (var stream = File.Create(tempPath))
+            {
+                await JsonSerializer.SerializeAsync(stream, next, JsonOptions, cancellationToken);
+            }
+
+            File.Move(tempPath, _statePath, overwrite: true);
+            return true;
         }
         finally
         {
@@ -404,6 +440,30 @@ public sealed class SystemUpdateService
 
         if (latest.Status is "running" or "waiting-for-reconnect")
         {
+            var info = await _getSystemInfo(cancellationToken);
+            var runningHash = info.Running.GitHash;
+
+            if (latest.Status == "waiting-for-reconnect"
+                && !string.IsNullOrWhiteSpace(runningHash)
+                && !string.IsNullOrWhiteSpace(latest.SourceHead)
+                && !string.Equals(runningHash, latest.SourceHead, StringComparison.Ordinal))
+            {
+                var supersededAt = DateTimeOffset.UtcNow;
+                latest = latest with
+                {
+                    Status = "superseded",
+                    Stage = "Superseded",
+                    RunningGitHash = runningHash,
+                    Reason = "Server runtime has advanced past this job's source HEAD; this update is no longer relevant.",
+                    UpdatedAt = supersededAt,
+                    CompletedAt = supersededAt,
+                    Logs = AppendLog(latest.Logs, new SystemUpdateLogEntry(supersededAt, "Superseded", $"Running git hash '{runningHash}' differs from job source HEAD '{latest.SourceHead}'; marking job as superseded."))
+                };
+                await _store.SaveAsync(latest, cancellationToken);
+                await _store.ReleaseLockAsync(latest.JobId, cancellationToken);
+                return ToResponse(latest);
+            }
+
             var readiness = await _readinessProbe.ProbeAsync(cancellationToken);
             if (!readiness.HealthReady || !readiness.RootReady || !readiness.AssetsReady)
             {
@@ -425,13 +485,12 @@ public sealed class SystemUpdateService
             }
             else
             {
-                var info = await _getSystemInfo(cancellationToken);
-                if (!string.IsNullOrWhiteSpace(info.Running.GitHash) && info.Running.GitHash == latest.SourceHead)
+                if (!string.IsNullOrWhiteSpace(runningHash) && runningHash == latest.SourceHead)
                 {
                     var now = DateTimeOffset.UtcNow;
                     latest = latest with
                     {
-                        RunningGitHash = info.Running.GitHash,
+                        RunningGitHash = runningHash,
                         SourceHead = info.Source.Head,
                         Reason = "Server runtime matches source HEAD and readiness checks passed",
                         UpdatedAt = now,
@@ -450,6 +509,7 @@ public sealed class SystemUpdateService
                     latest = latest with
                     {
                         Status = "succeeded",
+                        Outcome = "succeeded",
                         Stage = "Ready",
                         UpdatedAt = completedAt,
                         CompletedAt = completedAt,
@@ -469,8 +529,317 @@ public sealed class SystemUpdateService
         return new SystemUpdateStatusEnvelope(latest is not null, latest);
     }
 
+    public async Task<SystemUpdateStatusResponse> RecordCliOutcomeAsync(SystemUpdateOutcomeRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+            throw new ArgumentNullException(nameof(request));
+
+        var info = await _getSystemInfo(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+
+        var persistedLatest = await _store.GetLatestAsync(cancellationToken);
+        if (persistedLatest is not null
+            && !string.IsNullOrWhiteSpace(request.JobId)
+            && !string.Equals(persistedLatest.JobId, request.JobId, StringComparison.Ordinal)
+            && SystemUpdateJobState.TerminalStatuses.Contains(persistedLatest.Status))
+        {
+            throw new InvalidOperationException(
+                $"The latest persisted update job ('{persistedLatest.JobId}') is terminal and does not match the supplied JobId ('{request.JobId}'). Refusing to overwrite an unrelated job state.");
+        }
+
+        var latest = await _store.GetLatestAsync(cancellationToken);
+        var jobId = string.IsNullOrWhiteSpace(request.JobId) ? Guid.NewGuid().ToString("N") : request.JobId!;
+        var stage = string.IsNullOrWhiteSpace(request.Stage) ? "Ready" : request.Stage!;
+        var status = NormalizeOutcomeStatus(request.Status);
+        var outcome = NormalizeOutcomeLabel(request.Outcome) ?? status;
+        var unavailableCapability = string.IsNullOrWhiteSpace(request.UnavailableCapability) ? null : request.UnavailableCapability;
+        var sourceHead = request.SourceHead ?? info.Source.Head;
+        var sourcePath = request.SourcePath ?? info.Source.Path;
+        var serverUnit = request.ServerUnit ?? info.Install.ServerUnit;
+        var runnerUnit = request.RunnerUnit ?? info.Install.RunnerUnit;
+
+        var baseState = latest ?? new SystemUpdateJobState(
+            jobId,
+            status,
+            stage,
+            info.Update.Available,
+            info.Running.GitHash,
+            sourceHead,
+            sourcePath,
+            serverUnit,
+            runnerUnit,
+            null,
+            [],
+            now,
+            now,
+            now,
+            outcome,
+            unavailableCapability);
+
+        IReadOnlyList<SystemUpdateLogEntry> logs = baseState.Logs;
+        if (request.Logs is { Count: > 0 })
+        {
+            foreach (var entry in request.Logs)
+            {
+                logs = AppendLog(logs, entry);
+            }
+        }
+        logs = AppendLog(logs, new SystemUpdateLogEntry(now, stage, $"CLI reported outcome '{outcome}' with status '{status}'."));
+
+        var completedAt = SystemUpdateJobState.TerminalStatuses.Contains(status) ? now : baseState.CompletedAt;
+
+        var next = baseState with
+        {
+            JobId = jobId,
+            Status = status,
+            Stage = stage,
+            RunningGitHash = info.Running.GitHash ?? baseState.RunningGitHash,
+            SourceHead = sourceHead,
+            SourcePath = sourcePath,
+            ServerUnit = serverUnit,
+            RunnerUnit = runnerUnit,
+            Reason = unavailableCapability ?? baseState.Reason,
+            Outcome = outcome,
+            UnavailableCapability = unavailableCapability,
+            UpdatedAt = now,
+            CompletedAt = completedAt,
+            Logs = logs
+        };
+
+        await SupersedeStaleWebJobsAsync(next, cancellationToken);
+
+        var current = await _store.GetLatestAsync(cancellationToken);
+        if (current is null || !string.Equals(current.JobId, baseState.JobId, StringComparison.Ordinal))
+        {
+            await _store.SaveAsync(next, cancellationToken);
+        }
+        else
+        {
+            await _store.SaveIfCurrentAsync(current, next, cancellationToken);
+        }
+        await _store.ReleaseLockAsync(next.JobId, cancellationToken);
+        return ToResponse(next);
+    }
+
+    private async Task SupersedeStaleWebJobsAsync(SystemUpdateJobState cliState, CancellationToken cancellationToken)
+    {
+        var existing = await _store.GetLatestAsync(cancellationToken);
+        if (existing is null
+            || existing.JobId == cliState.JobId
+            || existing.Status != "waiting-for-reconnect")
+            return;
+
+        if (string.IsNullOrWhiteSpace(existing.SourceHead)
+            || string.IsNullOrWhiteSpace(cliState.SourceHead)
+            || string.Equals(existing.SourceHead, cliState.SourceHead, StringComparison.Ordinal))
+            return;
+
+        var now = DateTimeOffset.UtcNow;
+        var superseded = existing with
+        {
+            Status = "superseded",
+            Stage = "Superseded",
+            Reason = "A newer CLI-triggered update has completed; this job is no longer relevant.",
+            UpdatedAt = now,
+            CompletedAt = now,
+            Logs = AppendLog(existing.Logs, new SystemUpdateLogEntry(now, "Superseded", $"CLI update {cliState.JobId} completed with source HEAD '{cliState.SourceHead}'; this job is superseded."))
+        };
+        await _store.SaveIfCurrentAsync(existing, superseded, cancellationToken);
+        await _store.ReleaseLockAsync(superseded.JobId, cancellationToken);
+    }
+
+    public async Task<RuntimeConsistencyResponse> GetConsistencyAsync(CancellationToken cancellationToken = default)
+    {
+        var info = await _getSystemInfo(cancellationToken);
+        var components = new List<RuntimeConsistencyComponent>
+        {
+            BuildServerComponent(info),
+            BuildRunnerComponent(info),
+            BuildWebAssetsComponent(info),
+            BuildManagedAssetsComponent(info),
+            BuildCliComponent(info)
+        };
+
+        var mismatched = components.Count(c => c.Status is "mismatched" or "unavailable" or "unknown");
+        var topStatus = mismatched == 0 ? "consistent" : "inconsistent";
+        var reason = mismatched == 0
+            ? "All components are coherent and usable."
+            : $"{mismatched} component(s) reported a consistency issue.";
+
+        return new RuntimeConsistencyResponse(topStatus, reason, components, info);
+    }
+
+    private static RuntimeConsistencyComponent BuildServerComponent(SystemInfoResponse info)
+    {
+        if (string.IsNullOrWhiteSpace(info.Running.GitHash) || string.IsNullOrWhiteSpace(info.Source.Head))
+        {
+            return new RuntimeConsistencyComponent("server", "unknown", "Server git hash or source HEAD is unavailable.");
+        }
+
+        if (!string.Equals(info.Running.GitHash, info.Source.Head, StringComparison.Ordinal))
+        {
+            return new RuntimeConsistencyComponent(
+                "server",
+                "mismatched",
+                $"Running git hash '{info.Running.GitHash}' differs from source HEAD '{info.Source.Head}'.");
+        }
+
+        return new RuntimeConsistencyComponent("server", "consistent", null);
+    }
+
+    private static RuntimeConsistencyComponent BuildRunnerComponent(SystemInfoResponse info)
+    {
+        var status = info.Services.Runner;
+        if (string.IsNullOrWhiteSpace(status) || !string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RuntimeConsistencyComponent(
+                "runner",
+                "unavailable",
+                string.IsNullOrWhiteSpace(status) ? "Runner service status is not reported." : $"Runner service status is '{status}'.");
+        }
+
+        return new RuntimeConsistencyComponent("runner", "consistent", null);
+    }
+
+    private static RuntimeConsistencyComponent BuildWebAssetsComponent(SystemInfoResponse info)
+    {
+        if (string.IsNullOrWhiteSpace(info.Install.ServerUnit))
+        {
+            return new RuntimeConsistencyComponent("web-assets", "unknown", "Server unit is not configured.");
+        }
+
+        var status = info.Services.Server;
+        if (string.IsNullOrWhiteSpace(status) || !string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RuntimeConsistencyComponent(
+                "web-assets",
+                "unavailable",
+                string.IsNullOrWhiteSpace(status) ? "Server service status is not reported." : $"Server service status is '{status}'.");
+        }
+
+        return new RuntimeConsistencyComponent("web-assets", "consistent", null);
+    }
+
+    private RuntimeConsistencyComponent BuildManagedAssetsComponent(SystemInfoResponse info)
+    {
+        var manifestPath = ResolveManagedAssetManifestPath(info);
+        if (string.IsNullOrWhiteSpace(manifestPath) || !File.Exists(manifestPath))
+        {
+            return new RuntimeConsistencyComponent(
+                "managed-assets",
+                "mismatched",
+                "Managed skill asset manifest is missing or unreadable.");
+        }
+
+        var manifestIdentity = TryReadManifestIdentity(manifestPath);
+        if (manifestIdentity is null)
+        {
+            return new RuntimeConsistencyComponent(
+                "managed-assets",
+                "mismatched",
+                "Managed skill asset manifest is missing or unreadable.");
+        }
+
+        var runningHash = info.Running.GitHash;
+        if (!string.IsNullOrWhiteSpace(manifestIdentity.GitHash)
+            && !string.IsNullOrWhiteSpace(runningHash)
+            && !string.Equals(manifestIdentity.GitHash, runningHash, StringComparison.Ordinal))
+        {
+            return new RuntimeConsistencyComponent(
+                "managed-assets",
+                "mismatched",
+                $"Managed skill asset manifest git hash '{manifestIdentity.GitHash}' differs from running git hash '{runningHash}'.");
+        }
+
+        var runningVersion = info.Running.Version;
+        if (!string.IsNullOrWhiteSpace(manifestIdentity.CliVersion)
+            && !string.IsNullOrWhiteSpace(runningVersion)
+            && !string.Equals(manifestIdentity.CliVersion, runningVersion, StringComparison.Ordinal))
+        {
+            return new RuntimeConsistencyComponent(
+                "managed-assets",
+                "mismatched",
+                $"Managed skill asset manifest CLI version '{manifestIdentity.CliVersion}' differs from running version '{runningVersion}'.");
+        }
+
+        return new RuntimeConsistencyComponent("managed-assets", "consistent", null);
+    }
+
+    private static ManagedAssetIdentity? TryReadManifestIdentity(string manifestPath)
+    {
+        try
+        {
+            using var stream = File.OpenRead(manifestPath);
+            using var doc = System.Text.Json.JsonDocument.Parse(stream);
+            var root = doc.RootElement;
+            var gitHash = root.TryGetProperty("gitHash", out var gh) && gh.ValueKind == System.Text.Json.JsonValueKind.String
+                ? gh.GetString()
+                : null;
+            var cliVersion = root.TryGetProperty("cliVersion", out var cv) && cv.ValueKind == System.Text.Json.JsonValueKind.String
+                ? cv.GetString()
+                : null;
+            return new ManagedAssetIdentity(gitHash, cliVersion);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed record ManagedAssetIdentity(string? GitHash, string? CliVersion);
+
+    private static RuntimeConsistencyComponent BuildCliComponent(SystemInfoResponse info)
+    {
+        if (string.IsNullOrWhiteSpace(info.Running.Version))
+        {
+            return new RuntimeConsistencyComponent("cli", "unknown", "Server version is not reported.");
+        }
+
+        return new RuntimeConsistencyComponent("cli", "consistent", null);
+    }
+
+    private string ResolveManagedAssetManifestPath(SystemInfoResponse info)
+    {
+        var configured = _configuration["Mohist:CliSkillDataPath"];
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.Combine(configured, "manifest.json");
+
+        var home = _environment.GetEnvironmentVariable(HomeEnvironmentVariable)
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".mohist", "cli", "skill-data", "manifest.json");
+    }
+
+    private static string NormalizeOutcomeStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            throw new ArgumentException("status is required", nameof(status));
+        return status.Trim().ToLowerInvariant() switch
+        {
+            "succeeded" => "succeeded",
+            "success" => "succeeded",
+            "recovered" => "recovered",
+            "failed" => "failed",
+            "superseded" => "superseded",
+            "cancelled" or "canceled" => "cancelled",
+            _ => throw new ArgumentException($"Unknown outcome status '{status}'", nameof(status))
+        };
+    }
+
+    private static string? NormalizeOutcomeLabel(string? outcome)
+    {
+        if (string.IsNullOrWhiteSpace(outcome)) return null;
+        return outcome.Trim().ToLowerInvariant() switch
+        {
+            "succeeded" => "succeeded",
+            "recovered" => "recovered",
+            "failed" => "failed",
+            _ => null
+        };
+    }
+
     private async Task RunUpdateAsync(SystemUpdateJobState state, CancellationToken cancellationToken)
     {
+        var runnerWasPresent = !string.IsNullOrWhiteSpace(state.RunnerUnit);
         try
         {
             state = await RevalidateInstallAsync(state, cancellationToken);
@@ -479,11 +848,17 @@ public sealed class SystemUpdateService
 
             state = await RunCommandAsync(state, state.SourcePath!, "Building", "dotnet", ["build", "Mohist.sln"], cancellationToken);
             if (state.Status == "failed")
+            {
+                state = await TryRestoreRunnerAsync(state, runnerWasPresent, cancellationToken);
                 return;
+            }
 
             state = await RunCommandAsync(state, state.SourcePath!, "Restarting server", "systemctl", ["--user", "restart", state.ServerUnit!], cancellationToken);
             if (state.Status == "failed")
+            {
+                state = await TryRestoreRunnerAsync(state, runnerWasPresent, cancellationToken);
                 return;
+            }
 
             var waitingAt = DateTimeOffset.UtcNow;
             state = state with
@@ -508,13 +883,87 @@ public sealed class SystemUpdateService
                 CompletedAt = failedAt,
                 Logs = AppendLog(state.Logs, new SystemUpdateLogEntry(failedAt, state.Stage, ex.Message))
             };
-            await _store.SaveAsync(state, cancellationToken);
+            if (runnerWasPresent && !string.IsNullOrWhiteSpace(state.RunnerUnit))
+            {
+                state = await TryRestoreRunnerAsync(state, runnerWasPresent: true, cancellationToken);
+            }
+            else
+            {
+                await _store.SaveAsync(state, cancellationToken);
+            }
         }
         finally
         {
-            if (state.Status == "failed")
+            if (state.Status is "failed" or "recovered")
                 await _store.ReleaseLockAsync(state.JobId, cancellationToken);
         }
+    }
+
+    private async Task<SystemUpdateJobState> TryRestoreRunnerAsync(
+        SystemUpdateJobState state,
+        bool runnerWasPresent,
+        CancellationToken cancellationToken)
+    {
+        if (!runnerWasPresent || string.IsNullOrWhiteSpace(state.RunnerUnit))
+        {
+            await _store.SaveAsync(state, cancellationToken);
+            return state;
+        }
+
+        var restoringState = state with
+        {
+            Stage = "Restoring runner",
+            Status = "running",
+            Reason = "Update failed before server restart completed; attempting to restore the trusted runner unit.",
+            UpdatedAt = DateTimeOffset.UtcNow,
+            CompletedAt = null,
+            Outcome = null,
+            UnavailableCapability = null
+        };
+        await _store.SaveAsync(restoringState, cancellationToken);
+
+        var restored = await RunCommandAsync(
+            restoringState,
+            state.SourcePath!,
+            "Restoring runner",
+            "systemctl",
+            ["--user", "restart", state.RunnerUnit!],
+            cancellationToken);
+
+        if (restored.Status != "failed")
+        {
+            var recoveredAt = DateTimeOffset.UtcNow;
+            var failureReason = state.Reason;
+            var recovered = restored with
+            {
+                Status = "recovered",
+                Stage = "Recovered",
+                Reason = failureReason,
+                Outcome = "recovered",
+                UnavailableCapability = null,
+                UpdatedAt = recoveredAt,
+                CompletedAt = recoveredAt,
+                Logs = AppendLog(restored.Logs, new SystemUpdateLogEntry(recoveredAt, "Recovered", "Runner restore succeeded after update failure; Mohist is available with warnings."))
+            };
+            await _store.SaveAsync(recovered, cancellationToken);
+            return recovered;
+        }
+
+        var failedAt = DateTimeOffset.UtcNow;
+        var restoreFailureReason = state.Reason;
+        var failed = restored with
+        {
+            Status = "failed",
+            Stage = "Failed",
+            Reason = restoreFailureReason,
+            Outcome = "failed",
+            UnavailableCapability = "Runner",
+            UpdatedAt = failedAt,
+            CompletedAt = failedAt,
+            Logs = AppendLog(restored.Logs, new SystemUpdateLogEntry(failedAt, "Failed", "Runner restore failed after update failure. Workflows are unavailable. Start the runner manually with: mo server start --runner"))
+        };
+        await _store.SaveAsync(failed, cancellationToken);
+        return failed;
     }
 
     private (string Error, string Code)? ValidateStart(SystemInfoResponse info)
@@ -650,6 +1099,8 @@ public sealed class SystemUpdateService
             state.Logs,
             state.CreatedAt,
             state.UpdatedAt,
-            state.CompletedAt);
+            state.CompletedAt,
+            state.Outcome,
+            state.UnavailableCapability);
     }
 }

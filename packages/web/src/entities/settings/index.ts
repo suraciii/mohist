@@ -1,2 +1,5 @@
-export { useAgentRuntime, useAvailableModelIds, useLogLevel, useOpencodeModel, useOpencodeRuntime, useSetAgentRuntime, useSetLogLevel, useSetStageModels, useStageModels, useSystemInfo, useSystemUpdate, useSystemUpdateStatus, useUpdateOpencodeModel, useWorkflowProfile, useWorkflowProfiles } from './api/queries'
+export { useAgentRuntime, useAvailableModelIds, useLogLevel, useOpencodeModel, useOpencodeRuntime, useRuntimeConsistency, useSetAgentRuntime, useSetLogLevel, useSetStageModels, useStageModels, useSystemInfo, useSystemUpdate, useSystemUpdateStatus, useUpdateOpencodeModel, useWorkflowProfile, useWorkflowProfiles } from './api/queries'
 export * from './model/types'
+export * from './model/updateOutcome'
+export { ProgressStages } from './ui/ProgressStages'
+export { SystemUpdateOutcomeView } from './ui/SystemUpdateOutcomeView'

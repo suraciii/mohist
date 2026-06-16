@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using System.Net;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -20,12 +21,12 @@ internal static class UpdateCommands
         update.Options.Add(repoRootOpt);
         update.Options.Add(cliPathOpt);
         update.Options.Add(dryRunOpt);
-        update.SetAction(async ctx =>
+        update.SetAction(async (ctx, token) =>
         {
             var repoRoot = ctx.GetValue(repoRootOpt);
             var cliPath = ctx.GetValue(cliPathOpt);
             var dryRun = ctx.GetValue(dryRunOpt);
-            return await updater.UpdateAllAsync(repoRoot, dryRun, cliPath);
+            return await updater.UpdateAllAsync(repoRoot, dryRun, cliPath, token);
         });
 
         update.Subcommands.Add(BuildCliUpdate(updater));
@@ -44,12 +45,12 @@ internal static class UpdateCommands
         cmd.Options.Add(repoRootOpt);
         cmd.Options.Add(cliPathOpt);
         cmd.Options.Add(dryRunOpt);
-        cmd.SetAction(async ctx =>
+        cmd.SetAction(async (ctx, token) =>
         {
             var dryRun = ctx.GetValue(dryRunOpt);
             var repoRoot = ctx.GetValue(repoRootOpt);
             var cliPath = ctx.GetValue(cliPathOpt);
-            return await updater.UpdateCliAsync(repoRoot, dryRun, cliPath);
+            return await updater.UpdateCliAsync(repoRoot, dryRun, cliPath, token);
         });
         return cmd;
     }
@@ -61,11 +62,11 @@ internal static class UpdateCommands
         var dryRunOpt = MohistCliCommands.DryRunOption();
         cmd.Options.Add(repoRootOpt);
         cmd.Options.Add(dryRunOpt);
-        cmd.SetAction(async ctx =>
+        cmd.SetAction(async (ctx, token) =>
         {
             var dryRun = ctx.GetValue(dryRunOpt);
             var repoRoot = ctx.GetValue(repoRootOpt);
-            return await updater.UpdateServerAsync(repoRoot, dryRun);
+            return await updater.UpdateServerAsync(repoRoot, dryRun, token);
         });
         return cmd;
     }
@@ -77,13 +78,109 @@ internal static class UpdateCommands
         var dryRunOpt = MohistCliCommands.DryRunOption();
         cmd.Options.Add(repoRootOpt);
         cmd.Options.Add(dryRunOpt);
-        cmd.SetAction(async ctx =>
+        cmd.SetAction(async (ctx, token) =>
         {
             var dryRun = ctx.GetValue(dryRunOpt);
             var repoRoot = ctx.GetValue(repoRootOpt);
-            return await updater.UpdateRunnerAsync(repoRoot, dryRun);
+            return await updater.UpdateRunnerAsync(repoRoot, dryRun, token);
         });
         return cmd;
+    }
+}
+
+internal enum UpdateStage
+{
+    Start,
+    UpdateCli,
+    PrepareRunner,
+    UpdateServer,
+    WaitingForReady,
+    RestoreRunner,
+    VerifyRuntime,
+    Complete,
+}
+
+internal enum RuntimeCheckOutcome
+{
+    Pass,
+    Warn,
+    Fail,
+}
+
+internal sealed record RuntimeCheckResult(string Component, RuntimeCheckOutcome Outcome, string Message);
+
+internal sealed record UpdateStageLogEntry(string Stage, string Message, DateTimeOffset At);
+
+internal enum UpdateOutcome
+{
+    Ready,
+    Recovered,
+    Failed,
+}
+
+internal sealed record CliOutcomeLogEntry(DateTimeOffset At, string Stage, string Message);
+
+internal sealed record CliOutcomeRequest(
+    string? JobId,
+    string? Status,
+    string? Stage,
+    string? Outcome,
+    string? UnavailableCapability,
+    IReadOnlyList<CliOutcomeLogEntry>? Logs,
+    string? SourceHead);
+
+internal static class CliOutcomeJson
+{
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+}
+
+internal sealed class UpdateContext
+{
+    public UpdateContext(bool dryRun, string? repoRoot, string? cliPath, CancellationToken cancellationToken)
+    {
+        DryRun = dryRun;
+        RepoRoot = repoRoot;
+        CliPath = cliPath;
+        CancellationToken = cancellationToken;
+        JobId = Guid.NewGuid().ToString("N");
+    }
+
+    public bool DryRun { get; }
+    public string? RepoRoot { get; }
+    public string? CliPath { get; }
+    public CancellationToken CancellationToken { get; }
+
+    public string JobId { get; }
+    public UpdateStage Stage { get; set; } = UpdateStage.Start;
+    public bool RunnerWasRunning { get; set; }
+    public bool RunnerStopped { get; set; }
+    public bool RunnerRestored { get; set; }
+    public bool Interrupted { get; set; }
+    public List<string> Warnings { get; } = new();
+    public List<UpdateStageLogEntry> StageLogEntries { get; } = new();
+    public List<RuntimeCheckResult> RuntimeChecks { get; } = new();
+    public UpdateOutcome? Outcome { get; set; }
+    public string? UnavailableCapability { get; set; }
+    public string? SourceHead { get; set; }
+    public int LastExitCode { get; set; }
+
+    public void RecordWarning(string warning)
+    {
+        Warnings.Add(warning);
+    }
+
+    public void RecordStage(string label, string message)
+    {
+        StageLogEntries.Add(new UpdateStageLogEntry(label, message, DateTimeOffset.UtcNow));
+    }
+
+    public void RecordRuntimeCheck(RuntimeCheckResult check)
+    {
+        RuntimeChecks.Add(check);
+        if (check.Outcome == RuntimeCheckOutcome.Warn)
+        {
+            Warnings.Add($"{check.Component}: {check.Message}");
+        }
     }
 }
 
@@ -91,6 +188,7 @@ internal sealed class SourceCodeUpdater
 {
     private static readonly TimeSpan ServerReadyTimeout = TimeSpan.FromSeconds(180);
     private static readonly TimeSpan ServerReadyPollInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan ServerReadyProgressInterval = TimeSpan.FromSeconds(2);
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -148,52 +246,721 @@ internal sealed class SourceCodeUpdater
 
     internal Uri? ServerBaseAddress => _http.BaseAddress;
 
-    public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null)
+    public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
     {
-        var root = ResolveRepoRoot(repoRoot);
-        _out.WriteLine($"Updating Mohist from source: {root}");
+        var context = new UpdateContext(dryRun, repoRoot, cliPath, cancellationToken);
+        var outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await UpdateCliStageAsync(ctx, token);
+        });
 
-        var cli = await UpdateCliAsync(root, dryRun, cliPath);
-        if (cli != 0) return cli;
+        if (context.Interrupted)
+        {
+            if (!context.RunnerStopped)
+            {
+                _out.WriteLine("Update cancelled before the runner was stopped. No recovery needed.");
+            }
+            return await FinalizeAsync(context, 130);
+        }
 
-        var stoppedRunner = await StopRunnerForServerUpdateAsync(dryRun);
-        if (stoppedRunner != 0) return stoppedRunner;
+        if (!outcome.Success)
+        {
+            return await FinalizeAsync(context, outcome.ExitCode);
+        }
 
-        var server = await UpdateServerAsync(root, dryRun);
-        if (server != 0)
-            return await RestoreRunnerAfterFailedUpdateAsync(dryRun, server);
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await PrepareRunnerStageAsync(ctx, token);
+        });
 
-        var runner = await UpdateRunnerAsync(root, dryRun);
-        if (runner != 0)
-            return await RestoreRunnerAfterFailedUpdateAsync(dryRun, runner);
+        if (context.Interrupted || !outcome.Success)
+        {
+            return await FinalizeAfterServerAsync(context, outcome);
+        }
 
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await UpdateServerStageAsync(ctx, token);
+        });
+
+        if (context.Interrupted || !outcome.Success)
+        {
+            return await FinalizeAfterServerAsync(context, outcome);
+        }
+
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await WaitingForReadyStageAsync(ctx, token);
+        });
+
+        if (context.Interrupted || !outcome.Success)
+        {
+            return await FinalizeAfterServerAsync(context, outcome);
+        }
+
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await RestoreRunnerStageAsync(ctx, token);
+        });
+
+        if (context.Interrupted || !outcome.Success)
+        {
+            return await FinalizeAsync(context, outcome.ExitCode);
+        }
+
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await VerifyRuntimeStageAsync(ctx, token);
+        });
+
+        return await FinalizeAsync(context, outcome.Success ? 0 : outcome.ExitCode);
+    }
+
+    private async Task<int> FinalizeAfterServerAsync(UpdateContext context, StageOutcome outcome)
+    {
+        if (context.RunnerWasRunning && !context.RunnerRestored)
+        {
+            if (context.Interrupted)
+                _err.WriteLine("Update was interrupted and the runner was stopped. Attempting runner restore.");
+            else
+                _err.WriteLine("Update failed after the runner was stopped. Attempting runner restore.");
+
+            var restore = await RunRecoveryStageAsync(context, async (ctx, token) =>
+            {
+                return await RestoreRunnerStageAsync(ctx, token);
+            });
+
+            if (!restore.Success && restore.ExitCode != 0 && context.LastExitCode == 0)
+            {
+                context.LastExitCode = restore.ExitCode;
+            }
+        }
+
+        return await FinalizeAsync(context, outcome.ExitCode);
+    }
+
+    private async Task<StageOutcome> RunStageMachineAsync(UpdateContext context, Func<UpdateContext, CancellationToken, Task<int>> stage)
+    {
+        if (context.CancellationToken.IsCancellationRequested)
+        {
+            context.Interrupted = true;
+            return new StageOutcome(false, 130, new OperationCanceledException(context.CancellationToken));
+        }
+
+        try
+        {
+            var exitCode = await stage(context, context.CancellationToken);
+            context.LastExitCode = exitCode;
+            if (context.CancellationToken.IsCancellationRequested)
+            {
+                context.Interrupted = true;
+                return new StageOutcome(false, 130, new OperationCanceledException(context.CancellationToken));
+            }
+            return new StageOutcome(exitCode == 0, exitCode, null);
+        }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+            context.Interrupted = true;
+            return new StageOutcome(false, 130, null);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Update stage failed: {ex.GetType().Name}: {ex.Message}");
+            return new StageOutcome(false, 1, ex);
+        }
+    }
+
+    private async Task<StageOutcome> RunRecoveryStageAsync(UpdateContext context, Func<UpdateContext, CancellationToken, Task<int>> stage)
+    {
+        using var recoveryCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            var exitCode = await stage(context, recoveryCts.Token);
+            return new StageOutcome(exitCode == 0, exitCode, null);
+        }
+        catch (OperationCanceledException) when (recoveryCts.IsCancellationRequested)
+        {
+            return new StageOutcome(false, 1, new OperationCanceledException(recoveryCts.Token));
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Update recovery stage failed: {ex.GetType().Name}: {ex.Message}");
+            return new StageOutcome(false, 1, ex);
+        }
+    }
+
+    private async Task<int> UpdateCliStageAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.UpdateCli;
+        _out.WriteLine(StageLabels.CliUpdate);
+        context.RecordStage(StageLabels.CliUpdate, "starting");
+
+        var exitCode = await UpdateCliAsync(context.RepoRoot, context.DryRun, context.CliPath, token);
+        if (exitCode != 0)
+        {
+            context.RecordStage(StageLabels.CliUpdate, "failed");
+            return exitCode;
+        }
+        context.RecordStage(StageLabels.CliUpdate, "complete");
         return 0;
     }
 
-    private async Task<int> StopRunnerForServerUpdateAsync(bool dryRun)
+    private async Task<int> PrepareRunnerStageAsync(UpdateContext context, CancellationToken token)
     {
-        _out.WriteLine("Stopping runner service before server restart.");
-        var stop = await _systemd.StopRunnerAsync(new ServiceCommandOptions(dryRun, null, 100, false));
+        context.Stage = UpdateStage.PrepareRunner;
+        _out.WriteLine(StageLabels.PrepareRunner);
+        context.RecordStage(StageLabels.PrepareRunner, "querying runner state");
+
+        if (!context.DryRun)
+        {
+            context.RunnerWasRunning = await _systemd.IsRunnerRunningAsync(token);
+        }
+        else
+        {
+            context.RunnerWasRunning = true;
+            _out.WriteLine("Dry run: would query systemctl --user is-active mohist-runner.service");
+        }
+
+        if (!context.RunnerWasRunning)
+        {
+            context.RecordStage(StageLabels.PrepareRunner, "runner not running; nothing to stop");
+            _out.WriteLine("Runner was not running; nothing to stop for the server update.");
+            return 0;
+        }
+
+        context.RecordStage(StageLabels.PrepareRunner, "stopping runner for server update");
+        var stop = await _systemd.StopRunnerAsync(new ServiceCommandOptions(context.DryRun, null, 100, false));
         if (stop != 0)
         {
-            _err.WriteLine("Warning: Failed to stop runner service before server restart.");
+            context.RecordStage(StageLabels.PrepareRunner, "stop failed");
             return stop;
         }
 
+        context.RunnerStopped = true;
+        _out.WriteLine("Runner is stopped. Workflows cannot run until the runner is restored.");
+        context.RecordStage(StageLabels.PrepareRunner, "runner stopped; workflows paused");
         return 0;
     }
 
-    private async Task<int> RestoreRunnerAfterFailedUpdateAsync(bool dryRun, int originalExitCode)
+    private async Task<int> UpdateServerStageAsync(UpdateContext context, CancellationToken token)
     {
-        _err.WriteLine("Update failed after runner service was stopped. Restoring runner service.");
-        var start = await _systemd.StartRunnerAsync(new ServiceCommandOptions(dryRun, null, 100, false));
-        if (start != 0)
-            _err.WriteLine("Warning: Failed to restore runner service. You may need to start it manually.");
+        context.Stage = UpdateStage.UpdateServer;
+        _out.WriteLine(StageLabels.UpdateServer);
+        context.RecordStage(StageLabels.UpdateServer, "building and restarting server");
 
-        return originalExitCode;
+        if (context.DryRun)
+        {
+            _out.WriteLine($"  cd {ResolveRepoRoot(context.RepoRoot)} && dotnet build Mohist.sln");
+            _out.WriteLine($"  {RestartCommandLine("server")} (if installed)");
+            context.RecordStage(StageLabels.UpdateServer, "complete (dry run)");
+            return 0;
+        }
+
+        var root = ResolveRepoRoot(context.RepoRoot);
+        var exitCode = await BuildAndRestartServerAsync(root, token);
+        if (exitCode != 0)
+        {
+            context.RecordStage(StageLabels.UpdateServer, "failed");
+            return exitCode;
+        }
+        context.RecordStage(StageLabels.UpdateServer, "complete");
+        return 0;
     }
 
-    public async Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null)
+    private async Task<int> WaitingForReadyStageAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.WaitingForReady;
+        _out.WriteLine(StageLabels.WaitingForReady);
+        context.RecordStage(StageLabels.WaitingForReady, "starting readiness checks");
+
+        if (context.DryRun)
+        {
+            _out.WriteLine("Dry run: would wait for /api/health, /, and referenced /assets/* readiness checks.");
+            return 0;
+        }
+
+        var ready = await WaitForServerReadyWithProgressAsync(_serverReadyTimeout, token);
+        if (!ready.Ready)
+        {
+            context.RecordStage(StageLabels.WaitingForReady, $"timed out: {ready.LastFailure ?? "no readiness signal"}");
+            return 1;
+        }
+        context.RecordStage(StageLabels.WaitingForReady, "server is ready");
+        return 0;
+    }
+
+    private async Task<int> RestoreRunnerStageAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.RestoreRunner;
+        _out.WriteLine(StageLabels.RestoreRunner);
+        context.RecordStage(StageLabels.RestoreRunner, "starting runner restore");
+
+        if (!context.RunnerWasRunning)
+        {
+            _out.WriteLine("Runner was not running before the update; no restore needed.");
+            context.RecordStage(StageLabels.RestoreRunner, "skipped; runner was not running");
+            return 0;
+        }
+
+        if (!context.DryRun)
+        {
+            var root = ResolveRepoRoot(context.RepoRoot);
+            var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("npm", ["run", "build", "-w", "packages/runner"], root);
+            if (build != 0)
+            {
+                WriteCommandFailureOutput(buildOut, buildErr);
+                context.RecordStage(StageLabels.RestoreRunner, "runner build failed");
+                context.UnavailableCapability ??= "Runner unavailable";
+                return build;
+            }
+            _out.WriteLine("Runner updated successfully.");
+        }
+        else
+        {
+            var root = ResolveRepoRoot(context.RepoRoot);
+            _out.WriteLine($"  cd {root} && npm run build -w packages/runner");
+        }
+
+        var start = await _systemd.StartRunnerAsync(new ServiceCommandOptions(context.DryRun, null, 100, false));
+        if (start != 0)
+        {
+            context.RecordStage(StageLabels.RestoreRunner, "failed to start");
+            context.UnavailableCapability ??= "Runner unavailable";
+            return start;
+        }
+
+        context.RunnerRestored = true;
+        _out.WriteLine("Runner service restored.");
+        context.RecordStage(StageLabels.RestoreRunner, "runner started");
+        return 0;
+    }
+
+    private async Task<int> VerifyRuntimeStageAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.VerifyRuntime;
+        _out.WriteLine(StageLabels.VerifyRuntime);
+        context.RecordStage(StageLabels.VerifyRuntime, "starting runtime consistency checks");
+
+        if (context.DryRun)
+        {
+            _out.WriteLine("Dry run: would verify CLI binary, server identity, web assets, runner connection, and managed skill assets.");
+            context.Outcome = UpdateOutcome.Ready;
+            context.RecordStage(StageLabels.VerifyRuntime, "skipped (dry run)");
+            return 0;
+        }
+
+        var checks = new List<RuntimeCheckResult>
+        {
+            await CheckCliBinaryAsync(context, token),
+            await CheckServerIdentityAsync(context, token),
+            await CheckWebAssetsAsync(context, token),
+            await CheckRunnerConnectionAsync(context, token),
+            await CheckManagedSkillAssetsAsync(context, token),
+        };
+
+        foreach (var check in checks)
+        {
+            context.RecordRuntimeCheck(check);
+            switch (check.Outcome)
+            {
+                case RuntimeCheckOutcome.Pass:
+                    _out.WriteLine($"  [ok] {check.Component}: {check.Message}");
+                    break;
+                case RuntimeCheckOutcome.Warn:
+                    _out.WriteLine($"  [warn] {check.Component}: {check.Message}");
+                    break;
+                case RuntimeCheckOutcome.Fail:
+                    _err.WriteLine($"  [fail] {check.Component}: {check.Message}");
+                    break;
+            }
+        }
+
+        if (checks.Any(c => c.Outcome == RuntimeCheckOutcome.Fail))
+        {
+            var firstFailure = checks.First(c => c.Outcome == RuntimeCheckOutcome.Fail);
+            var capability = string.Equals(firstFailure.Component, "Runner connection", StringComparison.Ordinal)
+                ? "Runner unavailable"
+                : firstFailure.Component;
+            context.UnavailableCapability ??= capability;
+            context.Outcome = UpdateOutcome.Failed;
+            context.RecordStage(StageLabels.VerifyRuntime, $"failed: {capability}");
+            return 1;
+        }
+
+        if (checks.Any(c => c.Outcome == RuntimeCheckOutcome.Warn))
+        {
+            context.Outcome = UpdateOutcome.Recovered;
+            context.RecordStage(StageLabels.VerifyRuntime, "recovered with warnings");
+            return 0;
+        }
+
+        context.Outcome = UpdateOutcome.Ready;
+        context.RecordStage(StageLabels.VerifyRuntime, "all checks passed");
+        return 0;
+    }
+
+    internal async Task<RuntimeCheckResult> CheckCliBinaryAsync(UpdateContext context, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(context.CliPath))
+        {
+            return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Fail,
+                "CLI binary path was not resolved; cannot invoke mo --version. Reinstall with 'mo update' or pass --cli-path.");
+        }
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await _commandExecutor.ExecuteAsync(context.CliPath, ["--version"], null);
+            if (exitCode != 0)
+            {
+                return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Fail,
+                    $"mo --version exited with code {exitCode}: {stderr.Trim()}");
+            }
+
+            var versionOutput = stdout.Trim();
+            var identity = SkillAssetManifest.ResolveCurrentBuildIdentity();
+            if (!string.IsNullOrWhiteSpace(identity.GitHash)
+                && versionOutput.Contains(identity.GitHash, StringComparison.OrdinalIgnoreCase) is false
+                && versionOutput.Contains(identity.Version ?? string.Empty, StringComparison.OrdinalIgnoreCase) is false
+                && !string.IsNullOrWhiteSpace(versionOutput))
+            {
+                return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Warn,
+                    $"Installed mo reports '{versionOutput}', but source HEAD build identity is '{identity.Version}+{identity.GitHash}'. The CLI may be stale.");
+            }
+
+            return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Pass,
+                $"mo --version reported '{versionOutput}'");
+        }
+        catch (Exception ex)
+        {
+            return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Fail,
+                $"mo --version failed: {ex.Message}");
+        }
+    }
+
+    internal async Task<RuntimeCheckResult> CheckServerIdentityAsync(UpdateContext context, CancellationToken token)
+    {
+        var info = await TryGetSystemInfoAsync(token);
+        if (info is null)
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
+                "GET /api/system/info did not respond");
+        }
+
+        var runningHash = info.Running?.GitHash;
+        if (string.IsNullOrWhiteSpace(runningHash))
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+                "Server reported an empty git hash; cannot verify identity");
+        }
+
+        var sourceHead = await TryGetSourceHeadAsync(context);
+        if (string.IsNullOrWhiteSpace(sourceHead))
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+                "Source HEAD could not be determined; skipping identity check");
+        }
+
+        if (!string.Equals(runningHash, sourceHead, StringComparison.Ordinal))
+        {
+            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+                $"Running server git hash '{runningHash}' does not match source HEAD '{sourceHead}'");
+        }
+
+        return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Pass,
+            $"Server identity matches source HEAD '{sourceHead}'");
+    }
+
+    internal async Task<RuntimeCheckResult> CheckWebAssetsAsync(UpdateContext context, CancellationToken token)
+    {
+        try
+        {
+            using var index = await _http.GetAsync("/", HttpCompletionOption.ResponseHeadersRead, token);
+            if (!index.IsSuccessStatusCode)
+            {
+                return new RuntimeCheckResult("Web assets", RuntimeCheckOutcome.Fail,
+                    $"GET / returned {(int)index.StatusCode} {index.StatusCode}");
+            }
+
+            var contentType = index.Content.Headers.ContentType?.MediaType;
+            if (!string.Equals(contentType, "text/html", StringComparison.OrdinalIgnoreCase))
+            {
+                return new RuntimeCheckResult("Web assets", RuntimeCheckOutcome.Fail,
+                    $"GET / returned content type '{contentType ?? "unknown"}', expected text/html");
+            }
+
+            var html = await index.Content.ReadAsStringAsync(token);
+            var assetPath = FindFirstAssetPath(html);
+            if (assetPath is null)
+            {
+                return new RuntimeCheckResult("Web assets", RuntimeCheckOutcome.Fail,
+                    "GET / did not reference a /assets/* bundle");
+            }
+
+            using var asset = await _http.GetAsync(assetPath, HttpCompletionOption.ResponseHeadersRead, token);
+            if (asset.StatusCode != HttpStatusCode.OK)
+            {
+                return new RuntimeCheckResult("Web assets", RuntimeCheckOutcome.Fail,
+                    $"GET {assetPath} returned {(int)asset.StatusCode} {asset.StatusCode}");
+            }
+
+            return new RuntimeCheckResult("Web assets", RuntimeCheckOutcome.Pass,
+                $"Web root and {assetPath} respond with expected content");
+        }
+        catch (Exception ex)
+        {
+            return new RuntimeCheckResult("Web assets", RuntimeCheckOutcome.Fail,
+                $"Web asset check failed: {ex.Message}");
+        }
+    }
+
+    internal async Task<RuntimeCheckResult> CheckRunnerConnectionAsync(UpdateContext context, CancellationToken token)
+    {
+        var info = await TryGetSystemInfoAsync(token);
+        if (info is null)
+        {
+            return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
+                "GET /api/system/info did not respond");
+        }
+
+        var runner = info.Services?.Runner;
+        if (string.IsNullOrWhiteSpace(runner))
+        {
+            return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
+                "Server did not report a runner service state");
+        }
+
+        if (string.Equals(runner, "active", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Pass,
+                "Runner service is active");
+        }
+
+        return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
+            $"Runner service is '{runner}'; expected 'active'");
+    }
+
+    internal async Task<RuntimeCheckResult> CheckManagedSkillAssetsAsync(UpdateContext context, CancellationToken token)
+    {
+        await Task.CompletedTask;
+        var assetRoot = ResolveManagedSkillAssetRoot();
+        var manifestPath = Path.Combine(assetRoot, SkillAssetManifest.FileName);
+        if (!_fileSystem.Exists(manifestPath))
+        {
+            return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Warn,
+                $"Managed skill assets are missing at '{assetRoot}'. Run 'mo skills install' to restore.");
+        }
+
+        return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Pass,
+            $"Manifest present at '{manifestPath}'");
+    }
+
+    private async Task<SystemInfoSnapshot?> TryGetSystemInfoAsync(CancellationToken token)
+    {
+        try
+        {
+            using var response = await _http.GetAsync("/api/system/info", HttpCompletionOption.ResponseHeadersRead, token);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            return await JsonSerializer.DeserializeAsync<SystemInfoSnapshot>(stream, SystemInfoSnapshot.JsonOptions, token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> TryGetSourceHeadAsync(UpdateContext context)
+    {
+        if (!string.IsNullOrWhiteSpace(context.SourceHead))
+            return context.SourceHead;
+
+        try
+        {
+            var root = ResolveRepoRoot(context.RepoRoot);
+            var (exitCode, stdout, _) = await _commandExecutor.ExecuteAsync("git", ["rev-parse", "HEAD"], root);
+            if (exitCode != 0)
+                return null;
+            var head = stdout.Trim();
+            if (string.IsNullOrWhiteSpace(head))
+                return null;
+            context.SourceHead = head;
+            return head;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<int> FinalizeAsync(UpdateContext context, int exitCode)
+    {
+        context.Stage = UpdateStage.Complete;
+
+        if (context.RunnerWasRunning && !context.RunnerRestored)
+        {
+            if (context.Interrupted)
+                _err.WriteLine("Update was interrupted and the runner was stopped. Runner restore was attempted.");
+            else
+                _err.WriteLine("Update failed after the runner was stopped. Runner restore was attempted.");
+        }
+
+        await Task.CompletedTask;
+
+        var finalExit = FinalizeExitCode(context, exitCode);
+
+        if (ShouldPostOutcome(context))
+        {
+            await PostCliOutcomeAsync(context, context.CancellationToken);
+        }
+        else if (context.Interrupted)
+        {
+            _out.WriteLine("Update was cancelled. The local terminal output above is the authoritative result; no outcome was posted to the server.");
+        }
+
+        return finalExit;
+    }
+
+    private static bool ShouldPostOutcome(UpdateContext context)
+    {
+        if (context.DryRun)
+            return false;
+
+        if (!string.IsNullOrEmpty(context.UnavailableCapability))
+            return true;
+
+        if (context.Interrupted)
+            return false;
+
+        return true;
+    }
+
+    private int FinalizeExitCode(UpdateContext context, int? overrideExitCode = null)
+    {
+        var exit = overrideExitCode ?? context.LastExitCode;
+
+        if (context.RunnerWasRunning && !context.RunnerRestored)
+        {
+            context.UnavailableCapability ??= "Runner unavailable";
+        }
+
+        if (context.Interrupted)
+        {
+            _out.WriteLine("Update was interrupted.");
+        }
+
+        if (!string.IsNullOrEmpty(context.UnavailableCapability))
+        {
+            _err.WriteLine($"Mohist is not fully usable. Unavailable capability: {context.UnavailableCapability}.");
+            if (string.Equals(context.UnavailableCapability, "Runner unavailable", StringComparison.Ordinal))
+            {
+                _err.WriteLine("Start the runner manually with: mo server start --runner");
+            }
+        }
+        else if (context.Warnings.Count > 0)
+        {
+            _out.WriteLine("Mohist is recovered with warnings.");
+            foreach (var warning in context.Warnings)
+                _out.WriteLine($"  - {warning}");
+        }
+        else if (exit == 0)
+        {
+            _out.WriteLine("Update complete. Mohist is ready.");
+        }
+        else
+        {
+            _err.WriteLine("Mohist update did not complete successfully.");
+        }
+
+        return exit == 0 && context.Interrupted ? 130 : exit;
+    }
+
+    internal async Task<bool> PostCliOutcomeAsync(UpdateContext context, CancellationToken token)
+    {
+        if (context.DryRun)
+        {
+            _out.WriteLine("Dry run: would POST update outcome to server.");
+            return false;
+        }
+
+        if (context.StageLogEntries.Count == 0)
+        {
+            // Nothing to report.
+            return false;
+        }
+
+        var (status, outcomeLabel) = ResolveOutcomeStatus(context);
+        var stage = context.StageLogEntries[^1].Stage;
+        var unavailableCapability = !string.IsNullOrEmpty(context.UnavailableCapability)
+            ? context.UnavailableCapability
+            : null;
+
+        var logs = context.StageLogEntries
+            .Select(e => new CliOutcomeLogEntry(e.At, e.Stage, e.Message))
+            .ToList();
+
+        var payload = new CliOutcomeRequest(
+            JobId: context.JobId,
+            Status: status,
+            Stage: stage,
+            Outcome: outcomeLabel,
+            UnavailableCapability: unavailableCapability,
+            Logs: logs,
+            SourceHead: context.SourceHead);
+
+        using var postCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        postCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/system/update/outcome")
+            {
+                Content = JsonContent.Create(payload, options: CliOutcomeJson.Options),
+            };
+            using var response = await _http.SendAsync(request, postCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                _out.WriteLine($"Could not persist update outcome to server (HTTP {(int)response.StatusCode}). The CLI terminal output above is the authoritative result.");
+                return false;
+            }
+
+            _out.WriteLine("Update outcome persisted to server.");
+            return true;
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            _out.WriteLine("Could not persist update outcome to server (timed out). The CLI terminal output above is the authoritative result.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _out.WriteLine($"Could not persist update outcome to server: {ex.GetType().Name}: {ex.Message}. The CLI terminal output above is the authoritative result.");
+            return false;
+        }
+    }
+
+    private static (string Status, string Outcome) ResolveOutcomeStatus(UpdateContext context)
+    {
+        if (!string.IsNullOrEmpty(context.UnavailableCapability))
+            return ("failed", "failed");
+
+        if (context.Interrupted)
+            return ("cancelled", "failed");
+
+        return context.Outcome switch
+        {
+            UpdateOutcome.Recovered => ("recovered", "recovered"),
+            UpdateOutcome.Failed => ("failed", "failed"),
+            UpdateOutcome.Ready when context.LastExitCode != 0 => ("failed", "failed"),
+            UpdateOutcome.Ready => ("succeeded", "succeeded"),
+            _ when context.LastExitCode != 0 => ("failed", "failed"),
+            _ => ("succeeded", "succeeded"),
+        };
+    }
+
+    public async Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
         var target = await ResolveCliPathAsync(cliPath);
@@ -280,7 +1047,7 @@ internal sealed class SourceCodeUpdater
         return 0;
     }
 
-    public async Task<int> UpdateServerAsync(string? repoRoot, bool dryRun)
+    public async Task<int> UpdateServerAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
 
@@ -295,6 +1062,26 @@ internal sealed class SourceCodeUpdater
             return 0;
         }
 
+        var exitCode = await BuildAndRestartServerAsync(root, cancellationToken);
+        if (exitCode != 0)
+            return exitCode;
+
+        _out.WriteLine("Server service restarted.");
+        var ready = await WaitForServerReadyAsync(_serverReadyTimeout, cancellationToken);
+        if (!ready.Ready)
+        {
+            _err.WriteLine($"Server service restarted, but Mohist readiness checks did not pass within {(int)_serverReadyTimeout.TotalSeconds} seconds.");
+            if (!string.IsNullOrWhiteSpace(ready.LastFailure))
+                _err.WriteLine($"Last readiness error: {ready.LastFailure}");
+            return 1;
+        }
+
+        _out.WriteLine("Server is ready.");
+        return 0;
+    }
+
+    private async Task<int> BuildAndRestartServerAsync(string root, CancellationToken cancellationToken)
+    {
         var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("dotnet", ["build", "Mohist.sln"], root);
         if (build != 0)
         {
@@ -312,21 +1099,10 @@ internal sealed class SourceCodeUpdater
             return restart;
         }
 
-        _out.WriteLine("Server service restarted.");
-        var ready = await WaitForServerReadyAsync(_serverReadyTimeout);
-        if (!ready.Ready)
-        {
-            _err.WriteLine($"Server service restarted, but Mohist readiness checks did not pass within {(int)_serverReadyTimeout.TotalSeconds} seconds.");
-            if (!string.IsNullOrWhiteSpace(ready.LastFailure))
-                _err.WriteLine($"Last readiness error: {ready.LastFailure}");
-            return 1;
-        }
-
-        _out.WriteLine("Server is ready.");
         return 0;
     }
 
-    public async Task<int> UpdateRunnerAsync(string? repoRoot, bool dryRun)
+    public async Task<int> UpdateRunnerAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
 
@@ -416,12 +1192,65 @@ internal sealed class SourceCodeUpdater
             _err.WriteLine(stderr.TrimEnd());
     }
 
-    private async Task<ServerReadinessResult> WaitForServerReadyAsync(TimeSpan timeout)
+    private async Task<ServerReadinessResult> WaitForServerReadyWithProgressAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
         string? lastFailure = null;
-        using var cts = new CancellationTokenSource(timeout);
+        string? lastReason = null;
+        var lastProgress = DateTimeOffset.UtcNow;
+        int i = 0;
+
         while (!cts.IsCancellationRequested)
         {
+            i++;
+            var probe = new ReadinessProbeState();
+            try
+            {
+                lastFailure = await CheckServerReadyOnceWithReasonAsync(cts.Token, probe);
+                if (lastFailure is null)
+                    return new ServerReadinessResult(true, null);
+                lastReason = probe.Reason;
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                lastFailure = FormatReadinessException(ex);
+                lastReason ??= "waiting for Mohist API";
+            }
+
+            if (DateTimeOffset.UtcNow - lastProgress >= ServerReadyProgressInterval)
+            {
+                _out.WriteLine($"  waiting... {lastReason ?? "waiting for Mohist API"}");
+                lastProgress = DateTimeOffset.UtcNow;
+            }
+
+            try
+            {
+                await Task.Delay(ServerReadyPollInterval, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        return new ServerReadinessResult(false, lastFailure);
+    }
+
+    private async Task<ServerReadinessResult> WaitForServerReadyAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        string? lastFailure = null;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+        int i = 0;
+        while (!cts.IsCancellationRequested)
+        {
+            i++;
             try
             {
                 lastFailure = await CheckServerReadyOnceAsync(cts.Token);
@@ -451,6 +1280,48 @@ internal sealed class SourceCodeUpdater
         return new ServerReadinessResult(false, lastFailure);
     }
 
+    private async Task<string?> CheckServerReadyOnceWithReasonAsync(CancellationToken ct, ReadinessProbeState state)
+    {
+        using var health = await _http.GetAsync("/api/health", HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!health.IsSuccessStatusCode)
+        {
+            state.Reason = "waiting for Mohist API";
+            return FormatReadinessStatus("/api/health", health.StatusCode);
+        }
+
+        using var index = await _http.GetAsync("/", HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!index.IsSuccessStatusCode)
+        {
+            state.Reason = "waiting for Web assets";
+            return FormatReadinessStatus("/", index.StatusCode);
+        }
+
+        var contentType = index.Content.Headers.ContentType?.MediaType;
+        if (!string.Equals(contentType, "text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            state.Reason = "waiting for Web assets";
+            return $"GET / returned content type {contentType ?? "unknown"}, expected text/html";
+        }
+
+        var html = await index.Content.ReadAsStringAsync(ct);
+        var assetPath = FindFirstAssetPath(html);
+        if (assetPath is null)
+        {
+            state.Reason = "waiting for Web assets";
+            return "GET / did not reference a /assets/* bundle";
+        }
+
+        using var asset = await _http.GetAsync(assetPath, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (asset.StatusCode != HttpStatusCode.OK)
+        {
+            state.Reason = "waiting for Web assets";
+            return FormatReadinessStatus(assetPath, asset.StatusCode);
+        }
+
+        state.Reason = null;
+        return null;
+    }
+
     private async Task<string?> CheckServerReadyOnceAsync(CancellationToken ct)
     {
         using var health = await _http.GetAsync("/api/health", HttpCompletionOption.ResponseHeadersRead, ct);
@@ -475,6 +1346,49 @@ internal sealed class SourceCodeUpdater
     }
 
     private sealed record ServerReadinessResult(bool Ready, string? LastFailure);
+
+    private sealed class ReadinessProbeState
+    {
+        public string? Reason { get; set; }
+    }
+
+    private sealed record StageOutcome(bool Success, int ExitCode, Exception? Exception);
+
+    private static class StageLabels
+    {
+        public const string CliUpdate = "Updating CLI";
+        public const string PrepareRunner = "Preparing workflow runner";
+        public const string UpdateServer = "Updating Mohist Server";
+        public const string WaitingForReady = "Waiting for Mohist to become usable";
+        public const string RestoreRunner = "Restoring workflow runner";
+        public const string VerifyRuntime = "Verifying workflow runtime";
+    }
+
+    private sealed class SystemInfoRunningSnapshot
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("gitHash")]
+        public string? GitHash { get; set; }
+    }
+
+    private sealed class SystemInfoServiceSnapshot
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("runner")]
+        public string? Runner { get; set; }
+    }
+
+    private sealed class SystemInfoSnapshot
+    {
+        public static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+
+        [System.Text.Json.Serialization.JsonPropertyName("running")]
+        public SystemInfoRunningSnapshot? Running { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("services")]
+        public SystemInfoServiceSnapshot? Services { get; set; }
+    }
 
     private static string FormatReadinessStatus(string path, HttpStatusCode statusCode)
         => $"GET {path} returned {(int)statusCode} {statusCode}";

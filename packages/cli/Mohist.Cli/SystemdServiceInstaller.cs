@@ -76,6 +76,16 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     public Task<int> LogsRunnerAsync(ServiceCommandOptions options) => LogsAsync(RunnerUnit, options);
     public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) => UninstallAsync(RunnerUnit, options);
 
+    public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux()) return false;
+        var (code, stdout, _) = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "is-active", RunnerUnit]);
+        var trimmed = stdout?.Trim() ?? string.Empty;
+        return code == 0 && string.Equals(trimmed, "active", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<int> InstallAsync(SystemdUnit unit, ServiceInstallOptions options)
     {
         if (!EnsureSystemdSupported(options.DryRun)) return 1;

@@ -53,6 +53,18 @@ export interface SystemUpdateStartResponse {
   job: SystemUpdateStatus
 }
 
+export type SystemUpdateOutcome = 'succeeded' | 'recovered' | 'failed' | 'cancelled'
+
+export const SYSTEM_UPDATE_OUTCOMES: readonly SystemUpdateOutcome[] = ['succeeded', 'recovered', 'failed', 'cancelled'] as const
+
+export const SYSTEM_UPDATE_STAGES: readonly string[] = [
+  'Building',
+  'Restarting server',
+  'Waiting for reconnect',
+  'Restoring runner',
+  'Verifying runtime',
+] as const
+
 export interface SystemUpdateLogEntry {
   at: string
   stage: string
@@ -74,11 +86,25 @@ export interface SystemUpdateStatus {
   createdAt: string
   updatedAt: string
   completedAt: string | null
+  outcome?: SystemUpdateOutcome | null
+  unavailableCapability?: string | null
 }
 
 export interface SystemUpdateStatusEnvelope {
   hasJob: boolean
   job: SystemUpdateStatus | null
+}
+
+export interface RuntimeConsistencyComponent {
+  name: string
+  status: string
+  reason: string | null
+}
+
+export interface RuntimeConsistencyResponse {
+  status: 'consistent' | 'inconsistent'
+  reason: string | null
+  components: RuntimeConsistencyComponent[]
 }
 
 export interface WorkflowProfileInfo {
