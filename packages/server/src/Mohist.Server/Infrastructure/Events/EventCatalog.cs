@@ -91,6 +91,7 @@ public static class EventCatalog
         ReverseDns.StageFailed,
         ReverseDns.StageApprovalRequested,
         ReverseDns.StageApprovalResolved,
+        ReverseDns.FeedbackRequested,
         ReverseDns.TaskStarted,
         ReverseDns.TaskCompleted,
         ReverseDns.TaskFailed,
@@ -130,6 +131,7 @@ public static class EventCatalog
         public const string StageFailed = "com.mohist.workflow.stage.failed";
         public const string StageApprovalRequested = "com.mohist.workflow.stage.approval-requested";
         public const string StageApprovalResolved = "com.mohist.workflow.stage.approval-resolved";
+        public const string FeedbackRequested = "com.mohist.workflow.feedback.requested";
 
         public const string TaskStarted = "com.mohist.workflow.task.started";
         public const string TaskCompleted = "com.mohist.workflow.task.completed";

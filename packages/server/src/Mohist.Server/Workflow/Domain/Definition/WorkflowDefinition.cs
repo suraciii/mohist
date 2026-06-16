@@ -39,6 +39,16 @@ public sealed record StageDefinition(
     string? LockBehavior = null,
     List<string>? Resources = null);
 
+public sealed record FeedbackTaskConfig(
+    string Id,
+    string Title,
+    string? Uses = null,
+    Dictionary<string, JsonElement?>? With = null);
+
+public sealed record ApprovalFeedbackConfig(FeedbackTaskConfig? Task = null);
+
+public sealed record ApprovalConfig(ApprovalFeedbackConfig? Feedback = null);
+
 public sealed record WorkflowDefinition(
     string Id,
     List<StageDefinition> Stages,
@@ -46,4 +56,5 @@ public sealed record WorkflowDefinition(
     string? Description = null,
     Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, JsonElement?>? Defaults = null,
-    Dictionary<string, string>? Artifacts = null);
+    Dictionary<string, string>? Artifacts = null,
+    ApprovalConfig? Approval = null);

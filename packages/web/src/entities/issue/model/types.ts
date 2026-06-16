@@ -120,6 +120,25 @@ export interface WorkflowStageProgress {
   currentTaskTitle?: string | null
 }
 
+export type ApprovalFeedbackStatus = 'open' | 'resolved'
+
+export interface ApprovalFeedbackResolution {
+  resolutionTaskId?: string | null
+  resolvedAt?: string | null
+  resolutionSummary?: string | null
+}
+
+export interface ApprovalFeedback {
+  id: string
+  issueNumber?: number
+  workflowRunId: string
+  stage: string
+  status: ApprovalFeedbackStatus
+  body: string
+  createdAt: string
+  resolution?: ApprovalFeedbackResolution | null
+}
+
 export interface Issue {
   id: string
   number: number
@@ -153,6 +172,7 @@ export interface Issue {
   primaryEpic?: { id: string; number: number | null; title: string; status: string; priority: string } | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
+  feedback?: ApprovalFeedback[] | null
 }
 
 export interface DiffFile {

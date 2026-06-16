@@ -13,7 +13,12 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task StopAsync(string? reason = null);
 
     Task ApproveAsync();
+    // Legacy reject entry point. The grain implementation now routes
+    // through the feedback loop. Kept for back-compat with any external
+    // integration that still calls this method. Prefer RequestChangesAsync
+    // for new code.
     Task RejectAsync(string? reason = null);
+    Task<string> RequestChangesAsync(string body);
     Task RetryAsync();
     Task RerunAsync();
     Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
@@ -27,6 +32,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<string?> GetClaimedRunnerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();
     Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId);
+    Task<WorkflowFeedbackSnapshot?> GetFeedbackAsync(string feedbackId);
+    Task<IReadOnlyList<WorkflowFeedbackSnapshot>> ListFeedbackAsync();
     Task DeactivateForTestAsync();
 }
 
@@ -97,3 +104,33 @@ public sealed record WorkflowActiveWorkView(
     [property: Id(4)] string? Title,
     [property: Id(5)] string? ProjectId = null,
     [property: Id(6)] string? IssueId = null);
+
+/// <summary>
+/// Read-only snapshot of an approval feedback record for API
+/// responses. Wraps the persisted <see cref="ApprovalFeedback"/>
+/// with the workflow run id and issue number so callers can correlate
+/// feedback with the workflow that owns it and the issue that
+/// requested changes.
+/// </summary>
+[GenerateSerializer]
+public sealed record WorkflowFeedbackSnapshot(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string WorkflowRunId,
+    [property: Id(2)] string Stage,
+    [property: Id(3)] string Body,
+    [property: Id(4)] ApprovalFeedbackStatus Status,
+    [property: Id(5)] DateTimeOffset CreatedAt,
+    [property: Id(6)] WorkflowFeedbackResolution? Resolution,
+    [property: Id(7)] int? IssueNumber = null);
+
+/// <summary>
+/// Resolution sub-object for the stable, agent-readable feedback
+/// JSON shape. <c>null</c> when the feedback is still open; populated
+/// with the resolution task id, timestamp, and summary when the
+/// apply-feedback task completes successfully.
+/// </summary>
+[GenerateSerializer]
+public sealed record WorkflowFeedbackResolution(
+    [property: Id(0)] string? ResolutionTaskId,
+    [property: Id(1)] DateTimeOffset? ResolvedAt,
+    [property: Id(2)] string? ResolutionSummary);

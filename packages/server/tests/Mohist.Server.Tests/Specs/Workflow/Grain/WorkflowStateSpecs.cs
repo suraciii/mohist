@@ -50,7 +50,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RejectedWorkflow_NoMoreWork()
+    public async Task RejectedWorkflow_LegacyReject_SchedulesFeedbackTask()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
 
@@ -60,10 +60,17 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
+#pragma warning disable CS0618
         await workflow.RejectAsync("bad");
+#pragma warning restore CS0618
 
+        // The legacy reject path now routes through the feedback loop,
+        // so a new apply-feedback task is dispatched. The runner
+        // should pick it up.
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.Null(await runner.PollAsync());
+        var work = await runner.PollAsync();
+        Assert.NotNull(work);
+        Assert.StartsWith("apply-feedback.", work!.WorkId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

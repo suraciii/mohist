@@ -182,7 +182,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task PlanIsRejected_UserRetriesWorkflow_RetryIsRejected()
+    public async Task PlanIsRejected_LegacyRejectRoutesToFeedbackLoop_RetryIsNotRejected()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
 
@@ -191,7 +191,12 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (checks, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, checks, "plan-ok");
 
+        // Legacy reject no longer fails the workflow; it routes through
+        // the feedback loop. The workflow is now Running, not Failed,
+        // so RetryAsync throws because Retry is reserved for failed runs.
+#pragma warning disable CS0618
         await workflow.RejectAsync("needs rework");
+#pragma warning restore CS0618
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await workflow.RetryAsync());
@@ -200,7 +205,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task ApprovalRejected_UserViewsWorkflowStatus_RerunActionIsAvailable()
+    public async Task LegacyReject_UserViewsWorkflowStatus_FeedbackLoopIsObservable()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
 
@@ -209,18 +214,21 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (checks, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, checks, "plan-ok");
 
+        // The legacy reject path now routes through the feedback loop.
+        // The workflow is Running, not Failed, and the available actions
+        // list shows a request-changes action (instead of the prior
+        // retry/rerun failure-recovery actions).
+#pragma warning disable CS0618
         await workflow.RejectAsync("needs rework");
+#pragma warning restore CS0618
 
         var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
-        Assert.Equal("failed", status.Status);
-        Assert.NotNull(status.Failure);
-        Assert.Equal("ApprovalRejected", status.Failure.Reason);
+        Assert.Equal("running", status.Status);
 
-        Assert.Null(status.AvailableActions.Find(a => a.Name == "retry"));
-        var rerunAction = status.AvailableActions.Find(a => a.Name == "rerun");
-        Assert.NotNull(rerunAction);
-        Assert.Equal("plan", rerunAction.Target);
+        // The workflow is running with an apply-feedback task scheduled,
+        // so no recovery actions should be present.
+        Assert.Empty(status.AvailableActions);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -366,8 +374,12 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var approveAction = status.AvailableActions.Find(a => a.Name == "approve");
         Assert.NotNull(approveAction);
 
-        var rejectAction = status.AvailableActions.Find(a => a.Name == "reject");
-        Assert.NotNull(rejectAction);
+        var requestChangesAction = status.AvailableActions.Find(a => a.Name == "request-changes");
+        Assert.NotNull(requestChangesAction);
+        Assert.Equal("Request changes", requestChangesAction!.Label);
+
+        // The legacy "reject" action must NOT be present.
+        Assert.Null(status.AvailableActions.Find(a => a.Name == "reject"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

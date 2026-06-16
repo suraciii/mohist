@@ -29,7 +29,22 @@ public sealed record StageStatusView(
     List<TaskStatusView> Tasks,
     List<CheckStatusView> Checks,
     ApprovalStatusView? ApprovalStatus,
-    FailureStatusView? Failure);
+    FailureStatusView? Failure,
+    IReadOnlyList<StageFeedbackView>? Feedback = null);
+
+[GenerateSerializer]
+public sealed record StageFeedbackView(
+    string Id,
+    string Body,
+    ApprovalFeedbackStatus Status,
+    DateTimeOffset CreatedAt,
+    StageFeedbackResolution? Resolution = null);
+
+[GenerateSerializer]
+public sealed record StageFeedbackResolution(
+    string? ResolutionTaskId,
+    DateTimeOffset? ResolvedAt,
+    string? ResolutionSummary);
 
 [GenerateSerializer]
 public sealed record FailureStatusView(

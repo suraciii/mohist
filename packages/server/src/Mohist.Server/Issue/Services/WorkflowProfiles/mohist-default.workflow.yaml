@@ -10,6 +10,16 @@ variables:
   agent:
     type: opencode
 
+approval:
+  feedback:
+    task:
+      id: apply-feedback
+      title: Apply approval feedback
+      uses: mohist/acp-agent
+      with:
+        session: ${{ stage.name }}
+        prompt: ${{ prompts.apply-feedback }}
+
 stages:
   - stage: plan
     requiresApproval: true

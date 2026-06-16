@@ -1,0 +1,59 @@
+---
+name: "Apply Approval Feedback"
+description: "Reads user-requested approval feedback and applies it to the current stage work"
+tags: [approval, feedback, revision]
+stage: approval
+---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
+This task exists because the user requested changes at the `${{ stage.name }}` approval gate.
+
+## Read the Feedback
+
+The feedback is the authoritative source. Read it through the CLI before making any other changes:
+
+```bash
+mo issue feedback show ${{ issue.number }} --feedback ${{ approvalFeedback.id }} --project-id ${{ project.id }} --output json
+```
+
+The pre-rendered `approvalFeedback.command` gives you the same invocation:
+
+```bash
+${{ approvalFeedback.command }}
+```
+
+## Your Job
+
+1. Read the feedback body through the CLI above. Do not skip this step.
+2. Read the relevant issue, workflow artifacts, and changed files:
+   - `${{ openspecChangeDir }}/proposal.md`
+   - `${{ openspecChangeDir }}/design.md`
+   - `${{ openspecChangeDir }}/tasks.json`
+   - `${{ openspecChangeDir }}/specs/`
+   - any files the feedback points to
+3. Treat the feedback as required input, not optional commentary. Every requested change must be addressed.
+4. Apply only the changes needed to satisfy the feedback. Do not make unrelated edits.
+5. Add or update focused tests for the fixed behavior.
+6. Run the smallest relevant verification commands (build, lint, focused tests).
+7. Write a concise feedback resolution summary as your final output. The summary should describe what changed and how it was verified.
+
+## Rules
+
+- Do not edit `${{ openspecChangeDir }}/review.md` or other review-marker artifacts; the next review task regenerates them.
+- Do not modify workflow artifacts under `${{ openspecChangeDir }}/` unless the feedback explicitly requires it.
+- Do not approve the stage yourself. Approval is a user decision through the Mohist approval gate.
+- Do not create or remove feedback records. The user owns the feedback loop.
+
+## Output
+
+```markdown
+## Feedback Resolution
+1. [file:line] What changed and why
+
+## Verification
+- Build/tests run and result
+```

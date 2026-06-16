@@ -27,7 +27,8 @@ public static class WorkflowYamlSerializer
             Description: NullIfEmpty(String(document, "description")),
             Variables: JsonElementMap(OptionalMap(document, "variables")),
             Defaults: JsonElementMap(OptionalMap(document, "defaults")),
-            Artifacts: OptionalMap(document, "artifacts")?.ToDictionary(kv => kv.Key, kv => kv.Value?.ToString() ?? ""));
+            Artifacts: OptionalMap(document, "artifacts")?.ToDictionary(kv => kv.Key, kv => kv.Value?.ToString() ?? ""),
+            Approval: ToApproval(OptionalMap(document, "approval")));
     }
 
     public static string ToYaml(WorkflowDefinition definition)
@@ -42,6 +43,9 @@ public static class WorkflowYamlSerializer
             ["artifacts"] = definition.Artifacts,
             ["stages"] = definition.Stages.Select(ToStageMap).ToList(),
         };
+
+        var approvalMap = ToApprovalMap(definition.Approval);
+        if (approvalMap is not null) document["approval"] = approvalMap;
 
         return CreateSerializer().Serialize(document);
     }
@@ -186,6 +190,53 @@ public static class WorkflowYamlSerializer
                normalized.Contains("PASS", StringComparison.OrdinalIgnoreCase) &&
                (normalized.Contains("<PROMISE>", StringComparison.OrdinalIgnoreCase) ||
                 normalized.Contains("</PROMISE>", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static ApprovalConfig? ToApproval(Dictionary<string, object?>? map)
+    {
+        if (map is null) return null;
+        var feedbackMap = OptionalMap(map, "feedback");
+        if (feedbackMap is null) return null;
+        return new ApprovalConfig(new ApprovalFeedbackConfig(ToFeedbackTask(OptionalMap(feedbackMap, "task"))));
+    }
+
+    private static FeedbackTaskConfig? ToFeedbackTask(Dictionary<string, object?>? map)
+    {
+        if (map is null) return null;
+        var id = String(map, "id");
+        if (string.IsNullOrWhiteSpace(id))
+            throw new InvalidOperationException("Workflow approval.feedback.task requires id");
+        var title = String(map, "title");
+        if (string.IsNullOrWhiteSpace(title))
+            throw new InvalidOperationException($"Workflow approval.feedback.task {id} requires title");
+        return new FeedbackTaskConfig(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(OptionalMap(map, "with")));
+    }
+
+    private static Dictionary<string, object?>? ToApprovalMap(ApprovalConfig? approval)
+    {
+        if (approval is null || approval.Feedback is null) return null;
+        var feedbackMap = new Dictionary<string, object?>();
+        var taskMap = ToFeedbackTaskMap(approval.Feedback.Task);
+        if (taskMap is not null) feedbackMap["task"] = taskMap;
+        if (feedbackMap.Count == 0) return null;
+        return new Dictionary<string, object?> { ["feedback"] = feedbackMap };
+    }
+
+    private static Dictionary<string, object?>? ToFeedbackTaskMap(FeedbackTaskConfig? task)
+    {
+        if (task is null) return null;
+        var map = new Dictionary<string, object?>
+        {
+            ["id"] = task.Id,
+            ["title"] = task.Title,
+        };
+        if (task.Uses is not null) map["uses"] = task.Uses;
+        if (task.With is not null)
+        {
+            var withObject = ObjectMap(task.With);
+            if (withObject is not null) map["with"] = withObject;
+        }
+        return map;
     }
 
     private static CheckDefinition ToCheck(object? value)

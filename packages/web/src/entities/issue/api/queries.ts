@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import type { IssueWorkflowProfileYamlResponse } from '../model/types'
-import type { IssueWorkflowArtifactListParams } from './client'
-import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, unarchiveIssue, updateIssueWorkflowProfileYaml } from './client'
+import type { ApprovalFeedback, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, unarchiveIssue, updateIssueWorkflowProfileYaml, requestChangesIssue } from './client'
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
   const { projectId } = useProject()
@@ -157,6 +157,21 @@ export function useDeleteIssueWorkflowProfileTemplate() {
     mutationFn: ({ issueNumber }) => deleteIssueWorkflowProfileTemplate(issueNumber, projectId!),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
+    },
+  })
+}
+
+export function useRequestChangesIssue() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<ApprovalFeedback, Error, { issueNumber: number; data: CreateFeedbackRequest }>({
+    mutationFn: ({ issueNumber, data }) => requestChangesIssue(issueNumber, data, projectId),
+    onSuccess: (_feedback, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId, 'workflow-timeline'] })
     },
   })
 }

@@ -85,6 +85,12 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.CompletedTask;
     }
 
+    public Task DeactivateForTestAsync()
+    {
+        DeactivateOnIdle();
+        return Task.CompletedTask;
+    }
+
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
     {
         if (!string.IsNullOrWhiteSpace(repositoryRef))

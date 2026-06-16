@@ -19,6 +19,7 @@ public sealed class TaskRun
     public TaskArtifactCapture? Artifacts { get; init; }
     public List<TaskOutputDefinition>? Outputs { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
+    public string? CausedByFeedbackId { get; init; }
 }
 
 public static class TaskRunExtensions
@@ -79,7 +80,7 @@ public static class TaskRunExtensions
 
     extension(TaskRun)
     {
-        internal static TaskRun MakeTask(IEnumerable<TaskRun> existing, TaskDefinition input)
+        internal static TaskRun MakeTask(IEnumerable<TaskRun> existing, TaskDefinition input, string? causedByFeedbackId = null)
         {
             var attempt = existing
                               .Where(t => t.DefinitionId == input.Id)
@@ -100,7 +101,8 @@ public static class TaskRunExtensions
                 RequiredFiles = requiredFiles.Count > 0 ? requiredFiles : null,
                 Artifacts = input.Artifacts,
                 Outputs = input.Outputs,
-                Classification = classification
+                Classification = classification,
+                CausedByFeedbackId = causedByFeedbackId
             };
         }
     }
