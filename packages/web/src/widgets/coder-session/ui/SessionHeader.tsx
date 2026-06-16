@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useProjectPath } from '../../../entities/project'
 import type { CoderSessionSummary } from '../../../entities/coder-session'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
+import { ContextHealthIndicator } from '../../session-health'
 
 interface SessionHeaderProps {
   session: CoderSessionSummary
@@ -161,6 +162,15 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
             ? `${formatCompact(usage.contextWindowUsed)} / ${formatCompact(usage.contextWindowSize)} ctx`
             : `${formatCompact(usage.contextWindowUsed)} ctx used`}
         </span>
+      )}
+
+      {/* Context health indicator (colored dot + percentage) */}
+      {usage?.contextWindowSize != null && usage.contextWindowSize > 0 && (
+        <ContextHealthIndicator
+          contextWindowUsed={usage.contextWindowUsed ?? null}
+          contextWindowSize={usage.contextWindowSize ?? null}
+          contextUsagePercent={usage.contextUsagePercent ?? null}
+        />
       )}
 
       {/* Tool/error counts */}

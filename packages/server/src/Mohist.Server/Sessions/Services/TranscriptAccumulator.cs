@@ -22,6 +22,9 @@ internal sealed class TranscriptAccumulator
         RuntimeEventTypes.UsageUpdated,
         RuntimeEventTypes.ModelResolved,
         RuntimeEventTypes.SessionClosed,
+        RuntimeEventTypes.Compaction,
+        RuntimeEventTypes.CompactionEvent,
+        RuntimeEventTypes.ContextHealthUpdate,
     };
 
     private PendingTextSegment? _pending;
@@ -210,6 +213,7 @@ internal sealed class TranscriptAccumulator
         RuntimeEventTypes.UsageUpdated => TranscriptPartTypes.Usage,
         RuntimeEventTypes.ModelResolved => TranscriptPartTypes.Model,
         RuntimeEventTypes.SessionClosed => TranscriptPartTypes.SessionClosed,
+        RuntimeEventTypes.Compaction => TranscriptPartTypes.Compaction,
         _ => eventType
     };
 

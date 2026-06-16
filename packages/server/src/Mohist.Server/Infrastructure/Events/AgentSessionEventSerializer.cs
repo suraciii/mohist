@@ -20,6 +20,9 @@ internal static class AgentSessionEventSerializer
         AgentSessionRuntimeBound => EventCatalog.ReverseDns.AgentSessionRuntimeBound,
         AgentSessionUsageRecorded => EventCatalog.ReverseDns.AgentSessionUsageRecorded,
         AgentSessionModelChanged => EventCatalog.ReverseDns.AgentSessionModelChanged,
+        AgentSessionContextCompacted => EventCatalog.ReverseDns.AgentSessionContextCompacted,
+        AgentSessionContextExhausted => EventCatalog.ReverseDns.AgentSessionContextExhausted,
+        AgentSessionContextHealthUpdated => EventCatalog.ReverseDns.AgentSessionContextHealthUpdated,
         _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
     };
 
@@ -31,6 +34,9 @@ internal static class AgentSessionEventSerializer
         AgentSessionRuntimeBound x => (object)x,
         AgentSessionUsageRecorded x => x,
         AgentSessionModelChanged x => x,
+        AgentSessionContextCompacted x => x,
+        AgentSessionContextExhausted x => x,
+        AgentSessionContextHealthUpdated x => x,
         null => throw new InvalidOperationException("Null agent session event"),
     };
 }

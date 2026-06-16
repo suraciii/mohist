@@ -14,6 +14,7 @@ import {
   type SessionEvent,
   type SessionTimelineToolCall,
   type SessionTimelineRecovery,
+  type SessionTimelineCompaction,
 } from '../../../entities/session/model/view'
 
 const FLUSH_INTERVAL = 100
@@ -23,6 +24,27 @@ export interface RecoveryEvent {
   attempt: number
   reason?: string
   timestamp: number
+}
+
+export type ContextHealthStatus = 'green' | 'yellow' | 'red'
+
+export interface ContextHealthState {
+  status: ContextHealthStatus
+  contextWindowUsed: number | null
+  contextWindowSize: number | null
+  contextUsagePercent: number | null
+  recordedAt: string | null
+}
+
+export interface CompactionEntry {
+  id: string
+  strategy?: string
+  contextWindowUsedBefore?: number | null
+  contextWindowUsedAfter?: number | null
+  contextWindowSize?: number | null
+  summary?: string
+  timestamp: number
+  recordedAt: string
 }
 
 export interface Round {
@@ -35,6 +57,7 @@ export interface Round {
   thoughtText: string
   toolCalls: ToolCallEntry[]
   recoveryEvents: RecoveryEvent[]
+  compactions: CompactionEntry[]
 }
 
 export interface RecoveryStatus {
@@ -135,6 +158,20 @@ function timelineRecoveryToEvent(recovery: SessionTimelineRecovery): RecoveryEve
   }
 }
 
+function timelineCompactionToEntry(compaction: SessionTimelineCompaction, fallbackIndex: number): CompactionEntry {
+  const id = compaction.id != null ? String(compaction.id) : `compaction-${compaction.at}-${fallbackIndex}`
+  return {
+    id,
+    strategy: compaction.strategy,
+    contextWindowUsedBefore: compaction.contextWindowUsedBefore ?? null,
+    contextWindowUsedAfter: compaction.contextWindowUsedAfter ?? null,
+    contextWindowSize: compaction.contextWindowSize ?? null,
+    summary: compaction.summary,
+    timestamp: new Date(compaction.at).getTime(),
+    recordedAt: compaction.at,
+  }
+}
+
 export function reconstructRoundsFromEvents(events: SessionEvent[]): Round[] {
   if (events.length === 0) return []
   const view = viewSessionEvents(events, 'timeline')
@@ -149,6 +186,7 @@ export function reconstructRoundsFromEvents(events: SessionEvent[]): Round[] {
     thoughtText: round.thoughtText,
     toolCalls: round.toolCalls.map((tool) => timelineToolCallToEntry(tool, round.startedAt)),
     recoveryEvents: round.recovery.map(timelineRecoveryToEvent),
+    compactions: round.compactions.map((entry, idx) => timelineCompactionToEntry(entry, idx)),
   }))
 }
 
@@ -168,6 +206,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
   const [loopProgress] = useState<LoopProgress | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null)
   const [planProgress, setPlanProgress] = useState<PlanProgress | null>(null)
+  const [contextHealth, setContextHealth] = useState<ContextHealthState | null>(null)
 
   const planBufferRef = useRef<Array<AgentDetailEventMap['plan_session_update']>>([])
   const rafRef = useRef<number | null>(null)
@@ -353,6 +392,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
             thoughtText: '',
             toolCalls: [],
             recoveryEvents: [],
+            compactions: [],
           }
           return [...prev, newRound]
         })
@@ -610,6 +650,188 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
       }),
     )
 
+    const applyContextHealth = (next: ContextHealthState) => {
+      setContextHealth((prev) => {
+        if (!prev) return next
+        if (
+          prev.status === next.status
+          && prev.contextWindowUsed === next.contextWindowUsed
+          && prev.contextWindowSize === next.contextWindowSize
+          && prev.contextUsagePercent === next.contextUsagePercent
+        ) {
+          return prev
+        }
+        return next
+      })
+    }
+
+    unsubs.push(
+      onAgentEvent('usage.updated', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+        if (detail.contextWindowUsed == null && detail.contextWindowSize == null) return
+        const used = detail.contextWindowUsed ?? null
+        const size = detail.contextWindowSize ?? null
+        const percent = used != null && size != null && size > 0
+          ? Math.min(100, Math.round((used / size) * 100))
+          : null
+        const status: ContextHealthStatus = percent == null
+          ? 'green'
+          : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green'
+        applyContextHealth({
+          status,
+          contextWindowUsed: used,
+          contextWindowSize: size,
+          contextUsagePercent: percent,
+          recordedAt: new Date().toISOString(),
+        })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('context_health_update', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+        const percent = detail.contextUsagePercent ?? null
+        const status: ContextHealthStatus = detail.healthStatus === 'red' || detail.healthStatus === 'yellow' || detail.healthStatus === 'green'
+          ? detail.healthStatus
+          : (percent == null
+              ? 'green'
+              : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green')
+        applyContextHealth({
+          status,
+          contextWindowUsed: detail.contextWindowUsed ?? null,
+          contextWindowSize: detail.contextWindowSize ?? null,
+          contextUsagePercent: percent,
+          recordedAt: detail.recordedAt ?? new Date().toISOString(),
+        })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('compaction_event', (detail) => {
+        if (!isCurrentSessionEvent(detail)) return
+        const recordedAt = detail.recordedAt ?? new Date().toISOString()
+        const entry: CompactionEntry = {
+          id: `compaction-${recordedAt}-${Math.random().toString(36).slice(2, 8)}`,
+          strategy: detail.strategy,
+          contextWindowUsedBefore: detail.contextWindowUsedBefore ?? null,
+          contextWindowUsedAfter: detail.contextWindowUsedAfter ?? null,
+          contextWindowSize: detail.contextWindowSize ?? null,
+          summary: detail.summary,
+          timestamp: new Date(recordedAt).getTime(),
+          recordedAt,
+        }
+        setRoundsRef.current((prev) => {
+          if (prev.length === 0) {
+            const placeholder: Round = {
+              roundIndex: 0,
+              label: 'Compaction',
+              startedAt: recordedAt,
+              completedAt: recordedAt,
+              userText: '',
+              agentText: '',
+              thoughtText: '',
+              toolCalls: [],
+              recoveryEvents: [],
+              compactions: [entry],
+            }
+            return [placeholder]
+          }
+          const next = [...prev]
+          const lastRound = { ...next[next.length - 1] }
+          lastRound.compactions = [...lastRound.compactions, entry]
+          next[next.length - 1] = lastRound
+          return next
+        })
+        const size = detail.contextWindowSize ?? null
+        const percent = detail.contextWindowUsedAfter != null && size != null && size > 0
+          ? Math.min(100, Math.round((detail.contextWindowUsedAfter / size) * 100))
+          : null
+        const status: ContextHealthStatus = percent == null
+          ? 'green'
+          : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green'
+        applyContextHealth({
+          status,
+          contextWindowUsed: detail.contextWindowUsedAfter ?? null,
+          contextWindowSize: size,
+          contextUsagePercent: percent,
+          recordedAt,
+        })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        const recordedAt = detail.recordedAt ?? new Date().toISOString()
+        const entry: CompactionEntry = {
+          id: `compaction-domain-${recordedAt}-${Math.random().toString(36).slice(2, 8)}`,
+          strategy: detail.strategy ?? undefined,
+          contextWindowUsedBefore: detail.contextWindowUsedBefore ?? null,
+          contextWindowUsedAfter: detail.contextWindowUsedAfter ?? null,
+          contextWindowSize: detail.contextWindowSize ?? null,
+          summary: detail.summary ?? undefined,
+          timestamp: new Date(recordedAt).getTime(),
+          recordedAt,
+        }
+        setRoundsRef.current((prev) => {
+          if (prev.length === 0) {
+            const placeholder: Round = {
+              roundIndex: 0,
+              label: 'Compaction',
+              startedAt: recordedAt,
+              completedAt: recordedAt,
+              userText: '',
+              agentText: '',
+              thoughtText: '',
+              toolCalls: [],
+              recoveryEvents: [],
+              compactions: [entry],
+            }
+            return [placeholder]
+          }
+          const next = [...prev]
+          const lastRound = { ...next[next.length - 1] }
+          lastRound.compactions = [...lastRound.compactions, entry]
+          next[next.length - 1] = lastRound
+          return next
+        })
+        const size = detail.contextWindowSize ?? null
+        const percent = detail.contextWindowUsedAfter != null && size != null && size > 0
+          ? Math.min(100, Math.round((detail.contextWindowUsedAfter / size) * 100))
+          : null
+        const status: ContextHealthStatus = percent == null
+          ? 'green'
+          : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green'
+        applyContextHealth({
+          status,
+          contextWindowUsed: detail.contextWindowUsedAfter ?? null,
+          contextWindowSize: size,
+          contextUsagePercent: percent,
+          recordedAt,
+        })
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        const percent = detail.contextUsagePercent ?? null
+        const rawStatus = detail.healthStatus
+        const status: ContextHealthStatus = rawStatus === 'red' || rawStatus === 'yellow' || rawStatus === 'green'
+          ? rawStatus
+          : (percent == null
+              ? 'green'
+              : percent >= 80 ? 'red' : percent >= 60 ? 'yellow' : 'green')
+        applyContextHealth({
+          status,
+          contextWindowUsed: detail.contextWindowUsed ?? null,
+          contextWindowSize: detail.contextWindowSize ?? null,
+          contextUsagePercent: percent,
+          recordedAt: detail.recordedAt ?? new Date().toISOString(),
+        })
+      }),
+    )
+
     return () => {
       mountedRef.current = false
       for (const unsub of unsubs) unsub()
@@ -632,5 +854,6 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
     loopProgress,
     recoveryStatus,
     planProgress,
+    contextHealth,
   }
 }

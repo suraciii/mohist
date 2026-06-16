@@ -20,6 +20,14 @@ public static class AgentSessionJsonHelper
     public static AgentUsageSummary Usage(AgentSession session) =>
         session.Status.UsageSummary ?? new AgentUsageSummary();
 
+    public static double? ContextUsagePercent(long? used, long? size)
+    {
+        if (used is null || size is null || size.Value <= 0 || used.Value < 0) return null;
+        var ratio = (double)used.Value / size.Value;
+        if (double.IsNaN(ratio) || double.IsInfinity(ratio)) return null;
+        return Math.Round(Math.Clamp(ratio, 0d, 1d) * 100d, 2);
+    }
+
     public static string? GetStringProp(JsonElement element, string name)
     {
         if (element.ValueKind != JsonValueKind.Object) return null;
@@ -58,6 +66,19 @@ public static class AgentSessionJsonHelper
         return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
             ? prop.GetInt32()
             : null;
+    }
+
+    public static bool? GetBoolProp(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        if (!element.TryGetProperty(name, out var prop)) return null;
+        return prop.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => bool.TryParse(prop.GetString(), out var parsed) ? parsed : null,
+            _ => null,
+        };
     }
 
     public static string? GetToolStringProp(JsonElement payload, string name)

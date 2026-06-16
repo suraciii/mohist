@@ -63,6 +63,16 @@ export type SessionTimelineRecovery = {
   at: string
 }
 
+export type SessionTimelineCompaction = {
+  id?: string | number
+  strategy?: string
+  contextWindowUsedBefore?: number | null
+  contextWindowUsedAfter?: number | null
+  contextWindowSize?: number | null
+  summary?: string
+  at: string
+}
+
 export type SessionTimelineRound = {
   roundIndex: number
   startedAt: string
@@ -72,6 +82,7 @@ export type SessionTimelineRound = {
   thoughtText: string
   toolCalls: SessionTimelineToolCall[]
   recovery: SessionTimelineRecovery[]
+  compactions: SessionTimelineCompaction[]
 }
 
 export type SessionTimelineView = {
@@ -487,6 +498,10 @@ function buildChatView(events: SessionEvent[]): SessionChatView {
   return { kind: 'chat', turns }
 }
 
+function isCompactionEvent(type: string): boolean {
+  return type === 'compaction' || type === 'compaction_event'
+}
+
 function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
   const rounds: SessionTimelineRound[] = []
   const toolCallMap = new Map<string, SessionTimelineToolCall>()
@@ -499,6 +514,23 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
     }
     current.toolCalls = Array.from(toolCallMap.values())
     rounds.push(current)
+  }
+
+  const ensureCurrent = (at: string) => {
+    if (current) return current
+    toolCallMap.clear()
+    current = {
+      roundIndex: rounds.length,
+      startedAt: at,
+      completedAt: null,
+      userText: '',
+      agentText: '',
+      thoughtText: '',
+      toolCalls: [],
+      recovery: [],
+      compactions: [],
+    }
+    return current
   }
 
   for (const event of events) {
@@ -517,7 +549,33 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
         thoughtText: '',
         toolCalls: [],
         recovery: [],
+        compactions: [],
       }
+      continue
+    }
+
+    if (isCompactionEvent(event.type)) {
+      // Compaction events are attached to the active round so they
+      // appear alongside the activity that triggered them. If the
+      // session has not yet produced a round (e.g. only metadata
+      // refresh events), synthesise an empty round so the compaction
+      // is still visible to the user.
+      const round = ensureCurrent(event.createdAt)
+      const beforeValue = readToolValue(payload, 'contextWindowUsedBefore')
+      const afterValue = readToolValue(payload, 'contextWindowUsedAfter')
+      const sizeValue = readToolValue(payload, 'contextWindowSize')
+      const before = typeof beforeValue === 'number' ? beforeValue : null
+      const after = typeof afterValue === 'number' ? afterValue : null
+      const size = typeof sizeValue === 'number' ? sizeValue : null
+      round.compactions.push({
+        id: event.id,
+        strategy: getStringProp(payload, 'strategy'),
+        contextWindowUsedBefore: before,
+        contextWindowUsedAfter: after,
+        contextWindowSize: size,
+        summary: getStringProp(payload, 'summary'),
+        at: event.createdAt,
+      })
       continue
     }
 
@@ -532,18 +590,19 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
         thoughtText: '',
         toolCalls: [],
         recovery: [],
+        compactions: [],
       }
     }
 
     if (isAssistantTextEvent(event.type)) {
       const text = extractTextChunk(payload)
-      if (text) current.agentText += text
+      if (text && current) current.agentText += text
       continue
     }
 
     if (isAssistantReasoningEvent(event.type)) {
       const text = extractTextChunk(payload)
-      if (text) current.thoughtText += text
+      if (text && current) current.thoughtText += text
       continue
     }
 
@@ -592,6 +651,7 @@ function buildTimelineView(events: SessionEvent[]): SessionTimelineView {
     }
 
     if (isLivenessEvent(event.type)) {
+      if (!current) continue
       const status = getStringProp(payload, 'status') ?? 'running'
       const mapped = status === 'probing' ? 'recovering' : status === 'running' ? 'recovered' : status === 'failed' ? 'failed' : 'detected'
       current.recovery.push({

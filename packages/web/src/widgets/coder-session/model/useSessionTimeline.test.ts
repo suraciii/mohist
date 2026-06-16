@@ -152,4 +152,100 @@ describe('reconstructRoundsFromEvents', () => {
     expect(rounds[0].label).toBe('proposal.md')
     expect(rounds[1].label).toBe('specs/')
   })
+
+  it('projects a compaction event into the active round with before/after counts', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({
+        sequence: 1,
+        type: 'compaction',
+        payload: {
+          strategy: 'summary',
+          contextWindowUsedBefore: 950_000,
+          contextWindowUsedAfter: 400_000,
+          contextWindowSize: 1_000_000,
+          summary: 'Kept the original task instructions.',
+        },
+        createdAt: '2024-01-01T00:00:05Z',
+      }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].compactions).toHaveLength(1)
+    const compaction = rounds[0].compactions[0]
+    expect(compaction.strategy).toBe('summary')
+    expect(compaction.contextWindowUsedBefore).toBe(950_000)
+    expect(compaction.contextWindowUsedAfter).toBe(400_000)
+    expect(compaction.contextWindowSize).toBe(1_000_000)
+    expect(compaction.summary).toBe('Kept the original task instructions.')
+    expect(compaction.recordedAt).toBe('2024-01-01T00:00:05Z')
+  })
+
+  it('also recognises compaction_event type as a compaction source', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({
+        sequence: 1,
+        type: 'compaction_event',
+        payload: {
+          strategy: 'summary',
+          contextWindowUsedBefore: 500_000,
+          contextWindowUsedAfter: 100_000,
+        },
+        createdAt: '2024-01-01T00:00:01Z',
+      }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].compactions).toHaveLength(1)
+    expect(rounds[0].compactions[0].contextWindowUsedBefore).toBe(500_000)
+    expect(rounds[0].compactions[0].contextWindowUsedAfter).toBe(100_000)
+  })
+
+  it('attaches orphan compaction events (no preceding input) to a synthesised round', () => {
+    const events = [
+      makeSessionEvent({
+        sequence: 0,
+        type: 'compaction',
+        payload: {
+          contextWindowUsedBefore: 800_000,
+          contextWindowUsedAfter: 200_000,
+        },
+        createdAt: '2024-01-01T00:00:00Z',
+      }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].compactions).toHaveLength(1)
+    expect(rounds[0].agentText).toBe('')
+    expect(rounds[0].userText).toBe('')
+  })
+
+  it('records multiple compaction events in the same round in stream order', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'input', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({
+        sequence: 1,
+        type: 'compaction',
+        payload: { contextWindowUsedBefore: 900_000, contextWindowUsedAfter: 400_000 },
+        createdAt: '2024-01-01T00:00:05Z',
+      }),
+      makeSessionEvent({
+        sequence: 2,
+        type: 'compaction',
+        payload: { contextWindowUsedBefore: 800_000, contextWindowUsedAfter: 350_000 },
+        createdAt: '2024-01-01T00:00:30Z',
+      }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].compactions).toHaveLength(2)
+    expect(rounds[0].compactions[0].contextWindowUsedAfter).toBe(400_000)
+    expect(rounds[0].compactions[1].contextWindowUsedAfter).toBe(350_000)
+  })
 })

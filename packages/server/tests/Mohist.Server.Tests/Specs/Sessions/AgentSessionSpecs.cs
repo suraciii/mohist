@@ -143,7 +143,11 @@ public class AgentSessionSpecs
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(6, metadata.GetProperty("partCount").GetInt32());
+        // 7 parts: reasoning+message flush as one text, tool_call.started,
+        // usage.updated, model.resolved, tool_call.updated, session.closed,
+        // and the context_health_update snapshot emitted by the grain
+        // when usage.first crosses 0% → 0.075% (initial green seed).
+        Assert.Equal(7, metadata.GetProperty("partCount").GetInt32());
         Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
         var eventSummary = root.GetProperty("eventSummary");
         Assert.Equal("anthropic/claude-sonnet-4", eventSummary.GetProperty("resolvedModel").GetString());

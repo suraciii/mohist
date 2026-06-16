@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useIssue } from '../../../entities/issue'
 import { useCoderSessions } from '../../../entities/coder-session'
 import { getAgentSessionMetadata, getAgentSessionTranscript } from '../../../entities/coder-session'
@@ -10,6 +10,8 @@ import { useProject, useProjectPath } from '../../../entities/project'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, CoderSessionDetail, SessionTurn } from '../../../entities/coder-session'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
+import { SessionRecoveryActions } from '../../../widgets/coder-session'
+import { ContextHealthBar } from '../../../widgets/session-health'
 import { Button } from '@/shared/ui/components/button'
 
 type StatusKind = SessionStatusKind
@@ -258,9 +260,10 @@ interface SessionHeaderProps {
   meta: CoderSessionDetail['metadata']
   statusKind: StatusKind
   turnCount: number
+  recoveryBar?: React.ReactNode
 }
 
-function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }: SessionHeaderProps) {
+function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, recoveryBar }: SessionHeaderProps) {
   const toProjectPath = useProjectPath()
   const isTerminal = statusKind === 'completed' || statusKind === 'failed'
   const createdAt = meta?.createdAt ?? new Date().toISOString()
@@ -418,6 +421,12 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
           )}
         </div>
       )}
+
+      {recoveryBar && (
+        <div className="mt-3 pt-3 border-t border-gray-100" data-testid="session-recovery-bar">
+          {recoveryBar}
+        </div>
+      )}
     </div>
   )
 }
@@ -425,6 +434,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
 export function SessionPage() {
   const { number: numberStr, sessionId, sessionName } = useParams<{ number: string; sessionId?: string; sessionName?: string }>()
   const { projectId } = useProject()
+  const queryClient = useQueryClient()
   const issueNumber = Number(numberStr)
   const decodedSessionId = sessionId ? decodeURIComponent(sessionId) : undefined
   const decodedSessionName = sessionName ? decodeURIComponent(sessionName) : undefined
@@ -450,6 +460,12 @@ export function SessionPage() {
     () => ['issues', issueNumber, projectId, 'agent-session-transcript', lookupKey] as const,
     [issueNumber, projectId, lookupKey],
   )
+
+  const handleRecoverySuccess = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: metadataQueryKey })
+    queryClient.invalidateQueries({ queryKey: transcriptQueryKey })
+    queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'coder-sessions'] })
+  }, [queryClient, metadataQueryKey, transcriptQueryKey, issueNumber])
 
   const {
     data: metadata,
@@ -536,6 +552,28 @@ export function SessionPage() {
   const displayTurnCount = detail?.metadata?.turnCount ?? turns.length
 
   const displayTurns = turns.map((turn) => projectTurn(turn))
+
+  const recoverySessionName = detail?.metadata?.sessionName ?? session?.sessionName ?? session?.executionId ?? routeSessionKey ?? ''
+  const recoveryBar = recoverySessionName ? (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex-1 min-w-0">
+        <ContextHealthBar
+          contextWindowUsed={detail?.metadata?.usage?.contextWindowUsed ?? null}
+          contextWindowSize={detail?.metadata?.usage?.contextWindowSize ?? null}
+          contextUsagePercent={detail?.metadata?.usage?.contextUsagePercent ?? null}
+        />
+      </div>
+      <div className="shrink-0">
+        <SessionRecoveryActions
+          issueNumber={issueNumber}
+          sessionName={recoverySessionName}
+          status={detail?.metadata?.status ?? detail?.status ?? session?.status ?? null}
+          onSuccess={handleRecoverySuccess}
+          bare
+        />
+      </div>
+    </div>
+  ) : null
 
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
@@ -673,6 +711,7 @@ export function SessionPage() {
           meta={detail.metadata}
           statusKind={displayStatusKind}
           turnCount={displayTurnCount}
+          recoveryBar={recoveryBar}
         />
         <SessionLegacyMissingState />
       </div>
@@ -688,6 +727,7 @@ export function SessionPage() {
           meta={detail.metadata}
           statusKind={displayStatusKind}
           turnCount={displayTurnCount}
+          recoveryBar={recoveryBar}
         />
         <SessionWaitingState />
       </div>
@@ -703,6 +743,7 @@ export function SessionPage() {
           meta={detail.metadata}
           statusKind={displayStatusKind}
           turnCount={displayTurnCount}
+          recoveryBar={recoveryBar}
         />
         <SessionEmptyState issueNumber={issueNumber} />
       </div>
@@ -711,6 +752,9 @@ export function SessionPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
+      <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
+        {recoveryBar}
+      </div>
       <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto"

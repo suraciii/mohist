@@ -270,6 +270,59 @@ describe('viewSessionEvents timeline projection', () => {
     expect(view.kind).toBe('timeline')
     expect(view.rounds).toEqual([])
   })
+
+  it('attaches a compaction event to the active round with before/after counts', () => {
+    const stream: SessionEvent[] = [
+      makeEvent({
+        sequence: 0,
+        type: 'input',
+        payload: { text: 'Initial task' },
+        createdAt: '2024-05-01T10:00:00.000Z',
+      }),
+      makeEvent({
+        sequence: 1,
+        type: 'compaction',
+        payload: {
+          strategy: 'summary',
+          contextWindowUsedBefore: 950_000,
+          contextWindowUsedAfter: 400_000,
+          contextWindowSize: 1_000_000,
+          summary: 'Kept task instructions.',
+        },
+        createdAt: '2024-05-01T10:05:00.000Z',
+      }),
+    ]
+    const view = viewSessionEvents(stream, 'timeline') as SessionTimelineView
+    expect(view.rounds).toHaveLength(1)
+    expect(view.rounds[0].compactions).toHaveLength(1)
+    const compaction = view.rounds[0].compactions[0]
+    expect(compaction.strategy).toBe('summary')
+    expect(compaction.contextWindowUsedBefore).toBe(950_000)
+    expect(compaction.contextWindowUsedAfter).toBe(400_000)
+    expect(compaction.contextWindowSize).toBe(1_000_000)
+    expect(compaction.summary).toBe('Kept task instructions.')
+    expect(compaction.at).toBe('2024-05-01T10:05:00.000Z')
+  })
+
+  it('attaches a compaction_event to a synthesised round when no input exists', () => {
+    const stream: SessionEvent[] = [
+      makeEvent({
+        sequence: 0,
+        type: 'compaction_event',
+        payload: {
+          contextWindowUsedBefore: 500_000,
+          contextWindowUsedAfter: 200_000,
+        },
+        createdAt: '2024-05-02T10:00:00.000Z',
+      }),
+    ]
+    const view = viewSessionEvents(stream, 'timeline') as SessionTimelineView
+    expect(view.rounds).toHaveLength(1)
+    expect(view.rounds[0].userText).toBe('')
+    expect(view.rounds[0].agentText).toBe('')
+    expect(view.rounds[0].compactions).toHaveLength(1)
+    expect(view.rounds[0].compactions[0].contextWindowUsedBefore).toBe(500_000)
+  })
 })
 
 describe('viewSessionEvents compact projection', () => {

@@ -61,7 +61,41 @@ function renderHookWithProviders<T>(callback: () => T) {
   })
 }
 
-function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionItem {
+type SessionOverrides = Partial<CoderSessionItem> & {
+  resolvedModel?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+  contextUsagePercent?: number | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
+}
+
+function makeSession(overrides: SessionOverrides = {}): CoderSessionItem {
+  const {
+    resolvedModel,
+    failureCategory,
+    toolCallCount,
+    toolErrorCount,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    cachedReadTokens,
+    thoughtTokens,
+    costAmount,
+    costCurrency,
+    contextWindowUsed,
+    contextWindowSize,
+    contextUsagePercent,
+    ...rest
+  } = overrides
   return {
     id: 'session-1',
     acpSessionId: 'acp-1',
@@ -78,7 +112,25 @@ function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionIte
     probeSentAt: null,
     probeDeadlineAt: null,
     failureReason: null,
-    ...overrides,
+    eventSummary: {
+      resolvedModel: resolvedModel ?? null,
+      failureCategory: failureCategory ?? null,
+      toolCallCount: toolCallCount ?? null,
+      toolErrorCount: toolErrorCount ?? null,
+    },
+    usage: {
+      inputTokens: inputTokens ?? null,
+      outputTokens: outputTokens ?? null,
+      totalTokens: totalTokens ?? null,
+      cachedReadTokens: cachedReadTokens ?? null,
+      thoughtTokens: thoughtTokens ?? null,
+      costAmount: costAmount ?? null,
+      costCurrency: costCurrency ?? null,
+      contextWindowUsed: contextWindowUsed ?? null,
+      contextWindowSize: contextWindowSize ?? null,
+      contextUsagePercent: contextUsagePercent ?? null,
+    },
+    ...rest,
   }
 }
 

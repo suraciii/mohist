@@ -105,11 +105,39 @@ export type AgentDetailEventMap = {
     costCurrency?: string
     contextWindowSize?: number
     contextWindowUsed?: number
+    contextUsagePercent?: number
+    healthStatus?: string
   }
   'model.resolved': SessionRuntimeBase & { model: string }
+  'compaction': SessionRuntimeBase & {
+    strategy?: string
+    contextWindowUsedBefore?: number | null
+    contextWindowUsedAfter?: number | null
+    contextWindowSize?: number | null
+    summary?: string
+    recordedAt?: string
+  }
+  'compaction_event': SessionRuntimeBase & {
+    strategy?: string
+    contextWindowUsedBefore?: number | null
+    contextWindowUsedAfter?: number | null
+    contextWindowSize?: number | null
+    summary?: string
+    recordedAt?: string
+  }
+  'context_health_update': SessionRuntimeBase & {
+    healthStatus: 'green' | 'yellow' | 'red'
+    contextWindowSize?: number | null
+    contextWindowUsed?: number | null
+    contextUsagePercent?: number | null
+    recordedAt?: string
+  }
   'com.mohist.agent-session.runtime-bound': { issueId: string; projectId: string }
   'com.mohist.agent-session.usage-recorded': { issueId: string; projectId: string }
   'com.mohist.agent-session.model-changed': { issueId: string; projectId: string }
+  'com.mohist.agent-session.context-compacted': { issueId: string; projectId: string; strategy?: string | null; contextWindowUsedBefore?: number | null; contextWindowUsedAfter?: number | null; contextWindowSize?: number | null; summary?: string | null; recordedAt?: string }
+  'com.mohist.agent-session.context-exhausted': { issueId: string; projectId: string; failureCategory?: string | null; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
+  'com.mohist.agent-session.context-health-updated': { issueId: string; projectId: string; healthStatus: string; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
 }
 
 export interface AgentSessionInfo {

@@ -3,6 +3,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
@@ -48,8 +49,24 @@ public static partial class IssueRoutes
             var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
-            await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
-            return ApiResults.Ok();
+            try
+            {
+                await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
+                return ApiResults.Ok();
+            }
+            catch (WorkflowSessionContextExhaustedException ex)
+            {
+                return ApiResults.Conflict(
+                    ex.Message,
+                    "session_context_exhausted",
+                    new
+                    {
+                        contextUsagePercent = ex.ContextUsagePercent,
+                        stage = ex.Stage,
+                        taskId = ex.TaskId,
+                        recoveryActions = WorkflowSessionHealthGate.RecoveryActions,
+                    });
+            }
         });
 
         group.MapPost("/{number:int}/rerun", async (

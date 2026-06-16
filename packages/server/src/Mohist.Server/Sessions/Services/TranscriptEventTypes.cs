@@ -12,6 +12,9 @@ internal static class RuntimeEventTypes
     public const string ToolCallCompleted = "tool_call.completed";
     public const string UsageUpdated = "usage.updated";
     public const string ModelResolved = "model.resolved";
+    public const string Compaction = "compaction";
+    public const string CompactionEvent = "compaction_event";
+    public const string ContextHealthUpdate = "context_health_update";
 }
 
 internal static class TranscriptPartTypes
@@ -24,4 +27,5 @@ internal static class TranscriptPartTypes
     public const string Usage = "usage";
     public const string Model = "model";
     public const string SessionClosed = "session_closed";
+    public const string Compaction = "compaction";
 }

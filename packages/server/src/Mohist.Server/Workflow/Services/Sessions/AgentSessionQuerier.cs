@@ -102,6 +102,13 @@ public class AgentSessionQuerier
         return sessions.Select(ToSummaryDto).ToList();
     }
 
+    public async Task<string?> ResolveIssueSessionIdAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var record = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
+        return record?.Session.Id;
+    }
+
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -400,7 +407,7 @@ public class AgentSessionQuerier
             AgentSessionJsonHelper.StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null, null,
             s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), null,
             s.Status.LastDataAt?.ToString("o"), null, null,
-            new AgentEventSummaryDto(null, null, null, null),
+            new AgentEventSummaryDto(null, null, null, null, null, null),
             ToUsageDto(usage));
     }
 
@@ -419,7 +426,7 @@ public class AgentSessionQuerier
         AgentSessionJsonHelper.StatusName(s), s.Settings.Model, s.Runtime.WorkDir, null,
         s.Status.CreatedAt.ToString("o"), s.Status.BoundAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         null, null, null,
-        new AgentEventSummaryDto(null, null, null, null),
+        new AgentEventSummaryDto(null, null, null, null, null, null),
         ToUsageDto(s));
     }
 
@@ -435,7 +442,7 @@ public class AgentSessionQuerier
             AgentSessionJsonHelper.StatusName(s), s.Status.CreatedAt.ToString("o"), null,
             s.Settings.Model, null, Label(record, AgentSessionQueryMetadataKeys.Stage), Annotation(s, AgentSessionQueryMetadataKeys.Title),
             s.Status.LastDataAt?.ToString("o"), null, null, null,
-            new AgentEventSummaryDto(null, null, null, null),
+            new AgentEventSummaryDto(null, null, null, null, null, null),
             ToUsageDto(s));
     }
 
@@ -454,11 +461,20 @@ public class AgentSessionQuerier
 
     private static AgentUsageDto ToUsageDto(AgentUsageSummary u) =>
         new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
-            u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize);
+            u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
+            AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
+            ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)));
 
     private static AgentEventSummaryDto ToEventSummaryDto(AgentSessionTranscriptSummary? s) =>
-        s is null ? new AgentEventSummaryDto(null, null, null, null)
-                  : new(s.ResolvedModel, s.FailureCategory, s.ToolCallCount, s.ToolErrorCount);
+        s is null
+            ? new AgentEventSummaryDto(null, null, null, null, null, null)
+            : new(
+                s.ResolvedModel,
+                s.FailureCategory,
+                string.Equals(s.FailureCategory, ContextExhaustionClassifier.ContextExhaustionCategory, StringComparison.Ordinal) ? true : null,
+                string.Equals(s.FailureCategory, ContextExhaustionClassifier.SuspectedContextExhaustionCategory, StringComparison.Ordinal) ? true : null,
+                s.ToolCallCount,
+                s.ToolErrorCount);
 
     private static IReadOnlyDictionary<string, string> Labels(params (string Key, string? Value)[] values)
     {

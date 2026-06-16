@@ -93,6 +93,102 @@ public static partial class AgentSessionExtensions
             return [new AgentSessionUsageRecorded(session.Status.UsageSummary ?? new AgentUsageSummary())];
         }
 
+        public IReadOnlyList<AgentSessionEvent> RebindRuntimeSession(
+            string newAgentSessionId,
+            long? contextWindowUsedAfter,
+            long? contextWindowSizeAfter,
+            DateTime now)
+        {
+            var oldAgentSessionId = session.Status.AgentRuntimeSessionId;
+            session.Status = session.Status with
+            {
+                AgentRuntimeSessionId = newAgentSessionId,
+                BoundAt = now,
+                LastDataAt = now,
+                UsageSummary = (session.Status.UsageSummary ?? new AgentUsageSummary()) with
+                {
+                    ContextWindowUsed = contextWindowUsedAfter,
+                    ContextWindowSize = contextWindowSizeAfter ?? (session.Status.UsageSummary ?? new AgentUsageSummary()).ContextWindowSize,
+                }
+            };
+            var events = new List<AgentSessionEvent>();
+            if (!string.Equals(oldAgentSessionId, newAgentSessionId, StringComparison.Ordinal))
+                events.Add(new AgentSessionRuntimeBound(newAgentSessionId));
+            return events;
+        }
+
+        public IReadOnlyList<AgentSessionEvent> RecordCompaction(
+            long? contextWindowUsedBefore,
+            long? contextWindowUsedAfter,
+            long? contextWindowSize,
+            string? strategy,
+            string? summary,
+            DateTime now)
+        {
+            var usage = session.Status.UsageSummary ?? new AgentUsageSummary();
+            session.Status = session.Status with
+            {
+                LastDataAt = now,
+                UsageSummary = usage with
+                {
+                    ContextWindowUsed = contextWindowUsedAfter ?? usage.ContextWindowUsed,
+                    ContextWindowSize = contextWindowSize ?? usage.ContextWindowSize,
+                }
+            };
+            return [new AgentSessionContextCompacted(
+                ContextWindowUsedBefore: contextWindowUsedBefore,
+                ContextWindowUsedAfter: contextWindowUsedAfter,
+                ContextWindowSize: contextWindowSize,
+                Strategy: strategy,
+                Summary: summary,
+                RecordedAt: now)];
+        }
+
+        /// <summary>
+        /// Records a context-exhaustion classification on the session
+        /// after a failed close event. The failureCategory is captured
+        /// on the event payload so downstream consumers (UI, retry
+        /// guard, analytics) can render a context-exhaustion error
+        /// message and decide whether to block retries.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> RecordContextExhaustion(
+            string? failureCategory,
+            double? contextUsagePercent,
+            long? contextWindowUsed,
+            long? contextWindowSize,
+            DateTime now)
+        {
+            session.Status = session.Status with { LastDataAt = now };
+            return [new AgentSessionContextExhausted(
+                FailureCategory: failureCategory,
+                ContextUsagePercent: contextUsagePercent,
+                ContextWindowUsed: contextWindowUsed,
+                ContextWindowSize: contextWindowSize,
+                RecordedAt: now)];
+        }
+
+        /// <summary>
+        /// Records a context-health transition (green/yellow/red
+        /// threshold crossing or large percent change). The session
+        /// status is updated so subsequent reads of the session
+        /// expose the latest known health snapshot.
+        /// </summary>
+        public IReadOnlyList<AgentSessionEvent> RecordContextHealthUpdate(
+            string healthStatus,
+            double? contextUsagePercent,
+            long? contextWindowUsed,
+            long? contextWindowSize,
+            DateTime now)
+        {
+            session.Status = session.Status with { LastDataAt = now };
+            return [new AgentSessionContextHealthUpdated(
+                HealthStatus: healthStatus,
+                ContextUsagePercent: contextUsagePercent,
+                ContextWindowUsed: contextWindowUsed,
+                ContextWindowSize: contextWindowSize,
+                RecordedAt: now)];
+        }
+
         private static long? AddNonNegative(long? current, long? delta)
         {
             if (delta is null or < 0) return current;

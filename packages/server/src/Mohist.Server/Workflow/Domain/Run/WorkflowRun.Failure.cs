@@ -61,11 +61,69 @@ public static partial class WorkflowRunExtensions
                     run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
                     return [new WorkflowRunResumed()];
+                case FailureReason.ContextExhaustion:
+                    throw new InvalidOperationException($"Stage {current.Id} failure is context exhaustion; use compact or reset on the session before retrying");
                 case FailureReason.ApprovalRejected:
                     throw new InvalidOperationException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
                 default:
                     throw new InvalidOperationException($"Unknown failure reason: {current.Failure.Reason}");
             }
+        }
+
+        public IReadOnlyList<WorkflowEvent> BlockStageWithContextExhaustion(
+            string? taskId,
+            double? contextUsagePercent,
+            string? sessionId)
+        {
+            var current = run.CurrentStage();
+            var message = contextUsagePercent is null
+                ? "Session context is near capacity. Compact or reset the session before retrying."
+                : $"Session context is near capacity ({contextUsagePercent:0.##}%). Compact or reset the session before retrying.";
+            current.Failure = new FailureDetails(
+                FailureReason.ContextExhaustion,
+                current.Id,
+                TaskId: taskId,
+                Message: message);
+            run.Failure = current.Failure;
+            current.Status = StageRunStatus.Failed;
+            run.Status = WorkflowRunStatus.Failed;
+            return [
+                new StageFailed(current.Id, message),
+                new WorkflowRunFailed(message)
+            ];
+        }
+
+        /// <summary>
+        /// Demote a <see cref="FailureReason.ContextExhaustion"/> failure back to
+        /// <see cref="FailureReason.TaskFailed"/> so the normal retry path can
+        /// proceed. The workflow grain calls this when the user has recovered
+        /// the session (via compact/reset) and the gate now reports a healthy
+        /// context window. The original TaskId is preserved so the standard
+        /// retry handler re-runs the right task.
+        /// </summary>
+        /// <returns>
+        /// <c>true</c> when the failure was rewritten; <c>false</c> when the
+        /// current stage had no <see cref="FailureReason.ContextExhaustion"/>
+        /// failure to clear.
+        /// </returns>
+        public bool ClearContextExhaustionFailure()
+        {
+            var current = run.CurrentStage();
+            var failure = current.Failure;
+            if (failure is null || failure.Reason != FailureReason.ContextExhaustion)
+            {
+                return false;
+            }
+
+            var demoted = new FailureDetails(
+                FailureReason.TaskFailed,
+                failure.Stage,
+                TaskId: failure.TaskId,
+                CheckName: failure.CheckName,
+                Message: failure.Message);
+            current.Failure = demoted;
+            run.Failure = demoted;
+            return true;
         }
 
         public IReadOnlyList<WorkflowEvent> Rerun()

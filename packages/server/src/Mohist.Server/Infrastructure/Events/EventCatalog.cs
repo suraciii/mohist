@@ -48,6 +48,9 @@ public static class EventCatalog
         "session.liveness",
         "usage.updated",
         "model.resolved",
+        "compaction",
+        "compaction_event",
+        "context_health_update",
         // === Remaining workflow/integration legacy names ===
         "merge_queued",
         "merge_started",
@@ -104,6 +107,9 @@ public static class EventCatalog
         ReverseDns.AgentSessionRuntimeBound,
         ReverseDns.AgentSessionUsageRecorded,
         ReverseDns.AgentSessionModelChanged,
+        ReverseDns.AgentSessionContextCompacted,
+        ReverseDns.AgentSessionContextExhausted,
+        ReverseDns.AgentSessionContextHealthUpdated,
         ReverseDns.RunnerDisconnected,
         ReverseDns.IssueCompleted,
         ReverseDns.IssueCancelled,
@@ -146,6 +152,9 @@ public static class EventCatalog
         public const string AgentSessionRuntimeBound = "com.mohist.agent-session.runtime-bound";
         public const string AgentSessionUsageRecorded = "com.mohist.agent-session.usage-recorded";
         public const string AgentSessionModelChanged = "com.mohist.agent-session.model-changed";
+        public const string AgentSessionContextCompacted = "com.mohist.agent-session.context-compacted";
+        public const string AgentSessionContextExhausted = "com.mohist.agent-session.context-exhausted";
+        public const string AgentSessionContextHealthUpdated = "com.mohist.agent-session.context-health-updated";
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 

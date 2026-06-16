@@ -12,11 +12,15 @@ export interface AgentSessionUsage {
   costCurrency?: string | null
   contextWindowUsed?: number | null
   contextWindowSize?: number | null
+  contextUsagePercent?: number | null
+  healthStatus?: string | null
 }
 
 export interface AgentSessionEventSummary {
   resolvedModel?: string | null
   failureCategory?: string | null
+  contextExhaustion?: boolean | null
+  contextExhaustionSuspected?: boolean | null
   toolCallCount?: number | null
   toolErrorCount?: number | null
 }

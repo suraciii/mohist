@@ -26,6 +26,9 @@ export const REVERSE_DNS_EVENT_TYPES = {
   AgentSessionRuntimeBound: 'com.mohist.agent-session.runtime-bound',
   AgentSessionUsageRecorded: 'com.mohist.agent-session.usage-recorded',
   AgentSessionModelChanged: 'com.mohist.agent-session.model-changed',
+  AgentSessionContextCompacted: 'com.mohist.agent-session.context-compacted',
+  AgentSessionContextExhausted: 'com.mohist.agent-session.context-exhausted',
+  AgentSessionContextHealthUpdated: 'com.mohist.agent-session.context-health-updated',
 } as const
 
 export type ReverseDnsEventType =
@@ -35,6 +38,9 @@ export const REVERSE_DNS_AGENT_SESSION_EVENT_TYPES = [
   REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
   REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
   REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,
+  REVERSE_DNS_EVENT_TYPES.AgentSessionContextCompacted,
+  REVERSE_DNS_EVENT_TYPES.AgentSessionContextExhausted,
+  REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
 ] as const
 
 export const TRANSCRIPT_EVENT_TYPES = [
@@ -48,6 +54,9 @@ export const TRANSCRIPT_EVENT_TYPES = [
   'usage.updated',
   'model.resolved',
   'session.closed',
+  'compaction',
+  'compaction_event',
+  'context_health_update',
 ] as const
 
 export type TranscriptEventType = (typeof TRANSCRIPT_EVENT_TYPES)[number]

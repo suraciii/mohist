@@ -57,7 +57,15 @@ function renderHookWithProviders<T>(callback: () => T, options?: { initialProps?
   })
 }
 
-function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionItem {
+type SessionOverrides = Partial<CoderSessionItem> & {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+}
+
+function makeSession(overrides: SessionOverrides = {}): CoderSessionItem {
+  const { inputTokens, outputTokens, costAmount, costCurrency, ...rest } = overrides
   return {
     id: 'session-1',
     acpSessionId: 'acp-1',
@@ -74,7 +82,17 @@ function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionIte
     probeSentAt: null,
     probeDeadlineAt: null,
     failureReason: null,
-    ...overrides,
+    ...(inputTokens !== undefined || outputTokens !== undefined || costAmount !== undefined || costCurrency !== undefined
+      ? {
+          usage: {
+            inputTokens: inputTokens ?? null,
+            outputTokens: outputTokens ?? null,
+            costAmount: costAmount ?? null,
+            costCurrency: costCurrency ?? null,
+          },
+        }
+      : {}),
+    ...rest,
   }
 }
 
@@ -268,15 +286,15 @@ describe('useCoderSessions live event handling', () => {
 
     await waitFor(() => {
       const session = result.current.sessions[0]
-      expect(session.inputTokens).toBe(100)
-      expect(session.outputTokens).toBe(50)
-      expect(session.totalTokens).toBe(150)
-      expect(session.cachedReadTokens).toBe(10)
-      expect(session.thoughtTokens).toBe(5)
-      expect(session.costAmount).toBe(0.01)
-      expect(session.costCurrency).toBe('USD')
-      expect(session.contextWindowSize).toBe(200000)
-      expect(session.contextWindowUsed).toBe(150)
+      expect(session.usage?.inputTokens).toBe(100)
+      expect(session.usage?.outputTokens).toBe(50)
+      expect(session.usage?.totalTokens).toBe(150)
+      expect(session.usage?.cachedReadTokens).toBe(10)
+      expect(session.usage?.thoughtTokens).toBe(5)
+      expect(session.usage?.costAmount).toBe(0.01)
+      expect(session.usage?.costCurrency).toBe('USD')
+      expect(session.usage?.contextWindowSize).toBe(200000)
+      expect(session.usage?.contextWindowUsed).toBe(150)
     })
   })
 
@@ -298,7 +316,7 @@ describe('useCoderSessions live event handling', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.sessions[0].inputTokens).toBeUndefined()
+      expect(result.current.sessions[0].usage?.inputTokens).toBeUndefined()
     })
   })
 
@@ -327,10 +345,10 @@ describe('useCoderSessions live event handling', () => {
 
     await waitFor(() => {
       const session = result.current.sessions[0]
-      expect(session.inputTokens).toBe(50)
-      expect(session.outputTokens).toBe(25)
-      expect(session.costAmount).toBe(0.005)
-      expect(session.costCurrency).toBe('USD')
+      expect(session.usage?.inputTokens).toBe(50)
+      expect(session.usage?.outputTokens).toBe(25)
+      expect(session.usage?.costAmount).toBe(0.005)
+      expect(session.usage?.costCurrency).toBe('USD')
     })
   })
 })

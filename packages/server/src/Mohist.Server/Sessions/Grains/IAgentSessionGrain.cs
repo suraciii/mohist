@@ -7,7 +7,17 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command);
     Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
+    Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
+    Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
     Task<AgentSessionInfo?> GetAsync();
+
+    /// <summary>
+    /// Test-only hook: deactivates the grain so the next request
+    /// re-hydrates state from the persistent store. Production code
+    /// should rely on Orleans' normal collection cycle (the default
+    /// 15-minute quiet window) instead of forcing deactivation.
+    /// </summary>
+    Task DeactivateForTestAsync();
 }
 
 [GenerateSerializer]
@@ -29,6 +39,16 @@ public sealed record AttachPhysicalSessionCommand(
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(
     [property: Id(0)] IReadOnlyList<AgentSessionRuntimeEventInput> RuntimeEvents = null!);
+
+[GenerateSerializer]
+public sealed record CompactAgentSessionCommand(
+    [property: Id(0)] string NewAgentSessionId,
+    [property: Id(1)] string? Summary = null,
+    [property: Id(2)] int? MaxSummaryChars = null);
+
+[GenerateSerializer]
+public sealed record ResetAgentSessionCommand(
+    [property: Id(0)] string NewAgentSessionId);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
@@ -59,6 +79,18 @@ public sealed record AgentSessionInfo(
     [property: Id(19)] string? FailureCategory,
     [property: Id(20)] int? ToolCallCount,
     [property: Id(21)] int? ToolErrorCount);
+
+[GenerateSerializer]
+public sealed record AgentSessionRecoveryResult(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string? AgentSessionId,
+    [property: Id(2)] string Status,
+    [property: Id(3)] long? ContextWindowSize,
+    [property: Id(4)] long? ContextWindowUsed,
+    [property: Id(5)] double? ContextUsagePercent,
+    [property: Id(6)] long? ContextWindowUsedBefore,
+    [property: Id(7)] string? Operation,
+    [property: Id(8)] bool WasCompacted);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInfo(

@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { ToolCallEntry, TaskProgressMap, LoopProgress } from '../../../entities/coder-session'
 import type { WorkflowStage } from '../../../entities/issue'
-import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress } from '../model/useSessionTimeline'
+import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress, ContextHealthState } from '../model/useSessionTimeline'
 import { deriveToolCallTitle } from '../model/useSessionTimeline'
 import { PlanProgressPanel } from '../../issue-workflow/ui/PlanProgressPanel'
+import { ContextHealthBar } from '../../session-health/ui/ContextHealthBar'
+import { CompactionTimelineEntry } from '../../session-health/ui/CompactionTimelineEntry'
 
 interface SessionTimelineProps {
   rounds: Round[]
@@ -16,6 +18,9 @@ interface SessionTimelineProps {
   loopProgress: LoopProgress | null
   recoveryStatus: RecoveryStatus | null
   planProgress: PlanProgress | null
+  contextHealth?: ContextHealthState | null
+  onCompact?: () => void
+  onReset?: () => void
 }
 
 function formatDuration(ms: number): string {
@@ -223,7 +228,7 @@ export function RoundSection({
   const [expanded, setExpanded] = useState(true)
   const colors = getRoundColor(round, isLive)
   const isLiveRound = isLive && !round.completedAt
-  const hasContent = round.agentText || round.toolCalls.length > 0 || round.recoveryEvents.length > 0
+  const hasContent = round.agentText || round.toolCalls.length > 0 || round.recoveryEvents.length > 0 || round.compactions.length > 0
 
   return (
     <div className={`rounded-lg border ${colors.border} ${colors.bg}`}>
@@ -291,6 +296,25 @@ export function RoundSection({
             <div className="space-y-0.5 pt-1">
               {round.recoveryEvents.map((evt, i) => (
                 <RecoveryEventIndicator key={i} event={evt} />
+              ))}
+            </div>
+          )}
+
+          {round.compactions.length > 0 && (
+            <div className="space-y-0 pt-1">
+              {round.compactions.map((entry) => (
+                <CompactionTimelineEntry
+                  key={entry.id}
+                  entry={{
+                    id: entry.id,
+                    strategy: entry.strategy ?? null,
+                    contextWindowUsedBefore: entry.contextWindowUsedBefore,
+                    contextWindowUsedAfter: entry.contextWindowUsedAfter,
+                    contextWindowSize: entry.contextWindowSize,
+                    summary: entry.summary ?? null,
+                    recordedAt: entry.recordedAt,
+                  }}
+                />
               ))}
             </div>
           )}
@@ -473,6 +497,9 @@ export function SessionTimeline({
   loopProgress,
   recoveryStatus,
   planProgress,
+  contextHealth,
+  onCompact,
+  onReset,
 }: SessionTimelineProps) {
   if (isLoading) {
     return (
@@ -491,6 +518,11 @@ export function SessionTimeline({
   }
 
   const taskEntries = Array.from(taskProgress.values())
+  const showContextHealth = contextHealth != null
+    && contextHealth.contextUsagePercent != null
+    && contextHealth.contextWindowSize != null
+    && contextHealth.contextWindowSize > 0
+    && (onCompact != null || onReset != null)
 
   return (
     <div className="rounded-lg border border-blue-200 bg-blue-50/30">
@@ -509,6 +541,18 @@ export function SessionTimeline({
       </div>
 
       <div className="px-3 py-3 space-y-2 max-h-[600px] overflow-y-auto">
+        {showContextHealth && (
+          <div data-testid="context-health-section">
+            <ContextHealthBar
+              contextWindowUsed={contextHealth.contextWindowUsed}
+              contextWindowSize={contextHealth.contextWindowSize}
+              contextUsagePercent={contextHealth.contextUsagePercent}
+              onCompact={onCompact}
+              onReset={onReset}
+            />
+          </div>
+        )}
+
         <WorkflowStatusTimeline currentStage={currentStage} />
 
         {currentStage === 'plan' && planProgress && planProgress.steps.length > 0 && (

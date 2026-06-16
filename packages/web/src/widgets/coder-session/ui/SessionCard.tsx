@@ -3,6 +3,7 @@ import { useProjectPath } from '../../../entities/project'
 import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '../model/activity-cards'
 import { ActiveSessionAnomalies, WaitingSessionAnomalies } from '../model/anomaly'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
+import { ContextHealthIndicator } from '../../session-health'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -158,6 +159,16 @@ export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
         )}
 
         <ObservabilityBar card={card} />
+
+        {card.contextWindowSize != null && card.contextWindowSize > 0 && (
+          <div className="mt-1">
+            <ContextHealthIndicator
+              contextWindowUsed={card.contextWindowUsed ?? null}
+              contextWindowSize={card.contextWindowSize ?? null}
+              contextUsagePercent={card.contextUsagePercent ?? null}
+            />
+          </div>
+        )}
 
         {card.taskProgress && (
           <div className="mt-1">
