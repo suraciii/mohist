@@ -549,7 +549,7 @@ public class IssueFeedbackApiSpecs
     {
         var id = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
+        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}");
     }
 
     private async Task<(string IssueId, int Number)> CreateIssueAsync(string projectId, string title)

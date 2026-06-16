@@ -3,6 +3,23 @@ using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Workflow.Services.Sessions;
 
+public sealed record AgentUsageDto(
+    long? InputTokens,
+    long? OutputTokens,
+    long? TotalTokens,
+    long? CachedReadTokens,
+    long? ThoughtTokens,
+    double? CostAmount,
+    string? CostCurrency,
+    long? ContextWindowUsed,
+    long? ContextWindowSize);
+
+public sealed record AgentEventSummaryDto(
+    string? ResolvedModel,
+    string? FailureCategory,
+    int? ToolCallCount,
+    int? ToolErrorCount);
+
 public sealed record AgentSessionDto(
     string Id,
     string ProjectId,
@@ -26,19 +43,8 @@ public sealed record AgentSessionDto(
     string? LastDataAt,
     string? FailureReason,
     int? ExitCode,
-    string? ResolvedModel,
-    long? InputTokens,
-    long? OutputTokens,
-    long? TotalTokens,
-    long? CachedReadTokens,
-    long? ThoughtTokens,
-    double? CostAmount,
-    string? CostCurrency,
-    long? ContextWindowUsed,
-    long? ContextWindowSize,
-    string? FailureCategory,
-    int? ToolCallCount,
-    int? ToolErrorCount);
+    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
 public sealed record AgentSessionMetadataDto(
     string Id,
@@ -50,19 +56,8 @@ public sealed record AgentSessionMetadataDto(
     string? Title,
     string CreatedAt,
     string? CompletedAt,
-    string? ResolvedModel,
-    long? InputTokens,
-    long? OutputTokens,
-    long? TotalTokens,
-    long? CachedReadTokens,
-    long? ThoughtTokens,
-    double? CostAmount,
-    string? CostCurrency,
-    long? ContextWindowUsed,
-    long? ContextWindowSize,
-    string? FailureCategory,
-    int? ToolCallCount,
-    int? ToolErrorCount,
+    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage,
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
 
 public sealed record AgentSessionMetadataCounts(
@@ -140,21 +135,22 @@ public sealed record AgentSessionSummaryDto(
     string? ProbeSentAt,
     string? ProbeDeadlineAt,
     string? FailureReason,
-    string? ResolvedModel,
-    long? InputTokens,
-    long? OutputTokens,
-    long? TotalTokens,
-    long? CachedReadTokens,
-    long? ThoughtTokens,
-    double? CostAmount,
-    string? CostCurrency,
-    long? ContextWindowUsed,
-    long? ContextWindowSize,
-    string? FailureCategory,
-    int? ToolCallCount,
-    int? ToolErrorCount);
+    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
-public sealed record AgentSessionInfoDto(int IssueNumber, string IssueTitle, string IssueStage, string SessionId, [property: JsonPropertyName("status")] string Status, string? Model, string? Title, string CreatedAt, string? CompletedAt, string? LastActivityAt, string? ResolvedModel, long? InputTokens, long? OutputTokens, long? TotalTokens, long? CachedReadTokens, long? ThoughtTokens, double? CostAmount, string? CostCurrency, long? ContextWindowUsed, long? ContextWindowSize, string? FailureCategory, int? ToolCallCount, int? ToolErrorCount);
+public sealed record AgentSessionInfoDto(
+    int IssueNumber,
+    string IssueTitle,
+    string IssueStage,
+    string SessionId,
+    [property: JsonPropertyName("status")] string Status,
+    string? Model,
+    string? Title,
+    string CreatedAt,
+    string? CompletedAt,
+    string? LastActivityAt,
+    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
 public sealed record WorkflowSessionDto(
     string Id,
@@ -174,19 +170,8 @@ public sealed record WorkflowSessionDto(
     string? CompletedAt,
     string? FailureReason,
     int? ExitCode,
-    string? ResolvedModel,
-    long? InputTokens,
-    long? OutputTokens,
-    long? TotalTokens,
-    long? CachedReadTokens,
-    long? ThoughtTokens,
-    double? CostAmount,
-    string? CostCurrency,
-    long? ContextWindowUsed,
-    long? ContextWindowSize,
-    string? FailureCategory,
-    int? ToolCallCount,
-    int? ToolErrorCount);
+    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
@@ -216,19 +201,8 @@ public sealed record ActivityCardDto(
     ActivityTaskProgressDto? TaskProgress,
     ActivityPreviewDto? LastActivity,
     string? FailureReason,
-    string? ResolvedModel,
-    long? InputTokens,
-    long? OutputTokens,
-    long? TotalTokens,
-    long? CachedReadTokens,
-    long? ThoughtTokens,
-    double? CostAmount,
-    string? CostCurrency,
-    long? ContextWindowUsed,
-    long? ContextWindowSize,
-    string? FailureCategory,
-    int? ToolCallCount,
-    int? ToolErrorCount);
+    [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
 public sealed record ActivityWorkItemDto(string Type, string Id, string Title, string? Stage, string? SessionWorkType);
 public sealed record ActivityTaskProgressDto(int Completed, int Total);

@@ -34,7 +34,6 @@ public static partial class AgentSessionExtensions
             session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
             session.Status = session.Status with
             {
-                Phase = AgentSessionStatus.Bound,
                 AgentRuntimeSessionId = existingAgentSessionId ?? agentSessionId,
                 BoundAt = session.Status.BoundAt ?? now,
                 LastDataAt = now,

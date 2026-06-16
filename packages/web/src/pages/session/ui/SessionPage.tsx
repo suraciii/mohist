@@ -48,19 +48,27 @@ function buildSessionMetadata(
     toolCount: meta.metadata.toolCount,
     turnCount,
     changedFiles: meta.changedFiles,
-    resolvedModel: meta.resolvedModel ?? null,
-    inputTokens: meta.inputTokens ?? null,
-    outputTokens: meta.outputTokens ?? null,
-    totalTokens: meta.totalTokens ?? null,
-    cachedReadTokens: meta.cachedReadTokens ?? null,
-    thoughtTokens: meta.thoughtTokens ?? null,
-    costAmount: meta.costAmount ?? null,
-    costCurrency: meta.costCurrency ?? null,
-    contextWindowUsed: meta.contextWindowUsed ?? null,
-    contextWindowSize: meta.contextWindowSize ?? null,
-    failureCategory: meta.failureCategory ?? null,
-    toolCallCount: meta.toolCallCount ?? null,
-    toolErrorCount: meta.toolErrorCount ?? null,
+    eventSummary: meta.eventSummary
+      ? {
+          resolvedModel: meta.eventSummary.resolvedModel ?? null,
+          failureCategory: meta.eventSummary.failureCategory ?? null,
+          toolCallCount: meta.eventSummary.toolCallCount ?? null,
+          toolErrorCount: meta.eventSummary.toolErrorCount ?? null,
+        }
+      : undefined,
+    usage: meta.usage
+      ? {
+          inputTokens: meta.usage.inputTokens ?? null,
+          outputTokens: meta.usage.outputTokens ?? null,
+          totalTokens: meta.usage.totalTokens ?? null,
+          cachedReadTokens: meta.usage.cachedReadTokens ?? null,
+          thoughtTokens: meta.usage.thoughtTokens ?? null,
+          costAmount: meta.usage.costAmount ?? null,
+          costCurrency: meta.usage.costCurrency ?? null,
+          contextWindowUsed: meta.usage.contextWindowUsed ?? null,
+          contextWindowSize: meta.usage.contextWindowSize ?? null,
+        }
+      : undefined,
   }
 }
 
@@ -270,16 +278,18 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
       : `${changedFiles.length} files changed`
     : null
 
+  const usage = meta?.usage
+  const eventSummary = meta?.eventSummary
   const hasUsage =
-    meta?.totalTokens != null ||
-    meta?.inputTokens != null ||
-    meta?.outputTokens != null ||
-    meta?.cachedReadTokens != null ||
-    meta?.thoughtTokens != null
+    usage?.totalTokens != null ||
+    usage?.inputTokens != null ||
+    usage?.outputTokens != null ||
+    usage?.cachedReadTokens != null ||
+    usage?.thoughtTokens != null
 
   const contextWindowPct =
-    meta?.contextWindowUsed != null && meta?.contextWindowSize != null && meta.contextWindowSize > 0
-      ? Math.min(100, Math.round((meta.contextWindowUsed / meta.contextWindowSize) * 100))
+    usage?.contextWindowUsed != null && usage?.contextWindowSize != null && usage.contextWindowSize > 0
+      ? Math.min(100, Math.round((usage.contextWindowUsed / usage.contextWindowSize) * 100))
       : null
 
   return (
@@ -316,10 +326,10 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
           </span>
 
           {/* Model badges */}
-          {meta?.model && meta?.resolvedModel && meta.model !== meta.resolvedModel ? (
+          {meta?.model && eventSummary?.resolvedModel && meta.model !== eventSummary.resolvedModel ? (
             <span className="text-gray-500">
               {meta.model} <span className="text-gray-300">→</span>{' '}
-              <span className="text-blue-600">{meta.resolvedModel}</span>
+              <span className="text-blue-600">{eventSummary.resolvedModel}</span>
             </span>
           ) : meta?.model ? (
             <span>{meta.model}</span>
@@ -368,42 +378,42 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
       </div>
 
       {/* Observability bar */}
-      {(hasUsage || meta?.costAmount != null || meta?.contextWindowUsed != null || meta?.failureCategory || meta?.toolCallCount != null) && (
+      {(hasUsage || usage?.costAmount != null || usage?.contextWindowUsed != null || eventSummary?.failureCategory || eventSummary?.toolCallCount != null) && (
         <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 flex-wrap">
           {hasUsage && (
             <span>
-              {meta?.totalTokens != null
-                ? `${formatCompact(meta.totalTokens)} tokens`
+              {usage?.totalTokens != null
+                ? `${formatCompact(usage.totalTokens)} tokens`
                 : [
-                    meta?.inputTokens != null ? `${formatCompact(meta.inputTokens)} in` : '',
-                    meta?.outputTokens != null ? `${formatCompact(meta.outputTokens)} out` : '',
+                    usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '',
+                    usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '',
                   ]
                     .filter(Boolean)
                     .join(' · ')}
             </span>
           )}
-          {meta?.costAmount != null && meta?.costCurrency && (
-            <span>{formatCost(meta.costAmount, meta.costCurrency)}</span>
+          {usage?.costAmount != null && usage?.costCurrency && (
+            <span>{formatCost(usage.costAmount, usage.costCurrency)}</span>
           )}
-          {meta?.contextWindowUsed != null && (
+          {usage?.contextWindowUsed != null && (
             <span>
-              {meta?.contextWindowSize != null
-                ? `${formatCompact(meta.contextWindowUsed)} / ${formatCompact(meta.contextWindowSize)} ctx`
-                : `${formatCompact(meta.contextWindowUsed)} ctx used`}
+              {usage?.contextWindowSize != null
+                ? `${formatCompact(usage.contextWindowUsed)} / ${formatCompact(usage.contextWindowSize)} ctx`
+                : `${formatCompact(usage.contextWindowUsed)} ctx used`}
               {contextWindowPct != null && (
                 <span className="ml-1 text-gray-400">({contextWindowPct}%)</span>
               )}
             </span>
           )}
-          {meta?.failureCategory && (
+          {eventSummary?.failureCategory && (
             <span className="px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-medium">
-              {meta.failureCategory}
+              {eventSummary.failureCategory}
             </span>
           )}
-          {meta?.toolCallCount != null && (
-            <span className={meta?.toolErrorCount ? 'text-orange-600 font-medium' : ''}>
-              {meta.toolCallCount} tool{meta.toolCallCount !== 1 ? 's' : ''}
-              {meta?.toolErrorCount ? ` · ${meta.toolErrorCount} error${meta.toolErrorCount !== 1 ? 's' : ''}` : ''}
+          {eventSummary?.toolCallCount != null && (
+            <span className={eventSummary?.toolErrorCount ? 'text-orange-600 font-medium' : ''}>
+              {eventSummary.toolCallCount} tool{eventSummary.toolCallCount !== 1 ? 's' : ''}
+              {eventSummary?.toolErrorCount ? ` · ${eventSummary.toolErrorCount} error${eventSummary.toolErrorCount !== 1 ? 's' : ''}` : ''}
             </span>
           )}
         </div>

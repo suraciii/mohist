@@ -145,19 +145,21 @@ public class AgentSessionSpecs
         var metadata = root.GetProperty("metadata");
         Assert.Equal(6, metadata.GetProperty("partCount").GetInt32());
         Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
-        Assert.Equal("anthropic/claude-sonnet-4", root.GetProperty("resolvedModel").GetString());
-        Assert.Equal(100, root.GetProperty("inputTokens").GetInt64());
-        Assert.Equal(50, root.GetProperty("outputTokens").GetInt64());
-        Assert.Equal(150, root.GetProperty("totalTokens").GetInt64());
-        Assert.Equal(10, root.GetProperty("cachedReadTokens").GetInt64());
-        Assert.Equal(5, root.GetProperty("thoughtTokens").GetInt64());
-        Assert.Equal(0.01, root.GetProperty("costAmount").GetDouble());
-        Assert.Equal("USD", root.GetProperty("costCurrency").GetString());
-        Assert.Equal(150, root.GetProperty("contextWindowUsed").GetInt64());
-        Assert.Equal(200000, root.GetProperty("contextWindowSize").GetInt64());
-        Assert.Equal("probe_timeout", root.GetProperty("failureCategory").GetString());
-        Assert.Equal(1, root.GetProperty("toolCallCount").GetInt32());
-        Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
+        var eventSummary = root.GetProperty("eventSummary");
+        Assert.Equal("anthropic/claude-sonnet-4", eventSummary.GetProperty("resolvedModel").GetString());
+        Assert.Equal("probe_timeout", eventSummary.GetProperty("failureCategory").GetString());
+        Assert.Equal(1, eventSummary.GetProperty("toolCallCount").GetInt32());
+        Assert.Equal(1, eventSummary.GetProperty("toolErrorCount").GetInt32());
+        var usage = root.GetProperty("usage");
+        Assert.Equal(100, usage.GetProperty("inputTokens").GetInt64());
+        Assert.Equal(50, usage.GetProperty("outputTokens").GetInt64());
+        Assert.Equal(150, usage.GetProperty("totalTokens").GetInt64());
+        Assert.Equal(10, usage.GetProperty("cachedReadTokens").GetInt64());
+        Assert.Equal(5, usage.GetProperty("thoughtTokens").GetInt64());
+        Assert.Equal(0.01, usage.GetProperty("costAmount").GetDouble());
+        Assert.Equal("USD", usage.GetProperty("costCurrency").GetString());
+        Assert.Equal(150, usage.GetProperty("contextWindowUsed").GetInt64());
+        Assert.Equal(200000, usage.GetProperty("contextWindowSize").GetInt64());
 
         Assert.False(root.TryGetProperty("events", out _));
         Assert.False(root.TryGetProperty("turns", out _));
@@ -886,19 +888,21 @@ public class AgentSessionSpecs
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
 
-        Assert.Equal("anthropic/claude-sonnet-4", card.ResolvedModel);
-        Assert.Equal(100, card.InputTokens);
-        Assert.Equal(50, card.OutputTokens);
-        Assert.Equal(150, card.TotalTokens);
-        Assert.Equal(10, card.CachedReadTokens);
-        Assert.Equal(5, card.ThoughtTokens);
-        Assert.Equal(0.01, card.CostAmount);
-        Assert.Equal("USD", card.CostCurrency);
-        Assert.Equal(150, card.ContextWindowUsed);
-        Assert.Equal(200000, card.ContextWindowSize);
-        Assert.Equal("probe_timeout", card.FailureCategory);
-        Assert.Equal(1, card.ToolCallCount);
-        Assert.Equal(1, card.ToolErrorCount);
+        Assert.NotNull(card.EventSummary);
+        Assert.NotNull(card.Usage);
+        Assert.Equal("anthropic/claude-sonnet-4", card.EventSummary!.ResolvedModel);
+        Assert.Equal(100, card.Usage!.InputTokens);
+        Assert.Equal(50, card.Usage.OutputTokens);
+        Assert.Equal(150, card.Usage.TotalTokens);
+        Assert.Equal(10, card.Usage.CachedReadTokens);
+        Assert.Equal(5, card.Usage.ThoughtTokens);
+        Assert.Equal(0.01, card.Usage.CostAmount);
+        Assert.Equal("USD", card.Usage.CostCurrency);
+        Assert.Equal(150, card.Usage.ContextWindowUsed);
+        Assert.Equal(200000, card.Usage.ContextWindowSize);
+        Assert.Equal("probe_timeout", card.EventSummary.FailureCategory);
+        Assert.Equal(1, card.EventSummary.ToolCallCount);
+        Assert.Equal(1, card.EventSummary.ToolErrorCount);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -1261,7 +1265,15 @@ public class AgentSessionSpecs
         string SessionId,
         string Status,
         ActivityPreviewDto? LastActivity,
+        AgentEventSummaryDto? EventSummary,
+        AgentUsageDto? Usage,
+        ActivityTaskProgressDto? TaskProgress);
+    private sealed record AgentEventSummaryDto(
         string? ResolvedModel,
+        string? FailureCategory,
+        int? ToolCallCount,
+        int? ToolErrorCount);
+    private sealed record AgentUsageDto(
         long? InputTokens,
         long? OutputTokens,
         long? TotalTokens,
@@ -1270,11 +1282,7 @@ public class AgentSessionSpecs
         double? CostAmount,
         string? CostCurrency,
         long? ContextWindowUsed,
-        long? ContextWindowSize,
-        string? FailureCategory,
-        int? ToolCallCount,
-        int? ToolErrorCount,
-        ActivityTaskProgressDto? TaskProgress);
+        long? ContextWindowSize);
     private sealed record ActivityTaskProgressDto(int Completed, int Total);
     private sealed record ActivityPreviewDto(string Kind, string Text, string CreatedAt);
     private sealed record ActivityWaitingDto(int IssueNumber, string IssueTitle, string Label);

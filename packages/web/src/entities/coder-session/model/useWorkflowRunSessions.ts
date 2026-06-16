@@ -65,15 +65,18 @@ export function useWorkflowRunSessions(workflowRunId: string | null | undefined)
           session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
             ? {
                 ...session,
-                ...(detail.inputTokens !== undefined && { inputTokens: detail.inputTokens }),
-                ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
-                ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
-                ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
-                ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
-                ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
-                ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
-                ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
-                ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+                usage: {
+                  ...(session.usage ?? {}),
+                  ...(detail.inputTokens !== undefined && { inputTokens: detail.inputTokens }),
+                  ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
+                  ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
+                  ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
+                  ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
+                  ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
+                  ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
+                  ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
+                  ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+                },
               }
             : session,
         ))

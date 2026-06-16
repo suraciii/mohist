@@ -63,6 +63,8 @@ export interface StatusCounts {
 const ACTIVE_STATUSES = new Set(['active'])
 
 function sessionToCard(s: AgentActivitySession): SessionCard {
+  const usage = s.usage
+  const eventSummary = s.eventSummary
   return {
     issueId: s.issueId,
     issueNumber: String(s.issueNumber),
@@ -71,7 +73,7 @@ function sessionToCard(s: AgentActivitySession): SessionCard {
     sessionId: s.sessionId,
     status: s.status,
     model: s.model,
-    resolvedModel: s.resolvedModel ?? null,
+    resolvedModel: eventSummary?.resolvedModel ?? null,
     taskDescription: s.taskDescription,
     title: s.currentWorkItem?.title ?? s.taskDescription,
     createdAt: s.createdAt,
@@ -81,16 +83,16 @@ function sessionToCard(s: AgentActivitySession): SessionCard {
     taskProgress: s.taskProgress,
     currentWorkTitle: s.currentWorkItem?.title ?? null,
     failureReason: s.failureReason,
-    failureCategory: s.failureCategory ?? null,
-    inputTokens: s.inputTokens ?? null,
-    outputTokens: s.outputTokens ?? null,
-    totalTokens: s.totalTokens ?? null,
-    costAmount: s.costAmount ?? null,
-    costCurrency: s.costCurrency ?? null,
-    contextWindowUsed: s.contextWindowUsed ?? null,
-    contextWindowSize: s.contextWindowSize ?? null,
-    toolCallCount: s.toolCallCount ?? null,
-    toolErrorCount: s.toolErrorCount ?? null,
+    failureCategory: eventSummary?.failureCategory ?? null,
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    totalTokens: usage?.totalTokens ?? null,
+    costAmount: usage?.costAmount ?? null,
+    costCurrency: usage?.costCurrency ?? null,
+    contextWindowUsed: usage?.contextWindowUsed ?? null,
+    contextWindowSize: usage?.contextWindowSize ?? null,
+    toolCallCount: eventSummary?.toolCallCount ?? null,
+    toolErrorCount: eventSummary?.toolErrorCount ?? null,
   }
 }
 

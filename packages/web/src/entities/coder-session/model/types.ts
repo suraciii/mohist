@@ -2,6 +2,25 @@ import type { SessionEvent } from '../../session/model/view'
 
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
+export interface AgentSessionUsage {
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+}
+
+export interface AgentSessionEventSummary {
+  resolvedModel?: string | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
+}
+
 export interface AgentSessionMetadataCounts {
   partCount?: number
   eventCount?: number
@@ -30,19 +49,8 @@ export interface AgentSessionMetadata {
   turnCount?: number
   changedFiles?: FileChangeSummary[]
   metadata: AgentSessionMetadataCounts
-  resolvedModel?: string | null
-  inputTokens?: number | null
-  outputTokens?: number | null
-  totalTokens?: number | null
-  cachedReadTokens?: number | null
-  thoughtTokens?: number | null
-  costAmount?: number | null
-  costCurrency?: string | null
-  contextWindowUsed?: number | null
-  contextWindowSize?: number | null
-  failureCategory?: string | null
-  toolCallCount?: number | null
-  toolErrorCount?: number | null
+  eventSummary?: AgentSessionEventSummary
+  usage?: AgentSessionUsage
 }
 
 export interface FileChangeSummary {
@@ -71,19 +79,8 @@ export interface CoderSessionSummary {
   probeSentAt: string | null
   probeDeadlineAt: string | null
   failureReason: string | null
-  resolvedModel?: string | null
-  inputTokens?: number | null
-  outputTokens?: number | null
-  totalTokens?: number | null
-  cachedReadTokens?: number | null
-  thoughtTokens?: number | null
-  costAmount?: number | null
-  costCurrency?: string | null
-  contextWindowUsed?: number | null
-  contextWindowSize?: number | null
-  failureCategory?: string | null
-  toolCallCount?: number | null
-  toolErrorCount?: number | null
+  eventSummary?: AgentSessionEventSummary
+  usage?: AgentSessionUsage
 }
 
 export interface WorkflowRunSession {
@@ -104,19 +101,8 @@ export interface WorkflowRunSession {
   lastDataAt: string | null
   failureReason: string | null
   exitCode: number | null
-  resolvedModel?: string | null
-  inputTokens?: number | null
-  outputTokens?: number | null
-  totalTokens?: number | null
-  cachedReadTokens?: number | null
-  thoughtTokens?: number | null
-  costAmount?: number | null
-  costCurrency?: string | null
-  contextWindowUsed?: number | null
-  contextWindowSize?: number | null
-  failureCategory?: string | null
-  toolCallCount?: number | null
-  toolErrorCount?: number | null
+  eventSummary?: AgentSessionEventSummary
+  usage?: AgentSessionUsage
 }
 
 export type CoderSessionItem = CoderSessionSummary
@@ -166,19 +152,8 @@ export interface SessionMetadata {
   changedFiles?: FileChangeSummary[]
   warnings?: TranscriptWarning[]
   hasUnknownTools?: boolean
-  resolvedModel?: string | null
-  inputTokens?: number | null
-  outputTokens?: number | null
-  totalTokens?: number | null
-  cachedReadTokens?: number | null
-  thoughtTokens?: number | null
-  costAmount?: number | null
-  costCurrency?: string | null
-  contextWindowUsed?: number | null
-  contextWindowSize?: number | null
-  failureCategory?: string | null
-  toolCallCount?: number | null
-  toolErrorCount?: number | null
+  eventSummary?: AgentSessionEventSummary
+  usage?: AgentSessionUsage
 }
 
 export interface TextPart {

@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Domain.Events;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
@@ -21,6 +20,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly ILogger<AgentSessionGrain> _log;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
+    private AgentSessionTranscriptSummary? _cachedSummary;
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
     private bool _stateDirty;
@@ -53,50 +53,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _persistTimer?.Dispose();
         _persistTimer = null;
 
-        if (_session is null)
-            return;
-
-        var now = DateTime.UtcNow;
-        var transcript = _transcript.BuildFlush(_session, now);
-        var stateSaved = !_stateDirty;
-
-        if (_stateDirty)
-        {
-            try
-            {
-                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), ct);
-                stateSaved = true;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to flush state on deactivation for {SessionId}",
-                    SessionId);
-            }
-        }
-
-        var transcriptSaved = transcript is null;
-        if (transcript is not null)
-        {
-            try
-            {
-                await _transcriptStore.SaveAsync(transcript, ct);
-                transcriptSaved = true;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex,
-                    "AgentSessionGrain failed to flush transcript on deactivation for {SessionId}; parts={PartCount}",
-                    SessionId, transcript.Parts.Count);
-            }
-        }
-
-        if (stateSaved && transcriptSaved)
-        {
-            if (transcript is not null)
-                _transcript.CommitFlush();
-            _stateDirty = false;
-        }
+        await FlushAsync(ct);
     }
 
     public async Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command)
@@ -158,8 +115,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
             events.AddRange(domainEvents);
-            if (domainEvents.Count > 0)
-                _stateDirty = true;
 
             entries.Add(new RuntimeEventEnvelope
             {
@@ -176,6 +131,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _transcript.Accept(session, entries, now);
 
         _session = session;
+        _cachedSummary = null;
 
         EnsurePersistenceTimer();
 
@@ -255,16 +211,25 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _persistTimer ??= this.RegisterGrainTimer(
             _ => PersistCallback(),
             PersistTimerDueTime,
-            Timeout.InfiniteTimeSpan);
+            PersistTimerDueTime);
     }
 
     private async Task PersistCallback()
     {
-        if (_session is null)
+        if (_session is null || (!_stateDirty && !_transcript.HasPending))
         {
             DisposePersistTimer();
             return;
         }
+
+        var success = await FlushAsync(CancellationToken.None);
+        if (success)
+            DisposePersistTimer();
+    }
+
+    private async Task<bool> FlushAsync(CancellationToken ct)
+    {
+        if (_session is null) return true;
 
         var now = DateTime.UtcNow;
         var transcript = _transcript.BuildFlush(_session, now);
@@ -274,7 +239,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             try
             {
-                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), CancellationToken.None);
+                await _stateStore.SaveAsync(SessionId, _session, Array.Empty<AgentSessionEvent>(), ct);
                 stateSaved = true;
             }
             catch (Exception ex)
@@ -290,7 +255,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             try
             {
-                await _transcriptStore.SaveAsync(transcript, CancellationToken.None);
+                await _transcriptStore.SaveAsync(transcript, ct);
                 transcriptSaved = true;
             }
             catch (Exception ex)
@@ -306,19 +271,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             if (transcript is not null)
                 _transcript.CommitFlush();
             _stateDirty = false;
-            DisposePersistTimer();
+            return true;
         }
-        else
-        {
-            // The one-shot timer will not fire again; schedule a retry.
-            RestartPersistenceTimer();
-        }
-    }
-
-    private void RestartPersistenceTimer()
-    {
-        DisposePersistTimer();
-        EnsurePersistenceTimer();
+        return false;
     }
 
     private void DisposePersistTimer()
@@ -410,61 +365,28 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             eventSummary.ToolErrorCount);
     }
 
-    private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
+    private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
     {
+        if (_cachedSummary is not null)
+            return _cachedSummary;
+
         await using var db = await _dbFactory.CreateDbContextAsync();
         var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
             .Where(t => t.SessionId == sessionId)
             .Select(t => t.Id)
             .ToListAsync();
-        var transcriptParts = turnIds.Count == 0
-            ? new List<AgentSessionTranscriptPartRow>()
-            : await db.AgentSessionTranscriptParts.AsNoTracking()
-                .Where(e => turnIds.Contains(e.TurnId))
-                .OrderBy(e => e.Sequence)
-                .ToListAsync();
-        var events = transcriptParts
-            .Select(ToEventEnvelope)
+        if (turnIds.Count == 0)
+            return _cachedSummary = AgentSessionTranscriptSummary.Empty;
+
+        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(e => turnIds.Contains(e.TurnId))
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
-            .ToList();
+            .ToListAsync();
 
-        string? resolvedModel = null;
-        string? failureCategory = null;
-        var toolCallIds = new HashSet<string>(StringComparer.Ordinal);
-        var failedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var e in events)
-        {
-            if (e.Type == "model.resolved" || e.Type == "model")
-            {
-                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                resolvedModel = AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? resolvedModel;
-            }
-            else if (e.Type == "session.closed" || e.Type == "session_closed")
-            {
-                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory") ?? failureCategory;
-            }
-            else if (e.Type == "tool_call.started" || e.Type == "tool_call.updated" || e.Type == "tool_call.completed" || e.Type == "tool_call" || e.Type == "tool")
-            {
-                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                var toolCallId = AgentSessionJsonHelper.GetToolStringProp(payload, "toolCallId")
-                    ?? AgentSessionJsonHelper.GetToolStringProp(payload, "id")
-                    ?? AgentSessionJsonHelper.GetToolStringProp(payload, "callId")
-                    ?? e.Sequence.ToString();
-                toolCallIds.Add(toolCallId);
-                var status = AgentSessionJsonHelper.GetToolStringProp(payload, "status") ?? AgentSessionJsonHelper.GetToolStringProp(payload, "state");
-                if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
-                    failedToolCallIds.Add(toolCallId);
-            }
-        }
-
-        return new AgentSessionEventSummary(
-            resolvedModel,
-            failureCategory,
-            toolCallIds.Count == 0 ? null : toolCallIds.Count,
-            failedToolCallIds.Count == 0 ? null : failedToolCallIds.Count);
+        var events = parts
+            .Select(part => new TranscriptSummaryEvent(part.Sequence, part.Type, part.PayloadJson));
+        return _cachedSummary = TranscriptEventSummaryProjector.Summarize(events);
     }
 
     private static AgentSessionRuntimeEventInfo ToEventInfo(RuntimeEventEnvelope e) => new(
@@ -476,15 +398,6 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         e.PayloadJson,
         e.CreatedAt.ToString("o"));
 
-    private static RuntimeEventEnvelope ToEventEnvelope(AgentSessionTranscriptPartRow part) => new()
-    {
-        Id = part.Id,
-        Sequence = part.Sequence,
-        Type = part.Type,
-        PayloadJson = part.PayloadJson,
-        CreatedAt = part.FirstSeenAt,
-    };
-
     private static IReadOnlyList<AgentSessionEvent> ApplyRuntimeEventToDomain(
         AgentSession session,
         AgentSessionRuntimeEventInput runtimeEvent,
@@ -493,9 +406,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var payload = JsonSerializer.Deserialize<JsonElement>(runtimeEvent.PayloadJson);
         return runtimeEvent.Type switch
         {
-            "session.liveness" => session.RecordActivity(now),
-            "session.closed" => session.RecordActivity(now),
-            "usage.updated" => session.ApplyUsage(
+            RuntimeEventTypes.SessionLiveness => session.RecordActivity(now),
+            RuntimeEventTypes.SessionClosed => session.RecordActivity(now),
+            RuntimeEventTypes.UsageUpdated => session.ApplyUsage(
                 AgentSessionJsonHelper.GetLongProp(payload, "inputTokens"),
                 AgentSessionJsonHelper.GetLongProp(payload, "outputTokens"),
                 AgentSessionJsonHelper.GetLongProp(payload, "totalTokens"),
@@ -505,16 +418,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 AgentSessionJsonHelper.GetCostCurrency(payload),
                 AgentSessionJsonHelper.GetContextWindowUsed(payload),
                 AgentSessionJsonHelper.GetContextWindowSize(payload)),
-            "model.resolved" => session.ResolveModel(
+            RuntimeEventTypes.ModelResolved => session.ResolveModel(
                 AgentSessionJsonHelper.GetStringProp(payload, "resolvedModel") ?? AgentSessionJsonHelper.GetStringProp(payload, "model"),
                 now),
             _ => []
         };
     }
-
-    private sealed record AgentSessionEventSummary(
-        string? ResolvedModel,
-        string? FailureCategory,
-        int? ToolCallCount,
-        int? ToolErrorCount);
 }

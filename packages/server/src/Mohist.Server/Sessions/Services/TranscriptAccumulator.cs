@@ -12,16 +12,16 @@ internal sealed class TranscriptAccumulator
 
     internal static readonly HashSet<string> EventTypes = new(StringComparer.Ordinal)
     {
-        "session.input",
-        "message.delta",
-        "reasoning.delta",
-        "tool_call.started",
-        "tool_call.updated",
-        "tool_call.completed",
-        "session.liveness",
-        "usage.updated",
-        "model.resolved",
-        "session.closed",
+        RuntimeEventTypes.SessionInput,
+        RuntimeEventTypes.MessageDelta,
+        RuntimeEventTypes.ReasoningDelta,
+        RuntimeEventTypes.ToolCallStarted,
+        RuntimeEventTypes.ToolCallUpdated,
+        RuntimeEventTypes.ToolCallCompleted,
+        RuntimeEventTypes.SessionLiveness,
+        RuntimeEventTypes.UsageUpdated,
+        RuntimeEventTypes.ModelResolved,
+        RuntimeEventTypes.SessionClosed,
     };
 
     private PendingTextSegment? _pending;
@@ -48,7 +48,7 @@ internal sealed class TranscriptAccumulator
                 continue;
 
             FlushPendingIntoAccumulated(now);
-            if (row.Type == "session.input")
+            if (row.Type == RuntimeEventTypes.SessionInput)
             {
                 CaptureInput(row);
                 continue;
@@ -197,26 +197,26 @@ internal sealed class TranscriptAccumulator
 
     private static string? ToTextPartType(string eventType) => eventType switch
     {
-        "message.delta" => "text",
-        "reasoning.delta" => "reasoning",
+        RuntimeEventTypes.MessageDelta => TranscriptPartTypes.Text,
+        RuntimeEventTypes.ReasoningDelta => TranscriptPartTypes.Reasoning,
         _ => null
     };
 
     private static string ToTranscriptPartType(string eventType) => eventType switch
     {
-        "session.input" => "input",
-        "tool_call.started" or "tool_call.updated" or "tool_call.completed" => "tool",
-        "session.liveness" => "status",
-        "usage.updated" => "usage",
-        "model.resolved" => "model",
-        "session.closed" => "session_closed",
+        RuntimeEventTypes.SessionInput => TranscriptPartTypes.Input,
+        RuntimeEventTypes.ToolCallStarted or RuntimeEventTypes.ToolCallUpdated or RuntimeEventTypes.ToolCallCompleted => TranscriptPartTypes.Tool,
+        RuntimeEventTypes.SessionLiveness => TranscriptPartTypes.Status,
+        RuntimeEventTypes.UsageUpdated => TranscriptPartTypes.Usage,
+        RuntimeEventTypes.ModelResolved => TranscriptPartTypes.Model,
+        RuntimeEventTypes.SessionClosed => TranscriptPartTypes.SessionClosed,
         _ => eventType
     };
 
     private static string CorrelationKey(string type, string json) => type switch
     {
-        "tool" => AgentSessionJsonHelper.ExtractCorrelationId(json) ?? "tool",
-        "text" or "reasoning" => AgentSessionJsonHelper.ExtractCorrelationId(json) ?? type,
+        TranscriptPartTypes.Tool => AgentSessionJsonHelper.ExtractCorrelationId(json) ?? TranscriptPartTypes.Tool,
+        TranscriptPartTypes.Text or TranscriptPartTypes.Reasoning => AgentSessionJsonHelper.ExtractCorrelationId(json) ?? type,
         _ => type,
     };
 }

@@ -122,7 +122,7 @@ public class AgentSessionStore : IAgentSessionStore
 
 public static class AgentSessionJson
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    public static readonly JsonSerializerOptions JsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNameCaseInsensitive = true,
@@ -134,7 +134,10 @@ public static class AgentSessionJson
         try
         {
             var session = JsonSerializer.Deserialize<AgentSession>(row.State, JsonOptions);
-            return session is null ? null : Normalize(session, row);
+            if (session is null) return null;
+            ApplyColumnDefaults(session, row);
+            session.ValidateState();
+            return session;
         }
         catch
         {
@@ -148,29 +151,18 @@ public static class AgentSessionJson
         State = JsonSerializer.Serialize(session, JsonOptions),
         RunnerId = session.Runtime.RunnerId,
         AgentSessionId = session.Status.AgentRuntimeSessionId,
-        Status = AgentSessionStatusNames.ToName(session.Status.Phase),
+        Status = session.Status.AgentRuntimeSessionId is null ? "opened" : "bound",
         CreatedAt = session.Status.CreatedAt,
         LastDataAt = session.Status.LastDataAt,
     };
 
-    private static AgentSession Normalize(AgentSession session, AgentSessionRow row)
+    private static void ApplyColumnDefaults(AgentSession session, AgentSessionRow row)
     {
-        if (string.IsNullOrWhiteSpace(session.Id))
-            throw new InvalidOperationException("AgentSession state is missing required fields.");
-        if (session.Runtime is null)
-            session.Runtime = new AgentSessionRuntime(row.RunnerId ?? string.Empty, null);
-        if (session.Status.CreatedAt == default)
-            throw new InvalidOperationException("AgentSession state is missing CreatedAt.");
-        var phase = !string.IsNullOrWhiteSpace(session.Status.AgentRuntimeSessionId) || !string.IsNullOrWhiteSpace(row.AgentSessionId)
-            ? AgentSessionStatus.Bound
-            : AgentSessionStatus.Opened;
         session.Status = session.Status with
         {
-            Phase = phase,
             AgentRuntimeSessionId = session.Status.AgentRuntimeSessionId ?? row.AgentSessionId,
             LastDataAt = session.Status.LastDataAt ?? row.LastDataAt,
             UsageSummary = session.Status.UsageSummary ?? new AgentUsageSummary()
         };
-        return session;
     }
 }

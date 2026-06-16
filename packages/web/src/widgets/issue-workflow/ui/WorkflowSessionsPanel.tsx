@@ -35,28 +35,32 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function usageText(session: WorkflowRunSession): string {
-  if (session.totalTokens != null) return `${formatCompact(session.totalTokens)} processed`
+  const usage = session.usage
+  if (usage?.totalTokens != null) return `${formatCompact(usage.totalTokens)} processed`
   const parts = [
-    session.inputTokens != null ? `${formatCompact(session.inputTokens)} in` : '',
-    session.outputTokens != null ? `${formatCompact(session.outputTokens)} out` : '',
+    usage?.inputTokens != null ? `${formatCompact(usage.inputTokens)} in` : '',
+    usage?.outputTokens != null ? `${formatCompact(usage.outputTokens)} out` : '',
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(' · ') : 'No usage yet'
 }
 
 function contextText(session: WorkflowRunSession): string | null {
-  if (session.contextWindowUsed == null) return null
-  if (session.contextWindowSize == null || session.contextWindowSize <= 0) {
-    return `${formatCompact(session.contextWindowUsed)} ctx`
+  const used = session.usage?.contextWindowUsed
+  const size = session.usage?.contextWindowSize
+  if (used == null) return null
+  if (size == null || size <= 0) {
+    return `${formatCompact(used)} ctx`
   }
-  const pct = Math.min(100, Math.round((session.contextWindowUsed / session.contextWindowSize) * 100))
+  const pct = Math.min(100, Math.round((used / size) * 100))
   return `${pct}% ctx`
 }
 
 function modelLabel(session: WorkflowRunSession): string | null {
-  if (session.resolvedModel && session.model && session.resolvedModel !== session.model) {
-    return `${session.model} -> ${session.resolvedModel}`
+  const resolved = session.eventSummary?.resolvedModel
+  if (resolved && session.model && resolved !== session.model) {
+    return `${session.model} -> ${resolved}`
   }
-  return session.resolvedModel ?? session.model ?? null
+  return resolved ?? session.model ?? null
 }
 
 function relativeTime(iso: string | null | undefined): string {
@@ -82,8 +86,10 @@ function sumNullable(values: Array<number | null | undefined>): number | null {
 function summarizeCost(sessions: WorkflowRunSession[]): string | null {
   const byCurrency = new Map<string, number>()
   for (const session of sessions) {
-    if (session.costAmount == null || !session.costCurrency) continue
-    byCurrency.set(session.costCurrency, (byCurrency.get(session.costCurrency) ?? 0) + session.costAmount)
+    const amount = session.usage?.costAmount
+    const currency = session.usage?.costCurrency
+    if (amount == null || !currency) continue
+    byCurrency.set(currency, (byCurrency.get(currency) ?? 0) + amount)
   }
   if (byCurrency.size === 0) return null
   return Array.from(byCurrency.entries()).map(([currency, amount]) => formatCost(amount, currency)).join(' · ')
@@ -92,8 +98,10 @@ function summarizeCost(sessions: WorkflowRunSession[]): string | null {
 function summarizePeakContext(sessions: WorkflowRunSession[]): string | null {
   let peak: { pct: number; sessionName: string } | null = null
   for (const session of sessions) {
-    if (session.contextWindowUsed == null || session.contextWindowSize == null || session.contextWindowSize <= 0) continue
-    const pct = Math.min(100, Math.round((session.contextWindowUsed / session.contextWindowSize) * 100))
+    const used = session.usage?.contextWindowUsed
+    const size = session.usage?.contextWindowSize
+    if (used == null || size == null || size <= 0) continue
+    const pct = Math.min(100, Math.round((used / size) * 100))
     if (!peak || pct > peak.pct) {
       peak = { pct, sessionName: session.sessionName }
     }
@@ -105,9 +113,11 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
   const toProjectPath = useProjectPath()
   const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(session.sessionName)}`)
   const context = contextText(session)
-  const cost = formatCost(session.costAmount, session.costCurrency)
+  const cost = formatCost(session.usage?.costAmount, session.usage?.costCurrency)
   const model = modelLabel(session)
   const lastActivity = session.lastDataAt ?? session.completedAt ?? session.startedAt ?? session.createdAt
+  const toolCallCount = session.eventSummary?.toolCallCount
+  const toolErrorCount = session.eventSummary?.toolErrorCount
 
   return (
     <Link
@@ -132,10 +142,10 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
         <span>{usageText(session)}</span>
         {context && <span>{context}</span>}
         {cost && <span>{cost}</span>}
-        {session.toolCallCount != null && (
-          <span className={session.toolErrorCount ? 'text-orange-600 font-medium' : ''}>
-            {session.toolCallCount} tool{session.toolCallCount !== 1 ? 's' : ''}
-            {session.toolErrorCount ? ` · ${session.toolErrorCount} error${session.toolErrorCount !== 1 ? 's' : ''}` : ''}
+        {toolCallCount != null && (
+          <span className={toolErrorCount ? 'text-orange-600 font-medium' : ''}>
+            {toolCallCount} tool{toolCallCount !== 1 ? 's' : ''}
+            {toolErrorCount ? ` · ${toolErrorCount} error${toolErrorCount !== 1 ? 's' : ''}` : ''}
           </span>
         )}
         <span>{relativeTime(lastActivity)}</span>
@@ -153,7 +163,7 @@ export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSe
   if (!workflowRunId) return null
 
   const sorted = [...sessions].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-  const totalTokens = sumNullable(sorted.map((session) => session.totalTokens))
+  const totalTokens = sumNullable(sorted.map((session) => session.usage?.totalTokens))
   const cost = summarizeCost(sorted)
   const peakContext = summarizePeakContext(sorted)
   const summary = [

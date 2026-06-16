@@ -136,15 +136,18 @@ export function useCoderSessions(issueNumber: number) {
           const existing = prev[idx]
           const updated: CoderSessionSummary = {
             ...existing,
-            ...(detail.inputTokens !== undefined && { inputTokens: detail.inputTokens }),
-            ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
-            ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
-            ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
-            ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
-            ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
-            ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
-            ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
-            ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+            usage: {
+              ...(existing.usage ?? {}),
+              ...(detail.inputTokens !== undefined && { inputTokens: detail.inputTokens }),
+              ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
+              ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
+              ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
+              ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
+              ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
+              ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
+              ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
+              ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+            },
           }
           const next = [...prev]
           next[idx] = updated
