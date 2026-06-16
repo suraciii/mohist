@@ -1,6 +1,16 @@
 import { useState, useEffect } from 'react'
 import { Loader2Icon, RefreshCwIcon } from 'lucide-react'
-import { useLogLevel, useSetLogLevel, useSystemInfo, useSystemUpdate, useSystemUpdateStatus } from '../../../entities/settings'
+import {
+  isSupersededStatus,
+  isTerminalUpdateStatus,
+  ProgressStages,
+  SystemUpdateOutcomeView,
+  useLogLevel,
+  useSetLogLevel,
+  useSystemInfo,
+  useSystemUpdate,
+  useSystemUpdateStatus,
+} from '../../../entities/settings'
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
@@ -97,14 +107,7 @@ export function SystemSettingsSection() {
   }
 
   useEffect(() => {
-    if (updateStatus?.status === 'succeeded') {
-      setTrackingUpdate(false)
-      setReconnectState(null)
-      refetchInfo()
-      return
-    }
-
-    if (updateStatus?.status === 'failed') {
+    if (updateStatus && isTerminalUpdateStatus(updateStatus.status)) {
       setTrackingUpdate(false)
       setReconnectState(null)
       refetchInfo()
@@ -114,18 +117,37 @@ export function SystemSettingsSection() {
     if (updateStatus?.status === 'waiting-for-reconnect') {
       setReconnectState('Waiting for reconnect')
       let cancelled = false
-      const poll = window.setInterval(async () => {
+      const fastPollWindowMs = 2 * 60 * 1000
+      const slowPollIntervalMs = 30 * 1000
+      const startedAt = Date.now()
+      let fastPoll = window.setInterval(async () => {
+        if (cancelled) return
         const ok = await checkHealth()
-        if (!cancelled && ok) {
+        if (cancelled) return
+        if (ok) {
           setReconnectState('Refreshing runtime info')
           await refetchInfo()
           await refetchUpdateStatus()
+          return
+        }
+        if (Date.now() - startedAt >= fastPollWindowMs) {
+          window.clearInterval(fastPoll)
+          fastPoll = window.setInterval(async () => {
+            if (cancelled) return
+            const ok2 = await checkHealth()
+            if (cancelled) return
+            if (ok2) {
+              setReconnectState('Refreshing runtime info')
+              await refetchInfo()
+              await refetchUpdateStatus()
+            }
+          }, slowPollIntervalMs)
         }
       }, 2000)
 
       return () => {
         cancelled = true
-        clearInterval(poll)
+        clearInterval(fastPoll)
       }
     }
   }, [updateStatus?.status, refetchInfo, refetchUpdateStatus])
@@ -140,6 +162,7 @@ export function SystemSettingsSection() {
   const isLoading = logLevelLoading || infoLoading
   const sourceHead = systemInfo?.source.head ?? null
   const gitHash = systemInfo?.running.gitHash ?? null
+  const superseded = isSupersededStatus(updateStatus?.status)
   const updateReady = updateStatus?.status === 'succeeded'
     || (updateStatus?.status === 'waiting-for-reconnect' && !!gitHash && gitHash === updateStatus.sourceHead)
   const persistedUpdateActive = updateStatus?.status === 'running' || updateStatus?.status === 'waiting-for-reconnect'
@@ -148,7 +171,9 @@ export function SystemSettingsSection() {
     && systemInfo.update.status === 'update-available'
     && !persistedUpdateActive
     && !trackingUpdate
-  const showProgress = trackingUpdate || persistedUpdateActive || updateReady || reconnectState === 'Ready'
+  const showProgress = !superseded && (trackingUpdate || persistedUpdateActive || updateReady || reconnectState === 'Ready')
+  const showOutcome = updateStatus
+    && (isTerminalUpdateStatus(updateStatus.status) || updateStatus.outcome != null)
   const progressLabel = updateReady ? 'Ready' : reconnectState ?? updateStatus?.stage ?? null
   const updateMessage = updateStatus?.reason ?? systemInfo?.update.reason ?? null
   const recentUpdateLogs = updateStatus?.logs?.slice(-5).reverse() ?? []
@@ -213,12 +238,24 @@ export function SystemSettingsSection() {
         />
       ) : (
         <>
-          <CardSection title="Identity">
+          <CardSection
+            title="Identity"
+            tone={superseded ? 'blue' : 'default'}
+          >
             <InfoRow label="Running version">{formatValue(systemInfo.running.version)}</InfoRow>
             <InfoRow label="Running git hash">
               <span title={gitHash ?? undefined}>{shortHash(gitHash)}</span>
             </InfoRow>
             <InfoRow label="Started at">{formatTimestamp(systemInfo.running.startedAt)}</InfoRow>
+            {superseded && systemInfo.running.version && (
+              <p
+                data-testid="system-update-superseded-runtime"
+                className="mt-2 text-xs text-muted-foreground"
+              >
+                Current runtime: v{systemInfo.running.version}
+                {gitHash ? ` (${shortHash(gitHash)})` : ''}
+              </p>
+            )}
           </CardSection>
 
           <CardSection title="Source" tone={systemInfo.source.dirty ? 'amber' : 'default'}>
@@ -243,7 +280,13 @@ export function SystemSettingsSection() {
           {systemInfo.install.mode === 'local-source' && (
             <CardSection
               title="Update"
-              tone={systemInfo.update.available ? (updateReady ? 'green' : 'amber') : 'default'}
+              tone={
+                superseded
+                  ? 'blue'
+                  : systemInfo.update.available
+                    ? (updateReady ? 'green' : 'amber')
+                    : 'default'
+              }
             >
               <InfoRow label="Status">{formatValue(systemInfo.update.status)}</InfoRow>
 
@@ -257,6 +300,15 @@ export function SystemSettingsSection() {
                 </p>
               )}
 
+              {showOutcome && updateStatus && (
+                <div
+                  data-testid="system-update-outcome-block"
+                  className="mt-3"
+                >
+                  <SystemUpdateOutcomeView job={updateStatus} />
+                </div>
+              )}
+
               {(showUpdateButton || showProgress) && (
                 <div className="mt-3">
                   {showProgress ? (
@@ -265,6 +317,7 @@ export function SystemSettingsSection() {
                         {!updateReady && <Loader2Icon className="h-4 w-4 animate-spin" />}
                         {progressLabel ?? 'Waiting for reconnect'}
                       </span>
+                      <ProgressStages job={updateStatus} />
                       {(updateStatus?.sourcePath || updateStatus?.serverUnit || updateStatus?.runnerUnit) && (
                         <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
                           {updateStatus.sourcePath && <div>Source: <span className="font-mono">{updateStatus.sourcePath}</span></div>}

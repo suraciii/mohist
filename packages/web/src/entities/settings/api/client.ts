@@ -1,5 +1,5 @@
 import { request, projectApiPath } from '../../../shared/api/client'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
+import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
 
 export interface VariableBundle {
   vars?: Record<string, unknown> | null
@@ -125,6 +125,10 @@ export function startSystemUpdate() {
 
 export function getSystemUpdateStatus() {
   return request<SystemUpdateStatusEnvelope>('/system/update/status')
+}
+
+export function getRuntimeConsistency() {
+  return request<RuntimeConsistencyResponse>('/system/consistency')
 }
 
 function getAgentModel(vars: Record<string, unknown> | null | undefined) {

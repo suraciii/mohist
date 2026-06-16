@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
 import { useProject } from '../../project/@x/project-context'
-import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
   return useQuery<GeneralConfig, Error>({
@@ -121,7 +122,13 @@ export function useSystemUpdateStatus(enabled = true) {
     retry: false,
     refetchInterval: (query) => {
       const status = query.state.data?.job?.status
-      return status === 'running' || status === 'waiting-for-reconnect' ? 2000 : false
+      if (isActiveUpdateStatus(status)) {
+        return 2000
+      }
+      if (isSupersededStatus(status) || isTerminalUpdateStatus(status)) {
+        return false
+      }
+      return false
     },
   })
 }
@@ -238,6 +245,15 @@ export function useSystemInfo() {
   return useQuery<SystemInfo>({
     queryKey: ['system-info'],
     queryFn: () => getSystemInfo(),
+  })
+}
+
+export function useRuntimeConsistency(enabled = true) {
+  return useQuery<RuntimeConsistencyResponse, Error>({
+    queryKey: ['system-consistency'],
+    queryFn: () => getRuntimeConsistency(),
+    enabled,
+    retry: false,
   })
 }
 

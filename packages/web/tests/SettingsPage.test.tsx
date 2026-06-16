@@ -425,7 +425,7 @@ describe('SettingsPage', () => {
 
       await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
       await waitFor(() => expect(trackingEnabled).toBe(true))
-      await waitFor(() => expect(screen.getByText(/Waiting for reconnect/i)).toBeInTheDocument())
+      await waitFor(() => expect(screen.getAllByText(/Waiting for reconnect/i).length).toBeGreaterThan(0))
 
       await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/health'), { timeout: 4000 })
       await waitFor(() => expect(refetchInfo).toHaveBeenCalled(), { timeout: 4000 })
@@ -520,6 +520,214 @@ describe('SettingsPage', () => {
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
       expect(screen.getAllByText(/Ready/i).length).toBeGreaterThan(0)
+    })
+
+    it('renders superseded state with current runtime identity and hides active progress', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo({
+          running: { version: '1.2.4', gitHash: 'newsha9876543210', startedAt: '2026-06-01T00:00:00Z' },
+        }),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'superseded',
+          stage: 'Waiting for reconnect',
+          runningGitHash: 'abcdef1234567890',
+          sourceHead: 'fedcba0987654321',
+          completedAt: '2026-05-31T00:00:00Z',
+          reason: 'Running git hash differs from job source HEAD',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      expect(screen.getByTestId('system-update-superseded')).toBeInTheDocument()
+      expect(screen.getAllByText(/Previous update is no longer relevant/i).length).toBeGreaterThan(0)
+      expect(screen.getByTestId('system-update-superseded-runtime')).toHaveTextContent('v1.2.4')
+      expect(screen.getByTestId('system-update-superseded-runtime')).toHaveTextContent('newsha98')
+      expect(screen.queryByTestId('system-update-progress-stages')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('system-update-stage-Building')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Update & Restart/i })).toBeInTheDocument()
+    })
+
+    it('renders Succeeded outcome label for completed updates', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'succeeded',
+          stage: 'Verifying runtime',
+          outcome: 'succeeded',
+          completedAt: '2026-06-01T00:00:05Z',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const outcome = screen.getByTestId('system-update-outcome')
+      expect(outcome).toHaveAttribute('data-outcome', 'succeeded')
+      expect(outcome).toHaveTextContent('Succeeded')
+    })
+
+    it('renders Recovered outcome label with warnings detail', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'recovered',
+          stage: 'Verifying runtime',
+          outcome: 'recovered',
+          reason: 'Skill assets missing: managed skill manifest not found',
+          completedAt: '2026-06-01T00:00:05Z',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const outcome = screen.getByTestId('system-update-outcome')
+      expect(outcome).toHaveAttribute('data-outcome', 'recovered')
+      expect(outcome).toHaveTextContent('Recovered with warnings')
+      expect(outcome).toHaveTextContent('Skill assets missing')
+    })
+
+    it('renders Failed outcome label with unavailable capability', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'failed',
+          stage: 'Restoring runner',
+          outcome: 'failed',
+          reason: 'Runner restore failed: systemctl could not start mohist-runner.service',
+          unavailableCapability: 'runner',
+          completedAt: '2026-06-01T00:00:05Z',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const outcome = screen.getByTestId('system-update-outcome')
+      expect(outcome).toHaveAttribute('data-outcome', 'failed')
+      expect(outcome).toHaveTextContent('Failed')
+      expect(outcome).toHaveTextContent('runner')
+    })
+
+    it('renders Cancelled outcome label for interrupted updates', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'cancelled',
+          stage: 'Preparing workflow runner',
+          outcome: 'cancelled',
+          reason: 'Update was interrupted',
+          completedAt: '2026-06-01T00:00:03Z',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const outcome = screen.getByTestId('system-update-outcome')
+      expect(outcome).toHaveAttribute('data-outcome', 'cancelled')
+      expect(outcome).toHaveTextContent('Cancelled')
+    })
+
+    it('shows CLI-triggered update outcome persisted by the server', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo({
+          running: { version: '1.2.4', gitHash: 'clioutcome123abc', startedAt: '2026-06-01T00:00:00Z' },
+        }),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'succeeded',
+          stage: 'Verifying runtime',
+          outcome: 'succeeded',
+          jobId: 'cli-update-job-001',
+          sourceHead: 'clioutcome123abc',
+          runningGitHash: 'clioutcome123abc',
+          completedAt: '2026-06-01T00:00:10Z',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const outcome = screen.getByTestId('system-update-outcome')
+      expect(outcome).toHaveAttribute('data-outcome', 'succeeded')
+      expect(outcome).toHaveTextContent('Succeeded')
+      expect(screen.queryByTestId('system-update-superseded-runtime')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('system-update-superseded')).not.toBeInTheDocument()
+    })
+
+    it('renders shared update progress stage names matching CLI labels', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useSystemUpdateStatus as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { hasJob: true, job: createUpdateJob({
+          status: 'running',
+          stage: 'Restoring runner',
+        }) },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const stagesContainer = screen.getByTestId('system-update-progress-stages')
+      expect(stagesContainer).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-stage-Building')).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-stage-Restarting server')).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-stage-Waiting for reconnect')).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-stage-Restoring runner')).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-stage-Verifying runtime')).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-stage-Restoring runner')).toHaveAttribute('data-state', 'current')
+      expect(screen.getByTestId('system-update-stage-Building')).toHaveAttribute('data-state', 'done')
+      expect(screen.getByTestId('system-update-stage-Verifying runtime')).toHaveAttribute('data-state', 'pending')
     })
   })
 })
