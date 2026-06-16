@@ -16,7 +16,6 @@ public class AgentSessionRecoveryDomainSpecs
         var session = CreateSession();
         session.Status = session.Status with
         {
-            Phase = AgentSessionStatus.Bound,
             AgentRuntimeSessionId = "acp-old",
             BoundAt = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
             UsageSummary = new AgentUsageSummary
@@ -46,7 +45,6 @@ public class AgentSessionRecoveryDomainSpecs
         var session = CreateSession();
         session.Status = session.Status with
         {
-            Phase = AgentSessionStatus.Bound,
             AgentRuntimeSessionId = "acp-keep"
         };
 
