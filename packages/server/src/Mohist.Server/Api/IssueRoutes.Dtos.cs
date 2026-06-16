@@ -24,7 +24,7 @@ public record UpdateIssueRequest(
     Dictionary<string, string>? StageModels = null,
     Dictionary<string, Dictionary<string, string>>? StageVariables = null);
 
-public record RejectRequest(string? Reason);
+public record CreateFeedbackRequest(string Stage, string Body);
 
 public sealed record RebaseRequest(string? BaseBranch = null, RuntimeTaskRequest? ConflictResolver = null);
 

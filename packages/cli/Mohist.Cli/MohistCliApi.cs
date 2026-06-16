@@ -108,6 +108,34 @@ internal sealed class MohistCliApi
         return await ReadSuccessDataAsync(response);
     }
 
+    public async Task<int> PrintGetSafeAsync(string path)
+    {
+        try
+        {
+            return await PrintGetAsync(path);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+    }
+
+    public async Task<JsonNode?> GetDataSafeAsync(string path)
+    {
+        try
+        {
+            return await GetDataAsync(path);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return null;
+        }
+    }
+
+    internal const string ServerUnavailableMessage = "Server is not running. Start with: mo server start";
+
     public abstract record OutputModeResult
     {
         private OutputModeResult() { }
@@ -131,14 +159,22 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintWithOutputAsync(string path, string mode, string? tableShape = null)
     {
-        using var response = await _http.GetAsync(path);
+        try
+        {
+            using var response = await _http.GetAsync(path);
 
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-            return await PrintResponseAsync(response);
+            if (string.Equals(mode, "json", StringComparison.Ordinal))
+                return await PrintResponseAsync(response);
 
-        var data = await ReadSuccessDataAsync(response);
-        var shape = ParseTableShape(tableShape);
-        return await RenderTableAsync(data, shape);
+            var data = await ReadSuccessDataAsync(response);
+            var shape = ParseTableShape(tableShape);
+            return await RenderTableAsync(data, shape);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
     }
 
     public enum TableShape
@@ -150,6 +186,8 @@ internal sealed class MohistCliApi
         WorkflowStatus,
         Sessions,
         RepoList,
+        FeedbackList,
+        FeedbackShow,
     }
 
     internal static TableShape ParseTableShape(string? shape)

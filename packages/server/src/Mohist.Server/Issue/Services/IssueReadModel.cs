@@ -1,6 +1,7 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using System.Text.Json.Serialization;
 
@@ -43,4 +44,20 @@ public class IssueReadModel
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
     public IssuePrimaryEpic? PrimaryEpic { get; set; }
+    public IssueFeedbackDto[] Feedback { get; set; } = [];
 }
+
+public sealed record IssueFeedbackDto(
+    string Id,
+    int IssueNumber,
+    string WorkflowRunId,
+    string Stage,
+    ApprovalFeedbackStatus Status,
+    string Body,
+    string CreatedAt,
+    IssueFeedbackResolutionDto? Resolution = null);
+
+public sealed record IssueFeedbackResolutionDto(
+    string? ResolutionTaskId,
+    string? ResolvedAt,
+    string? ResolutionSummary);

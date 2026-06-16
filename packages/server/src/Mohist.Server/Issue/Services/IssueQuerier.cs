@@ -83,6 +83,7 @@ public class IssueQuerier
             .ToList();
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+        ApplyFeedbackProjections(list, await LoadFeedbackAsync(db, list));
 
         var query = list.AsEnumerable();
 
@@ -114,6 +115,7 @@ public class IssueQuerier
             .Select(issue => ToReadModel(ToInfo(issue)))
             .ToList();
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+        ApplyFeedbackProjections(list, await LoadFeedbackAsync(db, list));
 
         return list
             .Where(IsPausedOnApprovalGate)
@@ -129,6 +131,7 @@ public class IssueQuerier
     {
         var model = ToReadModel(ToInfo(issue, project));
         ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
+        ApplyFeedbackProjections([model], await LoadFeedbackAsync(db, [model]));
         return model;
     }
 
@@ -225,6 +228,31 @@ public class IssueQuerier
         return workflows;
     }
 
+    private async Task<Dictionary<string, IReadOnlyList<ApprovalFeedback>>> LoadFeedbackAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
+    {
+        var workflowRunIds = issues
+            .Select(i => i.WorkflowRunId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (workflowRunIds.Length == 0) return [];
+
+        var runRows = await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
+            .ToListAsync();
+
+        var result = new Dictionary<string, IReadOnlyList<ApprovalFeedback>>(StringComparer.Ordinal);
+        foreach (var row in runRows)
+        {
+            var run = DeserializeRun(row.State);
+            if (run is null) continue;
+            if (run.Feedback.Count == 0) continue;
+            result[row.WorkflowRunId] = run.Feedback;
+        }
+        return result;
+    }
+
     private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusView> workflows)
     {
         foreach (var issue in issues)
@@ -241,6 +269,40 @@ public class IssueQuerier
             issue.WorkflowStage = status.CurrentStage;
             issue.WorkflowStatus = status.Status;
             issue.WorkflowStageProgress = ComputeStageProgress(status);
+        }
+    }
+
+    private void ApplyFeedbackProjections(
+        IReadOnlyCollection<IssueReadModel> issues,
+        IReadOnlyDictionary<string, IReadOnlyList<ApprovalFeedback>> feedbackByRun)
+    {
+        foreach (var issue in issues)
+        {
+            if (issue.WorkflowRunId is null
+                || !feedbackByRun.TryGetValue(issue.WorkflowRunId, out var feedback)
+                || feedback.Count == 0)
+            {
+                issue.Feedback = [];
+                continue;
+            }
+
+            issue.Feedback = feedback
+                .OrderByDescending(f => f.CreatedAt)
+                .Select(f => new IssueFeedbackDto(
+                    Id: f.Id,
+                    IssueNumber: issue.Number,
+                    WorkflowRunId: f.WorkflowRunId,
+                    Stage: f.Stage,
+                    Status: f.Status,
+                    Body: f.Body,
+                    CreatedAt: f.CreatedAt.ToString("o"),
+                    Resolution: f.Status == ApprovalFeedbackStatus.Resolved
+                        ? new IssueFeedbackResolutionDto(
+                            ResolutionTaskId: f.ResolutionTaskId,
+                            ResolvedAt: f.ResolvedAt?.ToString("o"),
+                            ResolutionSummary: f.ResolutionSummary)
+                        : null))
+                .ToArray();
         }
     }
 

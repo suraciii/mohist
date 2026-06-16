@@ -43,6 +43,12 @@ internal sealed class TableRenderer
             case MohistCliApi.TableShape.RepoList:
                 RenderRepoList(data);
                 break;
+            case MohistCliApi.TableShape.FeedbackList:
+                RenderFeedbackList(data);
+                break;
+            case MohistCliApi.TableShape.FeedbackShow:
+                RenderFeedbackShow(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;
@@ -273,6 +279,90 @@ internal sealed class TableRenderer
 
         WriteTable(headers, widths, cells);
     }
+
+    private void RenderFeedbackList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        var headers = new[] { "id", "stage", "status", "createdAt", "body" };
+        var widths = new[] { IdSoftCap, 12, 12, 24, TitleSoftCap };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            var id = StringOf(row, "id");
+            var stage = StringOf(row, "stage");
+            var status = StringOf(row, "status");
+            var createdAt = StringOf(row, "createdAt");
+            var body = StringOf(row, "body");
+            cells.Add(new[]
+            {
+                Truncate(id, IdSoftCap),
+                Truncate(stage, 12),
+                Truncate(status, 12),
+                Truncate(createdAt, 24),
+                Truncate(body, TitleSoftCap),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private void RenderFeedbackShow(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var id = StringOf(data, "id");
+        var issueNumber = NumberOf(data, "issueNumber");
+        var workflowRunId = StringOf(data, "workflowRunId");
+        var stage = StringOf(data, "stage");
+        var status = StringOf(data, "status");
+        var body = StringOf(data, "body");
+        var createdAt = StringOf(data, "createdAt");
+        var resolutionTaskId = StringOf(data, "resolutionTaskId");
+        var resolvedAt = StringOf(data, "resolvedAt");
+        var resolutionSummary = StringOf(data, "resolutionSummary");
+        var resolution = data["resolution"] as JsonObject;
+
+        _out.WriteLine($"id:               {id}");
+        _out.WriteLine($"issue:            {issueNumber}");
+        _out.WriteLine($"workflow run:     {Truncate(workflowRunId, TitleSoftCap)}");
+        _out.WriteLine($"stage:            {stage}");
+        _out.WriteLine($"status:           {status}");
+        _out.WriteLine($"created:          {Truncate(createdAt, TitleSoftCap)}");
+        if (!string.IsNullOrEmpty(resolutionTaskId))
+            _out.WriteLine($"resolution task:  {Truncate(resolutionTaskId, TitleSoftCap)}");
+        if (!string.IsNullOrEmpty(resolvedAt))
+            _out.WriteLine($"resolved at:      {Truncate(resolvedAt, TitleSoftCap)}");
+        if (!string.IsNullOrEmpty(resolutionSummary))
+            _out.WriteLine($"resolution:       {Truncate(resolutionSummary, TitleSoftCap)}");
+        if (resolution is not null)
+        {
+            var rSummary = StringOf(resolution, "resolutionSummary");
+            var rResolvedAt = StringOf(resolution, "resolvedAt");
+            var rTaskId = StringOf(resolution, "resolutionTaskId");
+            if (!string.IsNullOrEmpty(rSummary))
+                _out.WriteLine($"resolution:       {Truncate(rSummary, TitleSoftCap)}");
+            if (!string.IsNullOrEmpty(rResolvedAt))
+                _out.WriteLine($"resolved at:      {Truncate(rResolvedAt, TitleSoftCap)}");
+            if (!string.IsNullOrEmpty(rTaskId))
+                _out.WriteLine($"resolution task:  {Truncate(rTaskId, TitleSoftCap)}");
+        }
+        if (!string.IsNullOrEmpty(body))
+            _out.WriteLine($"body:");
+        if (!string.IsNullOrEmpty(body))
+            WriteBody(body);
+    }
+
+    private void WriteBody(string body)
+    {
+        foreach (var line in body.Split('\n'))
+            _out.WriteLine($"  {line}");
+    }
+
 
     private void WriteTable(string[] headers, int[] widths, IReadOnlyList<string[]> cells)
     {

@@ -21,6 +21,23 @@ public static partial class WorkflowRunExtensions
             ];
         }
 
+        /// <summary>
+        /// Non-mutating evaluation: returns true when the current stage is
+        /// failed and represents a retryable failure that <see cref="Retry"/>
+        /// could clear. Returns false when the run is not failed, the
+        /// failure is on a different stage, or the current stage is in an
+        /// active approval feedback loop.
+        /// </summary>
+        public bool IsCurrentStageRetryableFailure()
+        {
+            if (run.Status != WorkflowRunStatus.Failed) return false;
+
+            var current = run.CurrentStage();
+            if (current.IsFeedbackLoop) return false;
+
+            return current.Failure is not null;
+        }
+
         public IReadOnlyList<WorkflowEvent> Retry()
         {
             if (run.Status != WorkflowRunStatus.Failed)
@@ -61,11 +78,6 @@ public static partial class WorkflowRunExtensions
                 Attempt = current.Attempt + 1,
                 RequiresApproval = current.RequiresApproval,
                 Status = StageRunStatus.Running,
-                // Carry the rejection reason over to the new stage so the
-                // operator can see "why was this rejected last time"
-                // while the rerun is in flight. Cleared on the next
-                // successful Approve (or overwritten on a fresh Reject).
-                LastRejectionReason = current.LastRejectionReason,
             };
             run.Stages[stageIdx] = newStage;
             run.Failure = null;

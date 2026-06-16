@@ -33,6 +33,7 @@ public sealed class WorkflowRun
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
     public Dictionary<string, JsonElement> RuntimeVariables { get; init; } = new(StringComparer.Ordinal);
+    public List<ApprovalFeedback> Feedback { get; set; } = new();
 
     public bool IsClaimed => Claim is not null;
     public string? ClaimedBy => Claim?.RunnerId;

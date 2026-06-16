@@ -78,6 +78,19 @@ public static partial class WorkflowRunExtensions
     {
         internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
 
+        /// <summary>
+        /// True when the stage is part of an active approval feedback loop
+        /// (awaiting approval, has feedback requested, or has an apply-feedback
+        /// task pending or running). Retryability evaluation MUST treat such
+        /// stages as not retryable.
+        /// </summary>
+        internal bool IsFeedbackLoop =>
+            stage.IsAwaitingApproval
+            || (stage.Initialized
+                && stage.Tasks.Any(t =>
+                    t.CausedByFeedbackId is not null
+                    && t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed)));
+
         private TaskRun? CurrentTask()
             => stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
 

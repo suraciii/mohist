@@ -15,7 +15,6 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildUpdate(api));
         issue.Subcommands.Add(BuildAction("start", "Start workflow", api));
         issue.Subcommands.Add(BuildAction("approve", "Approve workflow", api));
-        issue.Subcommands.Add(BuildReject(api));
         issue.Subcommands.Add(BuildAction("close", "Close issue", api));
         issue.Subcommands.Add(BuildAction("reopen", "Reopen issue", api));
         issue.Subcommands.Add(BuildAction("retry", "Retry issue", api));
@@ -31,6 +30,7 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildGetSub("commits", api));
         issue.Subcommands.Add(BuildSessions(api));
         issue.Subcommands.Add(BuildWorkflow(api));
+        issue.Subcommands.Add(BuildFeedback(api));
 
         return issue;
     }
@@ -292,38 +292,7 @@ internal static class IssueCommands
                     new { });
             }
         });
-        return cmd;
-    }
-
-    private static Command BuildReject(MohistCliApi api)
-    {
-        var cmd = new Command("reject", "Reject workflow approval");
-        var numberArg = NumberArg();
-        var reasonOpt = new Option<string?>("--reason", "-m") { Description = "Rejection reason" };
-        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        cmd.Arguments.Add(numberArg);
-        cmd.Options.Add(reasonOpt);
-        cmd.Options.Add(projectOpt);
-        cmd.Options.Add(projectIdOpt);
-        cmd.SetAction(ctx =>
-        {
-            var number = ctx.GetValue(numberArg);
-            var reason = ctx.GetValue(reasonOpt);
-            var project = ctx.GetValue(projectOpt);
-            var projectId = ctx.GetValue(projectIdOpt);
-            return RejectAsync();
-
-            async Task<int> RejectAsync()
-            {
-                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
-                if (resolvedProjectId is null)
-                    return 1;
-                return await api.PrintPostAsync(
-                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/reject"),
-                    new { reason });
-            }
-        });
-        return cmd;
+         return cmd;
     }
 
     private static Command BuildRebase(MohistCliApi api)
@@ -526,5 +495,156 @@ internal static class IssueCommands
         workflow.Subcommands.Add(statusCmd);
         workflow.Subcommands.Add(timelineCmd);
         return workflow;
+    }
+
+    private static Command BuildFeedback(MohistCliApi api)
+    {
+        var feedback = new Command("feedback", "Issue approval feedback");
+        feedback.Subcommands.Add(BuildFeedbackList(api));
+        feedback.Subcommands.Add(BuildFeedbackShow(api));
+        return feedback;
+    }
+
+    private static Command BuildFeedbackList(MohistCliApi api)
+    {
+        var cmd = new Command("list", "List approval feedback records for an issue");
+        var numberArg = NumberArg();
+        var stageOpt = MohistCliCommands.StageOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(stageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var stage = ctx.GetValue(stageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ListAsync();
+
+            async Task<int> ListAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/feedback");
+                if (!string.IsNullOrWhiteSpace(stage))
+                    path += $"?stage={Uri.EscapeDataString(stage!)}";
+                return await api.PrintWithOutputAsync(
+                    path,
+                    mode,
+                    nameof(MohistCliApi.TableShape.FeedbackList));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildFeedbackShow(MohistCliApi api)
+    {
+        var cmd = new Command("show", "Show approval feedback record");
+        var numberArg = NumberArg();
+        var feedbackOpt = new Option<string?>("--feedback") { Description = "Feedback id" };
+        var latestOpt = new Option<bool>("--latest") { Description = "Show the most recent feedback record" };
+        var stageOpt = MohistCliCommands.StageOption();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(feedbackOpt);
+        cmd.Options.Add(latestOpt);
+        cmd.Options.Add(stageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var feedbackId = ctx.GetValue(feedbackOpt);
+            var latest = ctx.GetValue(latestOpt);
+            var stage = ctx.GetValue(stageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ShowAsync();
+
+            async Task<int> ShowAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                if (string.IsNullOrWhiteSpace(feedbackId) && !latest)
+                {
+                    api.Error.WriteLine("Either --feedback <id> or --latest is required");
+                    return 1;
+                }
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var basePath = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/feedback");
+
+                if (!string.IsNullOrWhiteSpace(feedbackId))
+                {
+                    var path = $"{basePath}/{Uri.EscapeDataString(feedbackId!)}";
+                    return await api.PrintWithOutputAsync(
+                        path,
+                        mode,
+                        nameof(MohistCliApi.TableShape.FeedbackShow));
+                }
+
+                var listPath = basePath;
+                if (!string.IsNullOrWhiteSpace(stage))
+                    listPath += $"?stage={Uri.EscapeDataString(stage!)}";
+
+                var latestData = await api.GetDataSafeAsync(listPath);
+                if (latestData is null)
+                    return 1;
+                var latestId = ExtractLatestId(latestData, stage);
+                if (latestId is null)
+                {
+                    api.Error.WriteLine("No feedback records found");
+                    return 1;
+                }
+                var detailPath = $"{basePath}/{Uri.EscapeDataString(latestId)}";
+                return await api.PrintWithOutputAsync(
+                    detailPath,
+                    mode,
+                    nameof(MohistCliApi.TableShape.FeedbackShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static string? ExtractLatestId(System.Text.Json.Nodes.JsonNode? data, string? stage)
+    {
+        if (data is not System.Text.Json.Nodes.JsonArray arr || arr.Count == 0)
+            return null;
+        for (var i = 0; i < arr.Count; i++)
+        {
+            if (arr[i] is not System.Text.Json.Nodes.JsonObject obj) continue;
+            if (!string.IsNullOrWhiteSpace(stage))
+            {
+                var recordStage = obj["stage"]?.GetValue<string>();
+                if (!string.Equals(recordStage, stage, StringComparison.OrdinalIgnoreCase))
+                    continue;
+            }
+            var id = obj["id"]?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(id))
+                return id;
+        }
+        return null;
     }
 }

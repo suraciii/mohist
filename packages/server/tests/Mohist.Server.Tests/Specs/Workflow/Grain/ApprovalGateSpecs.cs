@@ -89,7 +89,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task AwaitingApproval_UserRejects_WorkflowFails()
+    public async Task AwaitingApproval_LegacyReject_RoutesToFeedbackLoop_AndDoesNotFail()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
 
@@ -99,7 +99,20 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
+        // Legacy RejectAsync must NOT mark the workflow as failed; it now
+        // routes through the feedback loop.
+#pragma warning disable CS0618
         await workflow.RejectAsync("not good enough");
+#pragma warning restore CS0618
+
+        var run = await LoadRunAsync();
+        Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);
+        var current = run.Stages.First(s => s.Id == run.CurrentStageId);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+        Assert.Null(current.ApprovalStatus);
+        Assert.Single(run.Feedback);
+        Assert.Equal("not good enough", run.Feedback[0].Body);
+        Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback[0].Status);
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.True(await runner.IsAvailableAsync());
@@ -108,7 +121,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task RejectedApproval_Rerun_RestartsStageFromScratch()
+    public async Task RejectedApproval_LegacyReject_NewRunResumesFromFeedbackTask()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
         var initialAttempt = await ReadCurrentStageAttemptAsync();
@@ -120,53 +133,20 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        // Reject: the reason must persist on the current StageRun.
+        // Legacy RejectAsync now routes through the feedback loop and
+        // schedules an apply-feedback task. The stage does not fail.
+#pragma warning disable CS0618
         await workflow.RejectAsync("plan is too short");
-        var (afterRejectAttempt, afterRejectReason, afterRejectStatus) =
-            await ReadCurrentStageRerunFieldsAsync();
-        Assert.Equal(1, afterRejectAttempt);
-        Assert.Equal("plan is too short", afterRejectReason);
-        Assert.Equal(StageRunStatus.Failed, afterRejectStatus);
+#pragma warning restore CS0618
 
-        // Rerun: new stage takes over with Attempt=2; the old rejection
-        // reason is carried over so the operator can see why the
-        // previous attempt was rejected.
-        await workflow.RerunAsync();
-        var (afterRerunAttempt, afterRerunReason, _) =
-            await ReadCurrentStageRerunFieldsAsync();
-        Assert.Equal(2, afterRerunAttempt);
-        Assert.Equal("plan is too short", afterRerunReason);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public async Task RejectedApproval_RerunTwice_ReasonStillOnTheLatestAttempt()
-    {
-        var workflow = await StartWorkflowAsync(ApprovalStage());
-
-        var (task, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, task.WorkId, "completed");
-
-        var (check, r2) = await PollWorkAnyAsync();
-        await ReportChecksPassAsync(r2, check, "plan-ok");
-
-        await workflow.RejectAsync("first reason");
-        await workflow.RerunAsync();
-
-        // Drive a second cycle: tasks + checks + reject again, with
-        // a different reason.
-        var (task2, r3) = await PollWorkAnyAsync();
-        await ReportAsync(r3, task2.WorkId, "completed");
-
-        var (check2, r4) = await PollWorkAnyAsync();
-        await ReportChecksPassAsync(r4, check2, "plan-ok");
-
-        await workflow.RejectAsync("second reason");
-
-        var (attempt, reason, _) = await ReadCurrentStageRerunFieldsAsync();
-        Assert.Equal(2, attempt);
-        Assert.Equal("second reason", reason);
+        var run = await LoadRunAsync();
+        var current = run.Stages.First(s => s.Id == run.CurrentStageId);
+        Assert.Equal(1, current.Attempt);
+        Assert.Equal(StageRunStatus.Running, current.Status);
+        Assert.Single(run.Feedback);
+        Assert.Equal("plan is too short", run.Feedback[0].Body);
+        Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback[0].Status);
+        Assert.Contains(current.Tasks, t => t.DefinitionId == "apply-feedback");
     }
 
     private async Task<WorkflowRun> LoadRunAsync()
@@ -190,13 +170,5 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     {
         var run = await LoadRunAsync();
         return run.Stages.First(s => s.Id == run.CurrentStageId).Attempt;
-    }
-
-    private async Task<(int Attempt, string? LastRejectionReason, StageRunStatus Status)>
-        ReadCurrentStageRerunFieldsAsync()
-    {
-        var run = await LoadRunAsync();
-        var current = run.Stages.First(s => s.Id == run.CurrentStageId);
-        return (current.Attempt, current.LastRejectionReason, current.Status);
     }
 }

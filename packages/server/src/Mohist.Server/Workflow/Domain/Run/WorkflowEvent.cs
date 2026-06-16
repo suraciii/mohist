@@ -14,6 +14,7 @@ public union WorkflowEvent(
     StageFailed,
     StageApprovalRequested,
     StageApprovalResolved,
+    FeedbackRequested,
     TaskCompleted,
     TaskFailed,
     CheckPassed,
@@ -37,6 +38,8 @@ public enum ApprovalResult { Approved, Rejected }
 
 public sealed record StageApprovalRequested(string Stage);
 public sealed record StageApprovalResolved(string Stage, ApprovalResult Result, string? Reason = null);
+
+public sealed record FeedbackRequested(string Stage, string FeedbackId, string? Reason = null);
 
 public sealed record TaskCompleted(string Stage, string TaskId);
 public sealed record TaskFailed(string Stage, string TaskId, string? Message);

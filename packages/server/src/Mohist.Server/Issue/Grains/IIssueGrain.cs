@@ -20,6 +20,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartEligibility> GetStartEligibilityAsync();
     Task<IssueCommentResult> AddCommentAsync(string body);
+    Task DeactivateForTestAsync();
 }
 
 [GenerateSerializer]

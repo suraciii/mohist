@@ -151,12 +151,35 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await CommitAsync(events);
     }
 
+    // Legacy reject entry point. Kept for back-compat with any external
+    // integration that still calls this method; the implementation now
+    // routes through the feedback loop rather than failing the workflow.
+    // Prefer RequestChangesAsync for new code.
     public async Task RejectAsync(string? reason = null)
     {
         EnsureRun();
-        var events = _run.Reject(reason);
-        _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStageId, reason);
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Reject reason is required");
+
+        _log.LogWarning(
+            "Workflow {Id} received legacy RejectAsync(reason); routing through RequestChangesAsync",
+            GrainKey);
+        await RequestChangesAsync(reason!);
+    }
+
+    public async Task<string> RequestChangesAsync(string body)
+    {
+        EnsureRun();
+        var stage = _run.CurrentStage();
+        var config = (await LoadEffectiveDefinitionAsync()).Approval?.Feedback?.Task;
+        var feedbackTask = config is null
+            ? WorkflowRunExtensions.BuildDefaultFeedbackTask(stage.Id)
+            : WorkflowRunExtensions.ResolveFeedbackTask(config, stage.Id);
+        var events = _run.RequestChanges(body, feedbackTask);
+        var feedbackId = _run.Feedback.Last().Id;
+        _log.LogInformation("Workflow {Id} requested changes at stage={Stage}: feedback={FeedbackId}", GrainKey, stage.Id, feedbackId);
         await CommitAsync(events);
+        return feedbackId;
     }
 
     public async Task RetryAsync()
@@ -424,6 +447,55 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             IssueId: issueId));
     }
 
+    public Task<WorkflowFeedbackSnapshot?> GetFeedbackAsync(string feedbackId)
+    {
+        EnsureRun();
+        if (string.IsNullOrWhiteSpace(feedbackId))
+            return Task.FromResult<WorkflowFeedbackSnapshot?>(null);
+
+        var feedback = _run!.Feedback.FirstOrDefault(f => string.Equals(f.Id, feedbackId, StringComparison.Ordinal));
+        if (feedback is null)
+            return Task.FromResult<WorkflowFeedbackSnapshot?>(null);
+
+        return Task.FromResult<WorkflowFeedbackSnapshot?>(ToSnapshot(feedback));
+    }
+
+    public Task<IReadOnlyList<WorkflowFeedbackSnapshot>> ListFeedbackAsync()
+    {
+        EnsureRun();
+        var issueNumber = ResolveIssueNumber();
+        var snapshots = _run!.Feedback
+            .OrderByDescending(f => f.CreatedAt)
+            .Select(f => ToSnapshot(f, issueNumber))
+            .ToList();
+        return Task.FromResult<IReadOnlyList<WorkflowFeedbackSnapshot>>(snapshots);
+    }
+
+    private WorkflowFeedbackSnapshot ToSnapshot(ApprovalFeedback feedback) =>
+        ToSnapshot(feedback, ResolveIssueNumber());
+
+    private WorkflowFeedbackSnapshot ToSnapshot(ApprovalFeedback feedback, int? issueNumber) =>
+        new(
+            Id: feedback.Id,
+            WorkflowRunId: feedback.WorkflowRunId,
+            Stage: feedback.Stage,
+            Body: feedback.Body,
+            Status: feedback.Status,
+            CreatedAt: feedback.CreatedAt,
+            Resolution: ToResolution(feedback),
+            IssueNumber: issueNumber);
+
+    private static WorkflowFeedbackResolution? ToResolution(ApprovalFeedback feedback) =>
+        feedback.Status == ApprovalFeedbackStatus.Resolved
+            ? new WorkflowFeedbackResolution(
+                ResolutionTaskId: feedback.ResolutionTaskId,
+                ResolvedAt: feedback.ResolvedAt,
+                ResolutionSummary: feedback.ResolutionSummary)
+            : null;
+
+    private int? ResolveIssueNumber() =>
+        int.TryParse(GetIssueNumber(), out var number) ? number : null;
+
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
     {
         var resource = await GetSequentialLockResourceAsync(stage);
@@ -598,6 +670,33 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run?.RuntimeVariables is { Count: > 0 })
         {
             payload = MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
+        }
+
+        // Inject minimal approvalFeedback context when dispatching a feedback task.
+        // Detection is by the dispatching task's CausedByFeedbackId (set when the
+        // apply-feedback runtime task was scheduled by RequestChanges).
+        if (workType == "task" && _run is not null)
+        {
+            var stageRun = _run.Stages.FirstOrDefault(s => s.Id == stage);
+            var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == logicalId);
+            if (task?.CausedByFeedbackId is { } feedbackId)
+            {
+                var feedback = _run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
+                if (feedback is not null)
+                {
+                    var issueNumber = ResolveIssueNumber();
+                    var projectId = GetProjectId();
+                    var feedbackObj = new
+                    {
+                        id = feedback.Id,
+                        stage = feedback.Stage,
+                        createdAt = feedback.CreatedAt.ToString("O"),
+                        summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
+                        command = WorkflowRunExtensions.BuildFeedbackShowCommand(issueNumber, feedback.Id, projectId),
+                    };
+                    payload["approvalFeedback"] = JsonSerializer.SerializeToElement(feedbackObj, WorkflowVariableJson.Options);
+                }
+            }
         }
 
         // --- 2. Load prompts from profile (independent from vars, same priority chain) ---
@@ -943,6 +1042,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (result.Status == "completed")
         {
             CaptureTaskOutputs(run, currentTask, result.CapturedOutputs);
+            if (currentTask?.CausedByFeedbackId is { } feedbackId)
+            {
+                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, result.Output);
+                if (resolved is not null)
+                {
+                    _log.LogInformation(
+                        "Workflow {Id} resolved feedback {FeedbackId} via task {TaskId}",
+                        GrainKey, feedbackId, currentTask.Id);
+                }
+            }
             events.AddRange(run.CompleteTask());
         }
         else
@@ -1221,6 +1330,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             StageFailed x => ReleaseStageLocksAsync(x.Stage, "failed"),
             StageApprovalRequested => DisableWorkHeartbeatAsync(),
             StageApprovalResolved x => OnApprovalResolvedAsync(x),
+            FeedbackRequested => EnsureWorkHeartbeatAsync(),
             TaskCompleted => EnsureWorkHeartbeatAsync(),
             TaskFailed => EnsureWorkHeartbeatAsync(),
             CheckPassed => EnsureWorkHeartbeatAsync(),
@@ -1269,7 +1379,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return e.Result switch
         {
             ApprovalResult.Approved => OnApprovalApprovedAsync(),
-            ApprovalResult.Rejected => OnApprovalRejectedAsync(e.Reason),
             _ => Task.CompletedTask,
         };
     }
@@ -1277,11 +1386,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private async Task OnApprovalApprovedAsync()
     {
         await EnsureWorkHeartbeatAsync();
-    }
-
-    private Task OnApprovalRejectedAsync(string? reason)
-    {
-        return Task.CompletedTask;
     }
 
     private string GetProjectId() =>

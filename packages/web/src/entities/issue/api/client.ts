@@ -1,5 +1,5 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
-import type { CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
 
 export interface IssueWorkflowVariables {
   vars?: Record<string, unknown> | null
@@ -57,11 +57,27 @@ export function approveIssue(number: number, projectId?: string | null) {
   return request<{ issue: Issue; context: string | null; message: string }>(projectApiPath(projectId, `/issues/${number}/approve`), { method: 'POST' })
 }
 
-export function rejectIssue(number: number, data: { message?: string }, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reject`), {
+export interface CreateFeedbackRequest {
+  stage: string
+  body: string
+}
+
+export function requestChangesIssue(number: number, data: CreateFeedbackRequest, projectId?: string | null) {
+  return request<{ success?: boolean; data: ApprovalFeedback }>(projectApiPath(projectId, `/issues/${number}/feedback`), {
     method: 'POST',
     body: JSON.stringify(data),
-  })
+  }).then((response) => response.data)
+}
+
+export function listIssueFeedback(number: number, params: { stage?: string } = {}, projectId?: string | null) {
+  const search = new URLSearchParams()
+  if (params.stage) search.set('stage', params.stage)
+  const qs = search.toString()
+  return request<ApprovalFeedback[]>(projectApiPath(projectId, `/issues/${number}/feedback${qs ? `?${qs}` : ''}`))
+}
+
+export function getIssueFeedback(number: number, feedbackId: string, projectId?: string | null) {
+  return request<ApprovalFeedback>(projectApiPath(projectId, `/issues/${number}/feedback/${encodeURIComponent(feedbackId)}`))
 }
 
 export function getIssueDiff(number: number, projectId?: string | null) {

@@ -1,0 +1,143 @@
+{
+  "project": "mohist",
+  "description": "Build approval feedback loop for Request changes — replace terminal Reject with a feedback loop that creates ApprovalFeedback records, resumes the stage, schedules apply-feedback agent tasks, and tracks resolution in approval history.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement ApprovalFeedback domain model and RequestChanges aggregate behavior",
+      "spec": "specs/approval-feedback/spec.md#ApprovalFeedback is a first-class domain entity, specs/approval-feedback/spec.md#Requesting changes resumes the stage as running work, specs/workflow-run/spec.md#stage-approval-rejection-feedback, specs/workflow-run/spec.md#retryable-current-stage-rejection, specs/workflow-run/spec.md#apply-feedback task is a normal WorkflowRun task, specs/workflow-run/spec.md#Workflow run records feedback as structured evidence, specs/workflow-engine/spec.md#Approval pending remains non-repairable",
+      "description": "Add ApprovalFeedback record to the domain model, add List<ApprovalFeedback> to WorkflowRun aggregate, implement RequestChanges() method on WorkflowRun that creates feedback, resumes the stage (not fails it), and schedules apply-feedback via AddRuntimeTask() with invalidateChecks=true. Replace Reject() call sites with RequestChanges(). Update retryability semantics so feedback-loop stages are not considered retryable failures.",
+      "acceptanceCriteria": [
+        "ApprovalFeedback record exists with Id, WorkflowRunId, Stage, Body, Status, CreatedAt, ResolutionTaskId, ResolvedAt, ResolutionSummary",
+        "WorkflowRun.RequestChanges() creates an ApprovalFeedback with status=open and schedules an apply-feedback runtime task",
+        "RequestChanges() clears approval status, resumes stage to Running, and does NOT set WorkflowRunStatus.Failed or FailureReason.ApprovalRejected",
+        "apply-feedback task is scheduled via AddRuntimeTask() with invalidateChecks=true, clearing prior check evidence",
+        "Active feedback-loop stages are not considered retryable failures by retryable-current-stage-rejection",
+        "Unit tests cover: RequestChanges creates feedback and resumes stage, RequestChanges schedules task and invalidates checks, RequestChanges on non-awaiting stage throws, feedback records are serialized/deserialized with WorkflowRun JSON, retryability is disabled during active feedback loop, approve still works normally alongside RequestChanges"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowRun domain model updated with ApprovalFeedback support and RequestChanges behavior; unit tests pass",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep Reject() method temporarily for backward compat if needed. Add Feedback list with default empty collection so existing serialized WorkflowRun JSONs deserialize cleanly. Use existing AddRuntimeTask() pattern from WorkflowRun.Work.cs:54 for task scheduling."
+    },
+    {
+      "id": "T-002",
+      "title": "Add workflow YAML approval.feedback config and built-in apply-feedback.prompt",
+      "spec": "specs/workflow-definition/spec.md#Workflow YAML supports approval feedback task configuration, specs/approval-feedback-agent/spec.md#Built-in apply-feedback.prompt instructs agent to read feedback via CLI",
+      "description": "Extend WorkflowDefinition C# model with ApprovalConfig/FeedbackTaskConfig records. Update mohist-default.workflow.yaml with root-level approval.feedback.task section. Create apply-feedback.prompt built-in prompt file using the standard .prompt format with YAML frontmatter. The prompt instructs agents to read feedback via 'mo issue feedback show --output json', apply changes, write a resolution summary, and not approve the stage.",
+      "acceptanceCriteria": [
+        "WorkflowDefinition model includes ApprovalConfig with FeedbackTaskConfig (Id, Title, Uses, With)",
+        "mohist-default.workflow.yaml has root-level approval.feedback.task section with id=apply-feedback, uses=mohist/acp-agent, session={{stage.name}}, prompt={{prompts.apply-feedback}}",
+        "apply-feedback.prompt exists in Prompts/builtins/ with valid YAML frontmatter (name, description, tags, stage)",
+        "Prompt body instructs agent to: (1) read feedback via 'mo issue feedback show', (2) read issue and stage artifacts, (3) treat feedback as required input, (4) apply only changes needed, (5) write concise resolution summary, (6) not approve the stage",
+        "YAML deserialization test covers approval.feedback section parsing",
+        "Without approval.feedback in YAML, the system falls back to built-in apply-feedback task default"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowDefinition model extended, mohist-default.workflow.yaml updated, apply-feedback.prompt created; tests pass",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Prompt should use ${{ issue.number }}, ${{ project.id }}, ${{ approvalFeedback.id }}, ${{ approvalFeedback.command }} template variables for the CLI read command. Follow the same format as auto-fix.prompt (YAML frontmatter + body)."
+    },
+    {
+      "id": "T-003",
+      "title": "Implement agent dispatch with approvalFeedback context injection",
+      "spec": "specs/approval-feedback-agent/spec.md#Feedback task dispatch includes minimal approvalFeedback context, specs/approval-feedback-agent/spec.md#After feedback application checks rerun before re-approval, specs/workflow-engine/spec.md#Workflow engine schedules apply-feedback as normal task, specs/workflow-engine/spec.md#Feedback loop reruns checks before re-approval",
+      "description": "In WorkflowGrain.MakeDispatchAsync(), detect when dispatching the feedback task and inject an approvalFeedback object into the VariableBundle. The object contains id, stage, createdAt, summary (short preview), and command (stable CLI invocation). Generate the CLI read command from template variables. After the feedback task completes, update the ApprovalFeedback record with the resolution summary from task output.",
+      "acceptanceCriteria": [
+        "When dispatching apply-feedback task, VariableBundle contains approvalFeedback.id, approvalFeedback.stage, approvalFeedback.createdAt, approvalFeedback.summary, approvalFeedback.command",
+        "approvalFeedback.command is a valid 'mo issue feedback show <number> --feedback <id> --project-id <id> --output json' string",
+        "approvalFeedback.summary is a short preview of the feedback body, not the full body",
+        "Full feedback body is NOT inlined into dispatch variables",
+        "After apply-feedback task completes, feedback record is updated with ResolutionTaskId, resolution summary from task output, and status=resolved",
+        "Task completion event handler maps resolution summary from task output to ApprovalFeedback.ResolutionSummary",
+        "VariableBundle injection tests cover: feedback dispatch variables present, non-feedback tasks do not have approvalFeedback injected"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowGrain.CreateDispatchAsync() injects approvalFeedback context; resolution from task output is persisted to feedback record; tests pass",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Detect feedback task by checking the task definition matches the configured feedback task id. Generate summary by truncating feedback body to ~100 chars. The CLI command uses the resolved issue.number, project.id, and feedback id."
+    },
+    {
+      "id": "T-004",
+      "title": "Add HTTP API endpoints for feedback CRUD and update approval responses",
+      "spec": "specs/http-api/spec.md#API provides approval feedback CRUD endpoints, specs/http-api/spec.md#Issue detail response includes approval feedback data, specs/http-api/spec.md#simplified check-stage public model",
+      "description": "Add POST /feedback, GET /feedback, GET /feedback/:id endpoints under the existing issue routes. Modify the /reject endpoint to call WorkflowGrain.RequestChangesAsync() instead of RejectAsync(). Include feedback array in issue detail and stage-state API responses so clients can render the feedback-resolution trail.",
+      "acceptanceCriteria": [
+        "POST /api/projects/{ref}/issues/{number}/feedback with { stage, body } creates ApprovalFeedback via WorkflowGrain.RequestChangesAsync() and returns the created record",
+        "POST /feedback returns 409 if the stage is not awaiting approval",
+        "GET /api/projects/{ref}/issues/{number}/feedback returns all feedback records for the issue's active WorkflowRun, ordered by createdAt desc",
+        "GET /feedback supports ?stage=plan filter",
+        "GET /api/projects/{ref}/issues/{number}/feedback/{id} returns full feedback record including resolution data",
+        "GET /feedback/{id} returns 404 for unknown feedback id",
+        "POST /reject now calls RequestChangesAsync() with the reason as feedback body instead of RejectAsync()",
+        "Issue detail (GET /api/issues/{number}) includes 'feedback' array in response when feedback records exist",
+        "Stage-state response includes 'feedback' array scoped to the stage",
+        "Integration tests cover: create feedback → stage resumes, list feedback, show feedback, /reject creates feedback, issue detail includes feedback, 409 on non-awaiting stage, 404 on unknown feedback, empty feedback when none exists"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Feedback CRUD endpoints operational; /reject creates feedback; issue detail includes feedback data; integration tests pass",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Add new IssueRoutes.Feedback.cs partial class for the feedback endpoints, following the pattern of IssueRoutes.WorkflowControl.cs. The RejectRequest model gains a 'body' field alongside the existing 'reason'. Feedback response projection reads from WorkflowRun.Feedback list."
+    },
+    {
+      "id": "T-005",
+      "title": "Implement CLI 'mo issue feedback' list and show commands",
+      "spec": "specs/cli-interface/spec.md#CLI provides mo issue feedback command group, specs/approval-feedback-cli/spec.md#CLI provides mo issue feedback list command, specs/approval-feedback-cli/spec.md#CLI provides mo issue feedback show command",
+      "description": "Add 'mo issue feedback' command group with list and show subcommands to MohistCliCommands.Issue.cs. list displays a table of feedback records; show displays a single record. Both support --output json for stable machine-readable output. show supports --feedback <id>, --latest, and --stage flags. Commands use the project context and support --project-id override.",
+      "acceptanceCriteria": [
+        "'mo issue feedback list <number>' calls GET /feedback and displays a table with id, stage, status, createdAt, and truncated body",
+        "'mo issue feedback list <number> --output json' outputs a valid JSON array matching the stable feedback schema",
+        "'mo issue feedback list <number> --stage plan' filters by stage",
+        "'mo issue feedback show <number> --feedback <id>' calls GET /feedback/{id} and displays full feedback details",
+        "'mo issue feedback show <number> --latest' returns the most recent feedback record",
+        "'mo issue feedback show <number> --latest --stage plan' returns most recent for that stage",
+        "'mo issue feedback show <number> --feedback <id> --output json' outputs the JSON object matching the agent-readable contract",
+        "All commands display 'Server is not running' and exit non-zero when server is unavailable",
+        "CLI integration tests cover: list table output, list JSON output, show JSON output, --latest, --stage filter, server unavailable, --project-id override"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "mo issue feedback list/show commands functioning; tests pass",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Follow existing command patterns: BuildAction() for simple POST, custom Build*() methods for feedback-specific flags. JSON output via --output json flag consistent with existing mo skills list --json pattern. Table output uses Spectre.Console for formatting."
+    },
+    {
+      "id": "T-006",
+      "title": "Update Web UI approval card and add feedback history rendering",
+      "spec": "specs/web-ui/spec.md#Approval card provides Approve and Request changes actions, specs/web-ui/spec.md#Approval history shows feedback-resolution trail, specs/web-ui/spec.md#Approval history renders feedback resolution summary",
+      "description": "Modify InlineApproval component in WorkflowView.tsx to show 'Approve' and 'Request changes' as the two approval actions, replacing 'Send back for fixes'/'Reject' labels. Add a text input for feedback body when 'Request changes' is clicked. Render a feedback-resolution history timeline in the approval section showing: approval request, feedback requested, feedback task, resolution summary, check rerun, and next approval request. Each feedback cycle must be visually distinct.",
+      "acceptanceCriteria": [
+        "Approval card shows only 'Approve' and 'Request changes' actions; no 'Reject', 'Send back', or terminal rejection buttons",
+        "Clicking 'Request changes' shows a text input for feedback body; submission calls POST /feedback API",
+        "After requesting changes, approval card refreshes to show the apply-feedback task in progress",
+        "Approval history timeline shows each feedback cycle with chronological steps: approval request → feedback requested → feedback task → resolution summary → check results → next approval request",
+        "Resolved feedback displays the resolution summary; open feedback shows awaiting-application state",
+        "Multiple feedback cycles for the same stage are visually distinct",
+        "Feedback history is shown in the approval area, not only in the comment thread",
+        "'Request changes' action is only available when stage is awaiting-approval; hidden during running/other states",
+        "Frontend tests cover: approval card renders Approve + Request changes, Request changes opens text input and calls API, approval history renders feedback cycle timeline, resolved vs open feedback display, hiding Request changes when not awaiting approval"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web UI approval card updated with Approve/Request changes; feedback history timeline rendered; tests pass",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Use React Query mutations (approveIssue, requestChangesIssue) consistent with existing patterns. The feedback history reads from the feedback array in the API response. Follow existing InlineApproval component structure in WorkflowView.tsx."
+    }
+  ]
+}

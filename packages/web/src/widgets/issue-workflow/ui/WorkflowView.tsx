@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { MessageSquareIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { approveIssue, rejectIssue, resumeIssue, startIssue, getFileContent } from '../../../entities/issue'
+import { approveIssue, resumeIssue, startIssue, getFileContent, useRequestChangesIssue } from '../../../entities/issue'
 import { onAgentEvent } from '../../../entities/agent'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
@@ -15,6 +15,7 @@ import { ArtifactContentViewer } from './ArtifactContentViewer'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
+import { FeedbackHistory } from './FeedbackHistory'
 import type { WorkflowArtifactSummary } from '../../../entities/issue'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
@@ -632,12 +633,9 @@ function InlineApproval({
 }) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  const [feedback, setFeedback] = useState('')
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [feedbackText, setFeedbackText] = useState('')
   const [reportModalOpen, setReportModalOpen] = useState(false)
-  const [instructionsExpanded, setInstructionsExpanded] = useState(false)
-  const [instructionsText, setInstructionsText] = useState('')
-  const [notesExpanded, setNotesExpanded] = useState(false)
-  const [notesText, setNotesText] = useState('')
 
   const review: ReviewOutput = useMemo(() => parseReviewOutput(approvalOutput), [approvalOutput])
   const classified = useMemo(() => classifyResult(review.result), [review.result])
@@ -651,62 +649,37 @@ function InlineApproval({
     },
   })
 
-  const rejectMutation = useMutation({
-    mutationFn: () => rejectIssue(issueNumber, { message: feedback.trim() || undefined }, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      setFeedback('')
-    },
-  })
+  const requestChangesMutation = useRequestChangesIssue()
 
-  const sendBackMutation = useMutation({
-    mutationFn: (message: string) => rejectIssue(issueNumber, { message }, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-      setInstructionsText('')
-      setInstructionsExpanded(false)
-      setNotesText('')
-      setNotesExpanded(false)
-    },
-  })
-
-  const handleSendBackForFixes = useCallback(() => {
-    const failDims = (review.dimensions ?? []).filter(
-      (d) => d.status.toUpperCase() === 'FAIL',
-    )
-    if (failDims.length > 0) {
-      const parts = failDims.map((dim) => {
-        const issues = dim.issues && dim.issues.length > 0
-          ? dim.issues.map((i) => `- ${i}`).join('\n')
-          : '- Issues identified in this dimension'
-        return `### ${dim.name}\n${issues}`
-      })
-      sendBackMutation.mutate(`Please fix the following issues:\n\n${parts.join('\n\n')}`)
-    } else if (review.reviewReport) {
-      sendBackMutation.mutate(`Please fix the following issues:\n\n${review.reviewReport}`)
-    } else {
-      sendBackMutation.mutate('The review found issues that need to be addressed. Please review and fix all problems.')
-    }
-  }, [review, sendBackMutation])
-
-  const handleSendWithInstructions = useCallback(() => {
-    if (!instructionsText.trim()) return
-    sendBackMutation.mutate(instructionsText.trim())
-  }, [instructionsText, sendBackMutation])
-
-  const handleSendBackWithNotes = useCallback(() => {
-    if (!notesText.trim()) return
-    sendBackMutation.mutate(notesText.trim())
-  }, [notesText, sendBackMutation])
-
-  const handleApproveAnyway = useCallback(() => {
+  const handleApprove = useCallback(() => {
     approveMutation.mutate()
   }, [approveMutation])
+
+  const handleOpenRequestChanges = useCallback(() => {
+    setFeedbackOpen(true)
+  }, [])
+
+  const handleCancelRequestChanges = useCallback(() => {
+    setFeedbackOpen(false)
+    setFeedbackText('')
+  }, [])
+
+  const handleSubmitRequestChanges = useCallback(() => {
+    const trimmed = feedbackText.trim()
+    if (!trimmed) return
+    requestChangesMutation.mutate(
+      {
+        issueNumber,
+        data: { stage, body: trimmed },
+      },
+      {
+        onSuccess: () => {
+          setFeedbackOpen(false)
+          setFeedbackText('')
+        },
+      },
+    )
+  }, [feedbackText, requestChangesMutation, issueNumber, stage])
 
   const handleViewChanges = useCallback(() => {
     document.getElementById('changes-panel')?.scrollIntoView({ behavior: 'smooth' })
@@ -738,7 +711,7 @@ function InlineApproval({
           ? 'Review the design proposal and approve to continue the workflow.'
           : stage === WorkflowStage.Check
             ? 'Review the check results and approve to continue the workflow.'
-            : `Review the ${stage} stage output and approve to continue, or send back with feedback.`}
+            : `Review the ${stage} stage output and approve to continue, or request changes with feedback.`}
       </p>
 
       {hasApprovalOutput && (
@@ -764,138 +737,78 @@ function InlineApproval({
         </div>
       )}
 
-      {!hasApprovalOutput && (
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Button
-              onClick={() => approveMutation.mutate()}
-              disabled={approveMutation.isPending}
-              className="flex-1"
-            >
-              {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
-            </Button>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <Button
+            onClick={handleApprove}
+            disabled={approveMutation.isPending}
+            data-testid="approve-button"
+            className={`flex-1 ${
+              hasApprovalOutput && classified === 'PASS'
+                ? 'bg-green-600 hover:bg-green-700 text-white'
+                : ''
+            }`}
+          >
+            {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
+          </Button>
+          {!feedbackOpen && (
             <Button
               variant="outline"
-              onClick={() => rejectMutation.mutate()}
-              disabled={rejectMutation.isPending}
+              onClick={handleOpenRequestChanges}
+              disabled={requestChangesMutation.isPending}
+              data-testid="request-changes-button"
               className="flex-1"
             >
-              {rejectMutation.isPending ? 'Sending...' : 'Send back'}
+              Request changes
             </Button>
-          </div>
-          <Textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="Optional feedback..."
-            rows={2}
-            className="resize-none"
-          />
+          )}
         </div>
-      )}
 
-      {hasApprovalOutput && classified === 'PASS' && (
-        <div className="space-y-2">
-          <Button
-            onClick={() => approveMutation.mutate()}
-            disabled={approveMutation.isPending}
-            className="w-full bg-green-600 hover:bg-green-700 text-white"
+        {feedbackOpen && (
+          <div
+            className="space-y-2 rounded-md border border-amber-300 bg-white p-3"
+            data-testid="request-changes-form"
           >
-            {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
-          </Button>
-        </div>
-      )}
-
-      {hasApprovalOutput && classified === 'FAIL' && (
-        <div className="space-y-2">
-          <Button
-            variant="destructive"
-            onClick={handleSendBackForFixes}
-            disabled={sendBackMutation.isPending}
-            className="w-full"
-          >
-            {sendBackMutation.isPending ? 'Sending back...' : 'Send back for fixes'}
-          </Button>
-
-          <div>
-            <Button
-              variant="ghost"
-              onClick={() => setInstructionsExpanded(!instructionsExpanded)}
-              className="h-auto px-0 text-sm text-muted-foreground hover:text-foreground"
+            <label
+              htmlFor="request-changes-body"
+              className="text-xs font-medium text-gray-700"
             >
-              {instructionsExpanded ? '▾' : '▸'} Add instructions...
-            </Button>
-            {instructionsExpanded && (
-              <div className="mt-2 space-y-2">
-                <Textarea
-                  value={instructionsText}
-                  onChange={(e) => setInstructionsText(e.target.value)}
-                  placeholder="Add your instructions for the fix..."
-                  rows={3}
-                  className="resize-none"
-                />
-                <Button
-                  onClick={handleSendWithInstructions}
-                  disabled={!instructionsText.trim() || sendBackMutation.isPending}
-                >
-                  {sendBackMutation.isPending ? 'Sending back...' : 'Send with instructions'}
-                </Button>
-              </div>
-            )}
+              What changes should the agent make?
+            </label>
+            <Textarea
+              id="request-changes-body"
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              placeholder="Describe the changes you want the agent to apply..."
+              rows={3}
+              data-testid="request-changes-textarea"
+              className="resize-none"
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={handleCancelRequestChanges}
+                disabled={requestChangesMutation.isPending}
+                size="sm"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmitRequestChanges}
+                disabled={!feedbackText.trim() || requestChangesMutation.isPending}
+                size="sm"
+                data-testid="submit-request-changes"
+              >
+                {requestChangesMutation.isPending ? 'Submitting...' : 'Submit feedback'}
+              </Button>
+            </div>
           </div>
+        )}
+      </div>
 
-          <Button
-            variant="outline"
-            onClick={handleApproveAnyway}
-            disabled={approveMutation.isPending}
-            className="w-full"
-          >
-            {approveMutation.isPending ? 'Approving...' : 'Approve anyway'}
-          </Button>
-        </div>
-      )}
-
-      {hasApprovalOutput && classified === 'UNKNOWN' && (
-        <div className="space-y-2">
-          <Button
-            onClick={() => approveMutation.mutate()}
-            disabled={approveMutation.isPending}
-            className="w-full"
-          >
-            {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
-          </Button>
-
-          <div>
-            <Button
-              variant="ghost"
-              onClick={() => setNotesExpanded(!notesExpanded)}
-              className="h-auto px-0 text-sm text-muted-foreground hover:text-foreground"
-            >
-              {notesExpanded ? '▾' : '▸'} Send back with notes...
-            </Button>
-            {notesExpanded && (
-              <div className="mt-2 space-y-2">
-                <Textarea
-                  value={notesText}
-                  onChange={(e) => setNotesText(e.target.value)}
-                  placeholder="Describe what needs to be changed..."
-                  rows={3}
-                  className="resize-none"
-                />
-                <Button
-                  onClick={handleSendBackWithNotes}
-                  disabled={!notesText.trim() || sendBackMutation.isPending}
-                >
-                  {sendBackMutation.isPending ? 'Sending back...' : 'Send back'}
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {(approveMutation.error || rejectMutation.error || sendBackMutation.error) && (
+      {(approveMutation.error || requestChangesMutation.error) && (
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          {approveMutation.error?.message || rejectMutation.error?.message || sendBackMutation.error?.message}
+          {approveMutation.error?.message || requestChangesMutation.error?.message}
         </div>
       )}
     </div>
@@ -981,8 +894,24 @@ function StepList({
               Approval is awaiting, but this stage has no recorded check results. This usually means the issue was recovered from an interrupted state; rerun the stage if you need fresh verification before approving.
             </div>
           )}
-          <InlineApproval issueNumber={issue.number} stage={stage} readOnly={readOnly} approvalOutput={issue.approvalState?.output} />
+          <InlineApproval
+            issueNumber={issue.number}
+            stage={stage}
+            readOnly={readOnly}
+            approvalOutput={issue.approvalState?.output}
+          />
         </div>
+      )}
+
+      {/* Feedback history is rendered whenever the stage has feedback records — including
+          during the running feedback-loop (apply-feedback task) when the approval card is hidden. */}
+      {issue.feedback && issue.feedback.length > 0 && issue.workflowStage === stage && (
+        <FeedbackHistory
+          stage={stage}
+          feedback={issue.feedback}
+          approvalRequestedAt={issue.approvalState?.requestedAt}
+          checks={checkResults}
+        />
       )}
 
       {!isAwaitingApproval && stage === WorkflowStage.Check && failedScriptHealthChecks.length > 0 && (

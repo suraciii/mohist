@@ -11,6 +11,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssuePrerequisites();
         projectIssues.MapIssueLifecycle();
         projectIssues.MapIssueWorkflowControl();
+        projectIssues.MapIssueFeedback();
         projectIssues.MapIssueSessions();
         projectIssues.MapIssueWorkflowProfile();
         projectIssues.MapIssueRebase();

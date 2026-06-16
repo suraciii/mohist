@@ -1,5 +1,6 @@
 export { ArtifactContentViewer } from './ui/ArtifactContentViewer'
 export { BranchBar } from './ui/BranchBar'
+export { FeedbackHistory } from './ui/FeedbackHistory'
 export { FullReportModal, ResultBadge } from './ui/ReviewReportModal'
 export { LatestArtifactsPanel } from './ui/LatestArtifactsPanel'
 export { TaskProgressPanel } from './ui/TaskProgressPanel'

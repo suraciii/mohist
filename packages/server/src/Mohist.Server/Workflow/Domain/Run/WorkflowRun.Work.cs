@@ -54,7 +54,8 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> AddRuntimeTask(
             TaskDefinition task,
             string? stage = null,
-            bool invalidateChecks = false)
+            bool invalidateChecks = false,
+            string? causedByFeedbackId = null)
         {
             var current = run.CurrentStage();
             if (!current.Initialized)
@@ -62,7 +63,7 @@ public static partial class WorkflowRunExtensions
             if (!string.IsNullOrWhiteSpace(stage) && stage != current.Id)
                 throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
-            var newTask = TaskRun.MakeTask(current.Tasks, task);
+            var newTask = TaskRun.MakeTask(current.Tasks, task, causedByFeedbackId);
             current.Tasks.Add(newTask);
 
             if (invalidateChecks)

@@ -36,7 +36,8 @@ public static class WorkflowStatusMapper
                 s.ApprovalStatus is not null
                     ? new ApprovalStatusView(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt)
                     : null,
-                stageFailure);
+                stageFailure,
+                MapFeedback(run, s.Id));
         }).ToList();
 
         var pending = BuildPendingWork(run);
@@ -64,6 +65,30 @@ public static class WorkflowStatusMapper
             run.ClaimedBy,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt));
     }
+
+    public static List<StageFeedbackView> MapFeedback(WorkflowRun run, string stageId)
+    {
+        if (run.Feedback.Count == 0) return [];
+
+        return run.Feedback
+            .Where(f => string.Equals(f.Stage, stageId, StringComparison.Ordinal))
+            .OrderByDescending(f => f.CreatedAt)
+            .Select(f => new StageFeedbackView(
+                f.Id,
+                f.Body,
+                f.Status,
+                f.CreatedAt,
+                ToResolution(f)))
+            .ToList();
+    }
+
+    private static StageFeedbackResolution? ToResolution(ApprovalFeedback feedback) =>
+        feedback.Status == ApprovalFeedbackStatus.Resolved
+            ? new StageFeedbackResolution(
+                feedback.ResolutionTaskId,
+                feedback.ResolvedAt,
+                feedback.ResolutionSummary)
+            : null;
 
     public static List<TaskStatusView> MapTasks(StageRun stage, WorkflowDefinition? definition)
     {
@@ -112,7 +137,7 @@ public static class WorkflowStatusMapper
         if (run.Status == WorkflowRunStatus.AwaitingApproval)
         {
             actions.Add(new AvailableActionView("approve", "Approve", null));
-            actions.Add(new AvailableActionView("reject", "Reject", null));
+            actions.Add(new AvailableActionView("request-changes", "Request changes", null));
         }
 
         var failure = failureOverride ?? run.Failure;
