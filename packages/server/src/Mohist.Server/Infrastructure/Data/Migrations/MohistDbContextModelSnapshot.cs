@@ -343,7 +343,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionLabelRow", b =>
                 {
                     b.Property<string>("SessionId")

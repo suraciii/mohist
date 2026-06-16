@@ -24,6 +24,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private long _realtimeSequence;
     private IDisposable? _persistTimer;
     private bool _stateDirty;
+    private string? _lastHealthStatus;
+    private double? _lastHealthPercent;
 
     public AgentSessionGrain(
         IAgentSessionStore stateStore,
@@ -99,6 +101,188 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await ToInfoAsync(session);
     }
 
+    public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
+    {
+        var session = await GetRequiredAsync();
+        EnsureSessionIdleForRecovery(session);
+
+        var now = DateTime.UtcNow;
+        var usage = AgentSessionJsonHelper.Usage(session);
+        var usedBefore = usage.ContextWindowUsed;
+        var size = usage.ContextWindowSize;
+
+        var summary = string.IsNullOrWhiteSpace(command.Summary)
+            ? await AgentSessionSummaryBuilder.BuildAsync(_dbFactory, session.Id, command.MaxSummaryChars)
+            : command.Summary!;
+
+        var (events, transcriptEntries) = ApplyRecoveryTransitions(
+            session,
+            command.NewAgentSessionId,
+            usedBefore,
+            usedBefore,
+            size,
+            "summary",
+            summary,
+            now);
+
+        await PersistRecoveryAsync(session, events, transcriptEntries);
+
+        return BuildRecoveryResult(session, usedBefore, size, "compact", wasCompacted: true);
+    }
+
+    public async Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command)
+    {
+        var session = await GetRequiredAsync();
+        EnsureSessionIdleForRecovery(session);
+
+        var now = DateTime.UtcNow;
+        var usage = AgentSessionJsonHelper.Usage(session);
+        var usedBefore = usage.ContextWindowUsed;
+        var size = usage.ContextWindowSize;
+
+        var (events, transcriptEntries) = ApplyRecoveryTransitions(
+            session,
+            command.NewAgentSessionId,
+            usedBefore,
+            usedBefore,
+            size,
+            "reset",
+            summary: null,
+            now);
+
+        await PersistRecoveryAsync(session, events, transcriptEntries);
+
+        return BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
+    }
+
+    private static void EnsureSessionIdleForRecovery(AgentSession session)
+    {
+        if (AgentSessionJsonHelper.StatusName(session) == "active")
+            throw new InvalidOperationException("Cannot recover a session that is currently active.");
+    }
+
+    private (IReadOnlyList<AgentSessionEvent> Events, IReadOnlyList<RuntimeEventEnvelope> TranscriptEntries) ApplyRecoveryTransitions(
+        AgentSession session,
+        string newAgentSessionId,
+        long? usedBefore,
+        long? usedAfter,
+        long? size,
+        string strategy,
+        string? summary,
+        DateTime now)
+    {
+        var events = new List<AgentSessionEvent>();
+        events.AddRange(session.RebindRuntimeSession(newAgentSessionId, usedAfter, size, now));
+        events.AddRange(session.RecordCompaction(usedBefore, usedAfter, size, strategy, summary, now));
+
+        var transcriptEntries = new List<RuntimeEventEnvelope>
+        {
+            new()
+            {
+                Id = -(_realtimeSequence + 1),
+                SessionId = session.Id,
+                AgentSessionId = newAgentSessionId,
+                Sequence = ++_realtimeSequence,
+                Type = "compaction",
+                PayloadJson = BuildCompactionPayload(strategy, usedBefore, usedAfter, size, summary, now),
+                CreatedAt = now,
+            },
+            new()
+            {
+                Id = -(_realtimeSequence + 1),
+                SessionId = session.Id,
+                AgentSessionId = newAgentSessionId,
+                Sequence = ++_realtimeSequence,
+                Type = "compaction_event",
+                PayloadJson = BuildCompactionEventPayload(strategy, usedBefore, usedAfter, size, summary, now),
+                CreatedAt = now,
+            }
+        };
+        return (events, transcriptEntries);
+    }
+
+    private static string BuildCompactionPayload(
+        string strategy,
+        long? usedBefore,
+        long? usedAfter,
+        long? size,
+        string? summary,
+        DateTime now)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["strategy"] = strategy,
+            ["contextWindowUsedBefore"] = usedBefore,
+            ["contextWindowUsedAfter"] = usedAfter,
+            ["contextWindowSize"] = size,
+            ["recordedAt"] = now.ToString("o"),
+        };
+        if (!string.IsNullOrWhiteSpace(summary))
+            payload["summary"] = summary;
+        return JsonSerializer.Serialize(payload);
+    }
+
+    private static string BuildCompactionEventPayload(
+        string strategy,
+        long? usedBefore,
+        long? usedAfter,
+        long? size,
+        string? summary,
+        DateTime now)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["strategy"] = strategy,
+            ["contextWindowUsedBefore"] = usedBefore,
+            ["contextWindowUsedAfter"] = usedAfter,
+            ["contextWindowSize"] = size,
+            ["recordedAt"] = now.ToString("o"),
+        };
+        if (!string.IsNullOrWhiteSpace(summary))
+            payload["summary"] = summary;
+        return JsonSerializer.Serialize(payload);
+    }
+
+    private async Task PersistRecoveryAsync(
+        AgentSession session,
+        IReadOnlyList<AgentSessionEvent> events,
+        IReadOnlyList<RuntimeEventEnvelope> transcriptEntries)
+    {
+        var now = DateTime.UtcNow;
+        _transcript.Accept(session, transcriptEntries, now);
+        var transcript = _transcript.BuildFlush(session, now);
+
+        await _stateStore.SaveAsync(SessionId, session, events);
+        if (transcript is not null)
+        {
+            await _transcriptStore.SaveAsync(transcript);
+            _transcript.CommitFlush();
+        }
+        _session = session;
+
+        await FanOutRealtimeAsync(session, transcriptEntries, events);
+    }
+
+    private static AgentSessionRecoveryResult BuildRecoveryResult(
+        AgentSession session,
+        long? usedBefore,
+        long? size,
+        string operation,
+        bool wasCompacted)
+    {
+        var usage = AgentSessionJsonHelper.Usage(session);
+        return new AgentSessionRecoveryResult(
+            session.Id,
+            session.Status.AgentRuntimeSessionId,
+            AgentSessionJsonHelper.StatusName(session),
+            usage.ContextWindowSize ?? size,
+            usage.ContextWindowUsed ?? usedBefore,
+            AgentSessionJsonHelper.ContextUsagePercent(usage.ContextWindowUsed ?? usedBefore, usage.ContextWindowSize ?? size),
+            usedBefore,
+            operation,
+            wasCompacted);
+    }
+
     public async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command)
     {
         if (command.RuntimeEvents.Count == 0) return [];
@@ -110,11 +294,23 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         events.AddRange(session.RecordActivity(now));
         _stateDirty = true;
 
+        var previousHealth = _lastHealthStatus;
+        var previousUsagePercent = _lastHealthPercent;
+
         var entries = new List<RuntimeEventEnvelope>();
+        var supplementaryEntries = new List<RuntimeEventEnvelope>();
         foreach (var e in command.RuntimeEvents)
         {
             var domainEvents = ApplyRuntimeEventToDomain(session, e, now);
             events.AddRange(domainEvents);
+
+            var payloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson;
+            var classifiedPayload = ClassifySessionClosedPayload(session, e.Type, payloadJson, now);
+            if (classifiedPayload is not null)
+            {
+                payloadJson = classifiedPayload;
+                events.AddRange(EmitContextExhaustionDomain(session, payloadJson, now));
+            }
 
             entries.Add(new RuntimeEventEnvelope
             {
@@ -123,12 +319,30 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 AgentSessionId = session.Status.AgentRuntimeSessionId,
                 Sequence = ++_realtimeSequence,
                 Type = e.Type,
-                PayloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson,
+                PayloadJson = payloadJson,
                 CreatedAt = now,
             });
+
+            if (string.Equals(e.Type, "usage.updated", StringComparison.Ordinal))
+            {
+                var built = TryBuildContextHealthUpdate(session, now, previousHealth, previousUsagePercent);
+                if (built.HasValue)
+                {
+                    var health = built.Value;
+                    supplementaryEntries.Add(health.Envelope);
+                    events.AddRange(health.DomainEvents);
+                    previousHealth = health.NewStatus;
+                    previousUsagePercent = health.NewPercent;
+                }
+            }
         }
 
-        _transcript.Accept(session, entries, now);
+        _lastHealthStatus = previousHealth;
+        _lastHealthPercent = previousUsagePercent;
+
+        var allEntries = entries.Concat(supplementaryEntries).ToList();
+
+        _transcript.Accept(session, allEntries, now);
 
         _session = session;
         _cachedSummary = null;
@@ -137,10 +351,137 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         await FanOutRealtimeAsync(
             session,
-            entries,
+            allEntries,
             events);
 
         return entries.Select(e => ToEventInfo(e)).ToList();
+    }
+
+    private string? ClassifySessionClosedPayload(AgentSession session, string type, string payloadJson, DateTime now)
+    {
+        if (!string.Equals(type, "session.closed", StringComparison.Ordinal))
+            return null;
+
+        JsonElement payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+        }
+        catch
+        {
+            return null;
+        }
+        if (payload.ValueKind != JsonValueKind.Object) return null;
+
+        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
+        var usage = AgentSessionJsonHelper.Usage(session);
+        var elapsed = session.Status.LastDataAt is { } last
+            && session.Status.BoundAt is { } bound
+            && last > bound
+            ? last - bound
+            : (TimeSpan?)null;
+
+        var producedArtifacts = AgentSessionJsonHelper.GetBoolProp(payload, "producedArtifacts")
+            ?? AgentSessionJsonHelper.GetBoolProp(payload, "producedExpectedOutput")
+            ?? false;
+
+        var result = ContextExhaustionClassifier.ClassifyClose(
+            status,
+            usage.ContextWindowUsed,
+            usage.ContextWindowSize,
+            elapsed,
+            producedArtifacts);
+        if (result.Category is null)
+        {
+            // Try the rapid-completion heuristic for successful closes that
+            // look suspiciously fast and did not produce expected output.
+            result = ContextExhaustionClassifier.ClassifyRapidCompletion(
+                status,
+                AgentSessionJsonHelper.ContextUsagePercent(usage.ContextWindowUsed, usage.ContextWindowSize),
+                elapsed,
+                producedArtifacts);
+            if (result.Category is null) return null;
+        }
+
+        return ContextExhaustionClassifier.ApplyToPayload(payloadJson, result) ?? payloadJson;
+    }
+
+    private IReadOnlyList<AgentSessionEvent> EmitContextExhaustionDomain(AgentSession session, string payloadJson, DateTime now)
+    {
+        JsonElement payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+        }
+        catch
+        {
+            return [];
+        }
+        if (payload.ValueKind != JsonValueKind.Object) return [];
+        var failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory");
+        if (!string.Equals(failureCategory, ContextExhaustionClassifier.ContextExhaustionCategory, StringComparison.Ordinal)
+            && !string.Equals(failureCategory, ContextExhaustionClassifier.SuspectedContextExhaustionCategory, StringComparison.Ordinal))
+            return [];
+        var percent = AgentSessionJsonHelper.GetDoubleProp(payload, "contextUsagePercent");
+        var usage = AgentSessionJsonHelper.Usage(session);
+        return session.RecordContextExhaustion(
+            failureCategory,
+            percent,
+            usage.ContextWindowUsed,
+            usage.ContextWindowSize,
+            now);
+    }
+
+    private readonly record struct ContextHealthDecision(
+        RuntimeEventEnvelope Envelope,
+        IReadOnlyList<AgentSessionEvent> DomainEvents,
+        string? NewStatus,
+        double? NewPercent);
+
+    private ContextHealthDecision? TryBuildContextHealthUpdate(
+        AgentSession session,
+        DateTime now,
+        string? previousStatus,
+        double? previousPercent)
+    {
+        var usage = AgentSessionJsonHelper.Usage(session);
+        var percent = AgentSessionJsonHelper.ContextUsagePercent(usage.ContextWindowUsed, usage.ContextWindowSize);
+        if (percent is null) return null;
+
+        var newStatus = ContextHealthClassifier.Classify(percent);
+        if (newStatus is null) return null;
+
+        if (!ContextHealthClassifier.ShouldEmitUpdate(previousStatus, previousPercent, percent))
+            return null;
+
+        var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["healthStatus"] = newStatus,
+            ["contextWindowSize"] = usage.ContextWindowSize,
+            ["contextWindowUsed"] = usage.ContextWindowUsed,
+            ["contextUsagePercent"] = percent,
+            ["recordedAt"] = now.ToString("o"),
+        });
+
+        var envelope = new RuntimeEventEnvelope
+        {
+            Id = -(_realtimeSequence + 1),
+            SessionId = session.Id,
+            AgentSessionId = session.Status.AgentRuntimeSessionId,
+            Sequence = ++_realtimeSequence,
+            Type = "context_health_update",
+            PayloadJson = payload,
+            CreatedAt = now,
+        };
+
+        var domainEvents = session.RecordContextHealthUpdate(
+            newStatus,
+            percent,
+            usage.ContextWindowUsed,
+            usage.ContextWindowSize,
+            now);
+
+        return new ContextHealthDecision(envelope, domainEvents, newStatus, percent);
     }
 
     private async Task FanOutRealtimeAsync(
@@ -285,6 +626,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     public async Task<AgentSessionInfo?> GetAsync()
     {
         return _session is null ? null : await ToInfoAsync(_session);
+    }
+
+    public Task DeactivateForTestAsync()
+    {
+        DeactivateOnIdle();
+        return Task.CompletedTask;
     }
 
     private async Task<AgentSession> GetRequiredAsync()

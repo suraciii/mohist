@@ -40,6 +40,10 @@ const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
 
+const DEFAULT_COMPACTION_THRESHOLD = 0.8
+const DEFAULT_COMPACTION_STRATEGY = "summary"
+const COMPACTION_META_KEY = "opencode.compaction"
+
 const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
   "agent_message_chunk",
   "agent_thought_chunk",
@@ -48,6 +52,7 @@ const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
   "tool_result",
   "tool_result_update",
   "usage_update",
+  "compaction",
 ])
 
 const SESSION_INPUT_EVENT = "session.input"
@@ -55,6 +60,21 @@ const SESSION_CLOSED_EVENT = "session.closed"
 const SESSION_LIVENESS_EVENT = "session.liveness"
 const MODEL_RESOLVED_EVENT = "model.resolved"
 const USAGE_UPDATED_EVENT = "usage.updated"
+const COMPACTION_EVENT = "compaction"
+
+export type CompactionStrategy = "summary"
+
+export interface CompactionConfig {
+  threshold: number
+  strategy: CompactionStrategy
+}
+
+interface CompactionEventPayload {
+  contextWindowUsedBefore?: number
+  contextWindowUsedAfter?: number
+  contextWindowSize?: number
+  strategy?: CompactionStrategy
+}
 
 type AcpLivenessActivity =
   | { isActivity: false }
@@ -142,7 +162,7 @@ function buildResolvedModelEventPayload(context: ActionContext, acpSessionId: st
   })
 }
 
-function buildUsageUpdatePayload(context: ActionContext, acpSessionId: string, source: "prompt_response" | "usage_update", usage?: unknown, update?: { cost?: unknown, size?: unknown, used?: unknown }): JsonObject {
+function buildUsageUpdatePayload(context: ActionContext, acpSessionId: string, source: "prompt_response" | "usage_update" | "compaction", usage?: unknown, update?: { cost?: unknown, size?: unknown, used?: unknown, compaction?: CompactionEventPayload }): JsonObject {
   const payload: JsonObject = cleanJson({
     sessionName: sessionNameFromContext(context),
     acpSessionId,
@@ -169,6 +189,13 @@ function buildUsageUpdatePayload(context: ActionContext, acpSessionId: string, s
     }
     if (typeof update.size === "number") payload.contextWindowSize = update.size
     if (typeof update.used === "number") payload.contextWindowUsed = update.used
+    if (update.compaction) {
+      const compaction = update.compaction
+      if (typeof compaction.contextWindowUsedBefore === "number") payload.contextWindowUsedBefore = compaction.contextWindowUsedBefore
+      if (typeof compaction.contextWindowUsedAfter === "number") payload.contextWindowUsedAfter = compaction.contextWindowUsedAfter
+      if (typeof compaction.contextWindowSize === "number") payload.contextWindowSize = compaction.contextWindowSize
+      if (typeof compaction.strategy === "string") payload.compactionStrategy = compaction.strategy
+    }
   }
 
   return payload
@@ -184,6 +211,53 @@ function hasUsageUpdateContent(payload: JsonObject): boolean {
     || payload.totalTokens !== undefined
     || payload.cachedReadTokens !== undefined
     || payload.thoughtTokens !== undefined
+    || payload.contextWindowUsedBefore !== undefined
+    || payload.contextWindowUsedAfter !== undefined
+    || payload.compactionStrategy !== undefined
+}
+
+function extractCompactionEventFromUpdate(update: unknown): CompactionEventPayload | undefined {
+  if (!update || typeof update !== "object") return undefined
+  const record = update as Record<string, unknown>
+  const candidates: Array<Record<string, unknown>> = []
+  if (record.compaction && typeof record.compaction === "object") {
+    candidates.push(record.compaction as Record<string, unknown>)
+  }
+  const meta = record._meta
+  if (meta && typeof meta === "object") {
+    const metaRecord = meta as Record<string, unknown>
+    if (metaRecord.compaction && typeof metaRecord.compaction === "object") {
+      candidates.push(metaRecord.compaction as Record<string, unknown>)
+    }
+    if (metaRecord["opencode.compaction"] && typeof metaRecord["opencode.compaction"] === "object") {
+      candidates.push(metaRecord["opencode.compaction"] as Record<string, unknown>)
+    }
+  }
+  let before: number | undefined
+  let after: number | undefined
+  let size: number | undefined
+  let strategyValue: unknown
+  for (const source of candidates) {
+    before ??= numberField(source, "contextWindowUsedBefore")
+    after ??= numberField(source, "contextWindowUsedAfter")
+    size ??= numberField(source, "contextWindowSize")
+    if (strategyValue === undefined) strategyValue = source.strategy
+  }
+  const strategy: CompactionStrategy | undefined = strategyValue === "summary" ? "summary" : undefined
+  if (before === undefined && after === undefined && size === undefined && strategy === undefined) {
+    return undefined
+  }
+  return {
+    contextWindowUsedBefore: before,
+    contextWindowUsedAfter: after,
+    contextWindowSize: size,
+    strategy,
+  }
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
 function createObservabilityAwareEmitter(
@@ -205,16 +279,38 @@ function createObservabilityAwareEmitter(
 
     if (type === "usage_update") {
       const u = update as unknown as Record<string, unknown>
-      const payload = buildUsageUpdatePayload(context, acpSessionId, "usage_update", undefined, {
+      const compaction = extractCompactionEventFromUpdate(update)
+      if (compaction && compaction.contextWindowSize === undefined && typeof u.size === "number") {
+        compaction.contextWindowSize = u.size
+      }
+      const payload = buildUsageUpdatePayload(context, acpSessionId, compaction ? "compaction" : "usage_update", undefined, {
         cost: u.cost,
         size: u.size,
         used: u.used,
+        compaction,
       })
       if (hasUsageUpdateContent(payload)) {
         await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
+        if (compaction) {
+          await emitSessionEvent(context, COMPACTION_EVENT, buildCompactionEventPayload(context, acpSessionId, compaction))
+        }
       }
     }
   }
+}
+
+function buildCompactionEventPayload(context: ActionContext, acpSessionId: string, compaction: CompactionEventPayload): JsonObject {
+  return cleanJson({
+    sessionName: sessionNameFromContext(context),
+    acpSessionId,
+    workId: context.workId,
+    workType: context.workType,
+    stage: context.stage ?? null,
+    contextWindowUsedBefore: compaction.contextWindowUsedBefore,
+    contextWindowUsedAfter: compaction.contextWindowUsedAfter,
+    contextWindowSize: compaction.contextWindowSize,
+    strategy: compaction.strategy,
+  })
 }
 
 function createAcpSessionUpdateHandler(options: {
@@ -245,6 +341,7 @@ interface AgentConfig {
   sessionStartTimeoutMs?: number
   livenessQuietThresholdMs?: number
   probeTimeoutMs?: number
+  compaction?: CompactionConfig
 }
 
 interface RequestedModel {
@@ -429,6 +526,7 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
       sessionStartTimeoutMs: numberInput(agent as JsonObject, "sessionStartTimeout") ?? undefined,
       livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
       probeTimeoutMs: numberInput(agent as JsonObject, "probeTimeoutMs") ?? undefined,
+      compaction: resolveCompactionConfigFromInput(agent as JsonObject),
     }
   }
   return {
@@ -437,6 +535,46 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
     sessionStartTimeoutMs: numberInput(with_, "sessionStartTimeout") ?? undefined,
     livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
     probeTimeoutMs: numberInput(with_, "probeTimeoutMs") ?? undefined,
+    compaction: resolveCompactionConfigFromInput(with_),
+  }
+}
+
+function resolveCompactionConfigFromInput(input: JsonObject | null | undefined): CompactionConfig | undefined {
+  if (!input || typeof input !== "object") return undefined
+  const raw = objectInput(input, "compaction")
+  if (!raw || typeof raw !== "object") return undefined
+  const thresholdValue = numberInput(raw as JsonObject, "threshold")
+  const strategyValue = stringInput(raw as JsonObject, "strategy")
+  if (thresholdValue === undefined && strategyValue === undefined) return undefined
+  return {
+    threshold: thresholdValue !== undefined && Number.isFinite(thresholdValue) && thresholdValue >= 0 && thresholdValue <= 1
+      ? thresholdValue
+      : DEFAULT_COMPACTION_THRESHOLD,
+    strategy: strategyValue === "summary" ? "summary" : DEFAULT_COMPACTION_STRATEGY,
+  }
+}
+
+export function resolveCompactionConfig(agentConfig?: AgentConfig): CompactionConfig {
+  if (!agentConfig?.compaction) return defaultCompactionConfig()
+  return {
+    threshold: agentConfig.compaction.threshold,
+    strategy: agentConfig.compaction.strategy,
+  }
+}
+
+export function defaultCompactionConfig(): CompactionConfig {
+  return {
+    threshold: DEFAULT_COMPACTION_THRESHOLD,
+    strategy: DEFAULT_COMPACTION_STRATEGY,
+  }
+}
+
+function buildSessionMeta(compaction: CompactionConfig): { [key: string]: unknown } {
+  return {
+    [COMPACTION_META_KEY]: {
+      threshold: compaction.threshold,
+      strategy: compaction.strategy,
+    },
   }
 }
 
@@ -677,7 +815,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
 
   try {
     const resumeResult = await Promise.race([
-      connection.resumeSession({ sessionId: acpSessionId, cwd: workDir, mcpServers: [] }),
+      connection.resumeSession({ sessionId: acpSessionId, cwd: workDir, mcpServers: [], _meta: buildSessionMeta(resolveCompactionConfig(agentConfig)) }),
       timeout(sessionStartTimeoutMs),
     ])
     if (resumeResult === "timeout") throw new Error("Timed out during ACP resumeSession")
@@ -758,7 +896,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
 
   try {
     const session = await Promise.race([
-      connection.newSession({ cwd: context.workDir, mcpServers: [] }),
+      connection.newSession({ cwd: context.workDir, mcpServers: [], _meta: buildSessionMeta(resolveCompactionConfig(agentConfig)) }),
       timeout(sessionStartTimeoutMs),
     ])
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
@@ -865,7 +1003,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "initialize" }))
 
     const session = await Promise.race([
-      connection.newSession({ cwd: context.workDir, mcpServers: [] }),
+      connection.newSession({ cwd: context.workDir, mcpServers: [], _meta: buildSessionMeta(resolveCompactionConfig(agentConfig)) }),
       timeout(timeoutMs),
       acpProcess.exitFailure,
     ])

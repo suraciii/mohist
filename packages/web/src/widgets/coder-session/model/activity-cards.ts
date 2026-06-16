@@ -49,6 +49,7 @@ export interface SessionCard {
   costCurrency: string | null
   contextWindowUsed: number | null
   contextWindowSize: number | null
+  contextUsagePercent?: number | null
   toolCallCount: number | null
   toolErrorCount: number | null
 }
@@ -91,6 +92,7 @@ function sessionToCard(s: AgentActivitySession): SessionCard {
     costCurrency: usage?.costCurrency ?? null,
     contextWindowUsed: usage?.contextWindowUsed ?? null,
     contextWindowSize: usage?.contextWindowSize ?? null,
+    contextUsagePercent: usage?.contextUsagePercent ?? null,
     toolCallCount: eventSummary?.toolCallCount ?? null,
     toolErrorCount: eventSummary?.toolErrorCount ?? null,
   }

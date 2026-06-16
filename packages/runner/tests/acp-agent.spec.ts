@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
-import { acpAgentAction, buildPromptWithMohistContext, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
+import { acpAgentAction, buildPromptWithMohistContext, defaultCompactionConfig, resolveCompactionConfig, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 import { AcpSessionManager, type SharedAcpConnection } from "../src/runtime/acp-connection.js"
 import { ServerConnection } from "../src/server/connection.js"
@@ -216,7 +216,7 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("success")
     expect(shared.agent.calls.filter((entry) => entry.event === "prompt").length).toBe(1)
     expect(shared.agent.calls.some((entry) => entry.event === "thought")).toBe(true)
-    expect(shared.serverConnection.calls.some((entry) => entry.event === "ensureWorkflowAgentSession")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "getWorkflowAgentSession" || entry.event === "openWorkflowAgentSession")).toBe(true)
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
     expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "reasoning.delta")).toBe(true)
     expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
@@ -236,7 +236,7 @@ describe("mohist/acp-agent", () => {
     }, undefined, shared.context()))
 
     expect(result.status).toBe("success")
-    expect(shared.serverConnection.calls.some((entry) => entry.event === "ensureWorkflowAgentSession")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "getWorkflowAgentSession" || entry.event === "openWorkflowAgentSession")).toBe(true)
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession" && entry.sessionId === "server-session-1")).toBe(true)
     expect(shared.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
     expect(shared.agent.calls.some((entry) => entry.event === "thought")).toBe(true)
@@ -714,6 +714,128 @@ describe("mohist/acp-agent", () => {
     expect(terminalEvent?.failureCategory).toBeNull()
     expect(terminalEvent?.failureReason).toBeNull()
   })
+
+  it("CompactionConfigNotSpecified_DefaultsApplied_NewSessionReceivesOpencodeCompactionMeta", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("success")
+    const newSessionCall = fixture.agent.calls.find((entry) => entry.event === "newSession")
+    expect(newSessionCall).toBeTruthy()
+    const meta = newSessionCall?._meta as Record<string, unknown> | undefined
+    expect(meta).toBeTruthy()
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction).toEqual({ threshold: 0.8, strategy: "summary" })
+  })
+
+  it("CompactionConfigExplicitlySet_ForwardedToNewSessionMeta", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      compaction: { threshold: 0.7, strategy: "summary" },
+    }))
+
+    expect(result.status).toBe("success")
+    const newSessionCall = fixture.agent.calls.find((entry) => entry.event === "newSession")
+    const meta = newSessionCall?._meta as Record<string, unknown> | undefined
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction).toEqual({ threshold: 0.7, strategy: "summary" })
+  })
+
+  it("CompactionConfigNestedUnderAgent_ForwardedToNewSessionMeta", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      agent: { compaction: { threshold: 0.6, strategy: "summary" } },
+    }))
+
+    expect(result.status).toBe("success")
+    const newSessionCall = fixture.agent.calls.find((entry) => entry.event === "newSession")
+    const meta = newSessionCall?._meta as Record<string, unknown> | undefined
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction).toEqual({ threshold: 0.6, strategy: "summary" })
+  })
+
+  it("CompactionThresholdOutOfRange_DefaultsToValidRange_Forwarded", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      compaction: { threshold: 1.5, strategy: "summary" },
+    }))
+
+    expect(result.status).toBe("success")
+    const newSessionCall = fixture.agent.calls.find((entry) => entry.event === "newSession")
+    const meta = newSessionCall?._meta as Record<string, unknown> | undefined
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction?.threshold).toBe(0.8)
+  })
+
+  it("CompactionStrategyUnsupported_FallsBackToSummary", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      compaction: { threshold: 0.5, strategy: "unknown" as never },
+    }))
+
+    expect(result.status).toBe("success")
+    const newSessionCall = fixture.agent.calls.find((entry) => entry.event === "newSession")
+    const meta = newSessionCall?._meta as Record<string, unknown> | undefined
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction?.strategy).toBe("summary")
+  })
+
+  it("CompactionEventArrives_RunnerEmitsUsageUpdatedEventWithBeforeAfterMetrics", async () => {
+    const fixture = createFixture("compaction")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "trigger compaction" }))
+
+    expect(result.status).toBe("success")
+    const usageEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "usage.updated")
+      .map((entry) => entry.payload as Record<string, unknown>)
+    const compactionEvent = usageEvents.find((payload) => payload.source === "compaction")
+    expect(compactionEvent).toBeTruthy()
+    expect(compactionEvent?.contextWindowUsedBefore).toBe(180000)
+    expect(compactionEvent?.contextWindowUsedAfter).toBe(60000)
+    expect(compactionEvent?.contextWindowSize).toBe(200000)
+    expect(compactionEvent?.compactionStrategy).toBe("summary")
+  })
+
+  it("CompactionEventArrives_RunnerEmitsDedicatedCompactionEvent", async () => {
+    const fixture = createFixture("compaction")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "trigger compaction" }))
+
+    expect(result.status).toBe("success")
+    const compactionEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "compaction")
+      .map((entry) => entry.payload as Record<string, unknown>)
+    expect(compactionEvents.length).toBeGreaterThan(0)
+    const payload = compactionEvents[0]
+    expect(payload?.contextWindowUsedBefore).toBe(180000)
+    expect(payload?.contextWindowUsedAfter).toBe(60000)
+    expect(payload?.contextWindowSize).toBe(200000)
+    expect(payload?.strategy).toBe("summary")
+  })
+
+  it("CompactionEventUpdatesContextWindowSizeInUsageUpdate", async () => {
+    const fixture = createFixture("compaction")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "trigger compaction" }))
+
+    expect(result.status).toBe("success")
+    const usageEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "usage.updated")
+      .map((entry) => entry.payload as Record<string, unknown>)
+    const finalUsage = usageEvents[usageEvents.length - 1]
+    expect(finalUsage?.contextWindowSize).toBe(200000)
+    expect(finalUsage?.contextWindowUsed).toBe(60000)
+  })
 })
 
 describe("mohist/acp-agent shared session observability", () => {
@@ -736,6 +858,64 @@ describe("mohist/acp-agent shared session observability", () => {
     expect(resolvedModelEvent).toBeTruthy()
     expect(resolvedModelEvent?.resolvedModel).toBe("anthropic/claude-haiku-4-5")
     expect(resolvedModelEvent?.source).toBe("resumeSession")
+  })
+
+  it("CompactionConfigNotSpecified_DefaultsApplied_ResumeSessionReceivesOpencodeCompactionMeta", async () => {
+    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { acpSessionId: "server-session-1" } })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "resume with defaults",
+      session: "shared-session",
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    const resumeCall = shared.agent.calls.find((entry) => entry.event === "resumeSession")
+    expect(resumeCall).toBeTruthy()
+    const meta = resumeCall?._meta as Record<string, unknown> | undefined
+    expect(meta).toBeTruthy()
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction).toEqual({ threshold: 0.8, strategy: "summary" })
+  })
+
+  it("CompactionConfigExplicitlySet_ForwardedToResumeSessionMeta", async () => {
+    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { acpSessionId: "server-session-1" } })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "resume with custom compaction",
+      session: "shared-session",
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+      compaction: { threshold: 0.65, strategy: "summary" },
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    const resumeCall = shared.agent.calls.find((entry) => entry.event === "resumeSession")
+    const meta = resumeCall?._meta as Record<string, unknown> | undefined
+    const compaction = meta?.["opencode.compaction"] as Record<string, unknown> | undefined
+    expect(compaction).toEqual({ threshold: 0.65, strategy: "summary" })
+  })
+})
+
+describe("mohist/acp-agent compaction config helpers", () => {
+  it("defaultCompactionConfig_ReturnsThresholdZeroPointEightAndSummaryStrategy", () => {
+    expect(defaultCompactionConfig()).toEqual({ threshold: 0.8, strategy: "summary" })
+  })
+
+  it("resolveCompactionConfig_WithNoAgentConfig_AppliesDefaults", () => {
+    expect(resolveCompactionConfig(undefined)).toEqual({ threshold: 0.8, strategy: "summary" })
+  })
+
+  it("resolveCompactionConfig_WithEmptyAgentConfig_AppliesDefaults", () => {
+    expect(resolveCompactionConfig({})).toEqual({ threshold: 0.8, strategy: "summary" })
+  })
+
+  it("resolveCompactionConfig_WithExplicitConfig_PassesThroughValues", () => {
+    expect(resolveCompactionConfig({ compaction: { threshold: 0.5, strategy: "summary" } }))
+      .toEqual({ threshold: 0.5, strategy: "summary" })
   })
 })
 
@@ -811,7 +991,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage"
+type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -834,7 +1014,7 @@ class FakeAcpAgent {
       },
       async newSession(params) {
         self.timeline?.push({ event: "newSession" })
-        self.calls.push({ event: "newSession", cwd: params.cwd })
+        self.calls.push({ event: "newSession", cwd: params.cwd, _meta: params._meta })
         if (self.scenario === "resolved-model") {
           return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1" } }
         }
@@ -880,6 +1060,11 @@ class FakeAcpAgent {
         if (self.scenario === "prompt-usage") {
           await self.connection.sessionUpdate(textUpdate(params.sessionId, "usage test"))
           return { stopReason: "end_turn", usage: { inputTokens: 120, outputTokens: 40, totalTokens: 160, cachedReadTokens: 80, thoughtTokens: 5 } }
+        }
+        if (self.scenario === "compaction") {
+          await self.connection.sessionUpdate(textUpdate(params.sessionId, "before-compact"))
+          await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "usage_update", size: 200000, used: 60000, _meta: { "opencode.compaction": { contextWindowUsedBefore: 180000, contextWindowUsedAfter: 60000, strategy: "summary" } } } } as never)
+          return { stopReason: "end_turn" }
         }
         else await self.emitBasicEvents(params.sessionId)
         return { stopReason: "end_turn" }
@@ -1026,6 +1211,16 @@ class FakeServerConnection {
     return this.nextEnsureWorkflowAgentSession
   }
 
+  async getWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string) {
+    this.calls.push({ event: "getWorkflowAgentSession", sessionName })
+    return null
+  }
+
+  async openWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string, body: unknown) {
+    this.calls.push({ event: "openWorkflowAgentSession", sessionName, body })
+    return this.nextEnsureWorkflowAgentSession
+  }
+
   async attachWorkflowAgentSession(_projectId: string, _workflowRunId: string, sessionName: string, body: unknown) {
     this.timeline?.push({ event: "attachWorkflowAgentSession" })
     this.calls.push({ event: "attachWorkflowAgentSession", sessionName, body })
@@ -1034,13 +1229,18 @@ class FakeServerConnection {
   async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events: Array<{ type: string; payload: unknown }> }) {
     for (const event of payload.events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
   }
+
+  async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
+    const events = payload?.events ?? payload?.runtimeEvents ?? []
+    for (const event of events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
+  }
 }
 
 class FakeSharedAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
 
-  constructor(private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model") {}
+  constructor(private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction") {}
 
   bind(connection: AgentSideConnection) {
     this.connection = connection
@@ -1052,12 +1252,12 @@ class FakeSharedAcpAgent {
       async initialize() {
         return { protocolVersion: PROTOCOL_VERSION, agentInfo: { name: "fake-shared-acp-agent", version: "0.1.0" }, agentCapabilities: {} }
       },
-      async newSession() {
-        self.calls.push({ event: "newSession" })
+      async newSession(params) {
+        self.calls.push({ event: "newSession", _meta: params._meta })
         return { sessionId: "shared-session-1" }
       },
         async resumeSession(params) {
-          self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd })
+          self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd, _meta: params._meta })
           if (self.scenario === "resolved-model") {
             return { sessionId: params.sessionId, models: { currentModelId: "anthropic/claude-haiku-4-5" } }
           }
@@ -1142,9 +1342,19 @@ function fakeServerConnection() {
     async ensureWorkflowAgentSession() {
       return {}
     },
+    async getWorkflowAgentSession() {
+      return null
+    },
+    async openWorkflowAgentSession() {
+      return {}
+    },
     async attachWorkflowAgentSession() {},
     async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: { events?: Array<{ type: string; payload: unknown }> }) {
       events.push(...(body.events ?? []))
+    },
+    async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
+      const all = body?.events ?? body?.runtimeEvents ?? []
+      events.push(...all)
     },
   }
 }

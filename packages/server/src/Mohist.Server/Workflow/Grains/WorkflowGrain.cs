@@ -6,12 +6,15 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Orleans.Runtime;
 
@@ -33,7 +36,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
     private readonly IWorkflowArtifactBindService _artifactBindService;
+    private readonly AgentSessionQuery _agentSessionQuery;
     private readonly ILogger<WorkflowGrain> _log;
+
+    private readonly record struct SessionContextUsage(double? Percent, string? SessionId)
+    {
+        public static readonly SessionContextUsage None = new(null, null);
+    }
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
@@ -41,6 +50,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
         IWorkflowArtifactBindService artifactBindService,
+        AgentSessionQuery agentSessionQuery,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
@@ -48,6 +58,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _backlogs = backlogs;
         _profileManager = profileManager;
         _artifactBindService = artifactBindService;
+        _agentSessionQuery = agentSessionQuery;
         _log = log;
     }
 
@@ -185,6 +196,36 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public async Task RetryAsync()
     {
         EnsureRun();
+        var failure = _run.Failure;
+        var failedTaskId = failure?.TaskId;
+        var stageId = _run.CurrentStageId;
+        var usage = await ResolveSessionContextUsageAsync(failedTaskId, stageId, ct: default);
+        var verdict = WorkflowSessionHealthGate.Evaluate(usage.Percent);
+        if (verdict == HealthVerdict.Block)
+        {
+            await ApplyContextExhaustionBlockAsync(failedTaskId, usage.Percent, stageId);
+            return;
+        }
+
+        if (verdict == HealthVerdict.Warn)
+        {
+            _log.LogWarning(
+                "Workflow {Id} retry proceeding with elevated session context usage {Percent:0.##}% (task={TaskId}, stage={Stage}, sessionId={SessionId})",
+                GrainKey, usage.Percent ?? 0d, failedTaskId ?? "(none)", stageId ?? "(none)", usage.SessionId ?? "(unknown)");
+        }
+
+        // If a previous attempt was blocked by context exhaustion, the user
+        // may have recovered the session (via compact/reset) by now. The gate
+        // reports a healthy context, so demote the sticky failure reason
+        // back to TaskFailed and let the regular retry path re-run the task.
+        if (failure?.Reason == FailureReason.ContextExhaustion
+            && _run.ClearContextExhaustionFailure())
+        {
+            _log.LogInformation(
+                "Workflow {Id} retry: session context recovered; demoting ContextExhaustion failure to TaskFailed (task={TaskId}, stage={Stage})",
+                GrainKey, failedTaskId ?? "(none)", stageId ?? "(none)");
+        }
+
         await ReleaseCurrentStageLocksAsync("retried");
         await ClearAndDeleteLeaseAsync();
         var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
@@ -496,6 +537,93 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private int? ResolveIssueNumber() =>
         int.TryParse(GetIssueNumber(), out var number) ? number : null;
 
+    private async Task<SessionContextUsage> ResolveSessionContextUsageAsync(
+        string? taskId,
+        string? stage,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(stage))
+        {
+            return SessionContextUsage.None;
+        }
+
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.WorkflowRunId] = GrainKey,
+            [AgentSessionQueryMetadataKeys.WorkId] = taskId,
+            [AgentSessionQueryMetadataKeys.Stage] = stage,
+        };
+
+        AgentSessionRecord? record;
+        try
+        {
+            record = await _agentSessionQuery.FirstByLabelsAsync(labels, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} session lookup for task {TaskId} stage {Stage} failed; treating as healthy",
+                GrainKey, taskId, stage);
+            return SessionContextUsage.None;
+        }
+
+        if (record is null) return SessionContextUsage.None;
+
+        try
+        {
+            var info = await GrainFactory.GetGrain<IAgentSessionGrain>(record.Session.Id).GetAsync();
+            if (info is null) return SessionContextUsage.None;
+            var percent = AgentSessionJsonHelper.ContextUsagePercent(info.ContextWindowUsed, info.ContextWindowSize);
+            return new SessionContextUsage(percent, record.Session.Id);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} session grain lookup for {SessionId} failed; treating as healthy",
+                GrainKey, record.Session.Id);
+            return SessionContextUsage.None;
+        }
+    }
+
+    private async Task ApplyContextExhaustionBlockAsync(
+        string? taskId,
+        double? contextUsagePercent,
+        string? stage)
+    {
+        EnsureRun();
+        var blockingEvents = _run.BlockStageWithContextExhaustion(taskId, contextUsagePercent, sessionId: null);
+        _log.LogWarning(
+            "Workflow {Id} retry blocked: session context at {Percent:0.##}% (task={TaskId}, stage={Stage})",
+            GrainKey, contextUsagePercent ?? 0d, taskId ?? "(none)", stage ?? "(none)");
+        await CommitAsync(blockingEvents);
+
+        throw new WorkflowSessionContextExhaustedException(
+            WorkflowSessionHealthGate.BuildBlockingMessage(contextUsagePercent),
+            contextUsagePercent,
+            stage,
+            taskId);
+    }
+
+    private async Task ApplyDispatchContextExhaustionBlockAsync(
+        string? taskId,
+        double? contextUsagePercent,
+        string? stage,
+        string? sessionId)
+    {
+        EnsureRun();
+        var blockingEvents = _run.BlockStageWithContextExhaustion(taskId, contextUsagePercent, sessionId);
+        _log.LogWarning(
+            "Workflow {Id} dispatch blocked: session context at {Percent:0.##}% (task={TaskId}, stage={Stage}, sessionId={SessionId})",
+            GrainKey, contextUsagePercent ?? 0d, taskId ?? "(none)", stage ?? "(none)", sessionId ?? "(unknown)");
+        await CommitAsync(blockingEvents);
+
+        throw new WorkflowSessionContextExhaustedException(
+            WorkflowSessionHealthGate.BuildBlockingMessage(contextUsagePercent),
+            contextUsagePercent,
+            stage,
+            taskId);
+    }
+
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
     {
         var resource = await GetSequentialLockResourceAsync(stage);
@@ -626,6 +754,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
+
+        if (workType == "task")
+        {
+            var usage = await ResolveSessionContextUsageAsync(workId, stage, ct: default);
+            var verdict = WorkflowSessionHealthGate.Evaluate(usage.Percent);
+            if (verdict == HealthVerdict.Block)
+            {
+                await ApplyDispatchContextExhaustionBlockAsync(workId, usage.Percent, stage, usage.SessionId);
+            }
+            else if (verdict == HealthVerdict.Warn)
+            {
+                _log.LogWarning(
+                    "Workflow {Id} dispatching task {WorkId} with elevated session context usage {Percent:0.##}% (sessionId={SessionId})",
+                    GrainKey, workId, usage.Percent ?? 0d, usage.SessionId ?? "(unknown)");
+            }
+        }
 
         // --- 1. Load template + independent vars from manager (per design/workflow-template-variables.md) ---
         var template = await _profileManager.LoadTemplateAsync(GrainKey);

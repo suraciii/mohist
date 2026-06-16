@@ -124,7 +124,11 @@ public class IssueSessionApiSpecs
         Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(5, metadata.GetProperty("partCount").GetInt32());
+        // 6 parts: session.input, message.delta (hello+world merged),
+        // usage.updated, model.resolved, tool_call (started+updated),
+        // session.closed, plus the context_health_update snapshot
+        // emitted by the grain on the first usage event.
+        Assert.Equal(6, metadata.GetProperty("partCount").GetInt32());
         Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
 
         Assert.False(root.TryGetProperty("events", out _));
@@ -132,6 +136,53 @@ public class IssueSessionApiSpecs
         Assert.False(root.TryGetProperty("assistant", out _));
         Assert.False(root.TryGetProperty("workflowLogs", out _));
         Assert.False(root.TryGetProperty("transcript", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task IssueSessionMetadataEndpoint_ExposesContextExhaustionFailureCategory()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("exhaustion-shape", sessionName: "plan");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
+        await issueGrain.StartWorkAsync();
+
+        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
+        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
+
+        // Drive usage to 96% (>= 90% threshold) then close the
+        // session as failed. The grain's classifier must rewrite
+        // the failureCategory to "context_exhaustion" and the API
+        // response must surface it.
+        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
+        {
+            runtimeEvents = new object[]
+            {
+                new
+                {
+                    type = "usage.updated",
+                    payload = new
+                    {
+                        contextWindowSize = 1000L,
+                        contextWindowUsed = 960L
+                    }
+                },
+                new
+                {
+                    type = "session.closed",
+                    payload = new { status = "failed", exitCode = 1 }
+                }
+            }
+        });
+
+        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
+        using var doc = JsonDocument.Parse(raw);
+        var root = doc.RootElement.GetProperty("data");
+
+        Assert.Equal("context_exhaustion", root.GetProperty("failureCategory").GetString());
+        Assert.Equal(960, root.GetProperty("contextWindowUsed").GetInt64());
+        Assert.Equal(1000, root.GetProperty("contextWindowSize").GetInt64());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -30,14 +30,19 @@ describe('canonical event types', () => {
 
   it('includes the 8 transcript event types', () => {
     expect(TRANSCRIPT_EVENT_TYPES).toEqual([
-      'coder_text_chunk',
-      'coder_thought_chunk',
-      'coder_tool_call',
-      'ralph_task_update',
-      'ralph_loop_progress',
-      'agent_liveness_status',
-      'agent_usage_update',
-      'agent_session_model_resolved',
+      'session.input',
+      'message.delta',
+      'reasoning.delta',
+      'tool_call.started',
+      'tool_call.updated',
+      'tool_call.completed',
+      'session.liveness',
+      'usage.updated',
+      'model.resolved',
+      'session.closed',
+      'compaction',
+      'compaction_event',
+      'context_health_update',
     ])
     for (const name of TRANSCRIPT_EVENT_TYPES) {
       expect(EVENT_TYPES).toContain(name)
@@ -81,6 +86,9 @@ describe('canonical event types', () => {
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded)
     expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionContextCompacted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionContextExhausted)
+    expect(EVENT_TYPES).toContain(REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated)
   })
 
   it('reverse-DNS names match the documented format', () => {
@@ -106,6 +114,9 @@ describe('canonical event types', () => {
       REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
       REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
       REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionContextCompacted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionContextExhausted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
     ])
     expect(new Set(AGENT_DETAIL_EVENTS as readonly string[])).toEqual(expected)
   })
@@ -151,6 +162,9 @@ describe('canonical event types', () => {
       REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound,
       REVERSE_DNS_EVENT_TYPES.AgentSessionUsageRecorded,
       REVERSE_DNS_EVENT_TYPES.AgentSessionModelChanged,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionContextCompacted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionContextExhausted,
+      REVERSE_DNS_EVENT_TYPES.AgentSessionContextHealthUpdated,
     ] as readonly EventName[]
     for (const name of eventNameValues) {
       expect(EVENT_TYPES).toContain(name)

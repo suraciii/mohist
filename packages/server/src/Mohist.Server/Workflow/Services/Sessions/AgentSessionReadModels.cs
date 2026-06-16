@@ -12,11 +12,15 @@ public sealed record AgentUsageDto(
     double? CostAmount,
     string? CostCurrency,
     long? ContextWindowUsed,
-    long? ContextWindowSize);
+    long? ContextWindowSize,
+    double? ContextUsagePercent,
+    string? HealthStatus);
 
 public sealed record AgentEventSummaryDto(
     string? ResolvedModel,
     string? FailureCategory,
+    bool? ContextExhaustion,
+    bool? ContextExhaustionSuspected,
     int? ToolCallCount,
     int? ToolErrorCount);
 

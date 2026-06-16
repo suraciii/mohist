@@ -147,6 +147,8 @@ export function useCoderSessions(issueNumber: number) {
               ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
               ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
               ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+              ...(detail.contextUsagePercent !== undefined && { contextUsagePercent: detail.contextUsagePercent }),
+              ...(detail.healthStatus !== undefined && { healthStatus: detail.healthStatus }),
             },
           }
           const next = [...prev]
