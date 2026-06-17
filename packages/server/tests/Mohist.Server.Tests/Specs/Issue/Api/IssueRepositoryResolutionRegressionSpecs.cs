@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Runner.Services.SignalR;
 using Issue = Mohist.Server.Issue.Domain.Issue;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -301,6 +302,20 @@ public class IssueRepositoryResolutionRegressionSpecs
             new Mohist.Server.Infrastructure.Workspace.GitCommit(
                 "abc1234", "abc1234", "First commit", "Author", "2024-01-01T00:00:00Z", new[] { "a.txt" }),
         };
+        _fixture.RunnerWorkspace.Reset();
+        _fixture.RunnerWorkspace.WorkspaceStatus = new Mohist.Server.Infrastructure.Workspace.WorkspaceStatus
+        {
+            Exists = true,
+            Branch = "mohist/run-test",
+            BaseBranch = "release-new",
+            Ahead = 0,
+            Behind = 0,
+            RebaseInProgress = false,
+            ConflictingFiles = [],
+        };
+        _fixture.RunnerWorkspace.Commits = new RunnerWorkspaceCommitsResult(
+            "release-new", "mohist/run-test", "merge-base", 1, 0, 1, 10, 2,
+            new[] { new Mohist.Server.Infrastructure.Workspace.GitCommit("abc1234", "abc1234", "First commit", "Author", "2024-01-01T00:00:00Z", new[] { "a.txt" }) });
 
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Commits resolve", "secondary");
@@ -359,6 +374,17 @@ public class IssueRepositoryResolutionRegressionSpecs
         _fixture.Git.Reset();
         _fixture.Git.BranchExists = true;
         _fixture.Git.WorkspaceStatus = new Mohist.Server.Infrastructure.Workspace.WorkspaceStatus
+        {
+            Exists = true,
+            Branch = "mo/issue-1",
+            BaseBranch = "release-new",
+            Ahead = 0,
+            Behind = 0,
+            RebaseInProgress = false,
+            ConflictingFiles = [],
+        };
+        _fixture.RunnerWorkspace.Reset();
+        _fixture.RunnerWorkspace.WorkspaceStatus = new Mohist.Server.Infrastructure.Workspace.WorkspaceStatus
         {
             Exists = true,
             Branch = "mo/issue-1",

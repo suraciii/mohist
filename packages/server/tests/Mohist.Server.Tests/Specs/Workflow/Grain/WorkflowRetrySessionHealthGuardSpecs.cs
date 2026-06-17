@@ -219,12 +219,12 @@ public class WorkflowRetrySessionHealthGuardSpecs
             var firstPayload = await first.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("session_context_exhausted", firstPayload.GetProperty("code").GetString());
 
-            // Simulate the user triggering compact: clear the recorded
-            // context window usage on the session. The workflow retry
-            // guard treats a session with no recorded usage as healthy
-            // (the user has recovered it via compact/reset/manual
-            // intervention) and lets retry proceed.
-            await ClearSessionContextUsageAsync(sessionId);
+            // Simulate the user triggering compact: push a healthy usage
+            // update through the grain (the same path a real compact/reset
+            // takes). The workflow retry guard reads from the grain's
+            // in-memory state, so this is the correct way to simulate
+            // post-compact recovery.
+            await PushContextUsageAsync(runnerId, projectId, workflowRunId, sessionName, contextWindowUsed: 0, contextWindowSize: 0);
 
             // Second retry: succeeds.
             var second = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/retry", null);
