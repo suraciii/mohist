@@ -98,7 +98,7 @@ export class WorkExecutor {
       if (normalized.status !== "completed") {
         return normalized
       }
-      const worktreeResult = await this.enforceCleanWorktree(work, workDir, normalized, variables, signal)
+      const worktreeResult = await this.enforceCleanWorktree(work, workDir, normalized, renderedWith, variables, signal)
       if (worktreeResult.status !== "completed") {
         return worktreeResult
       }
@@ -131,6 +131,7 @@ export class WorkExecutor {
     work: WorkItem,
     workDir: string,
     result: WorkItemResult,
+    renderedWith: JsonObject | null,
     variables: JsonObject,
     signal: AbortSignal,
   ): Promise<WorkItemResult> {
@@ -147,7 +148,7 @@ export class WorkExecutor {
         return dirtyWorktreeFailure(result, snapshot, attempts)
       }
       attempts += 1
-      const cleanupResult = await this.runAgentCleanupAttempt(work, workDir, variables, snapshot, attempts, signal)
+      const cleanupResult = await this.runAgentCleanupAttempt(work, workDir, renderedWith, variables, snapshot, attempts, signal)
       if (cleanupResult !== "ok") {
         return cleanupResult
       }
@@ -161,6 +162,7 @@ export class WorkExecutor {
   private async runAgentCleanupAttempt(
     work: WorkItem,
     workDir: string,
+    renderedWith: JsonObject | null,
     variables: JsonObject,
     snapshot: WorktreeSnapshot,
     attempt: number,
@@ -170,7 +172,7 @@ export class WorkExecutor {
       ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection),
       workDir,
       workType: "task",
-      with: buildCleanupWith(work, snapshot, attempt),
+      with: buildCleanupWith(work, renderedWith, snapshot, attempt),
     }
 
     let result: ActionResult
@@ -492,8 +494,8 @@ function parseFileList(stdout: string): string[] {
   return [...new Set(stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
 }
 
-function buildCleanupWith(work: WorkItem, snapshot: WorktreeSnapshot, attempt: number): JsonObject {
-  const existingWith = work.with ?? {}
+function buildCleanupWith(work: WorkItem, renderedWith: JsonObject | null, snapshot: WorktreeSnapshot, attempt: number): JsonObject {
+  const existingWith = renderedWith ?? {}
   const existingSession = stringInput(existingWith as JsonObject, "session")
   const basePrompt = stringInput(existingWith as JsonObject, "prompt")
   const originalTitle = work.title?.trim() || work.uses || work.workId
