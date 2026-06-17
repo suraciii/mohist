@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { MarkdownContent } from '@/shared/ui/components/markdown-content'
 import { IssueStatus, IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
@@ -19,6 +18,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
+import { MarkdownReader } from '@/shared/ui'
 import { getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { getStageColors } from '../../../widgets/kanban-board/model/stage-colors'
 import { CardSection } from '@/shared/ui/components/card-section'
@@ -176,10 +176,6 @@ export function IssueDetailPage() {
   const [forceStopConfirming, setForceStopConfirming] = useState(false)
   const forceStopPanelRef = useRef<HTMLDivElement>(null)
 
-  const [descriptionExpanded, setDescriptionExpanded] = useState(false)
-  const descriptionBodyRef = useRef<HTMLDivElement>(null)
-  const [isOverflowing, setIsOverflowing] = useState(false)
-
   const [prereqInput, setPrereqInput] = useState('')
   const [prereqError, setPrereqError] = useState<string | null>(null)
 
@@ -202,12 +198,6 @@ export function IssueDetailPage() {
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
   const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.status !== IssueStatus.Backlog)
-
-  useEffect(() => {
-    if (descriptionBodyRef.current) {
-      setIsOverflowing(descriptionBodyRef.current.scrollHeight > 600)
-    }
-  }, [issue?.body])
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
@@ -524,25 +514,12 @@ export function IssueDetailPage() {
               {issue.body && (
                   <div className="rounded-lg border border-gray-200 bg-white p-4">
                     <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
-                    <div className="relative">
-                      <div ref={descriptionBodyRef} className={descriptionExpanded ? '' : 'max-h-[600px] overflow-hidden'}>
-                        <MarkdownContent content={issue.body} />
-                      </div>
-                      {!descriptionExpanded && (
-                        <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-white to-transparent pointer-events-none" />
-                      )}
-                    </div>
-                    {isOverflowing && (
-                      <div className="mt-2">
-                        <Button
-                          variant="link"
-                          size="xs"
-                          onClick={() => setDescriptionExpanded(!descriptionExpanded)}
-                        >
-                          {descriptionExpanded ? 'Collapse' : 'Expand'}
-                        </Button>
-                      </div>
-                    )}
+                    <MarkdownReader
+                      content={issue.body}
+                      mode="collapsible"
+                      collapsedHeight={600}
+                      baseHeadingLevel={2}
+                    />
                   </div>
               )}
 
@@ -638,7 +615,10 @@ export function IssueDetailPage() {
                             <div className="text-xs text-gray-400 mb-1">
                               {formatTime(comment.createdAt)}
                             </div>
-                            <div className="text-sm text-gray-700"><MarkdownContent content={comment.body} /></div>
+                            <MarkdownReader
+                              content={comment.body}
+                              baseHeadingLevel={3}
+                            />
                           </div>
                           <Button
                             variant="ghost"

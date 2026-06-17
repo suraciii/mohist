@@ -92,7 +92,51 @@ vi.mock('../src/entities/issue/api/client', async (importOriginal) => ({
 
 let queryClient: QueryClient
 
-let scrollHeightSpy: ReturnType<typeof vi.spyOn>
+let resizeObserverInstances: Array<{ observed: Element[]; callback: ResizeObserverCallback }> = []
+let resizeObserverSpy: ReturnType<typeof vi.fn>
+
+class StubResizeObserver {
+  public observed: Element[] = []
+  public callback: ResizeObserverCallback
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+  }
+  observe(target: Element): void {
+    this.observed.push(target)
+    resizeObserverInstances.push({ observed: this.observed, callback: this.callback })
+  }
+  unobserve(target: Element): void {
+    this.observed = this.observed.filter((el) => el !== target)
+  }
+  disconnect(): void {
+    this.observed = []
+  }
+  trigger(): void {
+    this.callback(
+      this.observed.map((target) => ({ target, contentRect: { width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) } })) as unknown as ResizeObserverEntry[],
+      this as unknown as ResizeObserver,
+    )
+  }
+}
+
+async function withSimulatedReaderHeight(scrollHeight: number, run: () => Promise<void>) {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight')
+  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+    configurable: true,
+    get() {
+      return scrollHeight
+    },
+  })
+  try {
+    await run()
+  } finally {
+    if (original) {
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', original)
+    } else {
+      delete (HTMLElement.prototype as unknown as { scrollHeight?: number }).scrollHeight
+    }
+  }
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -111,13 +155,17 @@ beforeEach(() => {
       mutations: { retry: false },
     },
   })
-  scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
-  scrollHeightSpy.mockReturnValue(700)
+
+  resizeObserverInstances = []
+  resizeObserverSpy = vi.fn(function (this: unknown, callback: ResizeObserverCallback) {
+    return new StubResizeObserver(callback)
+  })
+  ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = resizeObserverSpy
 })
 
 afterEach(() => {
   queryClient.clear()
-  scrollHeightSpy?.mockRestore()
+  delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
 })
 
 function renderWithQueryClient(ui: React.ReactElement) {
@@ -325,83 +373,156 @@ describe('IssueDetailPage Markdown rendering', () => {
   })
 
   describe('description expand/collapse', () => {
-    it('shows Expand button for description by default', async () => {
+    it('renders the description through MarkdownReader in collapsible mode with base heading level 2', async () => {
       mocks.issue = makeIssue({
         body: 'Long description '.repeat(100),
       })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Expand')).toBeInTheDocument()
+        const reader = screen.getByTestId('markdown-reader')
+        expect(reader).toHaveAttribute('data-mode', 'collapsible')
+        expect(reader).toHaveAttribute('data-base-heading-level', '2')
       })
     })
 
-    it('shows Collapse button after expanding', async () => {
+    it('shows a Reader-level Expand control for tall description content', async () => {
       mocks.issue = makeIssue({
         body: 'Long description '.repeat(100),
       })
-      renderWithQueryClient(<IssueDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Expand')).toBeInTheDocument()
-      })
-      fireEvent.click(screen.getByText('Expand'))
-      await waitFor(() => {
-        expect(screen.getByText('Collapse')).toBeInTheDocument()
+      await withSimulatedReaderHeight(900, async () => {
+        renderWithQueryClient(<IssueDetailPage />)
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-expand-control')).toBeInTheDocument()
+          expect(screen.getByTestId('markdown-expand-control')).toHaveTextContent('Expand')
+          expect(screen.getByTestId('markdown-reader-body')).toHaveAttribute('data-overflow', 'constrained')
+        })
       })
     })
 
-    it('shows Expand button again after collapsing', async () => {
+    it('toggles Expand and Collapse through the Reader-level control', async () => {
       mocks.issue = makeIssue({
         body: 'Long description '.repeat(100),
       })
-      renderWithQueryClient(<IssueDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Expand')).toBeInTheDocument()
-      })
-      fireEvent.click(screen.getByText('Expand'))
-      await waitFor(() => {
-        expect(screen.getByText('Collapse')).toBeInTheDocument()
-      })
-      fireEvent.click(screen.getByText('Collapse'))
-      await waitFor(() => {
-        expect(screen.getByText('Expand')).toBeInTheDocument()
+      await withSimulatedReaderHeight(900, async () => {
+        renderWithQueryClient(<IssueDetailPage />)
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-expand-control')).toBeInTheDocument()
+        })
+        fireEvent.click(screen.getByTestId('markdown-expand-control'))
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-collapse-control')).toBeInTheDocument()
+          expect(screen.getByTestId('markdown-reader-body')).toHaveAttribute('data-overflow', 'free')
+        })
+        fireEvent.click(screen.getByTestId('markdown-collapse-control'))
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-expand-control')).toBeInTheDocument()
+          expect(screen.getByTestId('markdown-reader-body')).toHaveAttribute('data-overflow', 'constrained')
+        })
       })
     })
 
-    it('does not show expand button for short description that fits within threshold', async () => {
-      scrollHeightSpy.mockReturnValue(300)
+    it('does not render a Reader-level Expand control for short description that fits within the threshold', async () => {
       mocks.issue = makeIssue({
         body: 'Short content',
       })
-      renderWithQueryClient(<IssueDetailPage />)
-      await waitFor(() => {
-        expect(screen.queryByText('Expand')).not.toBeInTheDocument()
+      await withSimulatedReaderHeight(120, async () => {
+        renderWithQueryClient(<IssueDetailPage />)
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-reader')).toBeInTheDocument()
+        })
+        expect(screen.queryByTestId('markdown-expand-control')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('markdown-collapse-control')).not.toBeInTheDocument()
+        expect(screen.getByTestId('markdown-reader-body')).toHaveAttribute('data-overflow', 'free')
       })
     })
 
-    it('does not show expand/collapse for empty description', async () => {
+    it('does not render any Expand/Collapse control for empty description', async () => {
       mocks.issue = makeIssue({
         body: '',
       })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
-        expect(screen.queryByText('Expand')).not.toBeInTheDocument()
-        expect(screen.queryByText('Collapse')).not.toBeInTheDocument()
+        expect(screen.getByText('Test Issue')).toBeInTheDocument()
       })
+      expect(screen.queryByTestId('markdown-expand-control')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('markdown-collapse-control')).not.toBeInTheDocument()
     })
 
-    it('shows Markdown content after expansion', async () => {
+    it('shows Markdown content after expanding the description', async () => {
       mocks.issue = makeIssue({
         body: '# Long Heading\n\nContent here',
       })
+      await withSimulatedReaderHeight(900, async () => {
+        renderWithQueryClient(<IssueDetailPage />)
+        await waitFor(() => {
+          expect(screen.getByTestId('markdown-expand-control')).toBeInTheDocument()
+        })
+        fireEvent.click(screen.getByTestId('markdown-expand-control'))
+        await waitFor(() => {
+          expect(screen.getByRole('heading', { level: 2, name: 'Long Heading' })).toBeInTheDocument()
+          expect(screen.getByText('Content here')).toBeInTheDocument()
+        })
+      })
+    })
+
+    it('demotes an embedded # heading in description to h2 so the page title stays the only h1', async () => {
+      mocks.issue = makeIssue({
+        body: '# Embedded Heading\n\nSome content',
+      })
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Expand')).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 2, name: 'Embedded Heading' })).toBeInTheDocument()
       })
-      fireEvent.click(screen.getByText('Expand'))
+      const pageTitle = screen.getByRole('heading', { level: 1, name: 'Test Issue' })
+      const allH1 = screen.queryAllByRole('heading', { level: 1 })
+      expect(allH1).toHaveLength(1)
+      expect(allH1[0]).toBe(pageTitle)
+    })
+  })
+
+  describe('comments render through MarkdownReader', () => {
+    it('renders comment Markdown through MarkdownReader with base heading level 3', async () => {
+      mocks.issue = makeIssue({
+        body: 'Issue body',
+        comments: [
+          {
+            id: 'comment-1',
+            issueId: 'issue-1',
+            body: '# Comment Title\n\nComment body',
+            createdAt: '2024-01-01T11:00:00.000Z',
+          },
+        ],
+      })
+      renderWithQueryClient(<IssueDetailPage />)
+      const readers = await waitFor(() =>
+        screen.getAllByTestId('markdown-reader'),
+      )
+      const commentReader = readers.find(
+        (node) => node.getAttribute('data-base-heading-level') === '3',
+      )
+      expect(commentReader).toBeDefined()
+      expect(commentReader).toHaveAttribute('data-base-heading-level', '3')
+    })
+
+    it('demotes an embedded # heading in a comment to h3', async () => {
+      mocks.issue = makeIssue({
+        body: 'Issue body',
+        comments: [
+          {
+            id: 'comment-1',
+            issueId: 'issue-1',
+            body: '# Comment Heading',
+            createdAt: '2024-01-01T11:00:00.000Z',
+          },
+        ],
+      })
+      renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText(/Long Heading/i)).toBeInTheDocument()
-        expect(screen.getByText('Content here')).toBeInTheDocument()
+        expect(screen.getByRole('heading', { level: 3, name: 'Comment Heading' })).toBeInTheDocument()
       })
+      const allH1 = screen.queryAllByRole('heading', { level: 1 })
+      expect(allH1).toHaveLength(1)
+      expect(allH1[0]).toHaveTextContent('Test Issue')
     })
   })
 

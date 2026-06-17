@@ -1,0 +1,75 @@
+{
+  "project": "mohist-local",
+  "description": "Build a shared MarkdownReader component and migrate issue description, issue comments, and artifact Markdown surfaces to use it.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Build shared MarkdownReader component",
+      "spec": "specs/markdown-reader/spec.md#REQ-MDR-001",
+      "description": "Add a reusable MarkdownReader component under packages/web/src/shared/ui/markdown-reader/ built on the existing react-markdown + remark-gfm + Tailwind typography stack. Implement the full MarkdownReaderProps contract (content, baseHeadingLevel, mode, collapsedHeight, showToc, showHeadingAnchors, showCopyCode, className), h1-h6 heading remap via react-markdown component overrides clamped to h6, table wrapping in a horizontal-scroll container, code-block overflow with optional copy-code via navigator.clipboard (feature-detected), overflow-wrap:anywhere for links/inline code/long paths, and Reader-owned full/collapsible long-document modes with ResizeObserver-based measurement against collapsedHeight (default 600). Export MarkdownReader and MarkdownReaderProps from the shared UI barrel. MarkdownContent behavior (code/pre overrides, inline code styling) is folded into the Reader's internal renderer, not kept as a separate public export.",
+      "acceptanceCriteria": [
+        "MarkdownReader is importable from the shared UI barrel and renders Markdown content (paragraphs, headings, lists, links, emphasis, inline code, fenced code, blockquotes, rules) as formatted document content.",
+        "baseHeadingLevel shifts rendered heading elements: with baseHeadingLevel={3}, '#'/'##'/'###' render as h3/h4/h5; heading levels clamp at h6 and never exceed it.",
+        "With baseHeadingLevel > 1, an embedded Markdown '# heading' does not render as an h1 element.",
+        "A fenced code block with a very long line scrolls horizontally inside the code block and does not introduce page-level horizontal overflow in the test layout.",
+        "With showCopyCode enabled, a copy affordance renders on fenced code blocks and activating it calls navigator.clipboard.writeText with the block text; with showCopyCode omitted, no copy affordance renders.",
+        "A wide Markdown table scrolls horizontally inside its wrapper and does not expand the page width or introduce page-level horizontal overflow.",
+        "A long bare URL or link and a long inline code path/identifier wrap or break inside their container without producing page-level horizontal overflow.",
+        "In mode='collapsible', content taller than collapsedHeight (default 600) initially renders constrained with an Expand control and gradient overlay; activating Expand reveals full content and exposes a Collapse control; activating Collapse restores the constrained view. In mode='full', no collapse control renders. In mode='collapsible' with content shorter than the threshold, no Expand control renders.",
+        "With showToc enabled, a compact table of contents derived from headings renders; with showHeadingAnchors enabled, headings expose anchor affordances; with both omitted, neither renders.",
+        "Component tests in MarkdownReader.test.tsx cover heading remapping, code overflow, table containment, long link/path wrapping, and full vs collapsible modes.",
+        "Web test suite, lint, and typecheck pass after this task."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/shared/ui/markdown-reader/MarkdownReader.tsx plus building-block helpers (heading remap, table wrapper, copy-code button) and MarkdownReader.test.tsx; shared UI barrel export.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Default baseHeadingLevel=2, default mode='full', default collapsedHeight=600, all show* props default false. Preserve the existing inline-code styling (px-1 py-0.5 bg-gray-100 rounded text-xs font-mono) so REQ-WUI-ISSUE-MARKDOWN-002 visual is unchanged. Fold MarkdownContent's code/pre overrides into the Reader's internal renderer."
+    },
+    {
+      "id": "T-002",
+      "title": "Migrate Issue Detail description and comments to MarkdownReader",
+      "spec": "specs/markdown-reader/spec.md#REQ-MDR-010",
+      "description": "Update packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx to render the issue description and each comment through MarkdownReader instead of the page-local MarkdownContent. Remove descriptionExpanded, descriptionBodyRef, isOverflowing, the scrollHeight > 600 useEffect, the max-h-[600px] clip, the gradient overlay, the Expand/Collapse Button, and the MarkdownContent helper. Render the description with mode='collapsible' collapsedHeight=600 baseHeadingLevel=2 so long-document collapse becomes a Reader-level concern and embedded '#' headings no longer create a page-level h1 landmark. Render each comment with mode='full' baseHeadingLevel=3. Update IssueDetailPage.test.tsx to assert Reader-based Expand/Collapse behavior (appears for long, hidden for short/empty, toggles correctly), to assert embedded '#' renders as h2 not h1, and to remove the scrollHeight-spy-based assertions.",
+      "acceptanceCriteria": [
+        "Issue description renders through MarkdownReader and IssueDetailPage no longer defines or renders a local MarkdownContent.",
+        "IssueDetailPage source contains no descriptionExpanded, descriptionBodyRef, isOverflowing, scrollHeight > 600, max-h-[600px] clip, or gradient overlay; collapse/expand is delegated to MarkdownReader mode='collapsible'.",
+        "An issue description starting with '# Heading' does not render an h1 for that heading; the issue page title remains the only page-level h1 landmark on Issue Detail.",
+        "Each issue comment body renders through MarkdownReader and comment timestamps/delete actions remain available.",
+        "Long description collapses by default with a Reader-level Expand control; activating Expand reveals full content and exposes Collapse; short and empty descriptions render no Expand/Collapse control.",
+        "Updated IssueDetailPage.test.tsx asserts Reader-level collapse behavior and the no-duplicate-h1 behavior, and no longer uses scrollHeight spying.",
+        "Web test suite, lint, and typecheck pass after this task."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Updated packages/web/src/pages/issue-detail/ui/IssueDetailPage.tsx and packages/web/tests/IssueDetailPage.test.tsx.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Description wiring: <MarkdownReader content={issue.body} mode='collapsible' collapsedHeight={600} baseHeadingLevel={2} />. Comment wiring: <MarkdownReader content={comment.body} baseHeadingLevel={3} />. Satisfies the web-ui delta requirements REQ-WUI-ISSUE-MARKDOWN-001/002/003."
+    },
+    {
+      "id": "T-003",
+      "title": "Render Markdown artifacts through MarkdownReader",
+      "spec": "specs/markdown-reader/spec.md#REQ-MDR-011",
+      "description": "Update packages/web/src/widgets/issue-workflow/ui/ArtifactContentViewer.tsx so that when data.kind === 'text' and data.contentType === 'text/markdown', the recorded content renders through MarkdownReader (baseHeadingLevel=2) instead of the plain <pre> block. Non-Markdown text content keeps the existing <pre whitespace-pre-wrap break-words> rendering unchanged. Update WorkflowArtifacts.test.tsx and/or WorkflowTaskArtifact.test.tsx so that opening a Markdown artifact (e.g. proposal.md, review.md, or a directory entry with contentType text/markdown) asserts rendered Markdown (such as a heading element) rather than a <pre> block, and so a non-Markdown text artifact still renders inside <pre>.",
+      "acceptanceCriteria": [
+        "ArtifactContentViewer renders Markdown content (contentType === 'text/markdown') through MarkdownReader with baseHeadingLevel=2.",
+        "Non-Markdown text content still renders through the existing <pre whitespace-pre-wrap break-words> block unchanged.",
+        "Opening a Markdown artifact (e.g. review.md with content '# Title') shows rendered formatted content (e.g. an h2 from the remapped '# Title') rather than a raw <pre> block.",
+        "Directory-artifact Markdown entries (e.g. workflow.md with contentType text/markdown) also render through MarkdownReader when selected.",
+        "Updated artifact tests assert Markdown rendering via MarkdownReader for .md artifacts and plain <pre> rendering for non-Markdown text.",
+        "Web test suite, lint, and typecheck pass after this task."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Updated packages/web/src/widgets/issue-workflow/ui/ArtifactContentViewer.tsx and the relevant artifact tests (WorkflowArtifacts.test.tsx / WorkflowTaskArtifact.test.tsx).",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Only branch on data.kind === 'text' && data.contentType === 'text/markdown'. Do not change the artifact API, content model, or directory listing behavior. ReviewReportModal and session-transcript Markdown surfaces are explicitly out of scope (follow-up)."
+    }
+  ]
+}
