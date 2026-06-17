@@ -36,9 +36,10 @@ public static class IssueVariableBuilder
         VariableBundle? projectBundle,
         string workflowRunId,
         MohistIssue issue,
-        WorkflowProjectContext project)
+        WorkflowProjectContext project,
+        WorkspaceIdentity workspace)
     {
-        var builtIn = BuildBuiltInContext(workflowRunId, issue, project);
+        var builtIn = BuildBuiltInContext(workflowRunId, issue, project, workspace);
         return VariableBundle.MergeAll(globalBundle, projectBundle, builtIn);
     }
 
@@ -56,7 +57,7 @@ public static class IssueVariableBuilder
                 ["agent"] = JsonSerializer.SerializeToElement(agentConfig, WorkflowVariableJson.Options),
             });
 
-        return Build(userDefaults, VariableBundle.Empty, workflowRunId, issue, project);
+        return Build(userDefaults, VariableBundle.Empty, workflowRunId, issue, project, workspace);
     }
 
     public static Dictionary<string, JsonElement?> BuildRootVariables(
@@ -91,7 +92,8 @@ public static class IssueVariableBuilder
     private static VariableBundle BuildBuiltInContext(
         string workflowRunId,
         MohistIssue issue,
-        WorkflowProjectContext project)
+        WorkflowProjectContext project,
+        WorkspaceIdentity workspace)
     {
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
@@ -118,6 +120,7 @@ public static class IssueVariableBuilder
                 new
                 {
                     name = project.RepositoryName,
+                    gitUrl = project.RepositoryGitUrl,
                     baseBranch = project.RepositoryBaseBranch,
                 },
                 WorkflowVariableJson.Options),
@@ -126,6 +129,14 @@ public static class IssueVariableBuilder
                 WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(
                 MohistDefaultWorkflowProjection.ChangeDir(issue.Number),
+                WorkflowVariableJson.Options),
+            ["workspace"] = JsonSerializer.SerializeToElement(
+                new
+                {
+                    path = workspace.Path,
+                    branch = workspace.Branch,
+                    changeDir = workspace.ChangeDir,
+                },
                 WorkflowVariableJson.Options),
         };
 

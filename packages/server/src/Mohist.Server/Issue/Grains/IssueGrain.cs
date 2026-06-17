@@ -177,7 +177,8 @@ public class IssueGrain : Grain, IIssueGrain
             projectBundle,
             wrId,
             issue,
-            projectContext);
+            projectContext,
+            workspace);
         await _issueProfileManager.SetVariablesAsync(issue.Id, issueBundle);
 
         foreach (var (key, body) in mergedPrompts)
