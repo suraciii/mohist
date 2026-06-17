@@ -20,7 +20,11 @@ public class WorkflowQuerier
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
+        Converters =
+        {
+            new UnknownFailureReasonJsonConverter(),
+            new JsonStringEnumConverter()
+        }
     };
 
     private static readonly JsonSerializerOptions StorageJsonOptions = new()
@@ -176,4 +180,32 @@ public class WorkflowQuerier
     }
 
     private sealed record VariablesDto(string Json, Dictionary<string, Dictionary<string, string>>? StageVariables);
+
+    private sealed class UnknownFailureReasonJsonConverter : JsonConverter<FailureReason>
+    {
+        public override FailureReason Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.String)
+            {
+                var value = reader.GetString();
+                return Enum.TryParse<FailureReason>(value, ignoreCase: true, out var reason)
+                    ? reason
+                    : FailureReason.TaskFailed;
+            }
+
+            if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var numeric))
+            {
+                return Enum.IsDefined(typeof(FailureReason), numeric)
+                    ? (FailureReason)numeric
+                    : FailureReason.TaskFailed;
+            }
+
+            return FailureReason.TaskFailed;
+        }
+
+        public override void Write(Utf8JsonWriter writer, FailureReason value, JsonSerializerOptions options)
+        {
+            writer.WriteStringValue(value.ToString());
+        }
+    }
 }

@@ -83,13 +83,14 @@ public class WorkflowProfileManager
 
     public async Task<VariableBundle> LoadVariablesAsync(string runId)
     {
-        // The issue workflow profile's Variables is the T1-merged snapshot
-        // (global + project, project wins, plus built-in context). Runtime
-        // resolution reads that snapshot directly and does not re-merge the
-        // project layer; that responsibility lives only in IssueGrain.StartWorkflowAsync.
+        // Runtime variables are resolved from current project defaults plus
+        // issue-scoped overrides. This keeps project-level model settings live
+        // for already-created issues while preserving issue page overrides.
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
-        return await LoadIssueLayerAsync(db, context);
+        var project = await LoadProjectLayerAsync(db, context);
+        var issue = await LoadIssueLayerAsync(db, context);
+        return VariableBundle.Patch(project, issue);
     }
 
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)
@@ -178,6 +179,16 @@ public class WorkflowProfileManager
     {
         var issueProfile = await LoadIssueProfileAsync(db, context);
         return VariableBundle.FromJson(issueProfile?.Variables);
+    }
+
+    private static async Task<VariableBundle> LoadProjectLayerAsync(MohistDbContext db, RunContext context)
+    {
+        if (string.IsNullOrWhiteSpace(context.ProjectId))
+            return VariableBundle.Empty;
+
+        var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
+        return VariableBundle.FromJson(projectProfile?.Variables);
     }
 
     private static async Task<IssueWorkflowProfile?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)

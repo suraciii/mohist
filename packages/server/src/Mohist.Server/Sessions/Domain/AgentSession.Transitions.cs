@@ -22,10 +22,7 @@ public static partial class AgentSessionExtensions
             _ = processPid;
             var oldModel = session.Settings.Model;
             var existingAgentSessionId = session.Status.AgentRuntimeSessionId;
-            if (!string.IsNullOrWhiteSpace(existingAgentSessionId)
-                && !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal))
-                throw new InvalidOperationException(
-                    $"Agent session {session.Id} is already attached to physical ACP session {existingAgentSessionId}; cannot attach {agentSessionId}.");
+            var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal);
 
             session.Runtime = session.Runtime with
             {
@@ -34,12 +31,12 @@ public static partial class AgentSessionExtensions
             session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
             session.Status = session.Status with
             {
-                AgentRuntimeSessionId = existingAgentSessionId ?? agentSessionId,
-                BoundAt = session.Status.BoundAt ?? now,
+                AgentRuntimeSessionId = isNewRuntimeBinding ? agentSessionId : existingAgentSessionId,
+                BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
             };
             var events = new List<AgentSessionEvent>();
-            if (string.IsNullOrWhiteSpace(existingAgentSessionId))
+            if (isNewRuntimeBinding)
                 events.Add(new AgentSessionRuntimeBound(agentSessionId));
             if (!string.Equals(oldModel, session.Settings.Model, StringComparison.Ordinal))
                 events.Add(new AgentSessionModelChanged(session.Settings.Model));

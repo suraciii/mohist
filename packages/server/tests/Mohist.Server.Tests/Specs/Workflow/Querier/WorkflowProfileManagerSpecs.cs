@@ -144,7 +144,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_ReturnsEmpty_WhenOnlyRunExists()
+    public async Task LoadVariables_ReturnsEmpty_WhenNoProfileVariablesExist()
     {
         var runId = "wr_vars01";
         await SeedRunOnlyAsync("proj5", "issue_5", runId);
@@ -158,13 +158,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_ReturnsIssueLayerDirectly_DoesNotReMergeProject()
+    public async Task LoadVariables_MergesProjectDefaultsWithIssueOverrides()
     {
-        // T1 has already snapshotted project+global into the issue layer
-        // (IssueGrain.StartWorkflowAsync). Runtime must read that snapshot
-        // directly and MUST NOT re-merge the project layer — the project
-        // bundle here is intentionally divergent from the issue bundle, and
-        // the result must reflect the issue values verbatim.
         var runId = "wr_direct01";
         var proj = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -179,9 +174,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        // Project-only key `a` is gone — runtime does not see the project layer.
-        Assert.False(doc.RootElement.TryGetProperty("a", out _));
-        // Issue values come through verbatim.
+        Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());
         Assert.Equal("issue-b", doc.RootElement.GetProperty("b").GetString());
         Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());
         Assert.Equal("issue-d", doc.RootElement.GetProperty("d").GetString());
@@ -190,23 +183,21 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_SnapshotIsStable_ProjectEditsDoNotAffectExistingIssue()
+    public async Task LoadVariables_ProjectEditsAffectExistingIssueWhenNotOverridden()
     {
-        // Snapshot semantics: editing the project layer after an issue
-        // already has its T1-merged snapshot must not change that issue's
-        // effective variables. The runtime reads the issue layer directly.
+        // Project-level workflow variables are live defaults. Existing issues
+        // inherit updated project model settings unless the issue profile
+        // explicitly overrides the same leaf.
         var runId = "wr_snapshot01";
         var proj = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             { agent = new { model = "minimax-coding-plan/MiniMax-M3" } })));
         var issue = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
-            { agent = new { model = "kimi-for-coding/k2p6" } })));
+            { issueContext = true })));
 
         await SeedAllLayersAsync("proj_snap", "issue_snap", runId, proj, issue);
 
-        // Mutate the project layer; the runtime result must still reflect
-        // the issue snapshot, not the new project value.
         await using (var db = new MohistDbContext(_options))
         {
             var row = db.ProjectWorkflowProfiles.Single(x => x.ProjectId == "proj_snap");
@@ -221,8 +212,71 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        Assert.Equal("kimi-for-coding/k2p6",
+        Assert.True(doc.RootElement.GetProperty("issueContext").GetBoolean());
+        Assert.Equal("anthropic/claude-sonnet-4-6",
             doc.RootElement.GetProperty("agent").GetProperty("model").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadVariables_IssueModelOverrideWinsOverProjectModel()
+    {
+        var runId = "wr_override01";
+        var proj = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            { agent = new { type = "opencode", model = "project/default" } })));
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            { agent = new { model = "issue/override" } })));
+
+        await SeedAllLayersAsync("proj_override", "issue_override", runId, proj, issue);
+
+        var result = await _manager.LoadVariablesAsync(runId);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("issue/override", agent.GetProperty("model").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadVariables_ProjectStageModelAppliesWhenIssueOnlyHasContext()
+    {
+        var runId = "wr_project_stage01";
+        var project = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                agent = new { type = "opencode", model = "project/default" }
+            })),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["check"] = new(JsonSerializer.Deserialize<JsonElement>(
+                    JsonSerializer.Serialize(new
+                    {
+                        agent = new { type = "opencode", model = "openai/gpt-5.5" }
+                    })))
+            });
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                issue = new { number = 122 }
+            })));
+
+        await SeedAllLayersAsync("proj_project_stage", "issue_project_stage", runId, project, issue);
+
+        var result = await _manager.LoadVariablesAsync(runId);
+
+        Assert.NotNull(result.Stages);
+        Assert.True(result.Stages!.TryGetValue("check", out var checkStage));
+        Assert.NotNull(checkStage.Vars);
+        using var doc = JsonDocument.Parse(checkStage.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

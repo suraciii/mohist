@@ -1,10 +1,14 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
+using Microsoft.EntityFrameworkCore;
 
 namespace Mohist.Server.Tests.Specs.Workflow.Grain;
 
@@ -104,5 +108,65 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("Issue", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("Worktree", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task WorkflowStatusToleratesUnknownLegacyFailureReason()
+    {
+        var workflowId = $"wf-{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage());
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        await using (var db = new MohistDbContext(options))
+        {
+            db.WorkflowRuns.Add(new WorkflowRunRow
+            {
+                WorkflowRunId = workflowId,
+                State = JSON.Serialize(new
+                {
+                    Id = workflowId,
+                    Metadata = new { CreatedAt = DateTimeOffset.UtcNow },
+                    Status = "Failed",
+                    CurrentStageId = "build",
+                    Stages = new[]
+                    {
+                        new
+                        {
+                            Id = "build",
+                            Attempt = 1,
+                            RequiresApproval = false,
+                            Status = "Failed",
+                            Initialized = true,
+                            Tasks = Array.Empty<object>(),
+                            Checks = Array.Empty<object>(),
+                            Failure = new
+                            {
+                                Reason = "RemovedReason",
+                                Stage = "build",
+                                Message = "legacy failure"
+                            }
+                        }
+                    },
+                    Failure = new
+                    {
+                        Reason = "RemovedReason",
+                        Stage = "build",
+                        Message = "legacy failure"
+                    }
+                })
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var status = await GetQuerier().GetStatusAsync(workflowId);
+
+        Assert.NotNull(status);
+        Assert.Equal("failed", status.Status);
+        Assert.Equal("legacy failure", status.Failure?.Message);
     }
 }

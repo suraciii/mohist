@@ -127,14 +127,21 @@ public class AgentSessionDomainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public void AttachPhysicalSession_DifferentPhysicalSession_Throws()
+    public void AttachPhysicalSession_DifferentPhysicalSession_RebindsRuntimeSession()
     {
         var session = CreateSession();
-        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
+        var firstBoundAt = new DateTime(2026, 6, 17, 1, 0, 0, DateTimeKind.Utc);
+        var reboundAt = firstBoundAt.AddMinutes(1);
+        session.AttachPhysicalSession("runtime-session-1", "model-a", "/work", null, null, firstBoundAt);
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            session.AttachPhysicalSession("runtime-session-2", "model-a", "/work", null, null, DateTime.UtcNow));
-        Assert.Contains("already attached", ex.Message);
+        var events = session.AttachPhysicalSession("runtime-session-2", "model-b", "/work", null, null, reboundAt);
+
+        Assert.Equal("runtime-session-2", session.Status.AgentRuntimeSessionId);
+        Assert.Equal(reboundAt, session.Status.BoundAt);
+        Assert.Equal("model-b", session.Settings.Model);
+        Assert.Collection(events,
+            e => Assert.Equal("runtime-session-2", Assert.IsType<AgentSessionRuntimeBound>(e.Value).AgentRuntimeSessionId),
+            e => Assert.Equal("model-b", Assert.IsType<AgentSessionModelChanged>(e.Value).Model));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
