@@ -79,14 +79,6 @@ async function findDiagnosticInLogFile(file: CandidateLogFile, sessionId: string
     return parseProviderErrorLine(line, sessionId, file.path, index + 1)
   }
 
-  const runId = findRunIdForSession(lines, sessionId)
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index]
-    if (!isProviderErrorLine(line)) continue
-    if (runId && !line.includes(`run=${runId}`)) continue
-    return parseProviderErrorLine(line, sessionId, file.path, index + 1)
-  }
-
   return undefined
 }
 
@@ -126,14 +118,6 @@ function isProviderErrorLine(line: string): boolean {
   return false
 }
 
-function findRunIdForSession(lines: string[], sessionId: string): string | undefined {
-  for (const line of lines) {
-    if (line.includes("message=created") && line.includes(`id=${sessionId}`)) {
-      return field(line, "run")
-    }
-  }
-  return undefined
-}
 
 function parseProviderErrorLine(line: string, sessionId: string, logFile: string, logLine: number): OpencodeProviderErrorDiagnostic {
   const providerId = field(line, "providerID")

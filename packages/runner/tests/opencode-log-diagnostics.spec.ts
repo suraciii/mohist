@@ -32,28 +32,21 @@ describe("opencode log diagnostics", () => {
     expect(diagnostic?.retryable).toBe(true)
   })
 
-  it("finds provider errors logged under a different internal session (logfmt format)", async () => {
+  it("does not attribute errors from other sessions sharing the same run= id", async () => {
     tempDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
     process.env.MOHIST_OPENCODE_LOG_DIR = tempDir
     const trackedSession = "ses_13a627d5fffesOoW3p6ceeWkpu"
-    const internalSession = "ses_13a61b7f2ffeqyUCDQE7AUFtS7"
+    const otherSession = "ses_13a61b7f2ffeqyUCDQE7AUFtS7"
     await writeFile(join(tempDir, "opencode.log"), [
       `timestamp=2026-06-14T10:11:34.688Z level=INFO run=cd59405c message=created id=${trackedSession} slug=witty-engine version=1.17.4 projectID=abc directory=/tmp agent=build model.id=k2p6 model.providerID=kimi-for-coding`,
-      `timestamp=2026-06-14T10:12:25.229Z level=INFO run=cd59405c message=created id=${internalSession} slug=witty-comet version=1.17.4 projectID=abc directory=/tmp agent=build model.id=k2p6 model.providerID=kimi-for-coding`,
-      `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=cd59405c message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=${internalSession} small=false agent=build mode=primary error.error="AI_APICallError: You've reached your usage limit for this period. Your quota will be refreshed in the next period. Upgrade to get more: https://www.kimi.com/code/console?from=limit-upgrade"`,
+      `timestamp=2026-06-14T10:12:25.229Z level=INFO run=cd59405c message=created id=${otherSession} slug=witty-comet version=1.17.4 projectID=abc directory=/tmp agent=build model.id=k2p6 model.providerID=kimi-for-coding`,
+      `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=cd59405c message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=${otherSession} small=false agent=build mode=primary error.error="AI_APICallError: You've reached your usage limit for this period."`,
       "",
     ].join("\n"))
 
     const diagnostic = await findOpencodeProviderErrorDiagnostic(trackedSession)
 
-    expect(diagnostic).toBeDefined()
-    expect(diagnostic?.providerId).toBe("kimi-for-coding")
-    expect(diagnostic?.modelId).toBe("k2p7")
-    expect(diagnostic?.errorName).toBe("AI_APICallError")
-    expect(diagnostic?.message).toContain("usage limit")
-    expect(diagnostic?.summary).toContain("kimi-for-coding/k2p7")
-    expect(diagnostic?.summary).toContain("AI_APICallError")
-    expect(diagnostic?.summary).toContain("usage limit")
+    expect(diagnostic).toBeUndefined()
   })
 
   it("finds provider errors by exact session id (logfmt format)", async () => {
