@@ -760,6 +760,8 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
 
   if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.key(context.workflowRunId, sessionName)
+    const agentConfig = resolveAgentConfig(context.with)
+    const requestedModel = resolveRequestedModel(context, agentConfig).model
     const existing = await context.serverConnection.getWorkflowAgentSession(projectId, context.workflowRunId, sessionName, context.signal)
     const session = existing ?? await context.serverConnection.openWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
       workId: context.workId,
@@ -771,14 +773,19 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
 
     if (session.acpSessionId) {
       const cached = manager.get(key)
-      if (cached?.sessionId === session.acpSessionId) return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
-      const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
-      if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
+      const sessionModelMatches = requestedModelMatchesSession(requestedModel, session.model)
+      if (cached?.sessionId === session.acpSessionId && cachedModelAllowsReuse(requestedModel, cached.model) && sessionModelMatches) {
+        return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+      }
+      const result = sessionModelMatches
+        ? await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+        : await runNewWorkflowAgentSession(context, prompt)
+      if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir, model: requestedModel })
       return result
     }
 
     const result = await runNewWorkflowAgentSession(context, prompt)
-    if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
+    if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir, model: requestedModel })
     return result
   }
 
@@ -793,6 +800,20 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
   }
 
   return runEphemeralWorkflowAgentSession(context, prompt)
+}
+
+function requestedModelMatchesSession(requestedModel: string | undefined, sessionModel: string | null | undefined) {
+  const requested = requestedModel?.trim()
+  if (!requested) return true
+  return sessionModel?.trim() === requested
+}
+
+function cachedModelAllowsReuse(requestedModel: string | undefined, cachedModel: string | null | undefined) {
+  const requested = requestedModel?.trim()
+  if (!requested) return true
+  const cached = cachedModel?.trim()
+  if (!cached) return true
+  return cached === requested
 }
 
 async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {

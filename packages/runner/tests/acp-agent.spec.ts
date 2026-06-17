@@ -304,7 +304,7 @@ describe("mohist/acp-agent", () => {
   })
 
   it("ExistingSharedSessionWithRequestedModel_SetsModelBeforePromptWithoutResume", async () => {
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1", model: "openai/gpt-5.5" } })
 
     const result = await acpAgentAction(contextWithOverrides({
       prompt: "reuse shared session",
@@ -321,6 +321,37 @@ describe("mohist/acp-agent", () => {
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
+  })
+
+  it("ExistingSharedSessionWithDifferentRequestedModel_StartsNewSessionInsteadOfResumingOldModel", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", {
+      cachedModel: "kimi-for-coding/k2p6",
+      newSessionId: "replacement-session-1",
+      sessionRecord: { acpSessionId: "shared-session-1", model: "kimi-for-coding/k2p6" },
+    })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "switch shared session model",
+      session: "shared-session",
+      agent: { model: "openai/gpt-5.5" },
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
+    expect(shared.serverConnection.calls).toContainEqual(expect.objectContaining({
+      event: "attachWorkflowAgentSession",
+      sessionName: "shared-session",
+      body: expect.objectContaining({ agentSessionId: "replacement-session-1", model: "openai/gpt-5.5" }),
+    }))
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.sessionId === "replacement-session-1" && entry.value === "openai/gpt-5.5")
+    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "replacement-session-1")
+    expect(setModelIndex).toBeGreaterThanOrEqual(0)
+    expect(setModelIndex).toBeLessThan(promptIndex)
   })
 
   it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
@@ -1274,8 +1305,15 @@ function thoughtUpdate(sessionId: string, text: string) {
   return { sessionId, update: { sessionUpdate: "agent_thought_chunk" as const, content: { type: "text" as const, text } } }
 }
 
-function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-failed", options?: { sessionRecord?: { acpSessionId: string } }) {
-  const agent = new FakeSharedAcpAgent(scenario)
+function createSharedSessionFixture(
+  scenario: "thought-liveness" | "probe-send-failed",
+  options?: {
+    cachedModel?: string
+    newSessionId?: string
+    sessionRecord?: { acpSessionId: string; model?: string | null }
+  },
+) {
+  const agent = new FakeSharedAcpAgent(scenario, { newSessionId: options?.newSessionId })
   const [clientStream, agentStream] = linkedStreams()
   const sessionUpdateHandlers = new Map<string, (notification: SessionNotification) => Promise<void>>()
   const permissionHandlers = new Map<string, (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>>()
@@ -1290,7 +1328,7 @@ function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-f
 
   const serverConnection = new FakeServerConnection()
   const acpSessionManager = new AcpSessionManager()
-  acpSessionManager.set(acpSessionManager.key("workflow-1", "shared-session"), { sessionId: "shared-session-1", workDir: "D:/fake/work" })
+  acpSessionManager.set(acpSessionManager.key("workflow-1", "shared-session"), { sessionId: "shared-session-1", workDir: "D:/fake/work", model: options?.cachedModel })
   serverConnection.nextEnsureWorkflowAgentSession = options?.sessionRecord ? { ...options.sessionRecord, workDir: "D:/fake/work" } : { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
   const connection = clientConnection
   if (scenario === "probe-send-failed") {
@@ -1330,7 +1368,7 @@ function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-f
 
 class FakeServerConnection {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string }> = []
-  nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+  nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string; model?: string | null } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
 
   constructor(private readonly timeline?: Array<{ event: string }>) {}
 
@@ -1368,7 +1406,10 @@ class FakeSharedAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
 
-  constructor(private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction") {}
+  constructor(
+    private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
+    private readonly options: { newSessionId?: string } = {},
+  ) {}
 
   bind(connection: AgentSideConnection) {
     this.connection = connection
@@ -1382,7 +1423,7 @@ class FakeSharedAcpAgent {
       },
       async newSession(params) {
         self.calls.push({ event: "newSession", _meta: params._meta })
-        return { sessionId: "shared-session-1" }
+        return { sessionId: self.options.newSessionId ?? "shared-session-1" }
       },
         async resumeSession(params) {
           self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd, _meta: params._meta })
@@ -1396,7 +1437,7 @@ class FakeSharedAcpAgent {
         return { configOptions: [] }
       },
       async prompt(params) {
-        self.calls.push({ event: "prompt", text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })
+        self.calls.push({ event: "prompt", sessionId: params.sessionId, text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })
         if (self.scenario === "thought-liveness") {
           for (let index = 0; index < 5; index += 1) {
             await delay(20)
