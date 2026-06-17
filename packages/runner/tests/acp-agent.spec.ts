@@ -1050,6 +1050,178 @@ describe("mohist/acp-agent compaction config helpers", () => {
   })
 })
 
+describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
+  it("EphemeralSessionCancelHangs_CleanupForcesProcessKill_AndReturnsWithinBound", async () => {
+    const agent = new FakeAcpAgent("cancel-hangs")
+    const tracked = createTrackedFakeProcess(agent, { hangCancelWrites: true })
+    setAcpProcessFactoryForTest(() => tracked)
+    const serverConnection = new FakeServerConnection()
+
+    const startedAt = Date.now()
+    const result = await acpAgentAction({
+      ...baseContext({ prompt: "hanging task", timeout: 100 }),
+      serverConnection: serverConnection as unknown as ServerConnection,
+    })
+    const elapsed = Date.now() - startedAt
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Timed out")
+    expect(tracked.cleanupCount()).toBeGreaterThanOrEqual(1)
+    expect(elapsed).toBeGreaterThanOrEqual(4_500)
+    expect(elapsed).toBeLessThan(10_000)
+  }, 15_000)
+
+  it("EphemeralSessionCancelResolvesPromptly_NoForceCleanupFromTimeoutRace", async () => {
+    const agent = new FakeAcpAgent("cancel-hangs")
+    agent.cancelHangs = false
+    const tracked = createTrackedFakeProcess(agent)
+    setAcpProcessFactoryForTest(() => tracked)
+    const serverConnection = new FakeServerConnection()
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 30)
+
+    const cleanupBefore = tracked.cleanupCount()
+    const startedAt = Date.now()
+    const result = await acpAgentAction({
+      ...baseContext({ prompt: "abort task", timeout: 5_000 }, controller.signal),
+      serverConnection: serverConnection as unknown as ServerConnection,
+    })
+    const elapsed = Date.now() - startedAt
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toMatch(/stopped by user/i)
+    expect(agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
+    expect(elapsed).toBeLessThan(2_000)
+    const extraCleanups = tracked.cleanupCount() - cleanupBefore
+    expect(extraCleanups).toBeLessThanOrEqual(1)
+  })
+
+  it("SharedSessionCancelHangs_NoProcessIsKilled", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
+    shared.agent.cancelHangs = true
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "long shared task",
+      session: "shared-session",
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 100,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Timed out")
+    expect(shared.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
+  })
+})
+
+describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
+  it("PromptTimesOutWithProviderErrorInLog_ErrorMessageContainsDiagnostic_AndFailureCategoryIsPromptTimeout", async () => {
+    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
+    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
+    try {
+      await writeFile(join(logDir, "2026-06-03T164901.log"), [
+        'ERROR 2026-06-03T16:49:06 service=llm providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=fake-session-1 small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","statusCode":2056,"responseBody":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"token_plan_limit_error\\",\\"message\\":\\"Token Plan usage limit reached\\"}}","isRetryable":true}} stream error',
+        "",
+      ].join("\n"))
+      const fixture = createFixture("cancel-hangs")
+      setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
+
+      const result = await acpAgentAction(fixture.context({
+        prompt: "hanging prompt",
+        timeout: 100,
+        livenessQuietThresholdMs: 5_000,
+        probeTimeoutMs: 5_000,
+      }))
+
+      expect(result.status).toBe("failure")
+      expect(result.message ?? "").toContain("Timed out after")
+      expect(result.message ?? "").toContain("Opencode provider error: 2056 token_plan_limit_error on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached")
+
+      const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
+      const providerError = output.providerError as Record<string, unknown> | undefined
+      expect(providerError?.statusCode).toBe(2056)
+      expect(providerError?.errorType).toBe("token_plan_limit_error")
+      expect(providerError?.message).toContain("Token Plan usage limit reached")
+
+      const failed = fixture.serverConnection.calls
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+        .map((entry) => entry.payload as Record<string, unknown>)
+        .find((payload) => payload.status === "failed")
+      expect(failed).toBeTruthy()
+      expect(failed?.failureReason).toBe("prompt_timeout")
+      expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(2056)
+
+      const terminal = fixture.serverConnection.calls
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
+        .map((entry) => entry.payload as Record<string, unknown>)
+        .at(-1)
+      expect(terminal?.failureCategory).toBe("prompt_timeout")
+      expect(String(terminal?.failureReason)).toContain("Opencode provider error: 2056 token_plan_limit_error")
+    } finally {
+      await rm(logDir, { recursive: true, force: true })
+    }
+  })
+
+  it("PromptTimesOutWithEmptyLogDir_ErrorContainsNoDiagnostic_AndFailureCategoryStillPromptTimeout", async () => {
+    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-empty-"))
+    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
+    try {
+      const fixture = createFixture("cancel-hangs")
+      setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
+
+      const result = await acpAgentAction(fixture.context({
+        prompt: "hanging prompt no log",
+        timeout: 100,
+        livenessQuietThresholdMs: 5_000,
+        probeTimeoutMs: 5_000,
+      }))
+
+      expect(result.status).toBe("failure")
+      expect(result.message ?? "").toContain("Timed out after")
+      expect(result.message ?? "").not.toContain("Opencode provider error")
+
+      const output = JSON.parse(result.output ?? "{}") as Record<string, unknown>
+      expect(output.providerError).toBeUndefined()
+
+      const failed = fixture.serverConnection.calls
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+        .map((entry) => entry.payload as Record<string, unknown>)
+        .find((payload) => payload.status === "failed")
+      expect(failed).toBeTruthy()
+      expect(failed?.failureReason).toBe("prompt_timeout")
+      expect(failed?.providerError).toBeUndefined()
+
+      const terminal = fixture.serverConnection.calls
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
+        .map((entry) => entry.payload as Record<string, unknown>)
+        .at(-1)
+      expect(terminal?.failureCategory).toBe("prompt_timeout")
+    } finally {
+      await rm(logDir, { recursive: true, force: true })
+    }
+  })
+
+  it("PromptTimesOut_EmitsLivenessFailedEventWithPromptTimeoutFailureReason", async () => {
+    const fixture = createFixture("cancel-hangs")
+    setAcpProcessFactoryForTest(() => createFakeProcess(fixture.agent))
+
+    await acpAgentAction(fixture.context({
+      prompt: "hanging prompt liveness event",
+      timeout: 100,
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+    }))
+
+    const livenessEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.liveness")
+      .map((entry) => entry.payload as Record<string, unknown>)
+    const failed = livenessEvents.find((payload) => payload.status === "failed")
+    expect(failed).toBeTruthy()
+    expect(failed?.failureReason).toBe("prompt_timeout")
+    expect(failed?.acpSessionId).toBe("fake-session-1")
+  })
+})
+
 function createFixture(scenario: Scenario) {
   const timeline: Array<{ event: string }> = []
   const agent = new FakeAcpAgent(scenario, timeline)
@@ -1122,13 +1294,14 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction" | "expectation-repair" | "expectation-repair-usage-only"
+type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction" | "expectation-repair" | "expectation-repair-usage-only" | "cancel-hangs"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
   private promptCount = 0
   private initialPromptResolve: ((value: { stopReason: "end_turn" }) => void) | null = null
+  cancelHangs = false
 
   constructor(private readonly scenario: Scenario, private readonly timeline?: Array<{ event: string }>) {}
 
@@ -1150,6 +1323,11 @@ class FakeAcpAgent {
           return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1" } }
         }
         return { sessionId: "fake-session-1" }
+      },
+      async resumeSession(params) {
+        self.timeline?.push({ event: "resumeSession" })
+        self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd })
+        return { sessionId: params.sessionId }
       },
       async setSessionConfigOption(params) {
         self.timeline?.push({ event: "setSessionConfigOption" })
@@ -1177,6 +1355,7 @@ class FakeAcpAgent {
         if (self.scenario === "probe-timeout") return await self.runProbeTimeoutPrompt()
         if (self.scenario === "abort-during-probe") return await self.runAbortDuringProbePrompt()
         if (self.scenario === "abort") return await new Promise(() => {})
+        if (self.scenario === "cancel-hangs") return await new Promise(() => {})
         if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
         if (self.scenario === "expectation-repair") return await self.runExpectationRepairPrompt(params.sessionId, text)
         if (self.scenario === "expectation-repair-usage-only") return await self.runExpectationRepairUsageOnlyPrompt(params.sessionId, text)
@@ -1204,6 +1383,9 @@ class FakeAcpAgent {
       },
       async cancel(params) {
         self.calls.push({ event: "cancel", ...params })
+        if (self.scenario === "cancel-hangs" || self.cancelHangs) {
+          await new Promise(() => {})
+        }
       },
       async authenticate() { return {} },
     }
@@ -1392,8 +1574,8 @@ class FakeServerConnection {
     this.calls.push({ event: "attachWorkflowAgentSession", sessionName, body })
   }
 
-  async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events: Array<{ type: string; payload: unknown }> }) {
-    for (const event of payload.events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
+  async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { runtimeEvents: Array<{ type: string; payload: unknown }> }) {
+    for (const event of payload.runtimeEvents) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
   }
 
   async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
@@ -1454,7 +1636,12 @@ class FakeSharedAcpAgent {
       async closeSession(params) {
         self.calls.push({ event: "closeSession", sessionId: params.sessionId })
       },
-      async cancel() {},
+      async cancel() {
+        self.calls.push({ event: "cancel" })
+        if (self.cancelHangs) {
+          await new Promise(() => {})
+        }
+      },
       async authenticate() { return {} },
     }
   }
@@ -1464,8 +1651,24 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function createFakeProcess(agent: FakeAcpAgent): AcpProcessHandle {
-  const [clientStream, agentStream] = linkedStreams()
+function createTrackedFakeProcess(agent: FakeAcpAgent, options: { hangCancelWrites?: boolean } = {}): AcpProcessHandle & { cleanupCount: () => number } {
+  const base = createFakeProcess(agent, options)
+  let cleanupCalls = 0
+  return {
+    ...base,
+    cleanupCount: () => cleanupCalls,
+    async cleanup() {
+      cleanupCalls += 1
+      await base.cleanup()
+    },
+  }
+}
+
+function createFakeProcess(agent: FakeAcpAgent, options: { hangCancelWrites?: boolean } = {}): AcpProcessHandle {
+  const [baseClientStream, agentStream] = linkedStreams()
+  const clientStream: Stream = options.hangCancelWrites
+    ? { writable: createCancelHangingWritable(baseClientStream.writable), readable: baseClientStream.readable }
+    : baseClientStream
   const connection = new AgentSideConnection(() => agent.handler(), agentStream)
   agent.bind(connection)
   return {
@@ -1478,6 +1681,50 @@ function createFakeProcess(agent: FakeAcpAgent): AcpProcessHandle {
     async cleanup() {
       await Promise.allSettled([clientStream.readable.cancel(), clientStream.writable.abort()])
     },
+  }
+}
+
+function createCancelHangingWritable(inner: WritableStream<any>): WritableStream<any> {
+  let pendingWriteReject: ((reason: unknown) => void) | undefined
+  const stream = new WritableStream<any>({
+    async write(chunk) {
+      const text = describeMessage(chunk)
+      if (text.includes("\"session/cancel\"")) {
+        await new Promise<void>((_, reject) => { pendingWriteReject = reject })
+        return
+      }
+      const writer = inner.getWriter()
+      try {
+        await writer.write(chunk)
+      } finally {
+        writer.releaseLock()
+      }
+    },
+    async abort(reason) {
+      pendingWriteReject?.(reason)
+      pendingWriteReject = undefined
+      try {
+        await inner.abort(reason)
+      } catch {}
+    },
+    async close() {
+      pendingWriteReject?.(new Error("stream closed"))
+      pendingWriteReject = undefined
+      try {
+        await inner.close()
+      } catch {}
+    },
+  })
+  return stream
+}
+
+function describeMessage(message: unknown): string {
+  if (typeof message === "string") return message
+  if (message instanceof Uint8Array) return new TextDecoder().decode(message)
+  try {
+    return JSON.stringify(message)
+  } catch {
+    return String(message)
   }
 }
 
