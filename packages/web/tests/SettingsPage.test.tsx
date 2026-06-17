@@ -180,14 +180,16 @@ describe('SettingsPage', () => {
       expect(screen.getAllByRole('heading', { name: 'External Coder Agent' })[0]).toBeInTheDocument()
     })
 
-    it('should display opencode model count', () => {
+    it('should display opencode model count via the lightweight hint', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getAllByText('2')[0]).toBeInTheDocument()
+      expect(screen.getAllByText(/2 models available/i)[0]).toBeInTheDocument()
     })
 
-    it('should explain that providers are external to Mohist', () => {
+    it('should not render the redundant Runtime/Command/Models summary or provider note', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getAllByText(/Mohist does not configure AI providers/i)[0]).toBeInTheDocument()
+      expect(screen.queryByText('Command')).not.toBeInTheDocument()
+      expect(screen.queryByText('Models')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Mohist does not configure AI providers/i)).not.toBeInTheDocument()
     })
   })
 

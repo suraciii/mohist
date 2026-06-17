@@ -9,7 +9,7 @@ import { SectionState } from './SectionState'
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
 
 export function AiSettingsSection() {
-  const { data: runtime, isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
+  const { isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
   const { data: availableModelIds, isLoading: modelsLoading, error: modelsError } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
@@ -65,28 +65,11 @@ export function AiSettingsSection() {
       <div className="space-y-4">
         <h3 className="text-sm font-medium text-foreground">External Coder Agent</h3>
 
-        <div className="rounded-md border bg-muted px-3 py-2">
-          <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
-            <div>
-              <div className="text-muted-foreground">Runtime</div>
-              <div className="font-mono text-foreground">{runtime?.mode ?? 'local-opencode'}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Command</div>
-              <div className="font-mono text-foreground">{runtime?.command ?? 'opencode'}</div>
-            </div>
-            <div>
-              <div className="text-muted-foreground">Models</div>
-              <div className="font-mono text-foreground">{coderModels.length}</div>
-            </div>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Mohist does not configure AI providers. It delegates coder work to the connected opencode runner.
-          </p>
-        </div>
-
         <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-foreground/80">Default Coder Agent Model</label>
+          <div className="flex items-baseline justify-between gap-2">
+            <label className="block text-xs font-medium text-foreground/80">Default Coder Agent Model</label>
+            <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
+          </div>
           <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
           <ModelSelect
             value={opencodeModelData?.model ?? null}

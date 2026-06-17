@@ -188,7 +188,7 @@ export function getWorkflowProfiles() {
 }
 
 export function getWorkflowProfile(id: string) {
-  return request<WorkflowProfileDetail>(`/workflow-templates/system/${encodeURIComponent(id)}`)
+  return request<WorkflowProfileDetail>(`/workflow-templates/system/${id}`)
 }
 
 export function getSystemInfo() {

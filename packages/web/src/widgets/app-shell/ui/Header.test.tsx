@@ -60,4 +60,27 @@ describe('Header', () => {
     renderHeader('/logs')
     expect(screen.getByRole('heading', { level: 1, name: 'Logs' })).toBeInTheDocument()
   })
+
+  it('hides page title and New Issue button on settings route, keeps SidebarTrigger', () => {
+    renderHeader('/settings/ai')
+
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('header-new-issue')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /toggle sidebar/i })).toBeInTheDocument()
+  })
+
+  it('hides page title and New Issue button on project-scoped settings route', () => {
+    renderHeader('/audit-test-1/settings/ai')
+
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('header-new-issue')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /toggle sidebar/i })).toBeInTheDocument()
+  })
+
+  it('shows page title and New Issue button on non-settings route (Board)', () => {
+    renderHeader('/')
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toBeInTheDocument()
+    expect(screen.getByTestId('header-new-issue')).toBeInTheDocument()
+  })
 })

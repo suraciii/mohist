@@ -1,0 +1,111 @@
+{
+  "project": "mohist",
+  "description": "Settings page UX consistency cleanup: fix workflow profile 404, remove duplicate header, unify mutation feedback to toasts, and drop the Coder Agent runtime summary. Frontend-only.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix workflow profile detail 404 (drop URL encoding)",
+      "spec": "specs/web-ui/spec.md#workflows-profile-detail-resolves-via-literal-path",
+      "description": "In packages/web/src/entities/settings/api/client.ts, remove encodeURIComponent(id) from getWorkflowProfile so a profile id like mohist/default is interpolated as a literal path (/workflow-templates/system/mohist/default) that the backend {*id} catch-all route matches. Add/extend a client unit test asserting the slash is not encoded.",
+      "acceptanceCriteria": [
+        "getWorkflowProfile('mohist/default') issues a request to /workflow-templates/system/mohist/default with the slash left literal (no %2F)",
+        "A unit test (settings client or query layer) asserts the unencoded path for an id containing '/'",
+        "Opening the Mohist Default workflow profile card renders the stages list and YAML definition instead of erroring/404",
+        "The existing 'All profiles' back navigation in WorkflowProfilesSection still returns to the list (no regression)",
+        "packages/web SettingsPage.test.tsx remains green (vitest run)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/entities/settings/api/client.ts (+ companion test asserting unencoded path)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "One-line code change; backend route is correct and must not be touched. id is server-supplied (from getWorkflowProfiles), so no injection risk."
+    },
+    {
+      "id": "T-002",
+      "title": "Suppress duplicate Settings header (title + New Issue) in global Header",
+      "spec": "specs/web-ui/spec.md#settings-main-content-area-renders-only-tab-navigation",
+      "description": "The duplicate <h1> title and New Issue button physically live in the global app-shell Header (packages/web/src/widgets/app-shell/ui/Header.tsx), not SettingsPage.tsx. Add a settings-route guard (the usePageTitle settings branch already exists) so that on /settings/* the title <h1> and the desktop New Issue button are hidden, while SidebarTrigger (Toggle Sidebar) and the runner-status pill are kept. Cover both settings and non-settings routes in Header.test.tsx.",
+      "acceptanceCriteria": [
+        "On any /settings/* route, Header renders no page-title <h1> and no New Issue button",
+        "On /settings/* routes, SidebarTrigger remains visible (Toggle Sidebar preserved)",
+        "On non-settings routes (e.g. Board, Issues), the title <h1> and New Issue button still render unchanged",
+        "AppSidebar global navigation (Toggle Sidebar / New Issue / Settings entry) is not modified",
+        "Header.test.tsx covers the settings-route suppression and a non-settings control case",
+        "SettingsPage.test.tsx remains green"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/widgets/app-shell/ui/Header.tsx (+ Header.test.tsx assertions)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Issue body points at SettingsPage.tsx but the elements are in Header.tsx; do NOT edit SettingsPage.tsx for this. Do not relocate SidebarTrigger logic."
+    },
+    {
+      "id": "T-003",
+      "title": "Unify Settings mutation feedback to toasts (remove AgentSettingsSection inline banners)",
+      "spec": "specs/web-ui/spec.md#settings-mutation-feedback-uses-sonner-toasts",
+      "description": "All affected mutation hooks already emit toast.success/toast.error (verified: repository, template, useSetLogLevel, useUpdateOpencodeModel, useSetStageModels, useSetAgentRuntime). The remaining work is in packages/web/src/pages/settings/ui/AgentSettingsSection.tsx: delete the local saveError/saveSuccess state and the inline green/red mutation banners (lines ~210,212,232-233,262-263,281-284,297,306,416-426) so feedback relies on useSetAgentRuntime's existing hook toasts. Keep the per-field validationErrors inline rendering (red text under each field, ~line 197). Add/update a component test asserting banners are gone, toasts fire, and field errors remain inline.",
+      "acceptanceCriteria": [
+        "AgentSettingsSection no longer declares saveError/saveSuccess state and no longer renders the inline success/error mutation banners",
+        "Saving runtime settings fires toast.success on success and toast.error on failure via the useSetAgentRuntime hook (no new toast call needed in the component)",
+        "Per-field validationErrors remain rendered inline (red text-red-600 beneath the offending field) and are NOT converted to toasts",
+        "Static verification that useAddRepository/useRemoveRepository/useSetDefaultRepository, useSaveProjectTemplate/useDeleteProjectTemplateOverride, useSetLogLevel, useUpdateOpencodeModel, useSetStageModels all call toast (already present)",
+        "A component test covers: no inline mutation banner on success, toast is invoked, and a field validation error still renders inline",
+        "SettingsPage.test.tsx remains green"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/AgentSettingsSection.tsx (+ component test for banner removal and inline field errors)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do NOT touch useRuntimeConsistency / useUpdateConfig (those are #19 scope). Do NOT add a useToastMutation abstraction. confirmReset's setSaveError path must also be removed so reset failure surfaces via the hook toast."
+    },
+    {
+      "id": "T-004",
+      "title": "Remove Coder Agent Runtime/Command/Models summary block",
+      "spec": "specs/web-ui/spec.md#coder-agent-section-omits-redundant-runtime-summary",
+      "description": "Delete the Runtime/Command/Models 3-column summary block (and its bordered container + provider note) from packages/web/src/pages/settings/ui/AiSettingsSection.tsx (~lines 68-86). Keep the 'External Coder Agent' heading, the Default Coder Agent Model ModelSelect, and the Stage Model Overrides. Add an optional lightweight 'N models available' hint next to the model selector using the already-computed coderModels.length. If useOpencodeRuntime becomes unused, drop its destructure to avoid lint/tsc unused-variable errors. Add/update a component test asserting the block is absent and model controls remain.",
+      "acceptanceCriteria": [
+        "AiSettingsSection no longer renders the Runtime/Command/Models 3-column summary block",
+        "The Default Coder Agent Model selector (ModelSelect) remains available and functional",
+        "The Stage Model Overrides section remains available and functional",
+        "An optional 'N models available' hint is shown near the model selector",
+        "No new tsc unused-variable errors are introduced (drop unused runtime destructure if applicable)",
+        "A component test covers: summary block absent, ModelSelect present, Stage Overrides present",
+        "SettingsPage.test.tsx remains green"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/AiSettingsSection.tsx (+ component test for block removal and retained controls)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Optional hint is explicitly allowed by the spec; recommended since it restores the only useful datum (model count) from the removed block."
+    },
+    {
+      "id": "T-005",
+      "title": "PR regression gate: full web test + typecheck",
+      "spec": "specs/web-ui/spec.md#runtime-form-unsupportedfields-mechanism-preserved",
+      "description": "After T-001..T-004 land, run the full web test suite and the TypeScript build to verify cross-cutting regression criteria. Confirm no edits were made to useRuntimeConsistency/useUpdateConfig and that no unsupportedFields mechanism exists to regress (it is absent in the current codebase). This is a verification/review task, not new implementation.",
+      "acceptanceCriteria": [
+        "npm run test:run (vitest run) passes for the whole packages/web suite, including SettingsPage.test.tsx",
+        "The SettingsPage.test.tsx assertion expect(useRepositoriesMock).toHaveBeenCalledWith('proj-selected') still passes",
+        "npm run build (tsc -b && vite build) completes without type errors",
+        "No source edits to useRuntimeConsistency or useUpdateConfig hooks (diff check confirms they are untouched)",
+        "Confirmed that no unsupportedFields mechanism exists in packages/web/src, so its regression criterion is vacuously satisfied",
+        "The four changed files (client.ts, Header.tsx, AgentSettingsSection.tsx, AiSettingsSection.tsx) are the only implementation diffs"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "REVIEW",
+      "output": "Green vitest + tsc -b run; clean diff scope confirmation",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Spec reference is the unsupportedFields regression-guard requirement, which is vacuous against current code (documented in design.md Open Questions). Use `npm run test:run` and `npm run build` from packages/web."
+    }
+  ]
+}
