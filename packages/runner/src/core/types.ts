@@ -44,6 +44,7 @@ export interface WorkItemResult {
   exitCode?: number | null
   artifactUploadIds?: string[] | null
   capturedOutputs?: Record<string, JsonValue> | null
+  cleanupAttempts?: number | null
 }
 
 export interface ActionContext {

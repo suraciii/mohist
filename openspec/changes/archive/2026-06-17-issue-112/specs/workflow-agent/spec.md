@@ -1,15 +1,17 @@
-# OpenSpec Capability: workflow-agent
+## MODIFIED Requirements
 
 ### Requirement: REQ-WA-001 Workflow consumes session results without judging liveness
 
 Workflow orchestration SHALL consume completed, failed, or cancelled session call results from tasks and SHALL NOT independently determine whether opencode is alive. After an agent-backed task returns a session result, the runner SHALL verify `git status --porcelain` is clean in the task workspace before marking the task completed. If the worktree is dirty, the runner SHALL enter the cleanup loop before consuming the session result as complete.
 
 #### Scenario: Workflow receives session failure
+
 - **WHEN** a task reports that its opencode session failed
 - **THEN** workflow SHALL handle that as a task/session execution result
 - **AND** workflow SHALL decide retry, block, interruption, or user action through existing workflow policy
 
 #### Scenario: Session state does not mutate issue state directly
+
 - **WHEN** a session enters `probing` or `failed`
 - **THEN** issue `stage` and `status` SHALL remain unchanged unless a separate workflow decision changes them later
 
@@ -20,6 +22,8 @@ Workflow orchestration SHALL consume completed, failed, or cancelled session cal
 - **THEN** the runner SHALL NOT report the task as completed
 - **AND** the runner SHALL send a cleanup follow-up prompt to the same agent session
 - **AND** the task SHALL NOT be consumed as complete by workflow orchestration until the cleanup loop resolves the dirty worktree or exhausts its attempts
+
+## ADDED Requirements
 
 ### Requirement: Agent cleanup prompt constrains scope and outputs
 
@@ -57,22 +61,3 @@ The cleanup loop for a single agent-backed task SHALL have a maximum number of a
 - **THEN** the task SHALL fail
 - **AND** the failure evidence SHALL include the number of cleanup attempts tried
 - **AND** it SHALL include the categorized file lists from `git status --porcelain`
-
-### Requirement: Agent-session tasks resolve named refs through stage attempt context
-
-Agent-session task execution SHALL resolve an optional `agentSessionRef` through a stage-attempt-scoped registry. The registry SHALL return one real AgentSession for repeated uses of the same ref in the same attempt and SHALL leave omitted refs on the existing task-local create, execute, and close lifecycle.
-
-#### Scenario: Named ref reuses one AgentSession
-- **WHEN** two agent-session tasks in the same stage attempt execute with the same `agentSessionRef`
-- **THEN** the task handler SHALL execute both prompts against the same real AgentSession
-- **AND** the handler SHALL NOT close that named session after the first task completes
-
-#### Scenario: Omitted ref remains task-local
-- **WHEN** an agent-session task executes without `agentSessionRef`
-- **THEN** the task handler SHALL create a task-local AgentSession
-- **AND** it SHALL close that task-local session when the task execution finishes
-
-#### Scenario: Stage lifecycle closes named sessions
-- **WHEN** the owning stage attempt reaches a terminal boundary such as passed, failed, awaiting approval, cancelled, or pipeline completion
-- **THEN** the workflow runtime SHALL close and remove all named sessions for that attempt
-- **AND** close behavior SHALL be idempotent and best-effort on error paths
