@@ -147,6 +147,60 @@ describe("mohist/acp-agent", () => {
     expect(result.message).toContain("without any session activity")
   })
 
+  it("ExpectedArtifactMissing_AgentIsAskedToRepairArtifactBeforeTaskFails", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-expect-"))
+    const fixture = createFixture("expectation-repair")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        session: "check",
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("success")
+      const promptCalls = fixture.agent.calls.filter((entry) => entry.event === "prompt")
+      expect(promptCalls).toHaveLength(2)
+      expect(promptCalls[1].text).toContain("did not satisfy this task's completion requirements")
+      expect(promptCalls[1].text).toContain("review.md")
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
+  it("ExpectationRepairDisabled_MissingArtifactFailsWithoutFollowUpPrompt", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-expect-disabled-"))
+    const fixture = createFixture("basic")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        expectationRepairLimit: 0,
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("failure")
+      expect(result.message).toContain("missing artifact marker")
+      expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
   it("ProbeTimesOutWithoutQualifyingActivity_LivenessMonitored_FailsSession", async () => {
     const fixture = createFixture("quiet-then-done")
 
@@ -314,7 +368,8 @@ describe("mohist/acp-agent", () => {
     expect(failed?.lastDataAt).toEqual(expect.any(String))
     expect(failed?.lastActivityType).toEqual(expect.any(String))
 
-    const probeState = JSON.parse((result.message ?? "").slice((result.message ?? "").indexOf("{"))) as Record<string, unknown>
+    const probeJson = (result.message ?? "").slice((result.message ?? "").indexOf("{")).split("\n", 1)[0]
+    const probeState = JSON.parse(probeJson) as Record<string, unknown>
     expect(probeState.probeSentAt).toBe(probing?.probeSentAt)
     expect(probeState.probeDeadlineAt).toBe(probing?.probeDeadlineAt)
     expect(probeState.probeVersion).toBe(probing?.activeProbeVersion)
@@ -991,7 +1046,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction"
+type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction" | "expectation-repair"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -1047,6 +1102,7 @@ class FakeAcpAgent {
         if (self.scenario === "abort-during-probe") return await self.runAbortDuringProbePrompt()
         if (self.scenario === "abort") return await new Promise(() => {})
         if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
+        if (self.scenario === "expectation-repair") return await self.runExpectationRepairPrompt(params.sessionId, text)
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         if (self.scenario === "config-option-update") {
           await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "switching" } } } as never)
@@ -1124,6 +1180,22 @@ class FakeAcpAgent {
 
   private async runAbortDuringProbePrompt() {
     return await new Promise<{ stopReason: "end_turn" }>(() => {})
+  }
+
+  private async runExpectationRepairPrompt(sessionId: string, text: string) {
+    if (text.includes("did not satisfy this task's completion requirements")) {
+      await writeFile(join(this.extractCwd(), "review.md"), "<promise>PASS</promise>\n")
+      await this.connection.sessionUpdate(textUpdate(sessionId, "wrote review.md"))
+      return { stopReason: "end_turn" as const }
+    }
+
+    await this.connection.sessionUpdate(textUpdate(sessionId, "review complete"))
+    return { stopReason: "end_turn" as const }
+  }
+
+  private extractCwd() {
+    const newSession = this.calls.findLast?.((entry) => entry.event === "newSession") ?? [...this.calls].reverse().find((entry) => entry.event === "newSession")
+    return typeof newSession?.cwd === "string" ? newSession.cwd : tmpdir()
   }
 
   private async emitBasicEvents(sessionId: string) {
