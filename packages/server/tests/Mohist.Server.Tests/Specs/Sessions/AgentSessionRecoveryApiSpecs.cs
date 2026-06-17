@@ -166,7 +166,8 @@ public class AgentSessionRecoveryApiSpecs
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
-        Assert.True(root.TryGetProperty("contextUsagePercent", out var pct));
+        var usage = root.GetProperty("usage");
+        Assert.True(usage.TryGetProperty("contextUsagePercent", out var pct));
         Assert.True(pct.ValueKind == JsonValueKind.Null || pct.ValueKind == JsonValueKind.Number);
     }
 
@@ -184,9 +185,10 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
         Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
-        Assert.True(root.TryGetProperty("contextWindowSize", out _));
-        Assert.True(root.TryGetProperty("contextWindowUsed", out _));
-        Assert.True(root.TryGetProperty("contextUsagePercent", out _));
+        var usage = root.GetProperty("usage");
+        Assert.True(usage.TryGetProperty("contextWindowSize", out _));
+        Assert.True(usage.TryGetProperty("contextWindowUsed", out _));
+        Assert.True(usage.TryGetProperty("contextUsagePercent", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -232,6 +234,7 @@ public class AgentSessionRecoveryApiSpecs
     {
         var projectName = $"recovery-api-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Recovery api {name}", body = "track sessions", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         return (project, issue);
     }

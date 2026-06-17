@@ -35,9 +35,10 @@ public class TemplateRoutesSpecs
             .Select(item => item.GetProperty("key").GetString()!)
             .ToArray();
 
-        Assert.Equal(12, keys.Length);
+        Assert.Equal(14, keys.Length);
         var expectedKeys = new[]
         {
+            "apply-feedback",
             "auto-fix",
             "build",
             "conflict-resolution",
@@ -48,6 +49,7 @@ public class TemplateRoutesSpecs
             "review",
             "review-self-check",
             "self-review",
+            "spec-sync",
             "specs",
             "tasks",
         };

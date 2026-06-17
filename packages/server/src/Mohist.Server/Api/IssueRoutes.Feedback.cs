@@ -51,10 +51,10 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.Ok(Array.Empty<WorkflowFeedbackSnapshot>());
+            if (wrId is null) return ApiResults.Ok(Array.Empty<WorkflowFeedbackRecord>());
 
             var all = await grains.GetGrain<IWorkflowGrain>(wrId).ListFeedbackAsync();
-            IReadOnlyList<WorkflowFeedbackSnapshot> filtered = string.IsNullOrWhiteSpace(stage)
+            IReadOnlyList<WorkflowFeedbackRecord> filtered = string.IsNullOrWhiteSpace(stage)
                 ? all
                 : all.Where(f => string.Equals(f.Stage, stage, StringComparison.OrdinalIgnoreCase)).ToList();
             return ApiResults.Ok(filtered);

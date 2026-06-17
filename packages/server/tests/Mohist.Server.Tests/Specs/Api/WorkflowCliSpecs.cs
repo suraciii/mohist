@@ -142,6 +142,7 @@ public class WorkflowCliSpecs
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoCollector>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();
