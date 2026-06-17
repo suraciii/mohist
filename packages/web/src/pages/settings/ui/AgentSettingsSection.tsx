@@ -217,9 +217,7 @@ export function AgentSettingsSection() {
   const [savedValues, setSavedValues] = useState<FormValues>(() => configToForm(DEFAULTS))
   const [validationErrors, setValidationErrors] = useState<Partial<Record<FieldKey, string>>>({})
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
 
   const unsupportedFields = useMemo<Set<FieldKey>>(() => {
     const set = new Set<FieldKey>()
@@ -252,8 +250,6 @@ export function AgentSettingsSection() {
 
   const handleChange = (key: FieldKey, value: number) => {
     setLocalValues((prev) => ({ ...prev, [key]: value }))
-    setSaveError(null)
-    setSaveSuccess(false)
 
     const field = FIELDS.find((f) => f.key === key)
     if (field) {
@@ -283,8 +279,6 @@ export function AgentSettingsSection() {
     }
 
     setSaving(true)
-    setSaveError(null)
-    setSaveSuccess(false)
 
     try {
       const changed: Partial<AgentRuntimeConfig> = {}
@@ -303,10 +297,7 @@ export function AgentSettingsSection() {
 
       const result = await setAgentRuntime.mutateAsync(changed)
       setSavedValues(configToForm(result))
-      setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 3000)
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed')
+    } catch {
     } finally {
       setSaving(false)
     }
@@ -319,7 +310,6 @@ export function AgentSettingsSection() {
   const confirmReset = async () => {
     setShowResetConfirm(false)
     setSaving(true)
-    setSaveError(null)
 
     try {
       const resetPayload: Partial<AgentRuntimeConfig> = {}
@@ -339,8 +329,7 @@ export function AgentSettingsSection() {
       setLocalValues(form)
       setSavedValues(form)
       setValidationErrors({})
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Reset failed')
+    } catch {
     } finally {
       setSaving(false)
     }
@@ -461,18 +450,6 @@ export function AgentSettingsSection() {
       </div>
 
       <hr className="border" />
-
-      {saveError && (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          {saveError}
-        </div>
-      )}
-
-      {saveSuccess && (
-        <div className="rounded-md bg-green-50 px-3 py-2 text-xs text-green-700">
-          Settings saved successfully.
-        </div>
-      )}
 
       <div className="flex items-center gap-3">
         <Button

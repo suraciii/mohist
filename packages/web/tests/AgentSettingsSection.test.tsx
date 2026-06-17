@@ -1,20 +1,65 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, screen, fireEvent, waitFor } from './test-utils'
+import { baseRender, fireEvent, render, screen, waitFor } from './test-utils'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { AgentSettingsSection } from '../src/pages/settings/ui/AgentSettingsSection'
+import type { AgentRuntimeConfig, GeneralConfig } from '../src/entities/settings'
 
-vi.mock('../src/entities/settings/api/queries', async () => {
-  const actual = await import('../src/entities/settings/api/queries')
+const toast = vi.hoisted(() => ({
+  info: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+}))
+
+vi.mock('sonner', () => ({ toast }))
+
+const runtimeClient = vi.hoisted(() => ({
+  getAgentRuntime: vi.fn(),
+  getConfig: vi.fn(),
+  updateAgentRuntime: vi.fn(),
+}))
+
+vi.mock('../src/entities/settings/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/entities/settings/api/client')>()
   return {
     ...actual,
-    useAgentRuntime: vi.fn(),
-    useSetAgentRuntime: vi.fn(),
-    useConfig: vi.fn(),
+    getAgentRuntime: runtimeClient.getAgentRuntime,
+    getConfig: runtimeClient.getConfig,
+    updateAgentRuntime: runtimeClient.updateAgentRuntime,
   }
 })
 
-const { useAgentRuntime, useSetAgentRuntime, useConfig } = await import('../src/entities/settings/api/queries')
+const { AgentSettingsSection } = await import(
+  '../src/pages/settings/ui/AgentSettingsSection'
+)
+
+const RUNTIME: AgentRuntimeConfig = {
+  timeout: 1800000,
+  stageTimeout: 3600000,
+  taskTimeout: 600000,
+  maxConcurrent: 8,
+  maxGracePeriods: 2,
+  pollInterval: 30000,
+}
+
+const DEFAULT_RUNTIME: AgentRuntimeConfig = {
+  timeout: 600000,
+  stageTimeout: 3600000,
+  taskTimeout: 600000,
+  maxConcurrent: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
+}
+
+const DEFAULT_CONFIG: GeneralConfig = {
+  agentTimeout: 600,
+  taskTimeout: 600,
+  stageTimeout: 3600,
+  maxConcurrentAgents: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
+  logLevel: 'INFO',
+}
 
 function createMockQueryClient() {
   return new QueryClient({
@@ -34,6 +79,17 @@ function getInputByLabel(label: string): HTMLInputElement {
   return input as HTMLInputElement
 }
 
+function getNumberInputByLabel(label: string): HTMLInputElement {
+  const labelEls = screen.getAllByText(label)
+  const labelEl = labelEls[0]
+  if (!labelEl) throw new Error(`Label "${label}" not found`)
+  const container = labelEl.parentElement
+  if (!container) throw new Error(`Label "${label}" has no parent`)
+  const input = container.querySelector('input[type="number"]')
+  if (!input) throw new Error(`No number input found under label "${label}"`)
+  return input as HTMLInputElement
+}
+
 function renderSection() {
   const queryClient = createMockQueryClient()
   return baseRender(
@@ -45,40 +101,33 @@ function renderSection() {
   )
 }
 
-function makeRuntimeConfig(overrides: Partial<{
-  timeout: number
-  stageTimeout: number
-  taskTimeout: number
-  maxConcurrent: number
-  maxGracePeriods: number
-  pollInterval: number
-}> = {}) {
+async function renderLoaded() {
+  render(<AgentSettingsSection />)
+  await waitFor(() => {
+    expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+  })
+}
+
+function makeRuntimeConfig(overrides: Partial<AgentRuntimeConfig> = {}): AgentRuntimeConfig {
   return {
-    timeout: 600000,
-    stageTimeout: 3600000,
-    taskTimeout: 600000,
-    maxConcurrent: 3,
-    maxGracePeriods: 3,
-    pollInterval: 5000,
+    ...DEFAULT_RUNTIME,
     ...overrides,
   }
 }
 
-function makeGeneralConfig(overrides: Partial<Record<string, unknown>> = {}) {
+function makeGeneralConfig(overrides: Partial<GeneralConfig> = {}): GeneralConfig {
   return {
-    agentTimeout: 600,
-    taskTimeout: 600,
-    stageTimeout: 3600,
-    maxConcurrentAgents: 3,
-    maxGracePeriods: 3,
-    pollInterval: 5000,
+    ...DEFAULT_CONFIG,
     ...overrides,
-  } as Record<string, unknown>
+  }
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers({ shouldAdvanceTime: true })
+  runtimeClient.getAgentRuntime.mockResolvedValue(DEFAULT_RUNTIME)
+  runtimeClient.getConfig.mockResolvedValue(DEFAULT_CONFIG)
+  runtimeClient.updateAgentRuntime.mockResolvedValue(DEFAULT_RUNTIME)
 })
 
 afterEach(() => {
@@ -87,56 +136,35 @@ afterEach(() => {
 
 describe('AgentSettingsSection (Runtime tab)', () => {
   it('renders the runtime panel successfully when config exposes scheduling values', async () => {
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeRuntimeConfig(),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeGeneralConfig(),
-      isLoading: false,
-      error: null,
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false,
-    })
-
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByText('Coder Agent Runtime')).toBeInTheDocument()
+    })
     expect(screen.queryByText(/Failed to load settings/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/Coder Agent Runtime/i)).toBeInTheDocument()
     const sessionInput = getInputByLabel('Session Timeout')
     expect(sessionInput.value).toBe('10')
   })
 
-  it('displays a load error and does not render default runtime values when config load fails', () => {
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error('Empty response from /agent-runtime'),
-      refetch: vi.fn(),
+  it('displays a load error and does not render default runtime values when config load fails', async () => {
+    runtimeClient.getAgentRuntime.mockImplementation(async () => {
+      throw new Error('Empty response from /agent-runtime')
     })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error: new Error('server unavailable'),
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false,
+    runtimeClient.getConfig.mockImplementation(async () => {
+      throw new Error('server unavailable')
     })
 
     renderSection()
 
-    expect(screen.getByText(/Failed to load settings/i)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load settings/i)).toBeInTheDocument()
+    })
     expect(screen.queryByText('Session Timeout')).not.toBeInTheDocument()
   })
 
-  it('converts server seconds to form minutes when displaying scheduling values', () => {
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeRuntimeConfig({
+  it('converts server seconds to form minutes when displaying scheduling values', async () => {
+    runtimeClient.getAgentRuntime.mockResolvedValue(
+      makeRuntimeConfig({
         timeout: 900000,
         taskTimeout: 300000,
         stageTimeout: 1800000,
@@ -144,12 +172,9 @@ describe('AgentSettingsSection (Runtime tab)', () => {
         maxConcurrent: 7,
         maxGracePeriods: 4,
       }),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeGeneralConfig({
+    )
+    runtimeClient.getConfig.mockResolvedValue(
+      makeGeneralConfig({
         agentTimeout: 900,
         taskTimeout: 300,
         stageTimeout: 1800,
@@ -157,16 +182,13 @@ describe('AgentSettingsSection (Runtime tab)', () => {
         maxConcurrentAgents: 7,
         maxGracePeriods: 4,
       }),
-      isLoading: false,
-      error: null,
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync: vi.fn(),
-      isPending: false,
-    })
+    )
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
     const sessionInput = getInputByLabel('Session Timeout')
     expect(sessionInput.value).toBe('15')
     const stageInput = getInputByLabel('Stage Timeout')
@@ -181,93 +203,72 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(graceInput.value).toBe('4')
   })
 
-  it('persists changed supported fields through the config API and shows the updated value', async () => {
+  it('persists changed supported fields through the config API and reflects the updated value', async () => {
     vi.useRealTimers()
-    const mutateAsync = vi.fn().mockImplementation(async (payload) => {
-      const next = { ...makeRuntimeConfig(), ...payload }
-      return next
-    })
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeRuntimeConfig(),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeGeneralConfig(),
-      isLoading: false,
-      error: null,
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync,
-      mutate: vi.fn(),
-      isPending: false,
-    })
+    const updateAgentRuntime = vi.fn().mockImplementation(async (payload) => ({
+      ...DEFAULT_RUNTIME,
+      ...payload,
+    }))
+    runtimeClient.updateAgentRuntime.mockImplementation(updateAgentRuntime)
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
     const sessionInput = getInputByLabel('Session Timeout')
     fireEvent.change(sessionInput, { target: { value: '20' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-    const callArg = mutateAsync.mock.calls[0]?.[0] as { timeout: number }
+    await waitFor(() => expect(updateAgentRuntime).toHaveBeenCalledTimes(1))
+    const callArg = updateAgentRuntime.mock.calls[0]?.[0] as { timeout: number }
     expect(callArg.timeout).toBe(1200000)
-    await waitFor(() => expect(screen.getByText(/Settings saved successfully/i)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled(),
+    )
+    expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
-  it('surfaces a save failure as a visible error and leaves the form in a not-saved state', async () => {
+  it('surfaces a save failure by leaving the form in a not-saved state with no inline error banner', async () => {
     vi.useRealTimers()
-    const mutateAsync = vi.fn().mockRejectedValue(new Error('agentTimeout must be a number'))
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeRuntimeConfig(),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeGeneralConfig(),
-      isLoading: false,
-      error: null,
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync,
-      mutate: vi.fn(),
-      isPending: false,
-    })
+    const updateAgentRuntime = vi.fn().mockRejectedValue(
+      new Error('agentTimeout must be a number'),
+    )
+    runtimeClient.updateAgentRuntime.mockImplementation(updateAgentRuntime)
 
     renderSection()
 
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
     const sessionInput = getInputByLabel('Session Timeout')
     fireEvent.change(sessionInput, { target: { value: '20' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(screen.getByText(/agentTimeout must be a number/i)).toBeInTheDocument())
+    await waitFor(() => expect(updateAgentRuntime).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled(),
+    )
+    expect(screen.queryByText(/agentTimeout must be a number/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
   it('disables unsupported fields with explanatory text and excludes them from save payloads', async () => {
     vi.useRealTimers()
-    const mutateAsync = vi.fn().mockImplementation(async (payload) => ({ ...makeRuntimeConfig(), ...payload }))
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeRuntimeConfig(),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeGeneralConfig({ maxGracePeriods: undefined, pollInterval: undefined }),
-      isLoading: false,
-      error: null,
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync,
-      mutate: vi.fn(),
-      isPending: false,
-    })
+    const updateAgentRuntime = vi.fn().mockImplementation(async (payload) => ({
+      ...DEFAULT_RUNTIME,
+      ...payload,
+    }))
+    runtimeClient.updateAgentRuntime.mockImplementation(updateAgentRuntime)
+    runtimeClient.getConfig.mockResolvedValue(
+      makeGeneralConfig({ maxGracePeriods: undefined, pollInterval: undefined }),
+    )
 
     renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
 
     const graceInput = getInputByLabel('Retry Budget')
     expect(graceInput).toBeDisabled()
@@ -280,8 +281,8 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     fireEvent.change(sessionInput, { target: { value: '20' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
 
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-    const callArg = mutateAsync.mock.calls[0]?.[0] as Record<string, number>
+    await waitFor(() => expect(updateAgentRuntime).toHaveBeenCalledTimes(1))
+    const callArg = updateAgentRuntime.mock.calls[0]?.[0] as Record<string, number>
     expect(callArg.timeout).toBe(1200000)
     expect(callArg.maxGracePeriods).toBeUndefined()
     expect(callArg.pollInterval).toBeUndefined()
@@ -289,41 +290,126 @@ describe('AgentSettingsSection (Runtime tab)', () => {
 
   it('resets supported fields to defaults and skips unsupported ones', async () => {
     vi.useRealTimers()
-    const mutateAsync = vi.fn().mockImplementation(async (payload) => ({ ...makeRuntimeConfig(), ...payload }))
-    ;(useAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeRuntimeConfig({
+    const updateAgentRuntime = vi.fn().mockImplementation(async (payload) => ({
+      ...DEFAULT_RUNTIME,
+      ...payload,
+    }))
+    runtimeClient.updateAgentRuntime.mockImplementation(updateAgentRuntime)
+    runtimeClient.getAgentRuntime.mockResolvedValue(
+      makeRuntimeConfig({
         timeout: 1500000,
         maxConcurrent: 12,
         maxGracePeriods: 8,
         pollInterval: 90000,
       }),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    })
-    ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: makeGeneralConfig({ maxGracePeriods: undefined }),
-      isLoading: false,
-      error: null,
-    })
-    ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
-      mutateAsync,
-      mutate: vi.fn(),
-      isPending: false,
-    })
+    )
+    runtimeClient.getConfig.mockResolvedValue(
+      makeGeneralConfig({ maxGracePeriods: undefined }),
+    )
 
     renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }))
 
     const confirm = await screen.findByRole('button', { name: 'Reset' })
     fireEvent.click(confirm)
 
-    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
-    const callArg = mutateAsync.mock.calls[0]?.[0] as Record<string, number>
+    await waitFor(() => expect(updateAgentRuntime).toHaveBeenCalledTimes(1))
+    const callArg = updateAgentRuntime.mock.calls[0]?.[0] as Record<string, number>
     expect(callArg.timeout).toBe(600000)
     expect(callArg.maxConcurrent).toBe(3)
     expect(callArg.maxGracePeriods).toBeUndefined()
     expect(callArg.pollInterval).toBe(5000)
+  })
+})
+
+describe('AgentSettingsSection mutation feedback (T-003)', () => {
+  beforeEach(() => {
+    runtimeClient.getAgentRuntime.mockResolvedValue(RUNTIME)
+    runtimeClient.updateAgentRuntime.mockResolvedValue(RUNTIME)
+  })
+
+  it('does not render inline success or error mutation banners', async () => {
+    await renderLoaded()
+
+    expect(screen.queryByText('Settings saved successfully.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Save failed|Reset failed/)).not.toBeInTheDocument()
+  })
+
+  it('fires toast.success via useSetAgentRuntime hook on save success', async () => {
+    await renderLoaded()
+
+    const timeoutInput = getNumberInputByLabel('Session Timeout')
+    fireEvent.change(timeoutInput, { target: { value: '25' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => {
+      expect(runtimeClient.updateAgentRuntime).toHaveBeenCalled()
+    })
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Coder agent runtime updated')
+    })
+
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('fires toast.error via useSetAgentRuntime hook on save failure', async () => {
+    runtimeClient.updateAgentRuntime.mockImplementation(async () => {
+      throw new Error('Boom')
+    })
+
+    await renderLoaded()
+
+    const timeoutInput = getNumberInputByLabel('Session Timeout')
+    fireEvent.change(timeoutInput, { target: { value: '25' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Boom')
+    })
+
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Save failed/)).not.toBeInTheDocument()
+  })
+
+  it('renders field-level validation errors inline and does not toast them', async () => {
+    await renderLoaded()
+
+    const timeoutInput = getNumberInputByLabel('Session Timeout')
+    fireEvent.change(timeoutInput, { target: { value: '0' } })
+
+    const validationError = screen.getByText('Must be at least 1 minute')
+    expect(validationError).toBeInTheDocument()
+    expect(validationError.className).toContain('text-red-600')
+
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('surfaces reset failure through the hook toast (no setSaveError path)', async () => {
+    runtimeClient.updateAgentRuntime.mockImplementation(async () => {
+      throw new Error('Reset boom')
+    })
+
+    await renderLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/ }))
+
+    await screen.findByText('Reset Coder Agent Settings')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Reset boom')
+    })
+
+    expect(screen.queryByText(/Reset failed/)).not.toBeInTheDocument()
   })
 })

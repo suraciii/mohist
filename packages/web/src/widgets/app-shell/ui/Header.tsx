@@ -27,9 +27,16 @@ function usePageTitle(): string {
   return 'Mohist'
 }
 
+function useIsSettingsRoute(): boolean {
+  const location = useLocation()
+  const segments = location.pathname.split('/').filter(Boolean)
+  return segments.includes('settings')
+}
+
 export function Header({ onCreateIssue }: { onCreateIssue: () => void }) {
   const { isMobile } = useSidebar()
   const title = usePageTitle()
+  const isSettingsRoute = useIsSettingsRoute()
   const { data: agentStatus } = useAgentStatus()
   const running = agentStatus?.running ?? false
 
@@ -40,7 +47,9 @@ export function Header({ onCreateIssue }: { onCreateIssue: () => void }) {
         {isMobile && (
           <span className="text-sm font-bold tracking-tight">mohist</span>
         )}
-        <h1 className="text-sm font-medium text-foreground truncate">{title}</h1>
+        {!isSettingsRoute && (
+          <h1 className="text-sm font-medium text-foreground truncate">{title}</h1>
+        )}
       </div>
       <div className="ml-auto flex items-center gap-2">
         {running && (
@@ -52,7 +61,7 @@ export function Header({ onCreateIssue }: { onCreateIssue: () => void }) {
             Runner active
           </span>
         )}
-        {!isMobile && (
+        {!isMobile && !isSettingsRoute && (
           <Button
             size="sm"
             onClick={onCreateIssue}
