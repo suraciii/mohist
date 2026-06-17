@@ -303,6 +303,26 @@ describe("mohist/acp-agent", () => {
     expect(JSON.parse(result.output ?? "{}").text).toBe("")
   })
 
+  it("ExistingSharedSessionWithRequestedModel_SetsModelBeforePromptWithoutResume", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "reuse shared session",
+      session: "shared-session",
+      agent: { model: "openai/gpt-5.5" },
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model" && entry.value === "openai/gpt-5.5")
+    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt")
+    expect(setModelIndex).toBeGreaterThanOrEqual(0)
+    expect(setModelIndex).toBeLessThan(promptIndex)
+    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
+  })
+
   it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
 
@@ -1371,6 +1391,10 @@ class FakeSharedAcpAgent {
           }
           return {}
         },
+      async setSessionConfigOption(params) {
+        self.calls.push({ event: "setSessionConfigOption", ...params })
+        return { configOptions: [] }
+      },
       async prompt(params) {
         self.calls.push({ event: "prompt", text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })
         if (self.scenario === "thought-liveness") {
@@ -1385,6 +1409,9 @@ class FakeSharedAcpAgent {
           await self.connection.sessionUpdate(thoughtUpdate(params.sessionId, "thinking"))
         }
         return { stopReason: "end_turn" }
+      },
+      async closeSession(params) {
+        self.calls.push({ event: "closeSession", sessionId: params.sessionId })
       },
       async cancel() {},
       async authenticate() { return {} },

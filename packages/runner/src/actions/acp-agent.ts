@@ -839,6 +839,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   )
 
   await emitSessionStarted(context, entry.sessionId, acp.processPid, agentConfig)
+  await applyRequestedModel(connection, context, entry.sessionId, resolveRequestedModel(context, agentConfig), notifyData)
 
   try {
     const runPrompt = createSharedPromptRunner({
