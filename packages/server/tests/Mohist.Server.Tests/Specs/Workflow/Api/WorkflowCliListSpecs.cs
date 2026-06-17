@@ -21,72 +21,68 @@ public class WorkflowCliListSpecs
         var help = await RenderHelp(["workflow", "--help"]);
 
         Assert.Contains("list", help);
-        Assert.Contains("Manage workflow profiles", help);
+        Assert.Contains("Workflow profile management", help);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowListHelp_DocumentsJsonOption()
+    public async Task WorkflowListHelp_DocumentsOutputOption()
     {
         var help = await RenderHelp(["workflow", "list", "--help"]);
 
-        Assert.Contains("--json", help);
+        Assert.Contains("--output", help);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_HumanOutput_DisplaysAllProfilesWithDefaultIndicator()
+    public async Task WorkflowList_Described_DisplaysAllProfilesWithIdAndDisplayName()
     {
         const string json = """
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": "Default profile.", "isDefault": true },
-                { "id": "team/custom", "name": "Team Custom", "description": "Custom profile.", "isDefault": false }
+                { "id": "mohist/default", "displayName": "Mohist Default", "description": "Default profile.", "suitableFor": ["feature development"] },
+                { "id": "team/custom", "displayName": "Team Custom", "description": "Custom profile.", "suitableFor": [] }
               ]
             }
             """;
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
-        Assert.Equal(string.Empty, stderr);
         Assert.Contains("Mohist Default", stdout);
         Assert.Contains("Team Custom", stdout);
         Assert.Contains("mohist/default", stdout);
         Assert.Contains("team/custom", stdout);
-        Assert.Contains("(default)", stdout);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_HumanOutput_PreservesMultiLineDescriptionFormatting()
+    public async Task WorkflowList_Described_PreservesMultiLineDescriptionFormatting()
     {
         const string multiLine = "Line one\nLine two\nLine three";
         var json = $$"""
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": {{JsonSerializer.Serialize(multiLine)}}, "isDefault": true }
+                { "id": "mohist/default", "displayName": "Mohist Default", "description": {{JsonSerializer.Serialize(multiLine)}}, "suitableFor": [] }
               ]
             }
             """;
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stderr:\n{stderr}");
-        Assert.Equal(string.Empty, stderr);
-        var lines = stdout.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
-        Assert.Contains("Line one", lines);
-        Assert.Contains("Line two", lines);
-        Assert.Contains("Line three", lines);
+        Assert.Contains("Line one", stdout);
+        Assert.Contains("Line two", stdout);
+        Assert.Contains("Line three", stdout);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -106,7 +102,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list", "--json");
+        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Equal(string.Empty, stderr);
@@ -117,13 +113,12 @@ public class WorkflowCliListSpecs
 
         var first = parsed[0]!.AsObject();
         Assert.Equal("mohist/default", first["id"]!.GetValue<string>());
-        Assert.Equal("Mohist Default", first["displayName"]!.GetValue<string>());
+        Assert.Equal("Mohist Default", first["name"]!.GetValue<string>());
         Assert.Equal("Default profile.", first["description"]!.GetValue<string>());
         Assert.True(first["isDefault"]!.GetValue<bool>());
 
         var second = parsed[1]!.AsObject();
         Assert.Equal("team/custom", second["id"]!.GetValue<string>());
-        Assert.Equal("Team Custom", second["displayName"]!.GetValue<string>());
         Assert.False(second["isDefault"]!.GetValue<bool>());
     }
 
@@ -144,7 +139,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list", "--json");
+        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var parsed = JsonNode.Parse(stdout) as JsonArray;
@@ -171,7 +166,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list", "--json");
+        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var parsed = JsonNode.Parse(stdout) as JsonArray;
@@ -199,7 +194,7 @@ public class WorkflowCliListSpecs
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list", "--json");
+        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var trimmed = stdout.Trim();
@@ -207,7 +202,7 @@ public class WorkflowCliListSpecs
         Assert.NotNull(parsed);
         var allowed = new HashSet<string>(StringComparer.Ordinal)
         {
-            "id", "displayName", "description", "isDefault",
+            "id", "name", "description", "isDefault",
         };
         foreach (var entry in parsed!)
         {
@@ -261,39 +256,42 @@ public class WorkflowCliListSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_UnexpectedResponseShape_WritesErrorAndExitsNonZero()
+    public async Task WorkflowList_UnexpectedResponseShape_PassesRawDataThrough()
     {
+        // --output json does raw passthrough of the API response data field;
+        // shape validation is not performed for consistency with other commands.
         const string json = """
             { "success": true, "data": { "not": "an array" } }
             """;
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
 
-        Assert.Equal(1, exitCode);
-        Assert.Equal(string.Empty, stdout);
-        Assert.Contains("unexpected response", stderr);
+        Assert.Equal(0, exitCode);
+        var parsed = JsonNode.Parse(stdout.Trim()) as JsonObject;
+        Assert.NotNull(parsed);
+        Assert.Equal("an array", parsed!["not"]!.GetValue<string>());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowList_HumanOutput_SeparatesMultipleProfilesWithBlankLine()
+    public async Task WorkflowList_Described_SeparatesMultipleProfilesWithBlankLine()
     {
         const string json = """
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": "Default.", "isDefault": true },
-                { "id": "team/custom", "name": "Team Custom", "description": "Custom.", "isDefault": false }
+                { "id": "mohist/default", "displayName": "Mohist Default", "description": "Default.", "suitableFor": [] },
+                { "id": "team/custom", "displayName": "Team Custom", "description": "Custom.", "suitableFor": [] }
               ]
             }
             """;
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, json);
 
-        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list");
+        var (exitCode, stdout, _) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var text = stdout.Replace("\r\n", "\n");

@@ -151,8 +151,12 @@ public class AgentSessionContextExhaustionSpecs
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":650,"contextWindowSize":1000}"""),
             }));
 
+        // Wait for deferred persistence to flush transcript parts.
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(sessionId, 2);
+
         // Inspect the persisted transcript for the health snapshot.
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
         var healthParts = await db.AgentSessionTranscriptParts.AsNoTracking()
             .Where(p => p.Type == "context_health_update")
             .Join(db.AgentSessionTranscriptTurns.AsNoTracking().Where(t => t.SessionId == sessionId),

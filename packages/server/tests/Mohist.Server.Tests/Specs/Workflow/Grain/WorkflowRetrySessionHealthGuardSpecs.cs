@@ -301,6 +301,8 @@ public class WorkflowRetrySessionHealthGuardSpecs
             baseBranch = "main",
         });
 
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
             title = $"Retry guard {Guid.NewGuid():N}",

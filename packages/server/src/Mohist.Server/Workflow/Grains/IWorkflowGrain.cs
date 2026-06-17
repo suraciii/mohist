@@ -32,8 +32,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<string?> GetClaimedRunnerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();
     Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId);
-    Task<WorkflowFeedbackSnapshot?> GetFeedbackAsync(string feedbackId);
-    Task<IReadOnlyList<WorkflowFeedbackSnapshot>> ListFeedbackAsync();
+    Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId);
+    Task<IReadOnlyList<WorkflowFeedbackRecord>> ListFeedbackAsync();
     Task DeactivateForTestAsync();
 }
 
@@ -113,7 +113,7 @@ public sealed record WorkflowActiveWorkView(
 /// requested changes.
 /// </summary>
 [GenerateSerializer]
-public sealed record WorkflowFeedbackSnapshot(
+public sealed record WorkflowFeedbackRecord(
     [property: Id(0)] string Id,
     [property: Id(1)] string WorkflowRunId,
     [property: Id(2)] string Stage,

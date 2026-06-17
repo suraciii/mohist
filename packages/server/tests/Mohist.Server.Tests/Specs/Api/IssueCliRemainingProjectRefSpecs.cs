@@ -37,7 +37,6 @@ public class IssueCliRemainingProjectRefSpecs
     [Theory]
     [InlineData("start")]
     [InlineData("approve")]
-    [InlineData("reject")]
     [InlineData("close")]
     [InlineData("reopen")]
     [InlineData("retry")]

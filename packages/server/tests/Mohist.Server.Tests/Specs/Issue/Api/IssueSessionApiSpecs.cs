@@ -109,19 +109,21 @@ public class IssueSessionApiSpecs
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
         Assert.True(root.TryGetProperty("completedAt", out _));
         Assert.True(root.TryGetProperty("model", out _));
-        Assert.Equal("anthropic/claude-sonnet-4", root.GetProperty("resolvedModel").GetString());
-        Assert.Equal(100, root.GetProperty("inputTokens").GetInt64());
-        Assert.Equal(50, root.GetProperty("outputTokens").GetInt64());
-        Assert.Equal(150, root.GetProperty("totalTokens").GetInt64());
-        Assert.Equal(10, root.GetProperty("cachedReadTokens").GetInt64());
-        Assert.Equal(5, root.GetProperty("thoughtTokens").GetInt64());
-        Assert.Equal(0.01, root.GetProperty("costAmount").GetDouble());
-        Assert.Equal("USD", root.GetProperty("costCurrency").GetString());
-        Assert.Equal(150, root.GetProperty("contextWindowUsed").GetInt64());
-        Assert.Equal(200000, root.GetProperty("contextWindowSize").GetInt64());
-        Assert.Equal("probe_timeout", root.GetProperty("failureCategory").GetString());
-        Assert.Equal(1, root.GetProperty("toolCallCount").GetInt32());
-        Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
+        var eventSummary = root.GetProperty("eventSummary");
+        var usage = root.GetProperty("usage");
+        Assert.Equal("anthropic/claude-sonnet-4", eventSummary.GetProperty("resolvedModel").GetString());
+        Assert.Equal(100, usage.GetProperty("inputTokens").GetInt64());
+        Assert.Equal(50, usage.GetProperty("outputTokens").GetInt64());
+        Assert.Equal(150, usage.GetProperty("totalTokens").GetInt64());
+        Assert.Equal(10, usage.GetProperty("cachedReadTokens").GetInt64());
+        Assert.Equal(5, usage.GetProperty("thoughtTokens").GetInt64());
+        Assert.Equal(0.01, usage.GetProperty("costAmount").GetDouble());
+        Assert.Equal("USD", usage.GetProperty("costCurrency").GetString());
+        Assert.Equal(150, usage.GetProperty("contextWindowUsed").GetInt64());
+        Assert.Equal(200000, usage.GetProperty("contextWindowSize").GetInt64());
+        Assert.Equal("probe_timeout", eventSummary.GetProperty("failureCategory").GetString());
+        Assert.Equal(1, eventSummary.GetProperty("toolCallCount").GetInt32());
+        Assert.Equal(1, eventSummary.GetProperty("toolErrorCount").GetInt32());
 
         var metadata = root.GetProperty("metadata");
         // 6 parts: session.input, message.delta (hello+world merged),
@@ -176,13 +178,18 @@ public class IssueSessionApiSpecs
             }
         });
 
+        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2);
+
         var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
+        var eventSummary = root.GetProperty("eventSummary");
+        var usage = root.GetProperty("usage");
 
-        Assert.Equal("context_exhaustion", root.GetProperty("failureCategory").GetString());
-        Assert.Equal(960, root.GetProperty("contextWindowUsed").GetInt64());
-        Assert.Equal(1000, root.GetProperty("contextWindowSize").GetInt64());
+        Assert.Equal("context_exhaustion", eventSummary.GetProperty("failureCategory").GetString());
+        Assert.Equal(960, usage.GetProperty("contextWindowUsed").GetInt64());
+        Assert.Equal(1000, usage.GetProperty("contextWindowSize").GetInt64());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

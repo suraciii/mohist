@@ -488,20 +488,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             IssueId: issueId));
     }
 
-    public Task<WorkflowFeedbackSnapshot?> GetFeedbackAsync(string feedbackId)
+    public Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId)
     {
         EnsureRun();
         if (string.IsNullOrWhiteSpace(feedbackId))
-            return Task.FromResult<WorkflowFeedbackSnapshot?>(null);
+            return Task.FromResult<WorkflowFeedbackRecord?>(null);
 
         var feedback = _run!.Feedback.FirstOrDefault(f => string.Equals(f.Id, feedbackId, StringComparison.Ordinal));
         if (feedback is null)
-            return Task.FromResult<WorkflowFeedbackSnapshot?>(null);
+            return Task.FromResult<WorkflowFeedbackRecord?>(null);
 
-        return Task.FromResult<WorkflowFeedbackSnapshot?>(ToSnapshot(feedback));
+        return Task.FromResult<WorkflowFeedbackRecord?>(ToSnapshot(feedback));
     }
 
-    public Task<IReadOnlyList<WorkflowFeedbackSnapshot>> ListFeedbackAsync()
+    public Task<IReadOnlyList<WorkflowFeedbackRecord>> ListFeedbackAsync()
     {
         EnsureRun();
         var issueNumber = ResolveIssueNumber();
@@ -509,13 +509,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             .OrderByDescending(f => f.CreatedAt)
             .Select(f => ToSnapshot(f, issueNumber))
             .ToList();
-        return Task.FromResult<IReadOnlyList<WorkflowFeedbackSnapshot>>(snapshots);
+        return Task.FromResult<IReadOnlyList<WorkflowFeedbackRecord>>(snapshots);
     }
 
-    private WorkflowFeedbackSnapshot ToSnapshot(ApprovalFeedback feedback) =>
+    private WorkflowFeedbackRecord ToSnapshot(ApprovalFeedback feedback) =>
         ToSnapshot(feedback, ResolveIssueNumber());
 
-    private WorkflowFeedbackSnapshot ToSnapshot(ApprovalFeedback feedback, int? issueNumber) =>
+    private WorkflowFeedbackRecord ToSnapshot(ApprovalFeedback feedback, int? issueNumber) =>
         new(
             Id: feedback.Id,
             WorkflowRunId: feedback.WorkflowRunId,

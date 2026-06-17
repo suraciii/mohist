@@ -123,7 +123,7 @@ public class IssueApiSpecs
         var profile = Assert.Single(profiles);
         Assert.Equal("mohist/default", profile.Id);
         Assert.Equal("Mohist Default", profile.Name);
-        Assert.Contains("OpenSpec", profile.Description);
+        Assert.Contains("Mohist pipeline", profile.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -136,7 +136,7 @@ public class IssueApiSpecs
         var profile = Assert.Single(profiles);
         Assert.Equal("mohist/default", profile.Id);
         Assert.Equal("Mohist Default", profile.DisplayName);
-        Assert.Contains("OpenSpec", profile.Description);
+        Assert.Contains("Mohist pipeline", profile.Description);
         Assert.NotNull(profile.SuitableFor);
         Assert.NotEmpty(profile.SuitableFor);
         Assert.All(profile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
