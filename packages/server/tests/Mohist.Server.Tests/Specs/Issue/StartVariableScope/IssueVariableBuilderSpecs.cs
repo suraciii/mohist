@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 using Mohist.Server.Tests.Support;
 using MohistIssue = Mohist.Server.Issue.Domain.Issue;
@@ -27,6 +28,11 @@ public class IssueVariableBuilderSpecs
         RepositoryName: "master",
         RepositoryGitUrl: null,
         RepositoryBaseBranch: "master");
+
+    private static readonly WorkspaceIdentity Workspace = new(
+        Path: "/tmp/mohist/test/issue-80",
+        Branch: "mohist/run-wr_x",
+        ChangeDir: "openspec/changes/issue-80");
 
     private static MohistIssue TestIssue(int number = 80) => new()
     {
@@ -58,7 +64,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         // VariableBundle.Vars *is* the vars namespace — agent is a direct child.
@@ -92,7 +98,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
@@ -121,7 +127,7 @@ public class IssueVariableBuilderSpecs
         var projectBundle = VariableBundle.Empty;
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
@@ -140,7 +146,8 @@ public class IssueVariableBuilderSpecs
             projectBundle: VariableBundle.Empty,
             workflowRunId: "wr_x",
             issue: TestIssue(number: 80),
-            project: Project);
+            project: Project,
+            workspace: Workspace);
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var root = doc.RootElement;
@@ -178,7 +185,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(number: 80), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(number: 80), Project, Workspace);
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var root = doc.RootElement;
@@ -224,7 +231,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
 
         // Per-stage variables live in VariableBundle.Stages, not Vars.
         Assert.NotNull(result.Stages);
@@ -264,7 +271,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
 
         using var doc = JsonDocument.Parse(result.Vars!.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
@@ -302,7 +309,7 @@ public class IssueVariableBuilderSpecs
         }));
 
         var result = IssueVariableBuilder.Build(
-            globalBundle, projectBundle, "wr_x", TestIssue(), Project);
+            globalBundle, projectBundle, "wr_x", TestIssue(), Project, Workspace);
 
         // top-level vars
         Assert.NotNull(result.Vars);
