@@ -130,17 +130,17 @@ export class ServerConnection {
     return `${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
   }
 
-  async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null } | null> {
+  async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<WorkflowAgentSession | null> {
     const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { method: "GET", signal })
     if (response.status === 404) return null
     if (!response.ok) throw new Error(`session lookup failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
+    return response.json() as Promise<WorkflowAgentSession>
   }
 
-  async openWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
+  async openWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
     const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session open failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
+    return response.json() as Promise<WorkflowAgentSession>
   }
 
   async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string; with?: string | null }>) {
@@ -168,6 +168,13 @@ export class ServerConnection {
   private url(path: string) {
     return `${this.options.serverUrl.replace(/\/$/, "")}/api/runner/${encodeURIComponent(this.options.runnerId)}/${path}`
   }
+}
+
+export interface WorkflowAgentSession {
+  acpSessionId?: string | null
+  workDir?: string | null
+  model?: string | null
+  resolvedModel?: string | null
 }
 
 function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
