@@ -231,6 +231,43 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task StageWithAgentVariables_TaskAgentTemplateResolvesToStageAgentAtDispatch()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(
+                "check",
+                [new("ai-review", "AI review", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                {
+                    ["session"] = JsonSerializer.SerializeToElement("check"),
+                    ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.review }}"),
+                    ["agent"] = JsonSerializer.SerializeToElement("${{ vars.agent }}")
+                })],
+                [],
+                Variables: new Dictionary<string, JsonElement?>
+                {
+                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.5" })
+                })
+        ], Variables: new Dictionary<string, JsonElement?>
+        {
+            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
+        }));
+
+        var (task, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("ai-review.", task.WorkId);
+        using var with = JsonDocument.Parse(task.With!);
+        var agent = with.RootElement.GetProperty("agent");
+        Assert.Equal(JsonValueKind.Object, agent.ValueKind);
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
+        Assert.Equal("${{ prompts.review }}", with.RootElement.GetProperty("prompt").GetString());
+        Assert.DoesNotContain("kimi-for-coding/k2p6", task.With);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task StageAgentModelNull_InheritsIssueAgentModelAtDispatch()
     {
         // After T-003 the runtime reads the issue layer (T1 snapshot) directly
