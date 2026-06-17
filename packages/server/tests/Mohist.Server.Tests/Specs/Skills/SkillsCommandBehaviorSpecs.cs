@@ -73,7 +73,7 @@ public sealed class SkillsCommandBehaviorSpecs
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(getExplore.ExitCode == 0, $"get mohist-explore failed\nstderr:\n{getExplore.Stderr}");
             Assert.Contains("name: mohist-explore", getExplore.Stdout);
-            Assert.Contains("Use this skill to explore Mohist from the product and user perspective", getExplore.Stdout, StringComparison.Ordinal);
+            Assert.Contains("Use this skill to **distill** a fuzzy idea into a clear", getExplore.Stdout, StringComparison.Ordinal);
 
             var getFull = await RunProcessAsync(
                 "dotnet",
@@ -260,7 +260,7 @@ public sealed class SkillsCommandBehaviorSpecs
         if (name == "mohist")
             Assert.Contains("Use this skill for current Mohist .NET backend", content, StringComparison.Ordinal);
         else
-            Assert.Contains("Use this skill to explore Mohist from the product and user perspective", content, StringComparison.Ordinal);
+            Assert.Contains("Use this skill to **distill** a fuzzy idea into a clear", content, StringComparison.Ordinal);
     }
 
     private static string[] SplitLines(string value) =>
