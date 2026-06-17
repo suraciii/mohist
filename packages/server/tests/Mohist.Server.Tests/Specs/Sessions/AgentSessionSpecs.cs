@@ -276,16 +276,19 @@ public class AgentSessionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
-    public async Task RunnerAttach_DifferentPhysicalSession_ReturnsConflict()
+    public async Task RunnerAttach_DifferentPhysicalSession_RebindsRuntimeSession()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("attach-conflict", start: false);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = "acp-1", workDir = "/work", processPid = 1234 });
 
         using var response = await _client.PostAsJsonAsync(RunnerAgentSessionAttachPath(session), new { agentSessionId = "acp-2", workDir = "/work", processPid = 1234 });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("already attached", body);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rebound = await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(session.Id)
+            .GetAsync();
+        Assert.NotNull(rebound);
+        Assert.Equal("acp-2", rebound.AgentSessionId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
