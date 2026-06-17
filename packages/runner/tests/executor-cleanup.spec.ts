@@ -190,6 +190,45 @@ describe("WorkExecutor clean worktree invariant", () => {
     expect(after.stdout).toBe("")
   })
 
+  it("rendersTemplateVariablesInCleanupExpectationPaths", async () => {
+    // Cleanup follow-ups inherit the original task's completion
+    // requirements. Those requirements are filesystem paths, so they
+    // must use the same rendered `with` object as the original action
+    // rather than the raw workflow template.
+    await dirtyRepoWith({ path: "openspec/changes/issue-127/specs/cli-interface/spec.md", content: "spec\n" })
+    let observedExpectedPath: unknown
+    setCleanupAgentActionForTest(async (ctx) => {
+      const expectInput = ctx.with?.expect
+      if (expectInput && typeof expectInput === "object" && !Array.isArray(expectInput)) {
+        const files = expectInput.files
+        if (Array.isArray(files) && files[0] && typeof files[0] === "object") {
+          observedExpectedPath = (files[0] as { path?: unknown }).path
+        }
+      }
+      await exec("git", ["add", "openspec/changes/issue-127/specs/cli-interface/spec.md"], { cwd: ctx.workDir })
+      await exec("git", ["commit", "-m", "add spec artifact", "-q"], { cwd: ctx.workDir })
+      return { status: "success" }
+    })
+
+    const work = buildWork({
+      uses: "mohist/acp-agent",
+      with: {
+        prompt: "write specs",
+        expect: { files: [{ path: "${{ openspecChangeDir }}/specs" }] },
+      },
+      variables: {
+        workspace: { path: workDir, branch: "main", changeDir: null },
+        openspecChangeDir: "openspec/changes/issue-127",
+      },
+    })
+    const executor = buildExecutor(makeRegistry(async () => ({ status: "success" })))
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(observedExpectedPath).toBe("openspec/changes/issue-127/specs")
+  })
+
   it("succeedsAfterMultipleCleanupAttemptsWithTotalCountRecorded", async () => {
     // First cleanup only partially resolves the worktree (one
     // file committed, another left). Second cleanup commits the
