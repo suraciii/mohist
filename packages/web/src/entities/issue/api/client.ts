@@ -57,6 +57,13 @@ export function approveIssue(number: number, projectId?: string | null) {
   return request<{ issue: Issue; context: string | null; message: string }>(projectApiPath(projectId, `/issues/${number}/approve`), { method: 'POST' })
 }
 
+export function rejectIssue(number: number, data: { message?: string }, projectId?: string | null) {
+  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reject`), {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 export interface CreateFeedbackRequest {
   stage: string
   body: string

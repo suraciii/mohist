@@ -101,9 +101,20 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task HeartbeatRepairAsync(RunnerInfo info)
     {
         if (_status != RunnerStatus.Online)
+        {
             await RegisterAsync(info);
-        else
-            await TouchPresenceAsync();
+            return;
+        }
+
+        var effectiveHash = info.BuildGitHash ?? _pendingBuildGitHash;
+        if (effectiveHash is not null && _info is not null && _info.BuildGitHash != effectiveHash)
+        {
+            _info = _info with { BuildGitHash = effectiveHash };
+            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+            await registry.RegisterAsync(_info);
+        }
+        _pendingBuildGitHash = null;
+        await TouchPresenceAsync();
     }
 
     public async Task<WorkDispatch?> PollAsync()

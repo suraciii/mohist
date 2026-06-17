@@ -39,6 +39,21 @@ public static partial class IssueRoutes
             return ApiResults.Ok();
         });
 
+        group.MapPost("/{number:int}/reject", async (
+            HttpContext ctx,
+            string projectRef,
+            int number,
+            RejectRequest? req,
+            IGrainFactory grains,
+            IssueQuerier issuesQuery) =>
+        {
+            var project = GetRequiredProject(ctx);
+            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            await grains.GetGrain<IWorkflowGrain>(wrId).RejectAsync(req?.Message);
+            return ApiResults.Ok();
+        });
+
         group.MapPost("/{number:int}/retry", async (
             HttpContext ctx,
             string projectRef,
@@ -144,4 +159,6 @@ public static partial class IssueRoutes
 
         return false;
     }
+
+    internal sealed record RejectRequest(string? Message);
 }
