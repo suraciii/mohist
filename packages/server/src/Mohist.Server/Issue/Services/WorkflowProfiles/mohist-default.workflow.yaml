@@ -275,6 +275,8 @@ stages:
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
           strategy: squash
+          push: true
+          remote: origin
           message: Complete issue #${{ issue.number }}
           conflictResolver:
             title: Resolve merge conflicts

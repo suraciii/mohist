@@ -26,6 +26,34 @@ export function setMergeConflictResolverForTest(runner: ConflictResolverRunner |
   mergeConflictResolverRunner = runner ?? acpAgentAction
 }
 
+const DEFAULT_MAX_CONFLICT_RETRIES = 3
+const DEFAULT_MAX_PUSH_RETRY = 5
+
+type MergePhase = "source-cleanup" | "fetch" | "rebase-conflict" | "landing-validation" | "push"
+
+interface MergeEvidence {
+  kind: "merge"
+  phase?: MergePhase
+  source: string
+  target: string
+  remote: string
+  strategy: string
+  push: boolean
+  pushRemote?: string
+  pushEnabled: boolean
+  baseSha?: string | null
+  rebasedSha?: string | null
+  landingSha?: string | null
+  remoteRef?: string | null
+  pushRetryAttempts?: number
+  lastRemoteSha?: string | null
+  resolveAttempts?: number
+  dirty?: { staged: string[]; unstaged: string[]; untracked: string[] }
+  conflicts?: string[]
+  output?: string
+  message?: string
+}
+
 export class ActionRegistry {
   private readonly actions = new Map<string, ActionHandler>()
 
@@ -152,91 +180,343 @@ export async function mergeReadyAction(context: ActionContext): Promise<ActionRe
 export async function mergeAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? "HEAD"
   const target = stringInput(context.with, "target")
-  const remote = stringInput(context.with, "remote") ?? "origin"
-  const strategy = stringInput(context.with, "strategy") ?? "squash"
+  const strategy = (stringInput(context.with, "strategy") ?? "squash").toLowerCase()
   const message = stringInput(context.with, "message") ?? "Mohist merge"
-  const maxRetries = numberInput(context.with, "maxConflictRetries") ?? 3
+  const remote = stringInput(context.with, "remote") ?? "origin"
+  const push = boolInput(context.with, "push") ?? false
+  const maxConflictRetries = numberInput(context.with, "maxConflictRetries") ?? DEFAULT_MAX_CONFLICT_RETRIES
+  const maxPushRetry = numberInput(context.with, "maxPushRetry") ?? DEFAULT_MAX_PUSH_RETRY
   const conflictResolver = objectInput(context.with, "conflictResolver") ?? {}
-  const workDir = context.workDir
+  const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
 
-  const sourceCommit = await commitPendingSourceChanges(workDir, message, context.signal)
-  if (!sourceCommit.success) {
-    const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
-    return mergeFailure(source, target, strategy, sourceCommit.combinedOutput, diagnostics, sourceCommit.exitCode)
-  }
+  const outputs: string[] = []
 
-  const existingConflicts = await mergeConflictFiles(workDir, context.signal)
-  if (existingConflicts.length > 0) {
-    return resolveMergeConflict(context, {
+  if (!target?.trim()) {
+    return mergeFailure({
       source,
-      target,
+      target: target ?? "",
+      remote,
       strategy,
-      message,
-      initialOutput: `Existing merge conflicts detected:\n${existingConflicts.join("\n")}`,
-      initialExitCode: 1,
-      conflictResolver,
-      maxRetries,
+      push,
+      pushEnabled: push,
+      phase: undefined,
+      message: "merge action requires 'target'",
+      output: combinedGitOutput(outputs),
     })
   }
 
-  let remoteAlign: RemoteAlignResult | null = null
-  if (target?.trim()) {
-    const fetch = await fetchTargetRemote(workDir, remote, target, context.signal)
-    if (!fetch.success) {
-      const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
-      return mergeFailure(source, target, strategy, fetch.combinedOutput, diagnostics, fetch.exitCode)
-    }
+  const dirty = await collectDirtyWorktree(workDir, context.signal)
+  if (dirty && !isWorktreeClean(dirty)) {
+    return mergeFailure({
+      source,
+      target,
+      remote,
+      strategy,
+      push,
+      pushEnabled: push,
+      phase: "source-cleanup",
+      message: `Source worktree is dirty; refusing to merge.\n${describeDirty(dirty)}`,
+      output: combinedGitOutput(outputs),
+      dirty,
+    })
+  }
 
-    const checkout = await git(workDir, ["checkout", target], context.signal)
-    if (!checkout.success) {
-      const checkoutConflicts = await mergeConflictFiles(workDir, context.signal)
-      if (checkoutConflicts.length > 0) {
-        return resolveMergeConflict(context, {
+  // `maxPushRetry` is the total number of fetch→rebase→land→push
+  // cycles the merge action will run before giving up. With
+  // `maxPushRetry: 1` the action performs exactly 1 push attempt;
+  // with `maxPushRetry: 5` (the design default) it performs 5.
+  let lastRemoteSha: string | null = null
+  let baseSha: string | null = null
+  let landingSha: string | null = null
+  let rebasedSha: string | null = null
+  let resolveAttemptsTotal = 0
+  let resolvedConflicts: string[] = []
+  let pushAttemptsConsumed = 0
+
+  for (let attempt = 0; attempt < maxPushRetry; attempt++) {
+    const fetched = await fetchRemote(workDir, remote, target, context.signal)
+    if (!fetched.success) {
+      outputs.push(fetched.combinedOutput)
+      return fetchFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        landingSha,
+        output: combinedGitOutput(outputs),
+        detail: `Fetch from '${remote}' failed: ${fetched.combinedOutput}`,
+      })
+    }
+    outputs.push(fetched.combinedOutput)
+
+    const remoteTracking = `${remote}/${target}`
+    const baseResult = await git(workDir, ["rev-parse", remoteTracking], context.signal)
+    if (!baseResult.success) {
+      outputs.push(baseResult.combinedOutput)
+      return fetchFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        landingSha,
+        output: combinedGitOutput(outputs),
+        detail: `Could not resolve ${remoteTracking} after fetch: ${baseResult.combinedOutput}`,
+      })
+    }
+    baseSha = baseResult.stdout.trim()
+
+    const rebaseResult = await rebaseSourceOnto(workDir, source, remoteTracking, context)
+    outputs.push(rebaseResult.output)
+    // `rebaseSourceOnto` reports `success: false` when the source branch
+    // could not be checked out (a guard failure), but a failed rebase that
+    // produced conflicts still reports `success: false` with a non-empty
+    // `conflicts` array. Only the no-conflict failure path is a checkout
+    // error that should bubble up as a fetch failure.
+    if (!rebaseResult.success && rebaseResult.conflicts.length === 0) {
+      return fetchFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        landingSha,
+        baseSha,
+        output: combinedGitOutput(outputs),
+        detail: rebaseResult.output || `Could not check out or rebase source branch '${source}'.`,
+      })
+    }
+    if (rebaseResult.conflicts.length > 0) {
+      const resolved = await resolveRebaseConflicts(context, {
+        workDir,
+        source,
+        target,
+        remoteTracking,
+        baseSha,
+        conflicts: rebaseResult.conflicts,
+        conflictResolver,
+        maxConflictRetries,
+        initialOutput: rebaseResult.output,
+      })
+      outputs.push(resolved.output)
+      resolveAttemptsTotal += resolved.attempts
+      if (resolved.ok) {
+        resolvedConflicts = Array.from(new Set([...resolvedConflicts, ...resolved.resolvedConflicts]))
+      }
+      if (!resolved.ok) {
+        return rebaseConflictFailure({
           source,
           target,
+          remote,
           strategy,
-          message,
-          initialOutput: checkout.combinedOutput,
-          initialExitCode: checkout.exitCode,
-          conflictResolver,
-          maxRetries,
+          push,
+          baseSha,
+          landingSha,
+          outputs,
+          message: `Rebase conflicts could not be resolved after ${resolved.attempts} attempt(s).`,
+          conflicts: resolved.unresolvedConflicts,
+          resolveAttempts: resolved.attempts,
         })
       }
-
-      const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
-      return mergeFailure(source, target, strategy, checkout.combinedOutput, diagnostics, checkout.exitCode)
     }
 
-    remoteAlign = await fastForwardCheckedOutTargetToRemote(workDir, remote, target, fetch.combinedOutput, context.signal)
-    if (!remoteAlign.success) {
-      const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
-      return mergeFailure(source, target, strategy, remoteAlign.combinedOutput, diagnostics, remoteAlign.exitCode)
+    const rebasedHead = await git(workDir, ["rev-parse", "HEAD"], context.signal)
+    if (!rebasedHead.success) {
+      outputs.push(rebasedHead.combinedOutput)
+      return rebaseConflictFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        baseSha,
+        landingSha,
+        outputs,
+        message: `Could not resolve HEAD after rebase: ${rebasedHead.combinedOutput}`,
+        resolveAttempts: resolveAttemptsTotal,
+      })
     }
-  }
+    rebasedSha = rebasedHead.stdout.trim()
 
-  const result = strategy.toLowerCase() === "squash"
-    ? await squashMerge(workDir, source, target ?? "", message, context)
-    : await git(workDir, ["merge", source], context.signal)
-  if (!result.success && conflictResolver) {
-    return resolveMergeConflict(context, {
+    const postRebaseClean = await collectDirtyWorktree(workDir, context.signal)
+    outputs.push(postRebaseClean ? `Status after rebase: ${postRebaseClean.staged.length} staged, ${postRebaseClean.unstaged.length} unstaged, ${postRebaseClean.untracked.length} untracked` : "Status after rebase: ok")
+    if (postRebaseClean && !isWorktreeClean(postRebaseClean)) {
+      return rebaseConflictFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        baseSha,
+        rebasedSha,
+        landingSha,
+        outputs,
+        message: `Source worktree is dirty after rebase:\n${describeDirty(postRebaseClean)}`,
+        resolveAttempts: resolveAttemptsTotal,
+        dirty: postRebaseClean,
+      })
+    }
+
+    const landing = await createSquashLanding(workDir, baseSha, source, strategy, message, context)
+    outputs.push(landing.output)
+    if (!landing.landingSha) {
+      return landingValidationFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        baseSha,
+        rebasedSha,
+        landingSha: null,
+        outputs,
+        message: landing.message ?? "Squash landing commit could not be created",
+        resolveAttempts: resolveAttemptsTotal,
+      })
+    }
+    landingSha = landing.landingSha
+
+    const validation = await validateLanding(workDir, baseSha, landingSha, context.signal)
+    outputs.push(validation.output)
+    if (!validation.ok) {
+      return landingValidationFailure({
+        source,
+        target,
+        remote,
+        strategy,
+        push,
+        baseSha,
+        rebasedSha,
+        landingSha,
+        outputs,
+        message: validation.message ?? "Landing validation failed",
+        resolveAttempts: resolveAttemptsTotal,
+      })
+    }
+
+    if (!push) {
+      return mergeSuccess({
+        source,
+        target,
+        remote,
+        strategy,
+        push: false,
+        pushEnabled: false,
+        baseSha,
+        rebasedSha,
+        landingSha,
+        remoteRef: null,
+        pushRetryAttempts: 0,
+        lastRemoteSha: null,
+        resolveAttempts: resolveAttemptsTotal,
+        conflicts: resolvedConflicts,
+        output: combinedGitOutput(outputs),
+      })
+    }
+
+    pushAttemptsConsumed = attempt + 1
+    lastRemoteSha = baseSha
+
+    const pushResult = await pushLandingCommit(workDir, remote, target, landingSha, context.signal)
+    outputs.push(pushResult.combinedOutput)
+    if (pushResult.success) {
+      const remoteRef = await verifyRemoteRef(workDir, remote, target, context.signal)
+      outputs.push(remoteRef.combinedOutput)
+      if (!remoteRef.success) {
+        return pushFailure({
+          source,
+          target,
+          remote,
+          strategy,
+          baseSha,
+          rebasedSha,
+          landingSha,
+          remoteRef: null,
+          pushRetryAttempts: pushAttemptsConsumed,
+          lastRemoteSha,
+          outputs,
+          message: `Remote ref verification failed: ${remoteRef.combinedOutput}`,
+          resolveAttempts: resolveAttemptsTotal,
+        })
+      }
+      if (remoteRef.remoteSha && remoteRef.remoteSha !== landingSha) {
+        return pushFailure({
+          source,
+          target,
+          remote,
+          strategy,
+          baseSha,
+          rebasedSha,
+          landingSha,
+          remoteRef: remoteRef.remoteSha,
+          pushRetryAttempts: pushAttemptsConsumed,
+          lastRemoteSha,
+          outputs,
+          message: `Remote ref points at '${remoteRef.remoteSha}' but expected landing commit '${landingSha}'.`,
+          resolveAttempts: resolveAttemptsTotal,
+        })
+      }
+      return mergeSuccess({
+        source,
+        target,
+        remote,
+        strategy,
+        push: true,
+        pushEnabled: true,
+        baseSha,
+        rebasedSha,
+        landingSha,
+        remoteRef: remoteRef.remoteSha,
+        pushRetryAttempts: pushAttemptsConsumed,
+        lastRemoteSha,
+        resolveAttempts: resolveAttemptsTotal,
+        conflicts: resolvedConflicts,
+        output: combinedGitOutput(outputs),
+      })
+    }
+
+    if (isRemoteAdvancedRejection(pushResult.combinedOutput)) {
+      const newRemote = await git(workDir, ["ls-remote", remote, `refs/heads/${target}`], context.signal)
+      if (newRemote.success) {
+        const parsed = parseLsRemoteSha(newRemote.stdout)
+        if (parsed) lastRemoteSha = parsed
+      }
+      if (attempt < maxPushRetry) continue
+    }
+
+    return pushFailure({
       source,
       target,
+      remote,
       strategy,
-      message,
-      initialOutput: result.combinedOutput,
-      initialExitCode: result.exitCode,
-      conflictResolver,
-      maxRetries,
+      baseSha,
+      rebasedSha,
+      landingSha,
+      remoteRef: null,
+      pushRetryAttempts: pushAttemptsConsumed,
+      lastRemoteSha,
+      outputs,
+      message: `Fast-forward push to '${remote}/${target}' failed: ${pushResult.combinedOutput}`,
+      resolveAttempts: resolveAttemptsTotal,
     })
   }
 
-  const head = result.success ? await git(workDir, ["rev-parse", "HEAD"], context.signal) : null
-  const output = JSON.stringify({ kind: "merge", source, target, strategy, remoteAligned: remoteAlign?.aligned === true, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: [remoteAlign?.combinedOutput, result.combinedOutput].filter(Boolean).join("\n") })
-  if (result.success) {
-    return { status: "success", message: "Merge completed", output, exitCode: result.exitCode }
-  }
-  const diagnostics = await collectMergeDiagnostics(workDir, target, source, context.signal)
-  return mergeFailure(source, target, strategy, result.combinedOutput, diagnostics, result.exitCode)
+  return pushFailure({
+    source,
+    target,
+    remote,
+    strategy,
+    baseSha,
+    rebasedSha,
+    landingSha,
+    remoteRef: null,
+    pushRetryAttempts: pushAttemptsConsumed,
+    lastRemoteSha,
+    outputs,
+    message: `Remote-advanced push retry exhausted after ${pushAttemptsConsumed} attempt(s).`,
+    resolveAttempts: resolveAttemptsTotal,
+  })
 }
 
 export async function pushAction(context: ActionContext): Promise<ActionResult> {
@@ -255,96 +535,320 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
 }
 
-async function resolveMergeConflict(
-  context: ActionContext,
-  input: {
-    source: string
-    target?: string
-    strategy: string
-    message: string
-    initialOutput: string
-    initialExitCode: number
-    conflictResolver: JsonObject
-    maxRetries: number
-  },
-): Promise<ActionResult> {
-  const workDir = context.workDir
-  let conflicts = await mergeConflictFiles(workDir, context.signal)
-  if (conflicts.length === 0) {
-    const diagnostics = await collectMergeDiagnostics(workDir, input.target, input.source, context.signal)
-    return mergeFailure(input.source, input.target, input.strategy, input.initialOutput, diagnostics, input.initialExitCode)
+interface FetchFailureInput {
+  source: string
+  target: string
+  remote: string
+  strategy: string
+  push: boolean
+  landingSha: string | null
+  baseSha?: string | null
+  output: string
+  detail: string
+}
+
+function fetchFailure(input: FetchFailureInput): ActionResult {
+  return mergeFailure({
+    source: input.source,
+    target: input.target,
+    remote: input.remote,
+    strategy: input.strategy,
+    push: input.push,
+    pushEnabled: input.push,
+    pushRemote: input.push ? input.remote : undefined,
+    baseSha: input.baseSha ?? null,
+    landingSha: input.landingSha,
+    phase: "fetch",
+    message: input.detail,
+    output: input.output,
+  })
+}
+
+interface RebaseConflictFailureInput {
+  source: string
+  target: string
+  remote: string
+  strategy: string
+  push: boolean
+  baseSha: string | null
+  rebasedSha?: string | null
+  landingSha: string | null
+  outputs: string[]
+  message: string
+  conflicts?: string[]
+  resolveAttempts: number
+  dirty?: DirtyWorktree
+}
+
+function rebaseConflictFailure(input: RebaseConflictFailureInput): ActionResult {
+  return mergeFailure({
+    source: input.source,
+    target: input.target,
+    remote: input.remote,
+    strategy: input.strategy,
+    push: input.push,
+    pushEnabled: input.push,
+    pushRemote: input.push ? input.remote : undefined,
+    baseSha: input.baseSha,
+    rebasedSha: input.rebasedSha ?? null,
+    landingSha: input.landingSha,
+    phase: "rebase-conflict",
+    message: input.message,
+    output: combinedGitOutput(input.outputs),
+    conflicts: input.conflicts,
+    resolveAttempts: input.resolveAttempts,
+    dirty: input.dirty,
+  })
+}
+
+interface LandingValidationFailureInput {
+  source: string
+  target: string
+  remote: string
+  strategy: string
+  push: boolean
+  baseSha: string | null
+  rebasedSha: string | null
+  landingSha: string | null
+  outputs: string[]
+  message: string
+  resolveAttempts: number
+}
+
+function landingValidationFailure(input: LandingValidationFailureInput): ActionResult {
+  return mergeFailure({
+    source: input.source,
+    target: input.target,
+    remote: input.remote,
+    strategy: input.strategy,
+    push: input.push,
+    pushEnabled: input.push,
+    pushRemote: input.push ? input.remote : undefined,
+    baseSha: input.baseSha,
+    rebasedSha: input.rebasedSha,
+    landingSha: input.landingSha,
+    phase: "landing-validation",
+    message: input.message,
+    output: combinedGitOutput(input.outputs),
+    resolveAttempts: input.resolveAttempts,
+  })
+}
+
+interface PushFailureInput {
+  source: string
+  target: string
+  remote: string
+  strategy: string
+  baseSha: string | null
+  rebasedSha: string | null
+  landingSha: string | null
+  remoteRef: string | null
+  pushRetryAttempts: number
+  lastRemoteSha: string | null
+  outputs: string[]
+  message: string
+  resolveAttempts: number
+}
+
+function pushFailure(input: PushFailureInput): ActionResult {
+  return mergeFailure({
+    source: input.source,
+    target: input.target,
+    remote: input.remote,
+    strategy: input.strategy,
+    push: true,
+    pushEnabled: true,
+    pushRemote: input.remote,
+    baseSha: input.baseSha,
+    rebasedSha: input.rebasedSha,
+    landingSha: input.landingSha,
+    remoteRef: input.remoteRef,
+    pushRetryAttempts: input.pushRetryAttempts,
+    lastRemoteSha: input.lastRemoteSha,
+    phase: "push",
+    message: input.message,
+    output: combinedGitOutput(input.outputs),
+    resolveAttempts: input.resolveAttempts,
+  })
+}
+
+async function fetchRemote(workDir: string, remote: string, target: string, signal: AbortSignal) {
+  return await git(workDir, ["fetch", remote, target], signal)
+}
+
+async function fetchTargetRemote(workDir: string, remote: string, target: string, signal: AbortSignal): Promise<GitResult> {
+  return await git(workDir, ["fetch", remote, target], signal)
+}
+
+interface RebaseResult {
+  output: string
+  conflicts: string[]
+  success: boolean
+}
+
+async function rebaseSourceOnto(workDir: string, source: string, remoteTracking: string, context: ActionContext): Promise<RebaseResult> {
+  const outputs: string[] = []
+  // Defensive: `git rebase <upstream>` rebases the currently checked-out
+  // branch, not the named `source` branch. The runner worktree is normally
+  // already on `source` (set by WorkspaceManager.ensureIssueWorktree), but
+  // if a previous step left the worktree on a different ref, the rebase
+  // would silently target the wrong branch. Explicitly check out the
+  // source branch first so the rebased range always matches the configured
+  // source, even after worktree state drift.
+  const checkout = await git(workDir, ["checkout", source], context.signal)
+  outputs.push(checkout.combinedOutput)
+  if (!checkout.success) {
+    return { output: combinedGitOutput(outputs), conflicts: [], success: false }
   }
+  const result = await git(workDir, ["rebase", remoteTracking], context.signal)
+  outputs.push(result.combinedOutput)
+  if (result.success) {
+    return { output: combinedGitOutput(outputs), conflicts: [], success: true }
+  }
+  const conflicts = await mergeConflictFiles(workDir, context.signal)
+  return { output: combinedGitOutput(outputs), conflicts, success: false }
+}
 
-  const allConflicts: string[][] = [conflicts]
+interface ResolveRebaseConflictsInput {
+  workDir: string
+  source: string
+  target: string
+  remoteTracking: string
+  baseSha: string
+  conflicts: string[]
+  conflictResolver: JsonObject
+  maxConflictRetries: number
+  initialOutput: string
+}
+
+interface ResolveRebaseConflictsResult {
+  ok: boolean
+  attempts: number
+  output: string
+  unresolvedConflicts: string[]
+  resolvedConflicts: string[]
+}
+
+async function resolveRebaseConflicts(context: ActionContext, input: ResolveRebaseConflictsInput): Promise<ResolveRebaseConflictsResult> {
   const outputs: string[] = [input.initialOutput]
+  const allConflicts: string[][] = [input.conflicts]
   let attempts = 0
+  let conflicts = input.conflicts
 
-  while (attempts < input.maxRetries) {
-    attempts++
-    const agentResult = await runMergeConflictResolver(context, input.conflictResolver, input.source, input.target, conflicts, attempts)
+  while (attempts < input.maxConflictRetries) {
+    attempts += 1
+    const agentResult = await runRebaseMergeConflictResolver(context, input.conflictResolver, input.workDir, input.source, input.target, conflicts, attempts, "rebase")
     if (agentResult.output) outputs.push(agentResult.output)
     if (agentResult.status !== "success") {
-      const diagnostics = await collectMergeDiagnostics(workDir, input.target, input.source, context.signal)
-      return mergeConflictFailure(input, allConflicts.flat(), attempts, outputs, diagnostics, agentResult.exitCode ?? 1)
+      await git(input.workDir, ["rebase", "--abort"], context.signal).catch(() => undefined)
+      return {
+        ok: false,
+        attempts,
+        output: combinedGitOutput(outputs),
+        unresolvedConflicts: Array.from(new Set(allConflicts.flat())),
+        resolvedConflicts: [],
+      }
     }
 
-    conflicts = await mergeConflictFiles(workDir, context.signal)
-    if (conflicts.length > 0) {
-      allConflicts.push(conflicts)
+    const remaining = await mergeConflictFiles(input.workDir, context.signal)
+    if (remaining.length > 0) {
+      allConflicts.push(remaining)
+      conflicts = remaining
       continue
     }
 
-    const finish = input.strategy.toLowerCase() === "squash"
-      ? await finishSquashMerge(workDir, input.source, input.target ?? "", input.message, context)
-      : await finishRegularMerge(workDir, input.message, context.signal)
-    outputs.push(finish.combinedOutput)
-    const head = finish.success ? await git(workDir, ["rev-parse", "HEAD"], context.signal) : null
-    if (head?.combinedOutput) outputs.push(head.combinedOutput)
-    const output = JSON.stringify({
-      kind: "merge",
-      source: input.source,
-      target: input.target,
-      strategy: input.strategy,
-      commit: head?.success ? head.stdout.trim() : null,
-      conflicts: allConflicts.flat(),
-      resolveAttempts: attempts,
+    const rebaseInProgress = await isRebaseInProgress(input.workDir, context.signal)
+    if (rebaseInProgress) {
+      const continueResult = await git(input.workDir, ["rebase", "--continue"], context.signal)
+      outputs.push(continueResult.combinedOutput)
+      if (!continueResult.success) {
+        const stillUnresolved = await mergeConflictFiles(input.workDir, context.signal)
+        if (stillUnresolved.length > 0) {
+          allConflicts.push(stillUnresolved)
+          conflicts = stillUnresolved
+          continue
+        }
+      }
+    }
+
+    const stillInProgress = await isRebaseInProgress(input.workDir, context.signal)
+    const afterConflicts = await mergeConflictFiles(input.workDir, context.signal)
+    if (stillInProgress || afterConflicts.length > 0) {
+      if (afterConflicts.length > 0) {
+        allConflicts.push(afterConflicts)
+        conflicts = afterConflicts
+      }
+      continue
+    }
+
+    const head = await git(input.workDir, ["rev-parse", "HEAD"], context.signal)
+    outputs.push(head.combinedOutput)
+    return {
+      ok: true,
+      attempts,
       output: combinedGitOutput(outputs),
-    })
-    return finish.success
-      ? { status: "success", message: "Merge completed", output, exitCode: finish.exitCode }
-      : { status: "failure", message: finish.combinedOutput, output, exitCode: finish.exitCode }
+      unresolvedConflicts: [],
+      resolvedConflicts: Array.from(new Set(allConflicts.flat())),
+    }
   }
 
-  const diagnostics = await collectMergeDiagnostics(workDir, input.target, input.source, context.signal)
-  return mergeConflictFailure(input, allConflicts.flat(), attempts, outputs, diagnostics, 1)
+  await git(input.workDir, ["rebase", "--abort"], context.signal).catch(() => undefined)
+  return {
+    ok: false,
+    attempts,
+    output: combinedGitOutput(outputs),
+    unresolvedConflicts: Array.from(new Set(allConflicts.flat())),
+    resolvedConflicts: [],
+  }
 }
 
-async function runMergeConflictResolver(
+async function runRebaseMergeConflictResolver(
   context: ActionContext,
   conflictResolver: JsonObject,
+  workDir: string,
   source: string,
-  target: string | undefined,
+  target: string,
   conflicts: string[],
   attempt: number,
+  phase: "rebase" | "merge",
 ): Promise<ActionResult> {
   const resolverWith: JsonObject = {
-    prompt: buildMergeConflictPrompt(conflicts, source, target, attempt),
+    prompt: buildRebaseConflictPrompt(conflicts, source, target, attempt, phase),
     ...objectInput(conflictResolver, "with"),
   }
   applyWorkflowAgentDefault(resolverWith, context.variables)
 
   return mergeConflictResolverRunner({
     ...context,
-    workDir: context.workDir,
+    workDir,
     workId: `${context.workId}-conflict-resolve-${attempt}`,
     workType: "task",
-    title: stringInput(conflictResolver, "title") ?? "Resolve merge conflicts",
+    title: stringInput(conflictResolver, "title") ?? (phase === "rebase" ? "Resolve rebase conflicts" : "Resolve merge conflicts"),
     with: resolverWith,
   })
 }
 
-async function fetchTargetRemote(workDir: string, remote: string, target: string, signal: AbortSignal): Promise<GitResult> {
-  return await git(workDir, ["fetch", remote, target], signal)
+function buildRebaseConflictPrompt(conflicts: string[], source: string, target: string, attempt: number, phase: "rebase" | "merge") {
+  const fileList = conflicts.map((f) => `- ${f}`).join("\n")
+  const verb = phase === "rebase" ? "rebase" : "merge"
+  const targetLabel = phase === "rebase" ? `\`${target}\`` : `\`${source}\` into \`${target}\``
+  return [
+    `## Complete Git ${verb[0]!.toUpperCase()}${verb.slice(1)} Conflict Resolution (attempt ${attempt})`,
+    "",
+    `A ${verb} of ${targetLabel} produced conflicts.`,
+    "",
+    "Current conflict files:",
+    fileList,
+    "",
+    "Resolution rules:",
+    "1. Preserve both sides. Never drop or overwrite either side's intentional changes.",
+    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>`; no markers may remain.",
+    "3. Stage resolved files with `git add`.",
+    phase === "rebase"
+      ? "4. Continue the rebase yourself with `GIT_EDITOR=true git rebase --continue` until the rebase is complete and no rebase is in progress."
+      : "4. Do not create the merge commit. The runner will commit after verifying the conflict is resolved.",
+    "5. If verification fails because of your resolution, fix it before finishing.",
+  ].join("\n")
 }
 
 async function fastForwardCheckedOutTargetToRemote(workDir: string, remote: string, target: string, fetchOutput: string, signal: AbortSignal): Promise<RemoteAlignResult> {
@@ -568,54 +1072,222 @@ function isNonFastForward(output: string) {
   return /non-fast-forward|fetch first|tip is behind|Updates were rejected/i.test(output)
 }
 
-function buildMergeConflictPrompt(conflicts: string[], source: string, target: string | undefined, attempt: number) {
-  const fileList = conflicts.map((f) => `- ${f}`).join("\n")
-  return [
-    `## Complete Git Merge Conflict Resolution (attempt ${attempt})`,
-    "",
-    `A merge from \`${source}\`${target ? ` into \`${target}\`` : ""} produced conflicts.`,
-    "",
-    "Current conflict files:",
-    fileList,
-    "",
-    "Resolution rules:",
-    "1. Preserve both sides. Never drop or overwrite either side's intentional changes.",
-    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>`; no markers may remain.",
-    "3. Stage resolved files with `git add`.",
-    "4. Do not create the merge commit. The runner will commit after verifying the conflict is resolved.",
-    "5. If verification fails because of your resolution, fix it before finishing.",
-  ].join("\n")
+async function createSquashLanding(
+  workDir: string,
+  baseSha: string,
+  source: string,
+  strategy: string,
+  message: string,
+  context: ActionContext,
+): Promise<{ landingSha: string | null; output: string; message?: string }> {
+  const outputs: string[] = []
+
+  const checkout = await git(workDir, ["checkout", "--detach", baseSha], context.signal)
+  outputs.push(checkout.combinedOutput)
+  if (!checkout.success) {
+    return { landingSha: null, output: combinedGitOutput(outputs), message: `Could not checkout detached HEAD at ${baseSha}: ${checkout.combinedOutput}` }
+  }
+
+  if (strategy === "squash") {
+    const merge = await git(workDir, ["merge", "--squash", source], context.signal)
+    outputs.push(merge.combinedOutput)
+    if (!merge.success) {
+      await git(workDir, ["reset", "--hard", "HEAD"], context.signal).catch(() => undefined)
+      return { landingSha: null, output: combinedGitOutput(outputs), message: `Squash merge of '${source}' failed: ${merge.combinedOutput}` }
+    }
+    const commitResult = await finishLandingCommit(workDir, message, context)
+    outputs.push(commitResult.combinedOutput)
+    if (!commitResult.success) {
+      await git(workDir, ["reset", "--hard", "HEAD"], context.signal).catch(() => undefined)
+      return { landingSha: null, output: combinedGitOutput(outputs), message: `Landing commit failed: ${commitResult.combinedOutput}` }
+    }
+  } else {
+    const merge = await git(workDir, ["merge", source], context.signal)
+    outputs.push(merge.combinedOutput)
+    if (!merge.success) {
+      await git(workDir, ["merge", "--abort"], context.signal).catch(() => undefined)
+      return { landingSha: null, output: combinedGitOutput(outputs), message: `Merge of '${source}' failed: ${merge.combinedOutput}` }
+    }
+  }
+
+  const head = await git(workDir, ["rev-parse", "HEAD"], context.signal)
+  outputs.push(head.combinedOutput)
+  if (!head.success) {
+    return { landingSha: null, output: combinedGitOutput(outputs), message: `Could not resolve landing HEAD: ${head.combinedOutput}` }
+  }
+  return { landingSha: head.stdout.trim(), output: combinedGitOutput(outputs) }
+}
+
+async function finishLandingCommit(workDir: string, message: string, context: ActionContext) {
+  const title = stringAt(context.variables, ["issue", "title"]) ?? message
+  const numberStr = typeof context.issueNumber === "number" && context.issueNumber > 0
+    ? String(context.issueNumber)
+    : numberAtString(context.variables, ["issue", "number"])
+  const header = numberStr ? `${title} (#${numberStr})` : title
+
+  const source = stringInput(context.with, "source") ?? "HEAD"
+  const target = stringInput(context.with, "target") ?? ""
+  const logResult = await git(workDir, ["log", "--format=* %s", `${target}..${source}`], context.signal)
+  const body = capCommitBody(logResult.success ? logResult.stdout.trim() : "")
+
+  return body
+    ? await git(workDir, ["commit", "-m", header, "-m", body], context.signal)
+    : await git(workDir, ["commit", "-m", header], context.signal)
+}
+
+const MAX_LANDING_BODY_LINES = 50
+const MAX_LANDING_BODY_CHARS = 20_000
+
+function capCommitBody(body: string): string {
+  if (!body) return ""
+  const lines = body.split(/\r?\n/)
+  if (lines.length <= MAX_LANDING_BODY_LINES && body.length <= MAX_LANDING_BODY_CHARS) return body
+  const kept = lines.slice(0, MAX_LANDING_BODY_LINES).join("\n")
+  const remaining = lines.length - MAX_LANDING_BODY_LINES
+  return `${kept}\n\n... and ${remaining} more commit(s) ...`
+}
+
+interface LandingValidation {
+  ok: boolean
+  message?: string
+  output: string
+}
+
+async function validateLanding(workDir: string, baseSha: string, landingSha: string, signal: AbortSignal): Promise<LandingValidation> {
+  const outputs: string[] = []
+  const status = await git(workDir, ["status", "--porcelain"], signal)
+  outputs.push(status.combinedOutput)
+  if (!status.success) {
+    return { ok: false, output: combinedGitOutput(outputs), message: `Could not read worktree status: ${status.combinedOutput}` }
+  }
+  if (status.stdout.trim()) {
+    return { ok: false, output: combinedGitOutput(outputs), message: `Landing worktree is dirty:\n${status.stdout.trim()}` }
+  }
+
+  if (await isRebaseInProgress(workDir, signal)) {
+    return { ok: false, output: combinedGitOutput(outputs), message: "Rebase is still in progress after landing commit" }
+  }
+  const mergeHead = await git(workDir, ["rev-parse", "--git-path", "MERGE_HEAD"], signal)
+  if (mergeHead.success) {
+    const path = mergeHead.stdout.trim()
+    if (path && exists(resolveGitPath(workDir, path))) {
+      return { ok: false, output: combinedGitOutput(outputs), message: "Merge is still in progress after landing commit" }
+    }
+  }
+
+  const parents = await git(workDir, ["log", "-1", "--format=%P", landingSha], signal)
+  outputs.push(parents.combinedOutput)
+  if (!parents.success) {
+    return { ok: false, output: combinedGitOutput(outputs), message: `Could not read landing commit parents: ${parents.combinedOutput}` }
+  }
+  const parentList = parents.stdout.trim().split(/\s+/).filter(Boolean)
+  if (parentList.length !== 1 || parentList[0] !== baseSha) {
+    return {
+      ok: false,
+      output: combinedGitOutput(outputs),
+      message: `Landing commit parent mismatch. expected=${baseSha} actual=${parentList.join(",") || "<none>"}`,
+    }
+  }
+
+  return { ok: true, output: combinedGitOutput(outputs) }
+}
+
+async function pushLandingCommit(workDir: string, remote: string, target: string, landingSha: string, signal: AbortSignal) {
+  return await git(workDir, ["push", remote, `${landingSha}:refs/heads/${target}`], signal)
+}
+
+async function verifyRemoteRef(workDir: string, remote: string, target: string, signal: AbortSignal) {
+  const result = await git(workDir, ["ls-remote", remote, `refs/heads/${target}`], signal)
+  if (!result.success) return { ...result, remoteSha: null }
+  const sha = parseLsRemoteSha(result.stdout)
+  if (!sha) {
+    return {
+      success: false,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+      combinedOutput: result.combinedOutput,
+      remoteSha: null,
+    }
+  }
+  return { ...result, remoteSha: sha }
+}
+
+function parseLsRemoteSha(stdout: string) {
+  const firstLine = stdout.split("\n").map((line) => line.trim()).find(Boolean)
+  if (!firstLine) return null
+  const [sha] = firstLine.split(/\s+/)
+  return sha || null
+}
+
+function isRemoteAdvancedRejection(message: string) {
+  const lower = message.toLowerCase()
+  // Git's standard remote-advanced message reads:
+  //   ! [rejected] <ref> -> <ref> (non-fast-forward)
+  // or, in newer git: "Updates were rejected because the tip of your current branch is behind".
+  // Match those specific phrasings; do not match generic "rejected" / "fetch first"
+  // because they also appear in authentication / refspec / permission failures
+  // and we want the merge action to fail with a specific phase rather than
+  // burning retry attempts on a non-race failure.
+  return lower.includes("non-fast-forward") || lower.includes("updates were rejected")
+}
+
+interface DirtyWorktree {
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+}
+
+async function collectDirtyWorktree(workDir: string, signal: AbortSignal): Promise<DirtyWorktree | null> {
+  const status = await git(workDir, ["status", "--porcelain"], signal)
+  if (!status.success) return null
+  if (!status.stdout.trim()) return { staged: [], unstaged: [], untracked: [] }
+  const staged: string[] = []
+  const unstaged: string[] = []
+  const untracked: string[] = []
+  for (const line of status.stdout.split("\n")) {
+    if (!line) continue
+    const code = line.slice(0, 2)
+    const file = line.slice(3).trim()
+    if (code === "??") {
+      untracked.push(file)
+    } else {
+      if (code[0] !== " ") staged.push(file)
+      if (code[1] !== " ") unstaged.push(file)
+    }
+  }
+  return { staged, unstaged, untracked }
+}
+
+function isWorktreeClean(dirty: DirtyWorktree) {
+  return dirty.staged.length === 0 && dirty.unstaged.length === 0 && dirty.untracked.length === 0
+}
+
+function describeDirty(dirty: DirtyWorktree) {
+  const lines: string[] = []
+  if (dirty.staged.length > 0) lines.push(`staged: ${dirty.staged.join(", ")}`)
+  if (dirty.unstaged.length > 0) lines.push(`unstaged: ${dirty.unstaged.join(", ")}`)
+  if (dirty.untracked.length > 0) lines.push(`untracked: ${dirty.untracked.join(", ")}`)
+  return lines.join("\n")
+}
+
+async function isRebaseInProgress(workDir: string, signal: AbortSignal) {
+  const merge = await git(workDir, ["rev-parse", "--git-path", "rebase-merge"], signal)
+  if (merge.success) {
+    const path = merge.stdout.trim()
+    if (path && exists(resolveGitPath(workDir, path))) return true
+  }
+  const apply = await git(workDir, ["rev-parse", "--git-path", "rebase-apply"], signal)
+  if (!apply.success) return false
+  const path = apply.stdout.trim()
+  if (path && exists(resolveGitPath(workDir, path))) return true
+  return false
 }
 
 async function mergeConflictFiles(workDir: string, signal: AbortSignal) {
   const status = await git(workDir, ["diff", "--name-only", "--diff-filter=U"], signal)
   if (!status.success || !status.stdout.trim()) return []
   return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
-}
-
-function mergeConflictFailure(
-  input: { source: string; target?: string; strategy: string },
-  conflicts: string[],
-  attempts: number,
-  outputs: string[],
-  diagnostics: MergeDiagnostics,
-  exitCode: number,
-): ActionResult {
-  const output = JSON.stringify({
-    kind: "merge",
-    source: input.source,
-    target: input.target,
-    strategy: input.strategy,
-    targetBranch: diagnostics.targetBranch,
-    baseSha: diagnostics.baseSha,
-    candidateHeadSha: diagnostics.candidateHeadSha,
-    mergeBaseSha: diagnostics.mergeBaseSha,
-    commit: null,
-    conflicts,
-    resolveAttempts: attempts,
-    output: combinedGitOutput(outputs),
-  })
-  return { status: "failure", message: combinedGitOutput(outputs), output, exitCode }
 }
 
 function mergeReadyResult(canMerge: boolean, targetBranch: string, baseSha: string | null, candidateHeadSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null, conflictFiles: string[], checkedAt: string): ActionResult {
@@ -666,9 +1338,11 @@ async function commitPendingSourceChanges(workDir: string, message: string, sign
 }
 
 async function squashMerge(workDir: string, source: string, target: string, message: string, context: ActionContext) {
+  const checkout = await git(workDir, ["checkout", target], context.signal)
+  if (!checkout.success) return checkout
   const merge = await git(workDir, ["merge", "--squash", source], context.signal)
   if (!merge.success) return merge
-  return finishSquashMerge(workDir, source, target, message, context)
+  return await finishSquashMerge(workDir, source, target, message, context)
 }
 
 async function finishSquashMerge(workDir: string, source: string, target: string, message: string, context: ActionContext) {
@@ -690,8 +1364,41 @@ async function finishRegularMerge(workDir: string, message: string, signal: Abor
   return await git(workDir, ["commit", "-m", message], signal)
 }
 
-function mergeFailure(source: string, target: string | undefined, strategy: string, outputText: string, diagnostics: MergeDiagnostics, exitCode: number): ActionResult {
-  return { status: "failure", message: outputText, output: JSON.stringify({ kind: "merge", source, target, strategy, targetBranch: diagnostics.targetBranch, baseSha: diagnostics.baseSha, candidateHeadSha: diagnostics.candidateHeadSha, mergeBaseSha: diagnostics.mergeBaseSha, conflictFiles: diagnostics.conflictFiles, commit: null, output: outputText }), exitCode }
+function mergeConflictFailure(
+  input: { source: string; target?: string; strategy: string },
+  conflicts: string[],
+  attempts: number,
+  outputs: string[],
+  diagnostics: MergeDiagnostics,
+  exitCode: number,
+): ActionResult {
+  const output = JSON.stringify({
+    kind: "merge",
+    source: input.source,
+    target: input.target,
+    strategy: input.strategy,
+    targetBranch: diagnostics.targetBranch,
+    baseSha: diagnostics.baseSha,
+    candidateHeadSha: diagnostics.candidateHeadSha,
+    mergeBaseSha: diagnostics.mergeBaseSha,
+    commit: null,
+    conflicts,
+    resolveAttempts: attempts,
+    output: combinedGitOutput(outputs),
+  })
+  return { status: "failure", message: combinedGitOutput(outputs), output, exitCode }
+}
+
+function mergeFailure(input: Omit<MergeEvidence, "kind"> & { message: string; output: string }): ActionResult {
+  const { message, output, ...rest } = input
+  const evidence: MergeEvidence = { kind: "merge", message, output, ...rest }
+  return { status: "failure", message, output: JSON.stringify(evidence), exitCode: 1 }
+}
+
+function mergeSuccess(input: Omit<MergeEvidence, "kind" | "message" | "phase"> & { output: string }): ActionResult {
+  const { output, ...rest } = input
+  const evidence: MergeEvidence = { kind: "merge", message: "Merge completed", output, ...rest }
+  return { status: "success", message: "Merge completed", output: JSON.stringify(evidence) }
 }
 
 type MergeDiagnostics = { targetBranch: string; baseSha: string | null; candidateHeadSha: string | null; mergeBaseSha: string | null; conflictFiles: string[] }
@@ -709,6 +1416,38 @@ async function collectMergeDiagnostics(workDir: string, target: string | undefin
     mergeBaseSha: mergeBase?.success ? mergeBase.stdout.trim() : null,
     conflictFiles,
   }
+}
+
+function buildMergeConflictPrompt(conflicts: string[], source: string, target: string | undefined, attempt: number) {
+  const fileList = conflicts.map((f) => `- ${f}`).join("\n")
+  const targetLabel = target ? `\`${source}\` into \`${target}\`` : `\`${source}\``
+  return [
+    `## Complete Git Merge Conflict Resolution (attempt ${attempt})`,
+    "",
+    `A merge of ${targetLabel} produced conflicts.`,
+    "",
+    "Current conflict files:",
+    fileList,
+    "",
+    "Resolution rules:",
+    "1. Preserve both sides. Never drop or overwrite either side's intentional changes.",
+    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>`; no markers may remain.",
+    "3. Stage resolved files with `git add`.",
+    "4. Do not create the merge commit. The runner will commit after verifying the conflict is resolved.",
+    "5. If verification fails because of your resolution, fix it before finishing.",
+  ].join("\n")
+}
+
+function boolInput(input: JsonObject | null | undefined, key: string): boolean | undefined {
+  const value = input?.[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    const lower = value.trim().toLowerCase()
+    if (lower === "true") return true
+    if (lower === "false") return false
+  }
+  return undefined
 }
 
 function firstLine(value: string) {

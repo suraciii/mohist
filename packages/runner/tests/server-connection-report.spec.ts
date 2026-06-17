@@ -1,0 +1,54 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { ServerConnection } from "../src/server/connection.js"
+
+interface MockResponseInit {
+  status: number
+  contentType?: string
+  body?: string | Buffer
+}
+
+const originalFetch = globalThis.fetch
+
+let fetchMock: ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  fetchMock = vi.fn()
+  globalThis.fetch = fetchMock as unknown as typeof fetch
+})
+
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  vi.restoreAllMocks()
+})
+
+function mockResponse({ status, contentType = "application/json", body = "{}" }: MockResponseInit): Response {
+  return new Response(typeof body === "string" ? body : new Uint8Array(body), { status, headers: { "content-type": contentType } })
+}
+
+function options() {
+  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", maxConcurrentWorkflows: 1, pollIntervalMs: 100, heartbeatIntervalMs: 60_000 }
+}
+
+describe("ServerConnection.report", () => {
+  it("forwardsCleanupAttemptsToServerWhenResultIncludesThem", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "{}" }))
+    const connection = new ServerConnection(options())
+    const work = { workflowRunId: "wf-1", workId: "work-1", workType: "task" }
+    await connection.report(work, { status: "failed", message: "dirty", output: "{}", cleanupAttempts: 3 }, new AbortController().signal)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string)
+    expect(body.cleanupAttempts).toBe(3)
+  })
+
+  it("sendsNullCleanupAttemptsWhenResultOmitsThem", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "{}" }))
+    const connection = new ServerConnection(options())
+    const work = { workflowRunId: "wf-1", workId: "work-1", workType: "task" }
+    await connection.report(work, { status: "completed", message: "ok", output: "{}" }, new AbortController().signal)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const body = JSON.parse(init.body as string)
+    expect(body.cleanupAttempts).toBeNull()
+  })
+})

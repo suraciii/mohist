@@ -1,8 +1,8 @@
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { describe, expect, it, vi } from "vitest"
-import { openspecTasksAction } from "../src/actions/openspec.js"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { openspecSyncAction, openspecTasksAction, setOpenSpecGitRunnerForTest } from "../src/actions/openspec.js"
 import type { ActionContext } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { resolvePrompt, setPromptLoaderRegistryForTest, defaultPromptLoaderRegistry } from "../src/core/prompt.js"
@@ -494,6 +494,161 @@ describe("mohist/openspec-tasks", () => {
   })
 })
 
+afterEach(() => {
+  setOpenSpecGitRunnerForTest(null)
+})
+
+describe("mohist/openspec-sync", () => {
+  it("OpenSpecSyncAfterCopy_StagesAndCommitsSpecsDirectoryWithExpectedMessage", async () => {
+    // After copyDirectory has populated the worktree's specs/
+    // directory, the action must run `git add specs/`, observe
+    // staged changes, and commit them with the expected message.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-sync-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-112")
+    const sourceSpecs = join(changeDir, "specs", "workflow-definition")
+    await mkdir(sourceSpecs, { recursive: true })
+    await writeFile(join(sourceSpecs, "spec.md"), "## MODIFIED\n")
+
+    const calls: string[][] = []
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      calls.push(args)
+      const key = args.join(" ")
+      if (key === "add specs/") return gitOk("")
+      if (key === "diff --cached --name-only -- specs/") {
+        return gitOk("specs/workflow-definition/spec.md\n")
+      }
+      if (key === "commit -m Sync OpenSpec specs from change delta -- specs/") {
+        return gitOk("[main abc1234] Sync OpenSpec specs from change delta\n 1 file changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("abc1234\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await openspecSyncAction(syncContext(workDir, changeDir))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(result.message).toMatch(/committed/)
+    expect(output.kind).toBe("openspec-sync")
+    expect(output.changed).toBe(true)
+    expect(output.noChange).toBe(false)
+    expect(output.commitMessage).toBe("Sync OpenSpec specs from change delta")
+    expect(output.commitSha).toBe("abc1234")
+    expect(output.changedFiles).toEqual(["specs/workflow-definition/spec.md"])
+    expect(calls.map((args) => args.join(" "))).toEqual([
+      "add specs/",
+      "diff --cached --name-only -- specs/",
+      "commit -m Sync OpenSpec specs from change delta -- specs/",
+      "rev-parse HEAD",
+    ])
+  })
+
+  it("OpenSpecSyncWhenAlreadyUpToDate_ReturnsSuccessWithNoChangeMarker", async () => {
+    // If copyDirectory reproduces the worktree's existing specs,
+    // `git add specs/` adds nothing and `git diff --cached
+    // --name-only -- specs/` returns no files. The action must
+    // short-circuit, skip the commit, and return success with a
+    // no-change marker so the executor's post-action clean
+    // worktree check can pass without burning a commit.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-sync-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-112")
+    const sourceSpecs = join(changeDir, "specs")
+    await mkdir(sourceSpecs, { recursive: true })
+    await writeFile(join(sourceSpecs, "spec.md"), "## MODIFIED\n")
+
+    const calls: string[][] = []
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      calls.push(args)
+      const key = args.join(" ")
+      if (key === "add specs/") return gitOk("")
+      if (key === "diff --cached --name-only -- specs/") return gitOk("")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await openspecSyncAction(syncContext(workDir, changeDir))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(result.message).toMatch(/no change/i)
+    expect(output.changed).toBe(false)
+    expect(output.noChange).toBe(true)
+    expect(calls.map((args) => args.join(" "))).toEqual([
+      "add specs/",
+      "diff --cached --name-only -- specs/",
+    ])
+  })
+
+  it("OpenSpecSyncWhenAddFails_FailsWithStageAddAndStopsBeforeCommit", async () => {
+    // A failure in `git add specs/` must surface as a structured
+    // failure that names the `add` stage; the action must not
+    // attempt the diff or commit.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-sync-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-112")
+    const sourceSpecs = join(changeDir, "specs")
+    await mkdir(sourceSpecs, { recursive: true })
+    await writeFile(join(sourceSpecs, "spec.md"), "## MODIFIED\n")
+
+    const calls: string[][] = []
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      calls.push(args)
+      const key = args.join(" ")
+      if (key === "add specs/") {
+        return gitFail("fatal: pathspec 'specs/' did not match any files", 128)
+      }
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await openspecSyncAction(syncContext(workDir, changeDir))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toMatch(/git add specs\/ failed/)
+    expect(result.message).toContain("pathspec 'specs/' did not match any files")
+    expect(output.stage).toBe("add")
+    expect(calls.map((args) => args.join(" "))).toEqual(["add specs/"])
+  })
+
+  it("OpenSpecSyncWhenCommitFails_FailsWithStageCommitAndPreservesChangedFiles", async () => {
+    // If `git add` and `git diff --cached` succeed but `git commit`
+    // fails (e.g. pre-commit hook, repo permission, GPG sign
+    // error), the action must report the failure with the
+    // `commit` stage and the list of files that were staged.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-sync-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-112")
+    const sourceSpecs = join(changeDir, "specs")
+    await mkdir(sourceSpecs, { recursive: true })
+    await writeFile(join(sourceSpecs, "spec.md"), "## MODIFIED\n")
+
+    const calls: string[][] = []
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      calls.push(args)
+      const key = args.join(" ")
+      if (key === "add specs/") return gitOk("")
+      if (key === "diff --cached --name-only -- specs/") {
+        return gitOk("specs/spec.md\n")
+      }
+      if (key === "commit -m Sync OpenSpec specs from change delta -- specs/") {
+        return gitFail("fatal: cannot commit without a user identity", 128)
+      }
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await openspecSyncAction(syncContext(workDir, changeDir))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toMatch(/git commit specs\/ failed/)
+    expect(result.message).toContain("cannot commit without a user identity")
+    expect(output.stage).toBe("commit")
+    expect(output.changedFiles).toEqual(["specs/spec.md"])
+    expect(calls.map((args) => args.join(" "))).toEqual([
+      "add specs/",
+      "diff --cached --name-only -- specs/",
+      "commit -m Sync OpenSpec specs from change delta -- specs/",
+    ])
+  })
+})
+
 function context(workDir: string, withInput: Record<string, unknown>, addTasks: ServerConnection["addTasks"], variables: Record<string, unknown> = {}): ActionContext {
   return {
     workflowRunId: "workflow-1",
@@ -508,4 +663,27 @@ function context(workDir: string, withInput: Record<string, unknown>, addTasks: 
     signal: new AbortController().signal,
     serverConnection: { addTasks } as ServerConnection,
   }
+}
+
+function syncContext(workDir: string, changeDir: string): ActionContext {
+  return {
+    workflowRunId: "workflow-1",
+    workId: "integrate:spec-sync.1",
+    workType: "task",
+    stage: "integrate",
+    title: "Sync OpenSpec specs",
+    uses: "mohist/openspec-sync",
+    with: { changeDir } as never,
+    variables: {} as never,
+    workDir,
+    signal: new AbortController().signal,
+  }
+}
+
+function gitOk(stdout: string) {
+  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
+}
+
+function gitFail(stderr: string, exitCode = 1) {
+  return { success: false, stdout: "", stderr, exitCode, combinedOutput: stderr }
 }
