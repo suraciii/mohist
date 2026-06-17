@@ -9,35 +9,37 @@ using MohistIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.Issue.Services;
 
 /// <summary>
-/// Builds workflow variables for issue execution. Layers, lowest priority
-/// first, are merged via <see cref="VariableBundle.MergeAll"/>:
+/// Builds the variable bundle persisted on <c>IssueWorkflowProfile</c> at issue
+/// start (T1). The issue profile is the single resolution point: project values
+/// win, global <c>config.jsonc</c> values fill gaps, and the built-in calling
+/// context (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c> /
+/// <c>openspec*</c>) is layered on top. The result is snapshotted once, at
+/// issue creation, so subsequent edits to project or global <c>Variables</c>
+/// do not retroactively change this issue's effective variables.
 ///
-///   1. Project variables (<c>ProjectWorkflowProfile.Variables</c>) — defaults.
-///   2. Issue variables (<c>IssueWorkflowProfile.Variables</c>) — overrides.
-///   3. Runtime context (<c>mohist</c>, <c>issue</c>, <c>project</c>,
-///      <c>repository</c>, <c>workspace</c>, <c>openspecChangeDir</c>) —
-///      authoritative dispatch context.
+/// Merge layers, lowest priority first, are merged via
+/// <see cref="VariableBundle.MergeAll"/>:
 ///
-/// Anything a user patches onto the project (e.g. <c>vars.agent.model</c>) is
-/// therefore visible to the dispatch layer unless the issue overrides it. This
-/// is the single fix for the issue-#80 dispatch stall where the build agent
-/// silently fell through to opencode's local default because <c>vars.agent</c>
-/// was never populated.
+///   1. Global <see cref="Mohist.Server.Workflow.Domain.VariableBundle"/> from
+///      <c>config.jsonc</c> (exposed by <c>ConfigService.GetVariables()</c>).
+///   2. Project <c>VariableBundle</c> (<c>ProjectWorkflowProfile.Variables</c>).
+///   3. Built-in calling context.
 ///
-/// The built-in context is deliberately composed here so profile preview,
-/// issue start, and dispatch rendering cannot drift.
+/// The merge is symmetric: <c>vars</c> and each
+/// <c>stages.&lt;stage&gt;.vars</c> use the same project-over-global precedence
+/// via <see cref="VariableBundle.MergeAll"/>, with no special-cased key.
 /// </summary>
 public static class IssueVariableBuilder
 {
     public static VariableBundle Build(
+        VariableBundle? globalBundle,
         VariableBundle? projectBundle,
-        VariableBundle? issueBundle,
         string workflowRunId,
         MohistIssue issue,
-        WorkflowProjectContext project,
-        WorkspaceIdentity workspace)
+        WorkflowProjectContext project)
     {
-        return VariableBundle.MergeAll(projectBundle, issueBundle, BuildRuntimeContext(workflowRunId, issue, project, workspace));
+        var builtIn = BuildBuiltInContext(workflowRunId, issue, project);
+        return VariableBundle.MergeAll(globalBundle, projectBundle, builtIn);
     }
 
     public static VariableBundle Build(
@@ -54,7 +56,7 @@ public static class IssueVariableBuilder
                 ["agent"] = JsonSerializer.SerializeToElement(agentConfig, WorkflowVariableJson.Options),
             });
 
-        return Build(userDefaults, VariableBundle.Empty, workflowRunId, issue, project, workspace);
+        return Build(userDefaults, VariableBundle.Empty, workflowRunId, issue, project);
     }
 
     public static Dictionary<string, JsonElement?> BuildRootVariables(
@@ -86,21 +88,50 @@ public static class IssueVariableBuilder
             ChangeDir: changeDir);
     }
 
-    private static VariableBundle BuildRuntimeContext(
+    private static VariableBundle BuildBuiltInContext(
         string workflowRunId,
         MohistIssue issue,
-        WorkflowProjectContext project,
-        WorkspaceIdentity workspace)
+        WorkflowProjectContext project)
     {
-        return FromRoot(new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
-            ["mohist"] = JsonSerializer.SerializeToElement(new { runId = workflowRunId }, WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number }, WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name }, WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, gitUrl = project.RepositoryGitUrl, baseBranch = project.RepositoryBaseBranch }, WorkflowVariableJson.Options),
-            ["workspace"] = JsonSerializer.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch, changeDir = workspace.ChangeDir }, WorkflowVariableJson.Options),
-            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
-        });
+            ["mohist"] = JsonSerializer.SerializeToElement(
+                new { system = "mohist", runId = workflowRunId },
+                WorkflowVariableJson.Options),
+            ["issue"] = JsonSerializer.SerializeToElement(
+                new
+                {
+                    id = issue.Id,
+                    number = issue.Number,
+                    title = issue.Title,
+                    body = issue.Body ?? string.Empty,
+                },
+                WorkflowVariableJson.Options),
+            ["project"] = JsonSerializer.SerializeToElement(
+                new
+                {
+                    id = project.Id,
+                    name = project.Name,
+                },
+                WorkflowVariableJson.Options),
+            ["repository"] = JsonSerializer.SerializeToElement(
+                new
+                {
+                    name = project.RepositoryName,
+                    baseBranch = project.RepositoryBaseBranch,
+                },
+                WorkflowVariableJson.Options),
+            ["openspecChangeName"] = JsonSerializer.SerializeToElement(
+                MohistDefaultWorkflowProjection.ChangeName(issue.Number),
+                WorkflowVariableJson.Options),
+            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(
+                MohistDefaultWorkflowProjection.ChangeDir(issue.Number),
+                WorkflowVariableJson.Options),
+        };
+
+        var varsJson = JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+        var varsElement = JsonSerializer.Deserialize<JsonElement>(varsJson);
+        return new VariableBundle(varsElement);
     }
 
     private static VariableBundle FromRoot(Dictionary<string, JsonElement?> variables)

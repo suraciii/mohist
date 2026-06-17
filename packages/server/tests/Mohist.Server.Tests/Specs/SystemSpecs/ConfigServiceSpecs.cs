@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
 
@@ -73,5 +75,92 @@ public class ConfigServiceSpecs : IAsyncLifetime
         await _svc.SetAsync("model", "anthropic/claude");
         var all = await _svc.GetAllAsync();
         Assert.Equal("anthropic/claude", all["model"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_AgentConfigured_ExposesAgentAtVarsAgent()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+            ["type"] = "opencode",
+        });
+
+        var bundle = await _svc.GetVariables();
+
+        Assert.NotNull(bundle.Vars);
+        using var doc = JsonDocument.Parse(bundle.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("gpt-4o", agent.GetProperty("model").GetString());
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_OnlyLegacyModelSet_SynthesizesAgentObject()
+    {
+        await _svc.SetAsync("model", "anthropic/claude");
+
+        var bundle = await _svc.GetVariables();
+
+        Assert.NotNull(bundle.Vars);
+        using var doc = JsonDocument.Parse(bundle.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+
+        Assert.Equal("anthropic/claude", agent.GetProperty("model").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_NoAgentOrModel_ReturnsEmptyBundle()
+    {
+        var bundle = await _svc.GetVariables();
+
+        Assert.Null(bundle.Vars);
+        Assert.Null(bundle.Stages);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_AlwaysReturnsEmptyStages()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+        });
+        await _svc.SetAsync("stageAgents", new Dictionary<string, Dictionary<string, object?>>
+        {
+            ["plan"] = new() { ["model"] = "sonnet-4" },
+        });
+
+        var bundle = await _svc.GetVariables();
+
+        // Stage names are project-specific and never come from global config.jsonc.
+        Assert.Null(bundle.Stages);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetVariables_AgentConfigured_DoesNotLeakTopLevelModelKey()
+    {
+        await _svc.SetAsync("agent", new Dictionary<string, object?>
+        {
+            ["model"] = "gpt-4o",
+        });
+
+        var bundle = await _svc.GetVariables();
+
+        Assert.NotNull(bundle.Vars);
+        using var doc = JsonDocument.Parse(bundle.Vars.Value.GetRawText());
+        // The model must be nested under agent, not a sibling at vars root.
+        Assert.False(doc.RootElement.TryGetProperty("model", out _));
+        Assert.True(doc.RootElement.TryGetProperty("agent", out _));
     }
 }

@@ -158,15 +158,20 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_MergesProjectAndIssueByPriority()
+    public async Task LoadVariables_ReturnsIssueLayerDirectly_DoesNotReMergeProject()
     {
-        var runId = "wr_merge01";
+        // T1 has already snapshotted project+global into the issue layer
+        // (IssueGrain.StartWorkflowAsync). Runtime must read that snapshot
+        // directly and MUST NOT re-merge the project layer — the project
+        // bundle here is intentionally divergent from the issue bundle, and
+        // the result must reflect the issue values verbatim.
+        var runId = "wr_direct01";
         var proj = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             { a = 1, b = "proj-b", c = "proj-c" })));
         var issue = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
-            { b = "issue-b", c = "issue-c" })));
+            { b = "issue-b", c = "issue-c", d = "issue-d" })));
 
         await SeedAllLayersAsync("proj6", "issue_6", runId, proj, issue);
 
@@ -174,9 +179,91 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());           // from project
-        Assert.Equal("issue-b", doc.RootElement.GetProperty("b").GetString());  // issue overrides project
-        Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());  // issue overrides project
+        // Project-only key `a` is gone — runtime does not see the project layer.
+        Assert.False(doc.RootElement.TryGetProperty("a", out _));
+        // Issue values come through verbatim.
+        Assert.Equal("issue-b", doc.RootElement.GetProperty("b").GetString());
+        Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());
+        Assert.Equal("issue-d", doc.RootElement.GetProperty("d").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadVariables_SnapshotIsStable_ProjectEditsDoNotAffectExistingIssue()
+    {
+        // Snapshot semantics: editing the project layer after an issue
+        // already has its T1-merged snapshot must not change that issue's
+        // effective variables. The runtime reads the issue layer directly.
+        var runId = "wr_snapshot01";
+        var proj = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            { agent = new { model = "minimax-coding-plan/MiniMax-M3" } })));
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            { agent = new { model = "kimi-for-coding/k2p6" } })));
+
+        await SeedAllLayersAsync("proj_snap", "issue_snap", runId, proj, issue);
+
+        // Mutate the project layer; the runtime result must still reflect
+        // the issue snapshot, not the new project value.
+        await using (var db = new MohistDbContext(_options))
+        {
+            var row = db.ProjectWorkflowProfiles.Single(x => x.ProjectId == "proj_snap");
+            row.Variables = new VariableBundle(
+                Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+                { agent = new { model = "anthropic/claude-sonnet-4-6" } }))
+            ).ToJson();
+            await db.SaveChangesAsync();
+        }
+
+        var result = await _manager.LoadVariablesAsync(runId);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        Assert.Equal("kimi-for-coding/k2p6",
+            doc.RootElement.GetProperty("agent").GetProperty("model").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadVariables_ReadsIssueStagesDirectly_ForStageDispatch()
+    {
+        // Per-stage variables are read directly from the issue's Stages
+        // map. Runtime dispatch falls back from
+        // Variables.stages[stage].vars.agent to Variables.vars.agent via
+        // ordinary variable lookups — no cross-layer resolution.
+        var runId = "wr_stage01";
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                agent = new { model = "minimax-coding-plan/MiniMax-M3" }
+            })),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["build"] = new(JsonSerializer.Deserialize<JsonElement>(
+                    JsonSerializer.Serialize(new
+                    {
+                        agent = new { model = "anthropic/claude-sonnet-4-6" }
+                    })))
+            });
+
+        await SeedIssueOnlyAsync("proj_stage", "issue_stage", runId, issue);
+
+        var result = await _manager.LoadVariablesAsync(runId);
+
+        Assert.NotNull(result.Stages);
+        Assert.True(result.Stages!.TryGetValue("build", out var buildStage));
+        Assert.NotNull(buildStage.Vars);
+        using var stageDoc = JsonDocument.Parse(buildStage.Vars.Value.GetRawText());
+        Assert.Equal("anthropic/claude-sonnet-4-6",
+            stageDoc.RootElement.GetProperty("agent").GetProperty("model").GetString());
+
+        Assert.NotNull(result.Vars);
+        using var varsDoc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        Assert.Equal("minimax-coding-plan/MiniMax-M3",
+            varsDoc.RootElement.GetProperty("agent").GetProperty("model").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -375,6 +462,21 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             ProjectId = projectId,
             Variables = project.ToJson(),
         });
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+        {
+            IssueId = issueId,
+            Variables = issue.ToJson(),
+        });
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SeedIssueOnlyAsync(
+        string projectId, string issueId, string runId, VariableBundle issue)
+    {
+        await using var db = new MohistDbContext(_options);
+        SeedRunContext(db, projectId, issueId, runId);
+
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
             IssueId = issueId,

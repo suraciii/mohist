@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Infrastructure.Config;
 
@@ -157,6 +158,28 @@ public class ConfigService
         }
 
         return Task.FromResult(result);
+    }
+
+    /// <summary>
+    /// Global config.jsonc expressed as a <see cref="VariableBundle"/> for use as the
+    /// global layer in the T1 (issue creation) merge. <c>vars.agent</c> is populated
+    /// from the existing <see cref="GetAgentConfigAsync"/> output (which already
+    /// handles the legacy <c>model</c> fallback). <c>stages</c> is always empty
+    /// because stage names are project-specific and cannot be configured globally.
+    /// </summary>
+    public async Task<VariableBundle> GetVariables()
+    {
+        var agent = await GetAgentConfigAsync();
+        if (agent is null || agent.Count == 0)
+            return VariableBundle.Empty;
+
+        var vars = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["agent"] = agent,
+        };
+
+        var varsElement = JsonSerializer.SerializeToElement(vars);
+        return new VariableBundle(Vars: varsElement, Stages: null);
     }
 
     public async Task SetAgentModelAsync(string? model)

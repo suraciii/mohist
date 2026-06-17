@@ -371,15 +371,12 @@ public class MohistDefaultWorkflowProfileSpecs
             Assert.DoesNotContain("prompts.issue-context", prompts[key], StringComparison.Ordinal);
         }
 
-        var profile = new MohistDefaultIssueWorkflowProfile(loader, new FakeDbContextFactory());
-        var issue = new Mohist.Server.Issue.Domain.Issue
+        var variablesJson = JsonSerializer.Serialize(new
         {
-            Id = "issue-42",
-            ProjectId = "project-1",
-            Number = 42,
-            Title = "Use CLI issue details",
-        };
-        var variablesJson = profile.BuildVariables("wr-42", issue, new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"));
+            issue = new { number = 42 },
+            project = new { id = "project-1" },
+            openspecChangeDir = "openspec/changes/issue-42",
+        });
         using var variables = JsonDocument.Parse(variablesJson);
         var (rendered, missing, _) = new PromptTemplateEngine().Render(prompts["proposal"], variables.RootElement);
 

@@ -1,5 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -29,4 +32,18 @@ public class MohistDefaultIssueWorkflowProfile : MohistIssueWorkflowProfileBase
         var description = MohistWorkflow.Definition.Description;
         return string.IsNullOrWhiteSpace(description) ? "No description provided" : description;
     }
+
+    public MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusView? workflow) =>
+        MohistDefaultWorkflowProjection.ProjectWorkflowState(
+            issue.Number,
+            issue.Title,
+            issue.Status,
+            workflow);
+
+    public MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusView? workflow) =>
+        MohistDefaultWorkflowProjection.ProjectWorkflowState(
+            issue.Number,
+            issue.Title,
+            issue.Status,
+            workflow);
 }

@@ -231,8 +231,12 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StageAgentModelNull_InheritsProjectAgentModelAtDispatch()
+    public async Task StageAgentModelNull_InheritsIssueAgentModelAtDispatch()
     {
+        // After T-003 the runtime reads the issue layer (T1 snapshot) directly
+        // and does not re-merge the project layer. A stage override that sets
+        // `agent.model` to null falls back to the issue's top-level `agent`,
+        // not to the project or the embedded variable.
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition(
@@ -247,7 +251,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "old-coding/legacy" })
         }));
 
-        await PatchProjectVariablesAsync(TestProjectId(_workflowId!), new VariableBundle(
+        await PatchIssueVariablesAsync(TestIssueId(_workflowId!), new VariableBundle(
             Vars: JsonSerializer.SerializeToElement(new
             {
                 agent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" }
@@ -271,8 +275,10 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StageAgentVariableUpdate_DispatchedTaskInheritsLatestModelOverRenderedAgent()
+    public async Task StageAgentVariableUpdate_DispatchedTaskInheritsLatestIssueAgentModel()
     {
+        // After T-003 the runtime reads the issue layer directly. Patching
+        // the issue layer (the T1 snapshot) is what surfaces in dispatch.
         var initialAgent = new { type = "opencode", model = "old-coding/legacy" };
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
@@ -291,7 +297,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         ]));
 
         var updatedAgent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" };
-        await PatchProjectVariablesAsync(TestProjectId(_workflowId!), new VariableBundle(Stages: new Dictionary<string, StageVariables>
+        await PatchIssueVariablesAsync(TestIssueId(_workflowId!), new VariableBundle(Stages: new Dictionary<string, StageVariables>
         {
             ["build"] = new(JsonSerializer.SerializeToElement(new { agent = updatedAgent }))
         }));
