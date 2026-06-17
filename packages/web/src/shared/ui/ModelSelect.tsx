@@ -97,10 +97,54 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
   }, [normalizedModels, search])
 
   useEffect(() => { setHighlightedIndex(0) }, [search])
+
+  const selectModel = useCallback((modelId: string) => {
+    onChange(modelId)
+    setOpen(false)
+  }, [onChange])
+
   useEffect(() => {
     if (!open) return
     setTimeout(() => searchRef.current?.focus(), 0)
   }, [open])
+
+  const listNodeRef = useRef<HTMLDivElement | null>(null)
+
+  const handleListPointerDown = useCallback(
+    (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null
+      const modelId = target?.closest('[data-model-id]')?.getAttribute('data-model-id')
+      if (modelId) {
+        e.stopPropagation()
+        e.preventDefault()
+        selectModel(modelId)
+      }
+    },
+    [selectModel],
+  )
+
+  const setListRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      if (listNodeRef.current === el) return
+      if (listNodeRef.current) {
+        listNodeRef.current.removeEventListener('pointerdown', handleListPointerDown)
+      }
+      listNodeRef.current = el
+      if (el) {
+        el.addEventListener('pointerdown', handleListPointerDown)
+      }
+    },
+    [handleListPointerDown],
+  )
+
+  useEffect(() => {
+    return () => {
+      if (listNodeRef.current) {
+        listNodeRef.current.removeEventListener('pointerdown', handleListPointerDown)
+        listNodeRef.current = null
+      }
+    }
+  }, [handleListPointerDown])
 
   const selectedModel = value ? normalizedModels.find((m) => m.id === value) : null
   const selectedDescriptor: ModelDescriptor | null = value
@@ -108,11 +152,6 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
       ? { id: selectedModel.id, name: selectedModel.name, fullId: selectedModel.id, provider: describeModel(selectedModel.id).provider }
       : describeModel(value)
     : null
-
-  const selectModel = useCallback((modelId: string) => {
-    onChange(modelId)
-    setOpen(false)
-  }, [onChange])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -193,7 +232,7 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
             </div>
           </div>
 
-          <div className={`overflow-y-auto border-t ${isCompact ? 'max-h-48' : 'max-h-64'}`}>
+          <div ref={setListRef} className={`overflow-y-auto border-t ${isCompact ? 'max-h-48' : 'max-h-64'}`}>
             {filtered.length === 0 && (
               <div className={`px-3 py-4 text-center text-muted-foreground ${isCompact ? 'text-xs' : 'text-sm'}`}>
                 No models found
@@ -210,6 +249,7 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
                     <Button
                       key={model.id}
                       variant="ghost"
+                      data-model-id={model.id}
                       onClick={() => selectModel(model.id)}
                       onMouseEnter={() => setHighlightedIndex(globalIdx)}
                       className={`w-full justify-between rounded-none h-auto ${
