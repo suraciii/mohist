@@ -1,4 +1,5 @@
-export { useAgentRuntime, useAvailableModelIds, useLogLevel, useOpencodeModel, useOpencodeRuntime, useRuntimeConsistency, useSetAgentRuntime, useSetLogLevel, useSetStageModels, useStageModels, useSystemInfo, useSystemUpdate, useSystemUpdateStatus, useUpdateOpencodeModel, useWorkflowProfile, useWorkflowProfiles } from './api/queries'
+export { useAgentRuntime, useAvailableModelIds, useConfig, useLogLevel, useOpencodeModel, useOpencodeRuntime, useRuntimeConsistency, useSetAgentRuntime, useSetLogLevel, useSetStageModels, useStageModels, useSystemInfo, useSystemUpdate, useSystemUpdateStatus, useUpdateConfig, useUpdateOpencodeModel, useWorkflowProfile, useWorkflowProfiles } from './api/queries'
+export { agentRuntimeToConfigKey, configToAgentRuntime, SUPPORTED_RUNTIME_KEYS } from './api/client'
 export * from './model/types'
 export * from './model/updateOutcome'
 export { ProgressStages } from './ui/ProgressStages'

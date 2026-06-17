@@ -176,7 +176,7 @@ export function useSetOpencodeModelConfig() {
 }
 
 export function useLogLevel() {
-  return useQuery<{ level: string }>({
+  return useQuery<{ level: string }, Error>({
     queryKey: ['log-level'],
     queryFn: () => getLogLevel(),
   })
@@ -184,10 +184,11 @@ export function useLogLevel() {
 
 export function useSetLogLevel() {
   const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (level: string) => setLogLevel(level),
+  return useMutation<{ level: string }, Error, string>({
+    mutationFn: (level) => setLogLevel(level),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['log-level'] })
+      queryClient.invalidateQueries({ queryKey: ['config'] })
       toast.success('Log level updated')
     },
     onError: (err: Error) => {
@@ -197,7 +198,7 @@ export function useSetLogLevel() {
 }
 
 export function useAgentRuntime() {
-  return useQuery<AgentRuntimeConfig>({
+  return useQuery<AgentRuntimeConfig, Error>({
     queryKey: ['agent-runtime'],
     queryFn: () => getAgentRuntime(),
   })
@@ -209,9 +210,12 @@ export function useSetAgentRuntime() {
     mutationFn: (data) => updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
+      queryClient.invalidateQueries({ queryKey: ['config'] })
       toast.success('Coder agent runtime updated')
     },
     onError: (err: Error) => {
+      queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
+      queryClient.invalidateQueries({ queryKey: ['config'] })
       toast.error(err.message || 'Request failed')
     },
   })

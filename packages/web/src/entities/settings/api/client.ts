@@ -1,4 +1,4 @@
-import { request, projectApiPath } from '../../../shared/api/client'
+import { ApiError, projectApiPath, request } from '../../../shared/api/client'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
 
 export interface VariableBundle {
@@ -10,11 +10,19 @@ export function getConfig() {
   return request<GeneralConfig>('/config')
 }
 
-export function updateConfig(key: string, value: number) {
+export function updateConfig(key: string, value: number | string) {
   return request<GeneralConfig>(`/config/${encodeURIComponent(key)}`, {
     method: 'PUT',
     body: JSON.stringify({ value }),
   })
+}
+
+export function getLogLevel() {
+  return getConfig().then((config) => ({ level: config.logLevel ?? 'INFO' }))
+}
+
+export function setLogLevel(level: string) {
+  return updateConfig('logLevel', level).then((config) => ({ level: config.logLevel ?? level }))
 }
 
 export function getOpencodeModels(projectId?: string | null) {
@@ -63,19 +71,43 @@ export function setOpencodeModel(model: string | null) {
   })
 }
 
-export function getLogLevel() {
-  return request<{ level: string }>('/log-level')
+export const SUPPORTED_RUNTIME_KEYS = [
+  'maxConcurrentAgents',
+  'agentTimeout',
+  'taskTimeout',
+  'stageTimeout',
+  'pollInterval',
+  'maxGracePeriods',
+] as const
+
+export type SupportedRuntimeKey = typeof SUPPORTED_RUNTIME_KEYS[number]
+
+const RUNTIME_KEY_TO_CONFIG_KEY: Record<keyof AgentRuntimeConfig, SupportedRuntimeKey> = {
+  timeout: 'agentTimeout',
+  taskTimeout: 'taskTimeout',
+  stageTimeout: 'stageTimeout',
+  maxConcurrent: 'maxConcurrentAgents',
+  maxGracePeriods: 'maxGracePeriods',
+  pollInterval: 'pollInterval',
 }
 
-export function setLogLevel(level: string) {
-  return request<{ level: string }>('/log-level', {
-    method: 'PUT',
-    body: JSON.stringify({ level }),
-  })
+export function configToAgentRuntime(config: GeneralConfig | null | undefined): AgentRuntimeConfig {
+  return {
+    timeout: secondsToMs(toNumber(config?.agentTimeout)),
+    taskTimeout: secondsToMs(toNumber(config?.taskTimeout)),
+    stageTimeout: secondsToMs(toNumber(config?.stageTimeout)),
+    maxConcurrent: toNumber(config?.maxConcurrentAgents),
+    maxGracePeriods: toNumber(config?.maxGracePeriods),
+    pollInterval: toNumber(config?.pollInterval),
+  }
+}
+
+export function agentRuntimeToConfigKey(key: keyof AgentRuntimeConfig): SupportedRuntimeKey {
+  return RUNTIME_KEY_TO_CONFIG_KEY[key]
 }
 
 export function getAgentRuntime() {
-  return request<AgentRuntimeConfig>('/agent-runtime')
+  return getConfig().then((config) => configToAgentRuntime(config))
 }
 
 export function getOpencodeRuntime() {
@@ -83,10 +115,57 @@ export function getOpencodeRuntime() {
 }
 
 export function updateAgentRuntime(data: Partial<AgentRuntimeConfig>) {
-  return request<AgentRuntimeConfig>('/agent-runtime', {
-    method: 'PUT',
-    body: JSON.stringify(data),
+  const writes: Array<Promise<GeneralConfig>> = []
+  const unsupported: Array<keyof AgentRuntimeConfig> = []
+
+  for (const key of Object.keys(data) as Array<keyof AgentRuntimeConfig>) {
+    const configKey = RUNTIME_KEY_TO_CONFIG_KEY[key]
+    if (!configKey) {
+      unsupported.push(key)
+      continue
+    }
+    const rawValue = data[key]
+    if (rawValue === undefined) continue
+    const value = encodeRuntimeValue(key, rawValue)
+    writes.push(updateConfig(configKey, value))
+  }
+
+  if (writes.length === 0) {
+    if (unsupported.length > 0) {
+      const message = `Runtime field(s) not supported: ${unsupported.join(', ')}`
+      return Promise.reject(new ApiError(message, 400))
+    }
+    return getConfig().then((config) => configToAgentRuntime(config))
+  }
+
+  return Promise.all(writes).then((results) => {
+    const last = results[results.length - 1]
+    if (unsupported.length > 0) {
+      const message = `Runtime field(s) not supported: ${unsupported.join(', ')}`
+      throw new ApiError(message, 400, last, 'unsupported_field')
+    }
+    return configToAgentRuntime(last)
   })
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
+function secondsToMs(seconds: number): number {
+  return Math.round(seconds * 1000)
+}
+
+function encodeRuntimeValue(key: keyof AgentRuntimeConfig, value: number): number {
+  if (key === 'timeout' || key === 'taskTimeout' || key === 'stageTimeout') {
+    return Math.round(value / 1000)
+  }
+  return value
 }
 
 export function getStageModels(projectId?: string | null) {

@@ -76,6 +76,10 @@ public class ConfigService
         if (!_schema.ContainsKey(key))
             throw new InvalidOperationException($"Unknown config key: {key}");
 
+        var (valid, error) = Validate(key, ToComparableString(value));
+        if (!valid)
+            throw new InvalidOperationException(error!);
+
         var strValue = value switch
         {
             null => "",
@@ -87,6 +91,16 @@ public class ConfigService
         await WriteConfigFileAsync(key, strValue);
         _log.LogInformation("Config {Key} updated in {Path}", key, _configPath);
     }
+
+    private static string ToComparableString(object value) => value switch
+    {
+        null => "",
+        JsonElement json => json.ValueKind == JsonValueKind.String
+            ? (json.GetString() ?? "")
+            : json.GetRawText(),
+        string text => text,
+        _ => JsonSerializer.Serialize(value),
+    };
 
     public async Task ClearAsync(string key)
     {
@@ -199,12 +213,26 @@ public class ConfigService
         await ClearAsync("model");
     }
 
+    private static readonly HashSet<string> SupportedLogLevels = new(StringComparer.Ordinal)
+    {
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+    };
+
     public (bool valid, string? error) Validate(string key, string value)
     {
         if (!_schema.TryGetValue(key, out var def))
             return (false, $"Unknown config key: {key}");
 
         var (type, _) = def;
+        if (string.Equals(key, "logLevel", StringComparison.Ordinal))
+        {
+            if (!SupportedLogLevels.Contains(value))
+                return (false, $"logLevel must be one of DEBUG, INFO, WARN, ERROR");
+            return (true, null);
+        }
         return type switch
         {
             "number" => int.TryParse(value, out _) ? (true, null) : (false, $"{key} must be a number"),
@@ -212,6 +240,8 @@ public class ConfigService
             _ => (true, null),
         };
     }
+
+    public static IReadOnlyCollection<string> GetSupportedLogLevels() => SupportedLogLevels;
 
     /// <summary>
     /// 读取配置文件，返回扁平化的 key-value 字典。
