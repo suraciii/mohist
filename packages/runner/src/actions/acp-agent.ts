@@ -317,6 +317,7 @@ function buildCompactionEventPayload(context: ActionContext, acpSessionId: strin
 function createAcpSessionUpdateHandler(options: {
   notifyData(activityType?: string): void
   recordActivity?(): void
+  recordWorkActivity?(): void
   appendAssistantText(text: string): void
   emitUpdate(type: string, update: SessionNotification["update"]): Promise<void>
 }) {
@@ -326,6 +327,7 @@ function createAcpSessionUpdateHandler(options: {
     const activity = classifyAcpLivenessActivity({ kind: "session_update", update })
     if (activity.isActivity) {
       options.recordActivity?.()
+      if (isPromptWorkActivity(activity.activityType)) options.recordWorkActivity?.()
       options.notifyData(activity.activityType)
     }
 
@@ -334,6 +336,10 @@ function createAcpSessionUpdateHandler(options: {
 
     await options.emitUpdate(type, update)
   }
+}
+
+function isPromptWorkActivity(activityType: string): boolean {
+  return activityType !== "usage_update"
 }
 
 interface AgentConfig {
@@ -466,6 +472,7 @@ interface AcpPromptRunResult {
   providerError?: OpencodeProviderErrorDiagnostic
   failureCategory?: LivenessFailureReason
   activityCount: number
+  workActivityCount: number
   usageText: string
 }
 
@@ -506,6 +513,12 @@ async function satisfyExpectations(context: ActionContext, result: AcpSessionRes
       result.error = repair.error
       result.providerError = repair.providerError
       result.failureCategory = repair.failureCategory
+      result.exitCode = result.exitCode ?? 1
+      return verification
+    }
+    if (repair.workActivityCount <= 0) {
+      result.success = false
+      result.error = "ACP agent prompt completed without any session activity"
       result.exitCode = result.exitCode ?? 1
       return verification
     }
@@ -792,6 +805,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   let agentText = ""
   let agentTextTruncated = false
   let activityCount = 0
+  let workActivityCount = 0
   const toolIds = new ToolCallIdGenerator()
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
@@ -814,6 +828,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     createAcpSessionUpdateHandler({
       notifyData,
       recordActivity: () => { activityCount += 1 },
+      recordWorkActivity: () => { workActivityCount += 1 },
       appendAssistantText,
       emitUpdate: createObservabilityAwareEmitter(context, () => entry.sessionId, toolIds),
     }),
@@ -837,6 +852,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       dataWaiters,
       getAgentText: () => agentText,
       getActivityCount: () => activityCount,
+      getWorkActivityCount: () => workActivityCount,
     })
     const run = await runPrompt(prompt)
     if (!run.completed) {
@@ -864,11 +880,13 @@ function createSharedPromptRunner(options: {
   dataWaiters: Set<() => void>
   getAgentText(): string
   getActivityCount(): number
+  getWorkActivityCount(): number
   exitFailure?: Promise<never>
 }): AcpPromptRunner {
   return async (prompt) => {
     const beforeText = options.getAgentText()
     const beforeActivity = options.getActivityCount()
+    const beforeWorkActivity = options.getWorkActivityCount()
     await emitSessionEvent(options.context, SESSION_INPUT_EVENT, buildPromptEvent(options.context, prompt, options.sessionId))
     const promptResult = await monitorPrompt(options.context, options.connection, options.sessionId, prompt, {
       timeoutMs: options.timeoutMs,
@@ -879,13 +897,14 @@ function createSharedPromptRunner(options: {
       exitFailure: options.exitFailure,
     })
     const activityCount = options.getActivityCount() - beforeActivity
+    const workActivityCount = options.getWorkActivityCount() - beforeWorkActivity
     const usageText = options.getAgentText().slice(beforeText.length)
     if (promptResult !== "completed") {
-      return { completed: false, error: promptResult.error, providerError: promptResult.providerError, failureCategory: promptResult.failureReason, activityCount, usageText }
+      return { completed: false, error: promptResult.error, providerError: promptResult.providerError, failureCategory: promptResult.failureReason, activityCount, workActivityCount, usageText }
     }
     const activityFailure = validatePromptActivity(activityCount)
-    if (activityFailure) return { completed: false, error: activityFailure, activityCount, usageText }
-    return { completed: true, activityCount, usageText }
+    if (activityFailure) return { completed: false, error: activityFailure, activityCount, workActivityCount, usageText }
+    return { completed: true, activityCount, workActivityCount, usageText }
   }
 }
 
@@ -900,6 +919,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   let agentText = ""
   let agentTextTruncated = false
   let activityCount = 0
+  let workActivityCount = 0
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
@@ -934,6 +954,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       createAcpSessionUpdateHandler({
         notifyData,
         recordActivity: () => { activityCount += 1 },
+        recordWorkActivity: () => { workActivityCount += 1 },
         appendAssistantText,
         emitUpdate: createObservabilityAwareEmitter(context, () => acpSessionId, toolIds),
       }),
@@ -956,6 +977,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       dataWaiters,
       getAgentText: () => agentText,
       getActivityCount: () => activityCount,
+      getWorkActivityCount: () => workActivityCount,
     })
     const run = await runPrompt(prompt)
     if (!run.completed) {
@@ -985,6 +1007,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   let agentText = ""
   let agentTextTruncated = false
   let activityCount = 0
+  let workActivityCount = 0
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
@@ -1018,6 +1041,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       createAcpSessionUpdateHandler({
         notifyData,
         recordActivity: () => { activityCount += 1 },
+        recordWorkActivity: () => { workActivityCount += 1 },
         appendAssistantText,
         emitUpdate: createObservabilityAwareEmitter(context, () => sessionId, toolIds),
       }),
@@ -1042,6 +1066,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       dataWaiters,
       getAgentText: () => agentText,
       getActivityCount: () => activityCount,
+      getWorkActivityCount: () => workActivityCount,
     })
     const run = await runPrompt(prompt)
     if (!run.completed) {
@@ -1067,6 +1092,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
   let agentText = ""
   let agentTextTruncated = false
   let activityCount = 0
+  let workActivityCount = 0
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
@@ -1089,6 +1115,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       sessionUpdate: createAcpSessionUpdateHandler({
         notifyData,
         recordActivity: () => { activityCount += 1 },
+        recordWorkActivity: () => { workActivityCount += 1 },
         appendAssistantText,
         emitUpdate: createObservabilityAwareEmitter(context, () => sessionId, toolIds),
       }),
@@ -1137,6 +1164,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       dataWaiters,
       getAgentText: () => agentText,
       getActivityCount: () => activityCount,
+      getWorkActivityCount: () => workActivityCount,
       exitFailure: acpProcess.exitFailure,
     })
     const run = await runPrompt(prompt)
