@@ -4,6 +4,7 @@ using Mohist.Server.SystemInfo;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -35,6 +36,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
+    private readonly ConfigService _configService;
     private readonly IEventStore _eventStore;
     private readonly IEventPublisher _eventBus;
     private readonly IConfiguration _configuration;
@@ -51,6 +53,7 @@ public class IssueGrain : Grain, IIssueGrain
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
+        ConfigService configService,
         IEventStore eventStore,
         IEventPublisher eventBus,
         IConfiguration configuration,
@@ -66,6 +69,7 @@ public class IssueGrain : Grain, IIssueGrain
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
+        _configService = configService;
         _eventStore = eventStore;
         _eventBus = eventBus;
         _configuration = configuration;
@@ -161,9 +165,20 @@ public class IssueGrain : Grain, IIssueGrain
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
 
-        await _issueProfileManager.PatchVariablesAsync(
-            issue.Id,
-            IssueVariableBuilder.Build(VariableBundle.Empty, VariableBundle.Empty, wrId, issue, projectContext, workspace));
+        // T1: snapshot the issue's effective Variables by merging the global
+        // config.jsonc bundle and the project Variables bundle (project wins),
+        // then layering the built-in calling context on top. The result is
+        // stored on the issue profile and read directly by runtime; no second
+        // merge happens at dispatch time.
+        var globalBundle = await _configService.GetVariables();
+        var projectBundle = await _projectProfileManager.GetVariablesAsync(projectContext.Id);
+        var issueBundle = IssueVariableBuilder.Build(
+            globalBundle,
+            projectBundle,
+            wrId,
+            issue,
+            projectContext);
+        await _issueProfileManager.SetVariablesAsync(issue.Id, issueBundle);
 
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.Id, key, body);

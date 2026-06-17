@@ -30,17 +30,22 @@ public static class WorkflowGrainTestHelpers
 {
     public static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
 
-    public static WorkflowStartInput TestInput(IGrainFactory grains, string workflowId, string? projectId = null)
+    public static WorkflowStartInput TestInput(IGrainFactory grains, string workflowId, string? projectId = null, string? issueId = null)
     {
         projectId ??= TestProjectId(workflowId);
+        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectId"] = projectId,
+        };
+        if (!string.IsNullOrWhiteSpace(issueId))
+            annotations["issueId"] = issueId;
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: DateTimeOffset.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            }));
+            Annotations: annotations));
     }
+
+    public static string TestIssueId(string workflowId) => $"test-issue-{workflowId}";
 
     public static async Task<string> RegisterRunnerAsync(
         IGrainFactory grains,
@@ -292,6 +297,16 @@ public static class WorkflowGrainTestHelpers
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine());
         await manager.PatchVariablesAsync(projectId, patch);
+    }
+
+    public static async Task PatchIssueVariablesAsync(string connectionString, string issueId, VariableBundle patch)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        var manager = new IssueWorkflowProfileManager(factory);
+        await manager.PatchVariablesAsync(issueId, patch);
     }
 
     public static WorkflowDefinition TwoStages()

@@ -105,19 +105,24 @@ public abstract class WorkflowGrainSpecs
         return workflow;
     }
 
-    protected WorkflowStartInput TestInput(string? projectId = null)
+    protected WorkflowStartInput TestInput(string? projectId = null, string? issueId = null)
     {
         projectId ??= _workflowId is null ? "test-project" : TestProjectId(_workflowId);
+        issueId ??= _workflowId is null ? "test-issue" : TestIssueId(_workflowId);
+        var annotations = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["projectId"] = projectId,
+            ["issueId"] = issueId,
+        };
         return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
             Name: null,
             CreatedAt: DateTimeOffset.UtcNow,
-            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["projectId"] = projectId,
-            }));
+            Annotations: annotations));
     }
 
     protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
+
+    protected static string TestIssueId(string workflowId) => $"test-issue-{workflowId}";
 
     protected async Task DeactivateWorkflowAsync(string workflowId)
     {
@@ -344,6 +349,16 @@ public abstract class WorkflowGrainSpecs
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine());
         await manager.PatchVariablesAsync(projectId, patch);
+    }
+
+    protected async Task PatchIssueVariablesAsync(string issueId, VariableBundle patch)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        var manager = new IssueWorkflowProfileManager(factory);
+        await manager.PatchVariablesAsync(issueId, patch);
     }
 
     protected static WorkflowDefinition TwoStages()

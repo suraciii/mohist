@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Unify agent.model variable resolution: fold global + project Variables into the issue at T1 so the selected model reaches the runner, and remove the agent-specific code path.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose global config.jsonc as a VariableBundle",
+      "spec": "specs/workflow-config/spec.md#global-configuration-is-expressed-as-a-variablebundle",
+      "description": "Add ConfigService.GetVariables() that returns global config.jsonc as a VariableBundle: vars.agent built from the existing GetAgentConfigAsync() (including the legacy `model` fallback), and stages always empty. This is the global layer that T1 will merge. Leave ConfigRoutes/OpencodeRoutes on their existing flat-dict methods unchanged.",
+      "acceptanceCriteria": [
+        "ConfigService.GetVariables() returns a VariableBundle whose Vars contains the global agent object at the `agent` key",
+        "When config.jsonc has `agent`, that object is placed at vars.agent; when only legacy `model` is set, a `{model}` agent object is synthesized at vars.agent",
+        "Stages is always an empty/absent map regardless of config.jsonc content (stage names are project-specific)",
+        "ConfigServiceSpecs updated to assert the vars.agent mapping, the legacy-model fallback, and the empty-stages guarantee",
+        "Existing ConfigServiceSpecs and the config API routes continue to pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Config/ConfigService.cs (new GetVariables) + updated ConfigServiceSpecs.cs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Foundation for T-003. No DB/config-file format change; pure in-memory adapter reshaping the already-read config.jsonc values."
+    },
+    {
+      "id": "T-002",
+      "title": "Remove the dead agent-specific profile code path",
+      "spec": "specs/workflow-config/spec.md#workflow-profiles-store-agent-config-as-ordinary-variables",
+      "description": "Delete the uncalled agent-specific surface from the issue workflow profile layer: IIssueWorkflowProfile.BuildVariables(..., globalAgentConfig) and BuildStageVariables(..., globalStageAgentConfigs), plus the private BuildAgentConfig / MergeAgentConfig / MergeStageAgent / MergeVarsJson helpers in MohistDefaultIssueWorkflowProfile. Update any test doubles that implement IIssueWorkflowProfile. Confirm IssueReadModel.AgentConfig/Model/StageModels remain pure derivations of the bundle.",
+      "acceptanceCriteria": [
+        "IIssueWorkflowProfile exposes no parameter named globalAgentConfig or globalStageAgentConfigs (grep across packages/server returns no profile-method hits)",
+        "MohistDefaultIssueWorkflowProfile contains no BuildAgentConfig/MergeAgentConfig/MergeStageAgent/MergeVarsJson helpers and no agent-keyed branch",
+        "Test doubles implementing IIssueWorkflowProfile (e.g. WorkflowGrainTestHelpers, GrainTestConfig) compile against the narrowed interface",
+        "IssueQuerier.ApplyIssueWorkflowVariables still derives IssueReadModel.AgentConfig/Model/StageModels from the bundle unchanged in behavior",
+        "MohistDefaultWorkflowProfileSpecs and IssueWorkflowProfileManagerSpecs pass after the interface narrowing"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/IIssueWorkflowProfile.cs + MohistDefaultIssueWorkflowProfile.cs (dead code removed) + updated test doubles",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "These methods are already dead code (verified by grep: no callers), so removal is safe and does not change runtime behavior. Done before T-003 so the T1 merge is built on a clean, agent-agnostic profile surface."
+    },
+    {
+      "id": "T-003",
+      "title": "Move variable resolution to T1 (merge global+project into issue; runtime reads directly)",
+      "spec": "specs/workflow-config/spec.md#issue-creation-merges-project-and-global-variables-generically",
+      "description": "Make issue start the single resolution point: in IssueGrain.StartWorkflowAsync compute the issue Variables as VariableBundle.MergeAll(globalBundle, projectBundle) then patch the context vars (mohist/issue/project/repository/openspecChangeName/openspecChangeDir) on top and persist that as the issue profile Variables. Collapse WorkflowProfileManager.LoadVariablesAsync to read the issue layer directly instead of re-merging the project layer, while preserving ResolvedTemplate embedded-definition variables at the runner boundary.",
+      "acceptanceCriteria": [
+        "A newly created issue's Variables.vars.agent equals the project value when the project profile sets vars.agent (project wins)",
+        "When the project profile omits vars.agent, the issue's Variables.vars.agent is filled from global config.jsonc via GetVariables() (global fallback)",
+        "Per-stage merge is symmetric with top-level vars: stages.<stage>.vars uses the same project-over-global precedence, via the same VariableBundle.MergeAll path",
+        "WorkflowProfileManager.LoadVariablesAsync returns the issue layer directly and no longer re-merges the project layer",
+        "Stage agent dispatch reads Variables.stages[stage].vars.agent then falls back to Variables.vars.agent as ordinary variable lookups (no cross-layer resolution)",
+        "Snapshot semantics hold: editing project or global Variables after an issue is created does not change that issue's effective Variables (new issues pick up the new values)",
+        "Embedded workflow-definition variables (ResolvedTemplate.EmbeddedVariables) still apply at the runner boundary and are not dropped",
+        "VariableScopeSpecs and IssueVariableBuilderSpecs updated to assert the T1 merge (symmetry, project-over-global, stage fallback) and the direct runtime read; ConfigServiceSpecs, VariableBundleSpecs, MohistDefaultWorkflowProfileSpecs remain green"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Issue/Grains/IssueGrain.cs (StartWorkflowAsync/BuildIssueVariables) + WorkflowProfileManager.cs (LoadVariablesAsync) + updated VariableScopeSpecs/IssueVariableBuilderSpecs",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "This is the core fix. Reuse VariableBundle.MergeAll as MergeVariables (Decision 2) — do not write a new merge. The frontend already writes vars.agent/stages.X.vars.agent to the generic workflow-profile/variables endpoint, so no web change is needed. This task also implements the workflow-engine MODIFIED requirement 'Workflow uses issue-aware model resolution' (specs/workflow-engine/spec.md#workflow-uses-issue-aware-model-resolution): the acceptance criteria for direct runtime read, stage dispatch via ordinary variable lookups, and recovery-session reuse assert that requirement."
+    },
+    {
+      "id": "T-004",
+      "title": "Verify IssueWorkflowProfile storage integrity (migration is a no-op verification)",
+      "spec": "specs/workflow-config/spec.md#existing-issueworkflowprofile-agent-data-migrates-into-variables",
+      "description": "Add a storage-integrity verification asserting every IssueWorkflowProfile row's effective agent config is reachable through its Variables bundle (no row relies on data outside Variables). Because persistence is already unified this is expected to pass on day one. Include defensive copy logic that, only if a row is found with agent data outside Variables, copies AgentConfig->vars.agent and StageAgentConfigs->stages.<stage>.vars.agent, validates the bundle, and is reversible on failure.",
+      "acceptanceCriteria": [
+        "A verification query/test scans all IssueWorkflowProfile rows and confirms each row's effective agent config is reachable via Variables.vars.agent / Variables.stages.<stage>.vars.agent",
+        "Verification passes on the current dataset without mutating any row (storage is already unified)",
+        "Defensive copy path, if triggered, writes AgentConfig to Variables.vars.agent and StageAgentConfigs to Variables.stages.<stage>.vars.agent and validates the resulting bundle before clearing any source-derived field",
+        "The defensive path is reversible on failure (no destructive write occurs before the migrated Variables validates)",
+        "No database schema change is introduced (no new migration; the Variables column already exists)"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/server/tests/.../IssueWorkflowProfileStorageIntegritySpecs.cs (verification) + optional defensive copy helper",
+      "dependsOn": ["T-003"],
+      "passes": false,
+      "notes": "Per design: no real data migration is expected because both profile rows already store VariableBundle JSON. This task is the spec's migration requirement satisfied as a verification with a defensive fallback. Rollback is clean since no schema/data rewrite occurs in the expected path."
+    }
+  ]
+}
