@@ -2,13 +2,14 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { EventName, EventMap, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
-import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../entities/agent'
+import { dispatchAgentEvent, AGENT_DETAIL_EVENTS, useAgentStatus } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
-import { useEventsConnection } from '../../shared/api/events-hub'
+import { useConnectionState, useEventsConnection } from '../../shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
+import { useRuntimeToast, RuntimeToastHost } from '../../shared/ui/toast'
 
 /**
  * Compile-time guard: every name the switch can route (i.e. every key of
@@ -195,6 +196,46 @@ function getCurrentIssueNumber(): number | null {
   return match ? parseInt(match[1], 10) : null
 }
 
+/**
+ * Surface a runner-drop notice whenever `useAgentStatus()` transitions to
+ * `runnerAvailable === false`. The notice is delivered through the runtime
+ * toast host (and via the host's `onNotice` sink into Activity), never as
+ * inline issue content.
+ */
+function useRunnerDropNotice(): void {
+  const { data: agentStatus } = useAgentStatus()
+  const toastCtx = useRuntimeToast()
+  const lastSeen = useRef<boolean | null>(null)
+
+  useEffect(() => {
+    if (!agentStatus) return
+    const next = agentStatus.runnerAvailable === false
+    if (lastSeen.current === null) {
+      lastSeen.current = next
+      return
+    }
+    if (next === lastSeen.current) return
+    lastSeen.current = next
+    if (next) {
+      toastCtx.push({
+        tone: 'transport',
+        title: 'Runner dropped',
+        body: agentStatus.runnerMessage ?? 'The workflow runner is no longer reachable. Workflows will resume when it reconnects.',
+        testId: 'runtime-toast-runner-dropped',
+        ttlMs: 8_000,
+      })
+    } else {
+      toastCtx.push({
+        tone: 'transport',
+        title: 'Runner reconnected',
+        body: 'The workflow runner is back online.',
+        testId: 'runtime-toast-runner-reconnected',
+        ttlMs: 5_000,
+      })
+    }
+  }, [agentStatus, toastCtx])
+}
+
 function findIssueNumber(
   queryClient: ReturnType<typeof useQueryClient>,
   issueId: string,
@@ -307,6 +348,11 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
   const [activeTaskElapsedMs] = useState<number | null>(null)
   const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
   const viewedIssueRef = useRef<number | null>(getCurrentIssueNumber())
+  // Subscribe to SignalR connection transitions so transport notices are
+  // routed to the toast host / Activity surface instead of any inline issue
+  // content. The hook itself owns publishing.
+  useConnectionState(projectId)
+  useRunnerDropNotice()
 
   useEffect(() => {
     const update = () => {
@@ -607,8 +653,10 @@ export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
   const { projectId } = useProject()
   const state = useLiveEvents(projectId)
   return (
-    <LiveTaskContext.Provider value={state}>
-      {children}
-    </LiveTaskContext.Provider>
+    <RuntimeToastHost>
+      <LiveTaskContext.Provider value={state}>
+        {children}
+      </LiveTaskContext.Provider>
+    </RuntimeToastHost>
   )
 }

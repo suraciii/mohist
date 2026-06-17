@@ -267,7 +267,7 @@ function StageBar({
   runningDurations: Map<string, number>
 }) {
   return (
-    <div className="flex items-stretch gap-2">
+    <div className="flex items-stretch gap-2" data-testid="workflow-stage-bar">
       {WORKFLOW_STAGES.map((stage, idx) => {
         const status = getStageStatus(stage, stageStateMap, issue)
         let duration = getStageDuration(stage, stageStateMap)

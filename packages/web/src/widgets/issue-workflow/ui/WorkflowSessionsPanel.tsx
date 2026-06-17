@@ -174,7 +174,7 @@ export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSe
   ].filter(Boolean).join(' · ')
 
   return (
-    <Card>
+    <Card data-testid="workflow-sessions-panel">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-sm">Sessions</CardTitle>
