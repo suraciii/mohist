@@ -1,27 +1,111 @@
-# Mohist Issue Templates
+# Mohist Issue Body Template (frontmatter + three-voice content)
 
-Use these templates when the task benefits from converting product or implementation findings into a Mohist issue.
+Use this template when creating a Mohist issue. The file is the only contract between the PRD content (produced by `mohist-explore`) and the CLI: it MUST start with the frontmatter block, followed by the five structured sections in the exact order shown. Write the file to a temp path (for example `issue-body.md`) and hand it to `mo issue create <title> --body-file issue-body.md`.
 
-## Problem Statement
+## Frontmatter fields
 
-- Current behavior:
-- Expected behavior:
-- User impact:
+| Field | Required | Values |
+|---|---|---|
+| `recommended_workflow` | yes | A profile id returned by `mo workflow list --described`, or `mohist/default` when nothing matches. |
+| `recommended_workflow_reason` | yes | One sentence that names the matched `suitable_for` tag(s) or explains the fallback. Use the YAML `\|` block scalar for multi-line reasons. |
+| `risk` | yes | One of `low`, `medium`, `high`. Driver must be documented in `## Product Shape` or `## Acceptance Criteria`. |
 
-## Reproduction
+## Template
 
-1. 
-2. 
-3. 
+```markdown
+---
+recommended_workflow: mohist/default
+recommended_workflow_reason: |
+  No specific workflow matched the issue content; falling back to
+  mohist/default.
+risk: medium
+---
 
-## Suggested Direction
+## User Voice
 
-- Product shape:
-- Acceptance criteria:
-- Constraints or non-goals:
+<The user's own need, in the user's own words. The scenario where it matters and
+where the current experience fails them. Recorded faithfully, not translated into
+product or technical terms.>
 
-## Evidence
+## Product Shape
 
-- Logs:
-- Screenshots:
-- Related files or commits:
+<The PM translation: the target product form — what the user will see or be able
+to do. State the boundary. Cite what you observed in the current product (pages,
+commands, flows). Make trade-offs explicit.>
+
+## Domain Model
+
+<The domain expert translation: key concepts, invariants, and constraints — just
+enough for the Plan stage to understand the problem. Cite code paths inspected. Do
+NOT prescribe implementation (files, functions, tables).>
+
+## Acceptance Criteria
+
+- [ ] <Observable, verifiable condition, from the user perspective>
+- [ ] <Observable, verifiable condition>
+- [ ] <Observable, verifiable condition>
+
+## Non-Goals
+
+- <Explicit out-of-scope item>
+- <Explicit out-of-scope item>
+```
+
+## Worked example
+
+A UI affordance problem: the create-issue dialog offers no risk selector.
+
+```markdown
+---
+recommended_workflow: mohist/default
+recommended_workflow_reason: Content covers a UI affordance and a feature addition; mohist/default covers UI work.
+risk: low
+---
+
+## User Voice
+
+When I create an issue from the Web UI, I have no way to communicate how risky it
+is. I end up pasting "this is high risk" into the body, and half the time the team
+misses it. I want risk to be a first-class choice at creation time, not buried in
+prose.
+
+## Product Shape
+
+Surface a `low / medium / high` risk selector in the create-issue dialog,
+alongside the existing title and body fields. The selector pre-fills from the
+body's frontmatter `risk` field when one exists, and lets the user override it
+before submitting. Explored the dialog at `packages/web/src/issues/`: the `Issue`
+model already exposes `risk?: string | null`, but the dialog never binds it. Out
+of scope: server-side risk validation beyond the existing enum check, and how risk
+renders on the issue detail page.
+
+## Domain Model
+
+`Issue.Risk` is an optional enum (`low | medium | high`) persisted on the issue
+aggregate. The invariant is that risk, once set, flows into workflow profile
+selection at plan time — so the create dialog must commit a value the workflow
+engine can read. The create-issue API endpoint already accepts `risk` in the
+request body; the gap is purely in the Web UI binding. No schema change needed.
+
+## Acceptance Criteria
+
+- [ ] Create-issue dialog shows a risk selector with `low`, `medium`, `high` options.
+- [ ] Selector pre-fills from the body's frontmatter `risk` field when present.
+- [ ] User-chosen value overrides the frontmatter value on submit.
+- [ ] The selected risk reaches the server in the create-issue request body.
+
+## Non-Goals
+
+- No server-side risk validation beyond the existing enum check.
+- No change to how risk renders on the issue detail page.
+- No automated risk suggestion based on labels or title.
+```
+
+## Verification before invoking `mo issue create`
+
+- [ ] Frontmatter block is the first thing in the file, delimited by `---`.
+- [ ] All three required fields are present and non-empty.
+- [ ] `risk` is exactly one of `low`, `medium`, `high`.
+- [ ] `recommended_workflow` is a real id (or `mohist/default`).
+- [ ] The five `##` sections appear in order: User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals.
+- [ ] User has confirmed the workflow, risk, and a body summary before running `mo issue create --body-file`.

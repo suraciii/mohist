@@ -1,129 +1,103 @@
 ---
 name: mohist-explore
-description: 从产品和用户视角探索 mohist 项目，发现功能缺陷、体验问题、设计机会和价值增长点。当用户想要探索代码库、发现改进点、审查用户体验、思考功能设计、或无目标地巡检产品时使用。触发词包括 "explore"、"探索"、"巡检"、"找问题"、"体验审查"、"功能设计"、"产品思考"。
+description: 把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 "提炼需求"、"写 PRD"、"沉淀 issue"、"需求文档"、"探索"、"完善 issue"。
 ---
 
 # mohist-explore
 
-Use this skill to explore Mohist from the product and user perspective, identify UX problems, verify flows, and surface improvement opportunities without drifting into internal runtime-skill behavior.
+Use this skill to **distill** a fuzzy idea into a clear, bounded product requirement document (PRD) for a Mohist issue.
 
-When using this skill:
+The input is a seed — a sentence, a vague hunch, an improvement intent, or a half-formed thought. The output is a structured PRD that is clear enough for the Plan stage to act on. This skill is about *thinking clearly*, not about operating the CLI. Once the PRD content is finalized, hand it off to the `mohist` skill to actually create the issue.
 
-- Explore from the outside in: user-visible flows, operator workflows, docs, CLI affordances, Web UI behavior, and failure recovery.
-- Prefer concrete evidence from the current repository, local runtime behavior, and issue artifacts over assumptions.
-- Distinguish product problems from implementation details, and explain the user impact before proposing fixes.
-- Keep exploration scoped to shared Mohist product behavior, not removed internal runtime-skill systems.
+## When to use
 
-Good triggers include:
+- The user arrives with a fuzzy idea and wants it turned into a Mohist issue.
+- The user has a few sentences and needs them sharpened into something with a real boundary.
+- An issue exists but its body is too vague, too wide, or missing the domain context needed to plan implementation.
+- The user wants to think through a product change before committing it to an issue.
 
-- Exploring the product for UX gaps or regressions.
-- Reviewing whether docs, shipped guidance, and current CLI behavior are aligned.
-- Looking for workflow friction, confusing approval flows, missing guardrails, or broken setup paths.
+Do **not** use this skill for unfocused product patrols ("go find anything broken"). That is a different mode. This skill always starts from a seed the user provides.
 
-Boundaries:
+## The three-voice model
 
-- Do not turn an exploration request into unrelated code cleanup.
-- Do not treat `.mohist/skills` runtime behavior as the target unless the issue explicitly concerns that area.
-- Do not depend on stale pre-Orleans command surfaces when validating current product behavior.
+A good PRD is a collaboration between three perspectives. They are **not** peers — they form a dependency chain: Product builds on User, Domain builds on Product. The skill works through them in order, and each voice has its own exploration direction and a gate it must pass before the next voice begins.
 
-## Producing issues from exploration findings
+| Voice | Who speaks | Explores | Language | Core question |
+|---|---|---|---|---|
+| **User Voice** | The user (you); the agent records faithfully | The user's real scenario | The user's own words | What do you actually need? Where do you get stuck? |
+| **Product Shape** | The agent as PM | Current **product form** — what the user experiences today (Web UI, CLI, user journeys) | Product language | How does the need become a concrete product decision with a real boundary? |
+| **Domain Model** | The agent as domain expert | Current **technical implementation** — how it works today, what constrains it | Domain language | How does this product decision hold up in the domain? What are the invariants and constraints? |
 
-When an exploration concludes and the user wants to create an issue, produce a **structured, frontmatter-annotated body file** and hand it off to `mo issue create --body-file`. The CLI parses the frontmatter automatically and uses it to pre-fill `--workflow-profile` and `--risk`; explicit CLI flags still override frontmatter values.
+The most common PRD failure is skipping User Voice and jumping straight to implementation. This skill enforces that User Voice comes first, even when the idea feels obvious.
 
-The body file is the only contract between explore and runtime — make it self-contained, machine-readable, and reviewable.
+## Workflow
 
-### Workflow discovery (required before recommending)
+### 1. Capture User Voice
 
-Before recommending a workflow, discover what is available:
+Act as an interviewer. The goal here is to **record**, not to solve.
 
-```bash
-mo workflow list --described
-```
+- Restate the user's seed in the user's own words. Do not translate into product or technical terms yet.
+- Ask about the scenario: when does this matter? What is the user trying to decide or do? Where does the current experience fail them?
+- Capture intent, not solution. If the user proposes a fix ("just add a toggle"), ask what problem the toggle solves and record the problem.
+- Do not invent requirements the user did not express.
 
-This prints each workflow profile's `id`, display name, description, and `suitable_for` tags, for example:
+**Gate:** Can the user read back the captured User Voice and say "yes, that is exactly what I mean"? If not, keep asking. You may not proceed until the user recognizes their own need in this section.
 
-```
-mohist/default — Mohist Default Workflow
-  Standard autonomous plan→build→check→merge pipeline.
-  Suitable for: feature, bugfix, refactor, default
-```
+A minimal User Voice is one sentence naming the scenario and the need. Even for a clear-cut idea ("add dark mode"), require at least that — never skip the voice entirely.
 
-Parse the output to collect each profile's `id` and its `suitable_for` tags. The `suitable_for` line lists the kinds of work the profile is designed to handle. If the line reads `(not specified)`, treat the profile as having no declared suitability signal.
+### 2. Settle Product Shape
 
-### Matching exploration context to a workflow
+Switch to PM perspective. Explore the current product form, then translate User Voice into a concrete product decision.
 
-Match the exploration findings to a profile using rule-based comparison against `suitable_for` tags:
+- Explore what the user experiences today: the relevant Web UI pages, CLI commands, user journeys, and failure paths. Cite what you actually observe (pages visited, commands run, flows traced).
+- Translate the need into a target product form: what will the user see or be able to do? What changes in their journey?
+- Decide the boundary. State what is in scope and — just as importantly — what is not. A PRD that cannot name its non-goals is under-cooked.
+- Make the trade-offs explicit. If two directions exist, name the one you chose and why.
 
-1. Summarize the exploration context in 3–5 keywords (for example: `ui`, `feature`, `bug`, `docs`, `refactor`, `infra`, `security`).
-2. For each discovered profile, score it by counting how many of its `suitable_for` tags overlap the exploration keywords.
-3. Recommend the profile with the highest overlap.
-4. Write `recommended_workflow_reason` as one short sentence that names the matched tag(s) and ties them to the findings — not a copy of the profile description. Example: `Findings touch UI affordances and a feature addition, matching feature-flow's suitable_for: ui, feature.`
+**Gate:** Is the boundary clear? Are the non-goals brave enough (actually cutting things, not just listing safe trivia)? Does the Product Shape demonstrably resolve the User Voice — can you trace each user need to a product decision that addresses it? If not, refine.
 
-If two profiles tie, prefer the more specific one (the one with fewer, more targeted tags). If all candidates score zero, fall back to the default below.
+### 3. Distill Domain Model
 
-### Default fallback when nothing matches
+Switch to domain expert perspective. Explore the current technical implementation, then express the Product Shape in domain terms — just enough for the Plan stage to understand the problem, not a full technical design.
 
-When no profile's `suitable_for` description matches the exploration findings (every candidate scores zero, `suitable_for` is unspecified for all profiles, or `mo workflow list --described` is unavailable), default to:
+- Explore how the relevant area works today: the code paths, data models, and architectural constraints. Cite files and symbols you inspected.
+- Name the key domain concepts, the invariants that must hold, and the constraints that shape the solution.
+- Do **not** prescribe files, functions, database tables, or step-by-step implementation tasks. That belongs to the Plan stage. Domain Model is about the *problem space*, not the solution space.
+- If the Product Shape turns out to be infeasible or more complex than expected, stop and say so — then go back and revise Product Shape (see Iteration below).
 
-- `recommended_workflow: mohist/default`
-- `recommended_workflow_reason: No specific workflow matched the exploration findings; falling back to mohist/default.`
+**Gate:** Are the domain concepts accurate (verifiable against the code)? Are the real constraints identified? Is this the minimum domain context needed to plan — or have you drifted into premature design? Trim anything that looks like an implementation recipe.
 
-Never leave `recommended_workflow` blank. The default profile is always a safe choice because it is guaranteed to exist.
+### 4. Converge into a PRD
 
-### Risk assessment
+Assemble the three voices into a single PRD using the structure in `references/issue-body-template.md`. The PRD is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the `mohist` skill's job at issue-creation time.
 
-Set the `risk` frontmatter field to one of `low`, `medium`, or `high` based on the findings:
+Present the assembled PRD to the user for confirmation before any issue is created.
 
-- `low`: isolated change, single subsystem, no migration or API impact, covered by existing tests.
-- `medium`: touches multiple subsystems, requires a schema migration, or changes a public CLI/API contract.
-- `high`: large blast radius (auth, workflow runtime, persistence), cross-cutting refactor, or irreversible action without a rollback path.
+## Iteration
 
-Document the risk driver in the `Background` or `Acceptance criteria` section so the reviewer can validate the rating.
+The voices are serial, but not one-way. When a later voice reveals a gap in an earlier one, you may go back — but you must **say so explicitly**:
 
-### Frontmatter format
+- "Writing the Domain Model surfaced a constraint that Product Shape missed. Going back to revise Product Shape: …"
 
-The body file MUST start with a YAML frontmatter block delimited by leading and trailing `---` lines. The frontmatter carries the workflow recommendation and risk; the structured sections carry the human-readable content.
+Never silently rewrite an earlier section. The user must always know which voice is currently active and why a previous decision is being revisited.
 
-Supported fields:
+Common backtrack triggers:
+- Domain Model finds Product Shape is infeasible → revise Product Shape (and check User Voice still holds).
+- Product Shape realizes User Voice was actually two needs → split or revise User Voice.
+- User feedback on the converged PRD challenges a specific voice → revise only that voice, then re-check dependents.
 
-| Field | Required | Description |
-|---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, or `mohist/default` as fallback. |
-| `recommended_workflow_reason` | yes | One sentence explaining why this workflow was chosen, referencing matched `suitable_for` tags or the fallback rationale. Multi-line values use the YAML `|` block scalar. |
-| `risk` | yes | One of `low`, `medium`, `high`. |
+## Boundaries
 
-Unrecognized keys are ignored by the CLI; do not invent additional fields.
+- Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist` skill's responsibility. This skill produces PRD *content*; `mohist` turns it into an issue.
+- Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
+- Do not start from a blank slate and patrol for random problems. Always begin from a user-provided seed.
+- Do not let Domain Model grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement.
 
-### Body section template
+## Handoff
 
-Below the frontmatter, write four sections in this exact order. Each section starts with a level-2 (`##`) heading.
+When the PRD is confirmed:
 
-- `## Background` — concrete context distilled from the exploration: what was observed, where, and why it matters to users. Cite evidence (commands run, flows traced, files inspected).
-- `## Goal` — the single user-visible outcome this issue will deliver. One paragraph, no implementation detail.
-- `## Non-goals` — explicit list of what this issue will NOT do, to prevent scope creep. Each item on its own line.
-- `## Acceptance criteria` — a checklist (`- [ ]`) of observable, verifiable conditions. Each item must be testable by someone who did not write the change.
+1. Point the user to the `mohist` skill to create the issue: the `mohist` skill will read the PRD, recommend a workflow and risk, generate frontmatter, and run `mo issue create` after user confirmation.
+2. The PRD content (the three voices + acceptance criteria + non-goals) becomes the issue body. `mohist` is responsible for the frontmatter and CLI mechanics.
 
-The full template — including the frontmatter block and all four sections — is packaged at `references/issue-body-template.md`. Render it with `mo skills get mohist-explore --full` when you need a copy-paste starting point.
-
-### User confirmation flow
-
-Before creating the issue, present the produced recommendation to the user and wait for explicit confirmation:
-
-1. Show a compact summary:
-   - `recommended_workflow` and a one-line `recommended_workflow_reason`
-   - `risk` and the driver behind it
-   - The four section headings with a one-sentence gist of each
-2. Ask the user to confirm, override the workflow, override the risk, or edit the body.
-3. On confirm, run `mo issue create <title> --body-file <produced-file>` with no additional workflow/risk flags — the CLI will apply the frontmatter values.
-4. On override, update the frontmatter (or pass `--workflow-profile` / `--risk` explicitly) and then create. Always honor the user's final choice over the agent's recommendation.
-
-Never run `mo issue create --body-file` without confirmation. The body file is advisory until the user approves it.
-
-### End-to-end handoff checklist
-
-- [ ] `mo workflow list --described` was run and parsed.
-- [ ] `recommended_workflow` is populated (best match or `mohist/default`).
-- [ ] `recommended_workflow_reason` references the matched `suitable_for` tags or states the fallback.
-- [ ] `risk` is `low`, `medium`, or `high`, with the driver documented in the body.
-- [ ] Body contains `## Background`, `## Goal`, `## Non-goals`, `## Acceptance criteria` in order.
-- [ ] User has confirmed the recommendation and body summary before `mo issue create` runs.
+The full PRD template is at `references/issue-body-template.md`.

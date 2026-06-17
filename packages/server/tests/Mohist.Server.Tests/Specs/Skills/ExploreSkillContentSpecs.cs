@@ -7,7 +7,9 @@ namespace Mohist.Server.Tests.Specs.Skills;
 
 /// <summary>
 /// Verifies the packaged <c>mohist-explore</c> skill guidance carries the
-/// structured issue-body production workflow introduced by issue-102/T-005.
+/// three-voice requirement-distillation workflow. The explore skill produces
+/// PRD content only; issue-creation mechanics (frontmatter, workflow, risk,
+/// CLI handoff) live in the <c>mohist</c> skill and are not expected here.
 /// These specs read the actual packaged asset on disk so they catch drift
 /// between the served skill content and the spec.
 /// </summary>
@@ -28,90 +30,46 @@ public sealed class ExploreSkillContentSpecs
 
         Assert.StartsWith("---\n", content, StringComparison.Ordinal);
         Assert.Contains("name: mohist-explore", content, StringComparison.Ordinal);
-        Assert.Contains("description: 从产品和用户视角探索 mohist 项目", content, StringComparison.Ordinal);
+        Assert.Contains("description: 把模糊的产品想法提炼成清晰的", content, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PackagedExploreSkill_KeepsExistingIntroPhrase()
+    public void PackagedExploreSkill_IntroducesDistillationPurpose()
     {
         Assert.Contains(
-            "Use this skill to explore Mohist from the product and user perspective",
+            "Use this skill to **distill** a fuzzy idea into a clear",
             SkillMarkdown,
             StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PackagedExploreSkill_DocumentsAllFrontmatterFields()
+    public void PackagedExploreSkill_DocumentsThreeVoiceModel()
     {
         var content = SkillMarkdown;
 
-        Assert.Contains("`recommended_workflow`", content, StringComparison.Ordinal);
-        Assert.Contains("`recommended_workflow_reason`", content, StringComparison.Ordinal);
-        Assert.Contains("`risk`", content, StringComparison.Ordinal);
+        Assert.Contains("User Voice", content, StringComparison.Ordinal);
+        Assert.Contains("Product Shape", content, StringComparison.Ordinal);
+        Assert.Contains("Domain Model", content, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PackagedExploreSkill_ProvidesBodySectionTemplate()
+    public void PackagedExploreSkill_EnforcesSerialDependencyChain()
     {
         var content = SkillMarkdown;
 
-        Assert.Contains("## Background", content, StringComparison.Ordinal);
-        Assert.Contains("## Goal", content, StringComparison.Ordinal);
-        Assert.Contains("## Non-goals", content, StringComparison.Ordinal);
-        Assert.Contains("## Acceptance criteria", content, StringComparison.Ordinal);
+        Assert.Contains("dependency chain", content, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PackagedExploreSkill_InstructsWorkflowDiscoveryCommand()
-    {
-        Assert.Contains("mo workflow list --described", SkillMarkdown, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PackagedExploreSkill_DocumentsSuitableForMatchingLogic()
+    public void PackagedExploreSkill_DoesNotCarryIssueCreationMechanics()
     {
         var content = SkillMarkdown;
 
-        Assert.Contains("suitable_for", content, StringComparison.Ordinal);
-        Assert.Contains("matching", content, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void PackagedExploreSkill_DocumentsDefaultFallback()
-    {
-        var content = SkillMarkdown;
-
-        Assert.Contains("mohist/default", content, StringComparison.Ordinal);
-        Assert.Contains("fallback", content, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void PackagedExploreSkill_DocumentsRiskEnum()
-    {
-        var content = SkillMarkdown;
-
-        Assert.Contains("`low`", content, StringComparison.Ordinal);
-        Assert.Contains("`medium`", content, StringComparison.Ordinal);
-        Assert.Contains("`high`", content, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PackagedExploreSkill_DocumentsUserConfirmationStep()
-    {
-        var content = SkillMarkdown;
-
-        Assert.Contains("confirmation", content, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo issue create", content, StringComparison.Ordinal);
-        Assert.Contains("--body-file", content, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void PackagedExploreSkill_DocumentsBodyFileHandoff()
-    {
-        var content = SkillMarkdown;
-
-        Assert.Contains("mo issue create", content, StringComparison.Ordinal);
-        Assert.Contains("--body-file", content, StringComparison.Ordinal);
+        // Execution knowledge was moved to the mohist skill. Explore must stay
+        // immune to CLI mechanics so it does not drift with CLI versions.
+        Assert.DoesNotContain("mo workflow list --described", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("recommended_workflow", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("--body-file", content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -122,13 +80,13 @@ public sealed class ExploreSkillContentSpecs
         Assert.True(File.Exists(templatePath), $"Expected issue body template at '{templatePath}'.");
 
         var template = File.ReadAllText(templatePath);
-        Assert.Contains("recommended_workflow:", template, StringComparison.Ordinal);
-        Assert.Contains("recommended_workflow_reason:", template, StringComparison.Ordinal);
-        Assert.Contains("risk:", template, StringComparison.Ordinal);
-        Assert.Contains("## Background", template, StringComparison.Ordinal);
-        Assert.Contains("## Goal", template, StringComparison.Ordinal);
-        Assert.Contains("## Non-goals", template, StringComparison.Ordinal);
-        Assert.Contains("## Acceptance criteria", template, StringComparison.Ordinal);
+        // The template is pure PRD content — no frontmatter (that is mohist's job).
+        Assert.DoesNotContain("recommended_workflow", template, StringComparison.Ordinal);
+        Assert.Contains("## User Voice", template, StringComparison.Ordinal);
+        Assert.Contains("## Product Shape", template, StringComparison.Ordinal);
+        Assert.Contains("## Domain Model", template, StringComparison.Ordinal);
+        Assert.Contains("## Acceptance Criteria", template, StringComparison.Ordinal);
+        Assert.Contains("## Non-Goals", template, StringComparison.Ordinal);
     }
 
     [Fact]
