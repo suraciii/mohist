@@ -38,6 +38,7 @@ const DEFAULT_SESSION_START_TIMEOUT_MS = 30 * 1000
 const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
+const CANCEL_TIMEOUT_MS = 5_000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
 
@@ -375,7 +376,7 @@ interface SessionLivenessState {
   dataVersion: number
 }
 
-type LivenessFailureReason = "probe_timeout" | "probe_send_failed" | "protocol_disconnect" | "process_exit"
+type LivenessFailureReason = "probe_timeout" | "probe_send_failed" | "protocol_disconnect" | "process_exit" | "prompt_timeout"
 
 function createSessionLivenessState(): SessionLivenessState {
   return {
@@ -1188,6 +1189,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       getActivityCount: () => activityCount,
       getWorkActivityCount: () => workActivityCount,
       exitFailure: acpProcess.exitFailure,
+      acpProcess,
     })
     const run = await runPrompt(prompt)
     if (!run.completed) {
@@ -1209,7 +1211,7 @@ function validatePromptActivity(activityCount: number) {
   return activityCount > 0 ? undefined : "ACP agent prompt completed without any session activity"
 }
 
-async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string; providerError?: OpencodeProviderErrorDiagnostic; failureReason?: LivenessFailureReason }> {
+async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never>; acpProcess?: AcpProcessHandle }): Promise<"completed" | { error: string; providerError?: OpencodeProviderErrorDiagnostic; failureReason?: LivenessFailureReason }> {
   const startedAt = Date.now()
   const promptPromise = connection.prompt({ sessionId, prompt: [{ type: "text", text: prompt }] })
   let promptUsage: unknown
@@ -1230,7 +1232,21 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
   while (true) {
     const now = Date.now()
     const timeoutRemaining = startedAt + options.timeoutMs - now
-    if (timeoutRemaining <= 0) return await cancelAndReturn(connection, sessionId, `Timed out after ${options.timeoutMs / 1000}s`)
+    if (timeoutRemaining <= 0) {
+      const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", {
+        acpSessionId: sessionId,
+        failureReason: "prompt_timeout",
+        providerError: diagnostic,
+        postProbeActivity: hasPostProbeActivity(options.livenessState),
+      })
+      await cancelAndReturn(options.acpProcess, connection, sessionId, `Timed out after ${options.timeoutMs / 1000}s`)
+      return {
+        error: appendOpencodeDiagnostic(`Timed out after ${options.timeoutMs / 1000}s`, diagnostic),
+        providerError: diagnostic,
+        failureReason: "prompt_timeout",
+      }
+    }
     const quietRemaining = Math.max(0, options.livenessState.lastDataAt + options.livenessQuietThresholdMs - now)
     const waitMs = quietRemaining
     const result = await Promise.race([
@@ -1243,7 +1259,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       await emitPromptUsageIfAppropriate()
       return "completed"
     }
-    if (result === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
+    if (result === "aborted") return await cancelAndReturn(options.acpProcess, connection, sessionId, "Agent stopped by user")
     if (result instanceof Error) {
       const failureReason: LivenessFailureReason = result.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
@@ -1292,7 +1308,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       clearLivenessProbe(options.livenessState)
       continue
     }
-    if (probeResult === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
+    if (probeResult === "aborted") return await cancelAndReturn(options.acpProcess, connection, sessionId, "Agent stopped by user")
     if (probeResult instanceof Error) {
       const failureReason: LivenessFailureReason = probeResult.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
@@ -1332,8 +1348,17 @@ async function ensurePromptAcceptedOrPending(promptPromise: Promise<unknown>) {
   if (settled && rejected !== undefined) throw rejected
 }
 
-async function cancelAndReturn(connection: ClientSideConnection, sessionId: string, error: string) {
-  try { await connection.cancel({ sessionId }) } catch {}
+async function cancelAndReturn(acpProcess: AcpProcessHandle | undefined, connection: ClientSideConnection, sessionId: string, error: string) {
+  let cancelled = false
+  try {
+    await Promise.race([
+      connection.cancel({ sessionId }).then(() => { cancelled = true }),
+      timeout(CANCEL_TIMEOUT_MS),
+    ])
+  } catch {}
+  if (!cancelled && acpProcess) {
+    await acpProcess.cleanup()
+  }
   return { error }
 }
 

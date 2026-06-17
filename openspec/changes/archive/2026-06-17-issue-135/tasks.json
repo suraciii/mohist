@@ -1,0 +1,51 @@
+{
+  "project": "mohist",
+  "description": "Fix monitorPrompt timeout path to surface provider diagnostics and bound cancelAndReturn cleanup with a hard timeout.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Bound cancelAndReturn cleanup with a hard timeout and ephemeral force-clean",
+      "spec": "specs/agent-runtime/spec.md#session-failure-cleanup-is-bounded-by-a-hard-timeout",
+      "description": "Rewrite cancelAndReturn to race connection.cancel against a 5s hard timeout (CANCEL_TIMEOUT_MS); on timeout, force-clean the process via acpProcess.cleanup() only on the ephemeral path and leave shared sessions untouched. Add an optional acpProcess to monitorPrompt options (runEphemeralWorkflowAgentSession passes its spawned handle; the three shared callers pass undefined) and forward options.acpProcess at all three cancelAndReturn call sites (timeout, abort, probe-abort). The abort and probe-abort paths keep their bare-message behavior; only the cancel becomes bounded.",
+      "acceptanceCriteria": [
+        "cancelAndReturn returns within CANCEL_TIMEOUT_MS even when connection.cancel never resolves",
+        "On the ephemeral path with a hung cancel, acpProcess.cleanup() is invoked (killProcess path); the double-cleanup against the caller's finally block is safe because cleanup() is idempotent",
+        "On the shared path with a hung cancel, cleanup()/killProcess is NOT invoked and the shared connection remains reusable",
+        "When connection.cancel resolves promptly, no cleanup or kill is performed (cancelled stays true)",
+        "monitorPrompt receives acpProcess from runEphemeralWorkflowAgentSession and undefined from runPromptOnExistingWorkflowAgentSession, runResumedWorkflowAgentSession, and runNewWorkflowAgentSession",
+        "Unit tests in packages/runner/tests/acp-agent.spec.ts cover: ephemeral cancel-hang -> cleanup() called and returns within the bound; prompt cancel -> cancelled and no cleanup; shared cancel-hang -> no cleanup/killProcess",
+        "npm --prefix packages/runner test is green (shared/ephemeral path behavior unchanged except the bounded cleanup)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/acp-agent.ts; packages/runner/tests/acp-agent.spec.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implemented before the diagnostic task so cancelAndReturn's new (acpProcess, connection, sessionId, error) signature is already stable when the timeout branch is rewritten. Reuses the existing timeout() and AcpProcessHandle.cleanup() helpers; cleanup() is already bounded (stream cancel/abort + killProcess + SIGKILL after 5s) and does not await any protocol response."
+    },
+    {
+      "id": "T-002",
+      "title": "Symmetrize the timeout path to surface provider diagnostics",
+      "spec": "specs/agent-runtime/spec.md#prompt-level-timeout-surfaces-provider-diagnostics",
+      "description": "Rewrite the monitorPrompt timeout branch to match the other failure paths: await findOpencodeProviderErrorDiagnostic(sessionId), emit a failed liveness status event with failureReason 'prompt_timeout' and the diagnostic, call the bounded cancelAndReturn from T-001, and return the diagnostic appended to the error message with providerError and failureReason set. Add 'prompt_timeout' to the LivenessFailureReason union.",
+      "acceptanceCriteria": [
+        "On timeout with a provider error in the opencode log (e.g. statusCode 2056 / 'Token Plan usage limit reached'), the returned error contains the provider diagnostic summary and providerError is set",
+        "On timeout with no provider error in the log, the error contains no diagnostic section and providerError is undefined",
+        "On timeout, emitLivenessStatusEvent is called with status='failed' and failureReason='prompt_timeout', carrying the providerError diagnostic",
+        "'prompt_timeout' is a member of LivenessFailureReason and flows through to the AcpSessionResult failureCategory",
+        "Unit tests in packages/runner/tests/acp-agent.spec.ts cover: timeout + log with provider error -> error contains the provider error; timeout + no log -> no diagnostic; timeout -> failed/prompt_timeout liveness event emitted (mock the log via MOHIST_OPENCODE_LOG_DIR as existing tests do)",
+        "npm --prefix packages/runner test -- acp-agent.spec.ts is green and npm --prefix packages/runner test is green",
+        "dotnet test Mohist.sln is green ('prompt_timeout' is additive to server-side failure-reason deserialization)",
+        "Web failureCategory switch renders 'prompt_timeout' via default fallback without breaking existing branches"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/acp-agent.ts; packages/runner/tests/acp-agent.spec.ts",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 because the rewritten timeout branch calls cancelAndReturn(options.acpProcess, ...) using the signature established by T-001. findOpencodeProviderErrorDiagnostic is bounded file I/O (max 20 log files, max 10MB each) and never touches the ACP protocol, so calling it on the timeout path cannot hang. appendOpencodeDiagnostic returns the message unchanged when no diagnostic is found."
+    }
+  ]
+}
