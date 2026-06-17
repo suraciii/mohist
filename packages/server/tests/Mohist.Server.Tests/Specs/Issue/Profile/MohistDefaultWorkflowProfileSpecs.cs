@@ -125,7 +125,6 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
 
         var merge = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:merge");
-        var push = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:push");
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         Assert.Equal("mohist/merge", merge.Uses);
@@ -134,13 +133,60 @@ public class MohistDefaultWorkflowProfileSpecs
         // clone, not from a legacy worktree branch.
         Assert.Contains("workspace.branch", mergeWithJson);
         Assert.Contains("repository.baseBranch", mergeWithJson);
+        Assert.Contains("\"push\":true", mergeWithJson);
         Assert.Contains("\"conflictResolver\"", mergeWithJson);
         Assert.Contains("Resolve merge conflicts", mergeWithJson);
-        Assert.Equal("mohist/push", push.Uses);
-        var pushWithJson = JsonSerializer.Serialize(push.With);
-        Assert.Contains("${{ repository.baseBranch }}", pushWithJson);
         var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:merge", "integrate:push"], integrateTaskIds);
+        Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:merge"], integrateTaskIds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void DefaultWorkflowDefinition_IntegrateStageHasNoPushTaskAndMergeOwnsDelivery()
+    {
+        // Guardrail for the single-push-owner invariant
+        // (openspec/changes/issue-127/design.md Decision 5):
+        // the default Integrate stage must not declare any
+        // task whose id ends with ":push", and the merge
+        // task must be the sole delivery task so that
+        // mohist/merge remains the single push owner if/when
+        // it gains push:true support.
+        var definition = MohistWorkflow.Definition;
+        var integrate = definition.Stages.Single(s => s.Stage == "integrate");
+
+        AssertSinglePushOwnerInvariant(integrate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void DefaultWorkflowDefinition_IntegrateStageWithDuplicatePushTask_FailsSinglePushOwnerInvariant()
+    {
+        // Regression guard: if a duplicate push task is added
+        // alongside the merge task in the default profile,
+        // the single-push-owner invariant is violated.
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: integrate
+            tasks:
+              - id: integrate:merge
+                title: Merge branch
+                uses: mohist/merge
+                with:
+                  push: true
+              - id: integrate:push
+                title: Push branch
+                uses: mohist/push
+                with:
+                  target: ${{ project.baseBranch }}
+            checks: []
+        """);
+
+        var integrate = definition.Stages.Single(s => s.Stage == "integrate");
+
+        var ex = Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => AssertSinglePushOwnerInvariant(integrate));
+        Assert.Contains("integrate:push", ex.Message);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -860,6 +906,22 @@ public class MohistDefaultWorkflowProfileSpecs
         // completion contract.
         Assert.False(expectElement.TryGetProperty("files", out _),
             "ai-review expect must use markers, not files");
+    }
+
+    private static void AssertSinglePushOwnerInvariant(StageDefinition integrate)
+    {
+        var pushTasks = integrate.Tasks
+            .Where(t => t.Id.EndsWith(":push", StringComparison.Ordinal))
+            .Select(t => t.Id)
+            .ToList();
+        Assert.True(pushTasks.Count == 0, $"Integrate stage must not declare push tasks: {string.Join(", ", pushTasks)}");
+
+        var deliveryTasks = integrate.Tasks
+            .Where(t => t.Id.EndsWith(":merge", StringComparison.Ordinal)
+                        || t.Id.EndsWith(":push", StringComparison.Ordinal))
+            .Select(t => t.Id)
+            .ToList();
+        Assert.Equal(new[] { "integrate:merge" }, deliveryTasks);
     }
 
     private static void AssertArtifactPaths(TaskDefinition task, params string[] expectedPathSuffixes)

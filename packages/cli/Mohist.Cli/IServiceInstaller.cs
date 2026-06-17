@@ -20,4 +20,15 @@ internal interface IServiceInstaller
     Task<int> UninstallRunnerAsync(ServiceCommandOptions options);
 
     Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Probes whether the runner service is installed/manageable in the current environment.
+    /// Returns <c>true</c> when the service unit/task is present, <c>false</c> otherwise.
+    /// Implementations MUST be side-effect free (no systemctl calls that change state).
+    /// </summary>
+    /// <param name="unitDir">
+    /// Optional override for the systemd user unit directory. Implementations on non-systemd
+    /// platforms ignore this value. <c>null</c> selects the platform-default location.
+    /// </param>
+    Task<bool> IsRunnerInstalledAsync(string? unitDir = null);
 }

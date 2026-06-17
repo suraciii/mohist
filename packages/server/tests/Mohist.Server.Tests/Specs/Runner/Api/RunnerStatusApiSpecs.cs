@@ -363,4 +363,42 @@ public class RunnerStatusApiSpecs
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task RegisterRunner_WithBuildGitHash_ExposesHashInStatus()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}", path = "/tmp/project", baseBranch = "main" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+
+        var runnerId = $"runner-hash-{Guid.NewGuid():N}";
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "hash-host",
+            projectId,
+            buildGitHash = hash,
+        });
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var runners = payload.GetProperty("data").GetProperty("runners");
+            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
+
+            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runner.ValueKind);
+            Assert.True(runner.TryGetProperty("buildGitHash", out var reportedHash));
+            Assert.Equal(hash, reportedHash.GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
 }

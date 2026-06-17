@@ -17,6 +17,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
 
         try
         {
@@ -30,7 +31,7 @@ public class UpdateSpecs
                 new StringWriter(),
                 files,
                 commands);
-            var http = new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            var http = new HttpClient(SequenceHttpHandler.WithSystemInfo(HealthySystemInfoJson(runningGitHash: "testsha"), new ResponseSpec(HttpStatusCode.OK)))
             {
                 BaseAddress = new Uri("http://localhost:3456"),
             };
@@ -42,7 +43,8 @@ public class UpdateSpecs
                 files,
                 new MockEnvironmentVariableProvider(),
                 http,
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
@@ -52,19 +54,72 @@ public class UpdateSpecs
             Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
             Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
             Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
-            Assert.Equal("systemctl", commands.ExecutedCommands[4].FileName);
-            Assert.Equal(new[] { "--user", "is-active", "mohist-runner.service" }, commands.ExecutedCommands[4].Args);
-            Assert.Equal("systemctl", commands.ExecutedCommands[5].FileName);
-            Assert.Equal(new[] { "--user", "stop", "mohist-runner.service" }, commands.ExecutedCommands[5].Args);
-            Assert.Equal("dotnet", commands.ExecutedCommands[6].FileName);
-            Assert.Equal(new[] { "build", "Mohist.sln" }, commands.ExecutedCommands[6].Args);
-            Assert.Equal("systemctl", commands.ExecutedCommands[7].FileName);
-            Assert.Equal(new[] { "--user", "restart", "mohist.service" }, commands.ExecutedCommands[7].Args);
-            Assert.Equal("npm", commands.ExecutedCommands[8].FileName);
-            Assert.Equal("systemctl", commands.ExecutedCommands[9].FileName);
-            Assert.Equal(new[] { "--user", "start", "mohist-runner.service" }, commands.ExecutedCommands[9].Args);
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "restart", "mohist.service"]));
+            Assert.Contains(commands.ExecutedCommands, c => c.FileName == "npm");
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "git" && c.Args.SequenceEqual(["rev-parse", "HEAD"]));
+            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
+            AssertManagedSkillAssetsSynced(files, tempRoot);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+                Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateAll_WhenRunnerNotInstalled_SkipsRunnerRefreshAfterServerUpdate()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-no-runner-{Guid.NewGuid():N}");
+        var files = new FakeFileSystem();
+        WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+
+        try
+        {
+            var commands = new FakeCommandExecutor();
+            var stdout = new StringWriter();
+            var installer = new SystemdServiceInstaller(
+                stdout,
+                new StringWriter(),
+                files,
+                commands);
+            var updater = new SourceCodeUpdater(
+                stdout,
+                new StringWriter(),
+                installer,
+                commands,
+                files,
+                new MockEnvironmentVariableProvider(),
+                new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+                {
+                    BaseAddress = new Uri("http://localhost:3456"),
+                },
+                getUserHome: () => tempRoot);
+
+            var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
+
+            Assert.Equal(0, exitCode);
             Assert.DoesNotContain(commands.ExecutedCommands, c =>
-                c.FileName == "git" && c.Args.Any(a => a == "pull"));
+                c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+            Assert.Contains(commands.ExecutedCommands, c =>
+                c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "npm");
+            var output = stdout.ToString();
+            Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
+            Assert.Contains("Runner refresh skipped: runner service is not installed", output);
+            Assert.Contains("runner-refresh-skipped(runner service is not installed)", output);
             AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
@@ -104,7 +159,8 @@ public class UpdateSpecs
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             var exitCode = await updater.UpdateCliAsync(tempRoot, dryRun: false);
 
@@ -198,6 +254,163 @@ public class UpdateSpecs
         Assert.Equal(4, readiness.Requests);
         Assert.Equal(["/api/health", "/api/health", "/", "/assets/app.js"], readiness.Paths);
         Assert.Contains("Server is ready.", stdout.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateServer_AfterSuccess_AnnouncesRunnerNotRefreshed()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var readiness = new SequenceHttpHandler(
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+            new ResponseSpec(HttpStatusCode.OK));
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            stdout,
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(readiness)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromSeconds(1));
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("'mo update server' did not refresh the runner build output or runner runtime", output);
+        Assert.Contains("Local runner code may now be stale relative to the updated server", output);
+        Assert.DoesNotContain("all local runtime is current", output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("everything is up to date", output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateServer_WhenRunnerInstalled_ProvidesFollowUpRunnerRefreshCommand()
+    {
+        var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
+        var commands = new FakeCommandExecutor();
+        var readiness = new SequenceHttpHandler(
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+            new ResponseSpec(HttpStatusCode.OK));
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            stdout,
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(readiness)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromSeconds(1),
+            unitDir: "/units");
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("To refresh the runner, run: mo update runner", output);
+        Assert.Contains("mo update", output);
+        Assert.DoesNotContain("No runner service is installed locally", output);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateServer_WhenRunnerNotInstalled_OmitsFollowUpRunnerRefreshCommand()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var readiness = new SequenceHttpHandler(
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+            new ResponseSpec(HttpStatusCode.OK));
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            stdout,
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(readiness)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromSeconds(1));
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("'mo update server' did not refresh the runner build output or runner runtime", output);
+        Assert.Contains("No runner service is installed locally", output);
+        Assert.DoesNotContain("To refresh the runner, run: mo update runner", output);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateServer_InDryRunMode_AnnouncesRunnerNotRefreshed()
+    {
+        var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
+        var commands = new FakeCommandExecutor();
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            stdout,
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            unitDir: "/units");
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: true);
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Empty(commands.ExecutedCommands);
+        Assert.Contains("Dry run: would execute:", output);
+        Assert.Contains("'mo update server' did not refresh the runner build output or runner runtime", output);
+        Assert.Contains("To refresh the runner, run: mo update runner", output);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -300,6 +513,7 @@ public class UpdateSpecs
     public async Task UpdateRunner_BuildsCurrentSourceAndRestarts()
     {
         var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
             new StringWriter(),
@@ -310,16 +524,209 @@ public class UpdateSpecs
             new StringWriter(),
             new StringWriter(),
             installer,
-            commands);
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(new ResponseSpec(HttpStatusCode.OK, BuildRunnerIdentityResponse("runner-1", Environment.MachineName, null, "online"), "application/json")))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            unitDir: "/units");
 
         var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(2, commands.ExecutedCommands.Count);
-        Assert.Equal("npm", commands.ExecutedCommands[0].FileName);
-        Assert.Equal(new[] { "run", "build", "-w", "packages/runner" }, commands.ExecutedCommands[0].Args);
-        Assert.Equal("systemctl", commands.ExecutedCommands[1].FileName);
-        Assert.Equal(new[] { "--user", "restart", "mohist-runner.service" }, commands.ExecutedCommands[1].Args);
+        var npm = Assert.Single(commands.ExecutedCommands, c => c.FileName == "npm");
+        Assert.Equal(new[] { "run", "build", "-w", "packages/runner" }, npm.Args);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(new[] { "--user", "restart", "mohist-runner.service" }));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateRunner_WhenRunnerNotInstalled_SkipsWithReason()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(stdout, stderr, files, commands);
+        var updater = new SourceCodeUpdater(
+            stdout,
+            stderr,
+            installer,
+            commands,
+            files,
+            unitDir: "/units");
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(commands.ExecutedCommands);
+        Assert.Contains("Runner refresh skipped: runner service is not installed", stdout.ToString());
+        Assert.Contains("runner-refresh-skipped(runner service is not installed)", stdout.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateRunner_WhenIdentityMatchesRepoHead_ReportsCurrent()
+    {
+        var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
+        var hash = "abcdef1234567890abcdef1234567890abcdef12";
+        var commands = new FakeCommandExecutor();
+        commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, hash + "\n", "");
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            new StringWriter(),
+            files,
+            commands);
+        var identityResponse = BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online");
+        var updater = new SourceCodeUpdater(
+            stdout,
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(new ResponseSpec(HttpStatusCode.OK, identityResponse, "application/json")))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            unitDir: "/units",
+            runnerIdentityTimeout: TimeSpan.FromMilliseconds(2000),
+            getLocalHostname: () => "test-host");
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        var actual = stdout.ToString();
+        Assert.Contains("Runner runtime verification: current", actual);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateRunner_WhenIdentityDiffersFromRepoHead_ReportsStaleRuntime()
+    {
+        var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
+        var repoHead = "0123456789abcdef0123456789abcdef01234567";
+        var staleHash = "fedcba9876543210fedcba9876543210fedcba98";
+        var commands = new FakeCommandExecutor();
+        commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, repoHead + "\n", "");
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var identityResponse = BuildRunnerIdentityResponse("runner-1", "test-host", staleHash, "online");
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(new ResponseSpec(HttpStatusCode.OK, identityResponse, "application/json")))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            unitDir: "/units",
+            runnerIdentityTimeout: TimeSpan.FromMilliseconds(2000),
+            getLocalHostname: () => "test-host");
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        var output = stderr.ToString();
+        Assert.Contains("stale-runner-runtime", output);
+        Assert.Contains(staleHash, output);
+        Assert.Contains(repoHead, output);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateRunner_WhenRunnerDoesNotReconnect_ReportsNotReconnectedEvenWhenManifestMatches()
+    {
+        var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
+        var hash = "9999888877776666555544443333222211110000";
+        files.AddDirectory("/repo/packages/runner/dist");
+        files.AddFile("/repo/packages/runner/dist/build-info.json", $"{{\"gitHash\":\"{hash}\",\"builtAt\":1700000000}}");
+        var commands = new FakeCommandExecutor();
+        commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, hash + "\n", "");
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.NotFound))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            unitDir: "/units",
+            runnerIdentityTimeout: TimeSpan.FromMilliseconds(100),
+            getLocalHostname: () => "test-host");
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("runner-not-reconnected", stderr.ToString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task UpdateRunner_WhenRunnerDoesNotReconnectAndManifestStale_ReportsStaleRuntime()
+    {
+        var files = new FakeFileSystem();
+        WriteRunnerUnit(files, "/units");
+        var repoHead = "1111222233334444555566667777888899990000";
+        var staleHash = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+        files.AddDirectory("/repo/packages/runner/dist");
+        files.AddFile("/repo/packages/runner/dist/build-info.json", $"{{\"gitHash\":\"{staleHash}\",\"builtAt\":1700000000}}");
+        var commands = new FakeCommandExecutor();
+        commands.SetResultFor("git", args => args.SequenceEqual(new[] { "rev-parse", "HEAD" }), 0, repoHead + "\n", "");
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            files,
+            new MockEnvironmentVariableProvider(),
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.NotFound))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            unitDir: "/units",
+            runnerIdentityTimeout: TimeSpan.FromMilliseconds(100),
+            getLocalHostname: () => "test-host");
+
+        var exitCode = await updater.UpdateRunnerAsync("/repo", dryRun: false);
+
+        var actual = stderr.ToString();
+        Assert.Equal(1, exitCode);
+        Assert.Contains("runner-not-reconnected", actual);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -330,6 +737,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-fail1-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
 
         try
         {
@@ -355,7 +763,8 @@ public class UpdateSpecs
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
@@ -384,6 +793,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-fail1b-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
 
         try
         {
@@ -407,7 +817,8 @@ public class UpdateSpecs
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
@@ -435,6 +846,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-timeout-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
 
         try
         {
@@ -461,7 +873,8 @@ public class UpdateSpecs
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
                 TimeSpan.FromMilliseconds(150),
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
@@ -487,6 +900,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-ctrlc-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
 
         try
         {
@@ -511,7 +925,8 @@ public class UpdateSpecs
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
                 TimeSpan.FromSeconds(10),
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             using var cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromMilliseconds(120));
@@ -561,7 +976,8 @@ public class UpdateSpecs
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             using var cts = new CancellationTokenSource();
             cts.Cancel();
@@ -589,6 +1005,7 @@ public class UpdateSpecs
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-restore-fail-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        WriteRunnerUnit(files, "/units");
 
         try
         {
@@ -615,7 +1032,8 @@ public class UpdateSpecs
                     BaseAddress = new Uri("http://localhost:3456"),
                 },
                 TimeSpan.FromMilliseconds(150),
-                getUserHome: () => tempRoot);
+                getUserHome: () => tempRoot,
+                unitDir: "/units");
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
@@ -1730,6 +2148,7 @@ public class UpdateSpecs
         private readonly Queue<string> _stderr = new();
         private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode)> _exitCodeRules = new();
         private readonly List<(string FileName, Func<string[], bool> Match, string Stdout)> _stdoutRules = new();
+        private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode, string Stdout, string Stderr)> _resultRules = new();
 
         public void SetNextExitCode(int code) => _exitCodes.Enqueue(code);
         public void SetNextStdout(string stdout) => _stdout.Enqueue(stdout);
@@ -1741,11 +2160,16 @@ public class UpdateSpecs
         }
         public void SetExitCodeFor(string fileName, Func<string[], bool> match, int code) => _exitCodeRules.Add((fileName, match, code));
         public void SetStdoutFor(string fileName, Func<string[], bool> match, string stdout) => _stdoutRules.Add((fileName, match, stdout));
+        public void SetResultFor(string fileName, Func<string[], bool> match, int exitCode, string stdout, string stderr)
+            => _resultRules.Add((fileName, match, exitCode, stdout, stderr));
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
             string fileName, string[] args, string? workingDirectory = null, CancellationToken cancellationToken = default)
         {
             ExecutedCommands.Add((fileName, args, workingDirectory));
+            var resultRule = _resultRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
+            if (resultRule.Match is not null)
+                return Task.FromResult((resultRule.ExitCode, resultRule.Stdout, resultRule.Stderr));
             var rule = _exitCodeRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
             var code = rule.Match is not null ? rule.ExitCode : _exitCodes.Count > 0 ? _exitCodes.Dequeue() : 0;
             var stdoutRule = _stdoutRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
@@ -1906,6 +2330,20 @@ public class UpdateSpecs
         files.AddFile(
             Path.Combine(sourceRoot, "mohist-explore", "SKILL.md"),
             "---\nname: mohist-explore\ndescription: test\n---\n\n# mohist-explore\n");
+    }
+
+    private static void WriteRunnerUnit(FakeFileSystem files, string unitDir)
+    {
+        files.AddDirectory(unitDir);
+        files.AddFile(
+            Path.Combine(unitDir, "mohist-runner.service"),
+            "[Unit]\nDescription=Mohist Runner\n\n[Service]\nExecStart=node packages/runner/dist/cli.js\n\n[Install]\nWantedBy=default.target\n");
+    }
+
+    private static string BuildRunnerIdentityResponse(string runnerId, string hostname, string? buildGitHash, string status)
+    {
+        var hash = buildGitHash is null ? "null" : $"\"{buildGitHash}\"";
+        return $"{{\"success\":true,\"data\":{{\"runnerId\":\"{runnerId}\",\"hostname\":\"{hostname}\",\"buildGitHash\":{hash},\"status\":\"{status}\",\"connectionState\":\"connected\"}}}}";
     }
 
     private static void AssertManagedSkillAssetsSynced(FakeFileSystem files, string tempRoot)

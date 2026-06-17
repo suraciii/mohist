@@ -150,3 +150,52 @@ describe("ServerConnection.report", () => {
     expect(body.artifactUploadIds).toBeNull()
   })
 })
+
+describe("ServerConnection.buildGitHash", () => {
+  it("registerRequestIncludesBuildGitHash", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
+    const hash = "abcdef1234567890abcdef1234567890abcdef12"
+    const connection = new ServerConnection(options(), hash)
+
+    await connection.connect(
+      {
+        capabilities: ["spec/*"],
+        projectId: "project-1",
+        coderModels: ["openai/gpt-4"],
+        maxWorkflowSlots: 2,
+        buildGitHash: hash,
+      },
+      new AbortController().signal,
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/api/runner/runner-1/register")
+    expect(init.method).toBe("POST")
+    const body = JSON.parse(init.body as string)
+    expect(body.buildGitHash).toBe(hash)
+  })
+
+  it("heartbeatSendsBuildGitHashWhenKnown", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
+    const hash = "abcdef1234567890abcdef1234567890abcdef12"
+    const connection = new ServerConnection(options(), hash)
+
+    await connection.heartbeat(new AbortController().signal)
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(body.buildGitHash).toBe(hash)
+  })
+
+  it("heartbeatOmitsBodyWhenBuildGitHashUnknown", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "" }))
+    const connection = new ServerConnection(options(), null)
+
+    await connection.heartbeat(new AbortController().signal)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/api/runner/runner-1/heartbeat")
+    expect(init.body).toBeUndefined()
+  })
+})

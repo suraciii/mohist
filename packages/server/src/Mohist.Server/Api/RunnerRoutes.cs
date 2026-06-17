@@ -23,7 +23,8 @@ public static class RunnerRoutes
                 req.Hostname ?? Environment.MachineName,
                 req.ProjectId,
                 req.CoderModels,
-                MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots)));
+                MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots),
+                BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash)));
             return Results.Ok();
         });
 
@@ -49,7 +50,8 @@ public static class RunnerRoutes
                     req.Hostname ?? Environment.MachineName,
                     req.ProjectId,
                     req.CoderModels,
-                    MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots));
+                    MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots),
+                    BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash));
                 await runner.HeartbeatRepairAsync(info);
             }
             else
@@ -182,10 +184,17 @@ public static class RunnerRoutes
             session.WorkDir,
             session.Model,
             session.ResolvedModel);
+
+    private static string? NormalizeBuildGitHash(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length > 0 ? trimmed : null;
+    }
 }
 
-public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
-public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
+public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null, string? BuildGitHash = null);
+public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null, string? BuildGitHash = null);
 public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null, Dictionary<string, JsonElement>? CapturedOutputs = null);
 public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus, bool Tracked, string? Reason = null);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);

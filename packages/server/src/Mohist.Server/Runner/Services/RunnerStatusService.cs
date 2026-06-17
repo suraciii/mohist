@@ -76,7 +76,8 @@ public class RunnerStatusService
             info.CoderModels ?? [],
             info.CoderModels?.Length ?? 0,
             capacity,
-            activeWorkView);
+            activeWorkView,
+            info.BuildGitHash);
     }
 
     private string DeriveStatus(RunnerInfo info, RunnerRuntimeState? runtime, string connectionState, DateTimeOffset now)

@@ -3,13 +3,21 @@ import type { RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem,
 import { parseObject, parseTaskOutputs } from "../core/json.js"
 
 export class ServerConnection {
-  constructor(private readonly options: RunnerOptions) {}
+  private readonly buildGitHash: string | null
+
+  constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
+    this.buildGitHash = buildGitHash
+  }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
     await this.post("register", { hostname: hostname(), ...registration }, signal)
   }
 
   async heartbeat(signal: AbortSignal) {
+    if (this.buildGitHash) {
+      await this.post("heartbeat", { buildGitHash: this.buildGitHash }, signal)
+      return
+    }
     await this.post("heartbeat", undefined, signal)
   }
 

@@ -13,7 +13,8 @@ public sealed record RunnerStatusView(
     IReadOnlyList<string> CoderModels,
     int CoderModelCount,
     RunnerCapacityView? Capacity,
-    RunnerActiveWorkView? ActiveWork);
+    RunnerActiveWorkView? ActiveWork,
+    string? BuildGitHash = null);
 
 public sealed record RunnerScopeView(
     string Type,

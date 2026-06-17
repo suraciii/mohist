@@ -1,0 +1,86 @@
+{
+  "project": "mohist-local",
+  "description": "Fix runner update runtime consistency and enforce single-push-owner invariant in the default Integrate workflow",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Runner build identity manifest and live identity reporting",
+      "spec": "specs/cli-interface/spec.md#CLI update verification detects stale runner runtime",
+      "description": "Add a postbuild step to packages/runner that writes dist/build-info.json (gitHash from `git rev-parse HEAD`, builtAt). The runner loads this manifest at startup (resolved relative to cli.js) and reports buildGitHash in its SignalR handshake alongside the existing runnerId. The server stores the reported buildGitHash with the runner connection/availability record so downstream readers (the CLI) can compare it. Treat a missing manifest as unknown-identity (non-fatal).",
+      "acceptanceCriteria": [
+        "Running `npm run build -w packages/runner` produces packages/runner/dist/build-info.json containing a gitHash matching `git rev-parse HEAD`",
+        "When `git rev-parse HEAD` is unavailable, build still succeeds and writes gitHash: null",
+        "Runner startup loads build-info.json and exposes RUNNER_BUILD_GIT_HASH for the handshake",
+        "Runner SignalR handshake includes buildGitHash in addition to runnerId",
+        "Server stores the reported buildGitHash on the runner connection/availability record",
+        "Unit/integration tests cover manifest generation, runner reporting of the hash, and server storage of the reported hash"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner postbuild manifest + runner handshake identity + server-side buildGitHash storage, with tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Mirrors server RuntimeBuildInfo git-hash pattern (design.md Decision 1 & 2). Runner TS + server C# in one cohesive identity-production unit."
+    },
+    {
+      "id": "T-002",
+      "title": "mo update runner refresh coverage, skip detection, and live runtime verification",
+      "spec": "specs/cli-interface/spec.md#CLI update refreshes managed runner runtime",
+      "description": "Update SourceCodeUpdater.UpdateRunnerAsync to probe runner manageability before build/restart, report an explicit skip reason when the runner is not installed/manageable, and add a post-restart verification tail: wait for the runner to reconnect, read its reported buildGitHash from the server, compare to the current repo HEAD, and report current / stale-runner-runtime / runner-refresh-skipped(reason) / unknown-identity / runner-not-reconnected. Include the Layer 1 dist-manifest pre-check as a fallback when live read-back is unavailable.",
+      "acceptanceCriteria": [
+        "Full `mo update` rebuilds packages/runner/dist and restarts the runner when the runner is installed and manageable, and reports the refresh was performed",
+        "When the runner is not installed/manageable, `mo update` reports 'Runner refresh skipped: <reason>' instead of failing or silently proceeding",
+        "Verification reports current when the live runner buildGitHash equals the repo HEAD",
+        "Verification reports stale-runner-runtime when the runner service is active but its buildGitHash differs from repo HEAD (not reported as healthy)",
+        "Verification reports runner-refresh-skipped(reason) for intentional skips, distinguishable from a stale-runtime mismatch",
+        "Tests cover: refresh performed, skip-with-reason, identity match, stale-runtime detection, and the fallback when the runner does not reconnect"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated UpdateRunnerAsync with skip detection and verification tail, with tests in UpdateSpecs.cs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Analogous to WaitForServerReadyAsync but for runner identity (design.md Decisions 2 & 3). Needs T-001's reported hash + server storage."
+    },
+    {
+      "id": "T-003",
+      "title": "mo update server explicit runner-scope messaging",
+      "spec": "specs/cli-interface/spec.md#CLI server-only update is explicit about runner scope",
+      "description": "Update SourceCodeUpdater.UpdateServerAsync to emit, after success, an explicit line stating that runner build output and runner runtime were not refreshed by this command, plus a follow-up tip (e.g. `mo update runner` or full `mo update`) when the runner is installed. Messaging-only change; no change to what UpdateServerAsync actually updates.",
+      "acceptanceCriteria": [
+        "`mo update server` output states that runner build output and runner runtime were not refreshed",
+        "When the runner is installed, `mo update server` output provides a clear follow-up action for refreshing the runner",
+        "`mo update server` does not report overall local runtime freshness as if the runner had been updated",
+        "Tests assert the runner-not-refreshed message and follow-up guidance in UpdateSpecs.cs"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated UpdateServerAsync messaging, with tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent messaging change (design.md Decision 4). No dependency on the identity chain."
+    },
+    {
+      "id": "T-004",
+      "title": "Default Integrate single-push-owner regression guardrail",
+      "spec": "specs/workflow-definition/spec.md#REQ-WD-002 Integrate uses the standard task/check stage contract",
+      "description": "Add a regression test in MohistDefaultWorkflowProfileSpecs.cs asserting the default Integrate stage declares no task whose id matches `*:push` and that integrate:merge is the sole delivery task. This establishes the single-push-owner invariant so that if/when mohist/merge gains push:true, a separate integrate:push cannot be (re)introduced. No runtime behavior change to the already-clean default workflow YAML.",
+      "acceptanceCriteria": [
+        "Test asserts the default Integrate stage contains no task with an id matching `*:push`",
+        "Test asserts integrate:merge is the sole delivery task in the default Integrate stage",
+        "Test fails if a duplicate push task is added alongside a merge task in the default profile",
+        "The default mohist-default.workflow.yaml Integrate stage remains unchanged (already clean)"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Regression test in MohistDefaultWorkflowProfileSpecs.cs guarding single push ownership",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Guardrail only (design.md Decision 5). Guards both modified workflow-definition requirements: REQ-WD-002 (Integrate task/check contract) and 'Stage definitions preserve existing stage semantics' (Integrate definition preserves integration contract). Adding push:true to mohist/merge is out of scope (#112). Standalone test task is correct here because the default Integrate YAML is already clean — there is no implementation to merge the test into."
+    }
+  ]
+}

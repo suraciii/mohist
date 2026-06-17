@@ -14,6 +14,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private string? _projectId;
+    private string? _pendingBuildGitHash;
     private readonly Dictionary<string, RunnerTrackedWork> _works = new(StringComparer.Ordinal);
     private DateTime _lastHeartbeat;
     private int _nextProjectIndex;
@@ -52,10 +53,16 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task RegisterAsync(RunnerInfo info)
     {
         var previousRegistryKey = _info is null ? null : RunnerRegistryKey();
-        _info = info with { MaxWorkflowSlots = RunnerCapacity.Normalize(info.MaxWorkflowSlots) };
+        var effectiveHash = info.BuildGitHash ?? _pendingBuildGitHash;
+        _info = info with
+        {
+            MaxWorkflowSlots = RunnerCapacity.Normalize(info.MaxWorkflowSlots),
+            BuildGitHash = effectiveHash,
+        };
         _projectId = string.IsNullOrWhiteSpace(info.ProjectId) ? null : info.ProjectId;
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
+        _pendingBuildGitHash = null;
         var registryKey = RunnerRegistryKey();
         if (previousRegistryKey is not null && previousRegistryKey != registryKey)
         {
@@ -198,6 +205,30 @@ public class RunnerGrain : Grain, IRunnerGrain
                 .Select(w => w.Dispatch.WorkflowRunId)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray()));
+    }
+
+    public async Task UpdateBuildGitHashAsync(string? buildGitHash)
+    {
+        var normalized = string.IsNullOrWhiteSpace(buildGitHash) ? null : buildGitHash.Trim();
+        if (_info is null)
+        {
+            // Buffer the hash so a subsequent RegisterAsync can pick it up.
+            _pendingBuildGitHash = normalized;
+            return;
+        }
+
+        if (string.Equals(_info.BuildGitHash, normalized, StringComparison.Ordinal))
+            return;
+
+        _info = _info with { BuildGitHash = normalized };
+        _log.LogInformation("Runner {Id} reported buildGitHash {Hash}", RunnerId, normalized ?? "<null>");
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        await registry.RegisterAsync(_info);
+    }
+
+    public Task<RunnerInfo?> GetInfoAsync()
+    {
+        return Task.FromResult(_info);
     }
 
     private async Task CheckHeartbeatAsync()

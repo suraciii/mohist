@@ -86,6 +86,14 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         return code == 0 && string.Equals(trimmed, "active", StringComparison.OrdinalIgnoreCase);
     }
 
+    public Task<bool> IsRunnerInstalledAsync(string? unitDir = null) => Task.FromResult(IsRunnerUnitInstalled(unitDir));
+
+    private bool IsRunnerUnitInstalled(string? unitDir)
+    {
+        var unitPath = Path.Combine(ResolveUnitDir(unitDir), RunnerUnit);
+        return _fileSystem.Exists(unitPath);
+    }
+
     private async Task<int> InstallAsync(SystemdUnit unit, ServiceInstallOptions options)
     {
         if (!EnsureSystemdSupported(options.DryRun)) return 1;
