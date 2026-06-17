@@ -6,10 +6,13 @@ import { deleteDirectory, runCommand } from "../system/process.js"
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
 
-  constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string) {
+  constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string, buildGitHash: string | null = null) {
     const baseUrl = serverUrl.replace(/\/$/, "")
+    const params = new URLSearchParams()
+    params.set("runnerId", runnerId)
+    if (buildGitHash) params.set("buildGitHash", buildGitHash)
     this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(`${baseUrl}/hubs/runner?runnerId=${encodeURIComponent(runnerId)}`)
+      .withUrl(`${baseUrl}/hubs/runner?${params.toString()}`)
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build()
 

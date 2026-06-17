@@ -7,6 +7,7 @@ import { WorkspaceManager, defaultRunnerRoot } from "./workspace.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
+import { loadBuildInfo } from "./build-info.js"
 import type { WorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
 
@@ -15,11 +16,21 @@ export interface ReportResult {
   workflowStatus?: string | null
 }
 
+/**
+ * Resolves the runner's build git hash from the on-disk build manifest.
+ * Returns `null` when the manifest is missing or unreadable (treated as
+ * unknown-identity, non-fatal).
+ */
+export function getRunnerBuildGitHash(): string | null {
+  return loadBuildInfo().gitHash
+}
+
 export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly maxConcurrentWorkflows: number
+  private readonly buildGitHash: string | null
 
   // Step 10 of design/eventbus.md: AcpSessionManager and
   // SharedAcpConnection are created once per host (not per work item).
@@ -32,12 +43,15 @@ export class RunnerHost {
 
   constructor(private readonly options: RunnerOptions) {
     this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
-    this.connection = new ServerConnection(options)
+    const build = loadBuildInfo()
+    this.buildGitHash = build.gitHash
+    this.connection = new ServerConnection(options, this.buildGitHash)
     this.workspace = new WorkspaceManager(options.runnerRoot)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
       options.runnerRoot,
+      this.buildGitHash,
     )
   }
 
@@ -214,6 +228,7 @@ export class RunnerHost {
           projectId: this.options.projectId,
           coderModels,
           maxWorkflowSlots: this.maxConcurrentWorkflows,
+          buildGitHash: this.buildGitHash,
         }, signal)
         await this.signalR.start()
         return

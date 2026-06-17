@@ -282,11 +282,6 @@ stages:
             title: Resolve merge conflicts
             with:
               description: "Resolve git merge conflicts, stage resolved files, and leave the merge commit to Mohist."
-      - id: integrate:push
-        title: Push base branch
-        uses: mohist/push
-        with:
-          target: ${{ repository.baseBranch }}
     checks:
       - name: health
         title: Health

@@ -192,6 +192,17 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) =>
         UninstallAsync(RunnerTaskName, RunnerLauncherPath(), RunnerStartupPath(), RunnerMetadataPath(), "Runner", options);
 
+    public async Task<bool> IsRunnerInstalledAsync(string? unitDir = null)
+    {
+        _ = unitDir;
+        var backend = await DetectBackendAsync(
+            RunnerTaskName,
+            RunnerStartupPath(),
+            RunnerLauncherPath(),
+            RunnerMetadataPath());
+        return backend != BackendKind.None;
+    }
+
     private async Task<int> StartAsync(
         string taskName,
         string launcherPath,

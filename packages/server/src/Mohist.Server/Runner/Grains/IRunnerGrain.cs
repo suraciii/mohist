@@ -15,6 +15,8 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<RunnerWorkReportResult> ReportResultAsync(string workflowRunId, string workId, WorkResult result);
     Task<bool> IsAvailableAsync();
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
+    Task UpdateBuildGitHashAsync(string? buildGitHash);
+    Task<RunnerInfo?> GetInfoAsync();
 }
 
 public static class RunnerCapacity
@@ -34,7 +36,8 @@ public record RunnerInfo(
     string[]? CoderModels = null,
     string Kind = "external",
     DateTimeOffset? RegisteredAt = null,
-    int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots);
+    int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots,
+    string? BuildGitHash = null);
 
 [GenerateSerializer]
 public record WorkDispatch(

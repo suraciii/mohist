@@ -153,6 +153,7 @@ internal sealed class UpdateContext
     public string JobId { get; }
     public UpdateStage Stage { get; set; } = UpdateStage.Start;
     public bool RunnerWasRunning { get; set; }
+    public bool RunnerInstalled { get; set; }
     public bool RunnerStopped { get; set; }
     public bool RunnerRestored { get; set; }
     public bool Interrupted { get; set; }
@@ -189,6 +190,9 @@ internal sealed class SourceCodeUpdater
     private static readonly TimeSpan ServerReadyTimeout = TimeSpan.FromSeconds(180);
     private static readonly TimeSpan ServerReadyPollInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ServerReadyProgressInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RunnerIdentityTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RunnerIdentityPollInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly string RunnerDistBuildInfoRelativePath = Path.Combine("packages", "runner", "dist", "build-info.json");
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -198,7 +202,10 @@ internal sealed class SourceCodeUpdater
     private readonly IEnvironmentVariableProvider _environment;
     private readonly HttpClient _http;
     private readonly TimeSpan _serverReadyTimeout;
+    private readonly TimeSpan _runnerIdentityTimeout;
     private readonly Func<string?> _getUserHome;
+    private readonly Func<string?> _getLocalHostname;
+    private readonly string? _unitDir;
 
     public SourceCodeUpdater(
         TextWriter output,
@@ -209,7 +216,10 @@ internal sealed class SourceCodeUpdater
         IEnvironmentVariableProvider? environment = null,
         HttpClient? http = null,
         TimeSpan? serverReadyTimeout = null,
-        Func<string?>? getUserHome = null)
+        Func<string?>? getUserHome = null,
+        TimeSpan? runnerIdentityTimeout = null,
+        Func<string?>? getLocalHostname = null,
+        string? unitDir = null)
     {
         _out = output;
         _err = error;
@@ -223,7 +233,10 @@ internal sealed class SourceCodeUpdater
             Timeout = TimeSpan.FromSeconds(5),
         };
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
+        _runnerIdentityTimeout = runnerIdentityTimeout ?? RunnerIdentityTimeout;
         _getUserHome = getUserHome ?? DefaultUserHome;
+        _getLocalHostname = getLocalHostname ?? DefaultLocalHostname;
+        _unitDir = unitDir;
     }
 
     public const string ServerUrlEnvironmentVariable = "MOHIST_SERVER_URL";
@@ -235,6 +248,8 @@ internal sealed class SourceCodeUpdater
             return home;
         return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
+
+    private static string? DefaultLocalHostname() => Environment.MachineName;
 
     internal string ResolveManagedSkillAssetRoot()
     {
@@ -411,6 +426,17 @@ internal sealed class SourceCodeUpdater
         context.Stage = UpdateStage.PrepareRunner;
         _out.WriteLine(StageLabels.PrepareRunner);
         context.RecordStage(StageLabels.PrepareRunner, "querying runner state");
+
+        context.RunnerInstalled = context.DryRun || await _systemd.IsRunnerInstalledAsync(_unitDir);
+        if (!context.RunnerInstalled)
+        {
+            var reason = "runner service is not installed";
+            context.RecordStage(StageLabels.PrepareRunner, reason);
+            _out.WriteLine("Runner service is not installed; skipping pre-server runner stop.");
+            _out.WriteLine($"Runner refresh skipped: {reason}");
+            WriteRunnerRefreshSummary(new RunnerRefreshOutcome.Skipped(reason));
+            return 0;
+        }
 
         if (!context.DryRun)
         {
@@ -1059,6 +1085,7 @@ internal sealed class SourceCodeUpdater
             _out.WriteLine($"  cd {root} && dotnet build Mohist.sln");
             _out.WriteLine($"  {RestartCommandLine("server")} (if installed)");
             _out.WriteLine("  wait for /api/health, /, and referenced /assets/* response headers readiness checks");
+            await WriteServerScopeMessageAsync();
             return 0;
         }
 
@@ -1077,6 +1104,7 @@ internal sealed class SourceCodeUpdater
         }
 
         _out.WriteLine("Server is ready.");
+        await WriteServerScopeMessageAsync();
         return 0;
     }
 
@@ -1102,6 +1130,27 @@ internal sealed class SourceCodeUpdater
         return 0;
     }
 
+    /// <summary>
+    /// Emits the explicit "server-only" scope message: the runner was not refreshed, and,
+    /// when the runner is installed locally, a concrete follow-up command to refresh it.
+    /// Messaging-only; no behavioral change to <see cref="UpdateServerAsync"/>.
+    /// </summary>
+    private async Task WriteServerScopeMessageAsync()
+    {
+        _out.WriteLine("Note: 'mo update server' did not refresh the runner build output or runner runtime.");
+        _out.WriteLine("Local runner code may now be stale relative to the updated server.");
+        var installed = await _systemd.IsRunnerInstalledAsync(_unitDir);
+        if (installed)
+        {
+            _out.WriteLine("To refresh the runner, run: mo update runner");
+            _out.WriteLine("Or, to refresh CLI + server + runner together, run: mo update");
+        }
+        else
+        {
+            _out.WriteLine("No runner service is installed locally; runner refresh is not required.");
+        }
+    }
+
     public async Task<int> UpdateRunnerAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
@@ -1113,6 +1162,16 @@ internal sealed class SourceCodeUpdater
             _out.WriteLine("Dry run: would execute:");
             _out.WriteLine($"  cd {root} && npm run build -w packages/runner");
             _out.WriteLine($"  {RestartCommandLine("runner")} (if installed)");
+            _out.WriteLine("  wait for runner to reconnect, then read its buildGitHash from /api/runner/identity");
+            return 0;
+        }
+
+        var installed = await _systemd.IsRunnerInstalledAsync(_unitDir);
+        if (!installed)
+        {
+            var reason = "runner service is not installed";
+            _out.WriteLine($"Runner refresh skipped: {reason}");
+            WriteRunnerRefreshSummary(new RunnerRefreshOutcome.Skipped(reason));
             return 0;
         }
 
@@ -1134,8 +1193,206 @@ internal sealed class SourceCodeUpdater
         }
 
         _out.WriteLine("Runner service restarted.");
-        return 0;
+
+        var outcome = await VerifyRunnerRuntimeAsync(root);
+        WriteRunnerRefreshSummary(outcome);
+        return outcome.ExitCode;
     }
+
+    private void WriteRunnerRefreshSummary(RunnerRefreshOutcome outcome)
+    {
+        switch (outcome)
+        {
+            case RunnerRefreshOutcome.Current:
+                _out.WriteLine("Runner runtime verification: current (matches repo HEAD).");
+                break;
+            case RunnerRefreshOutcome.UnknownIdentity unknown:
+                _out.WriteLine($"Runner runtime verification: unknown-identity ({unknown.Reason}).");
+                break;
+            case RunnerRefreshOutcome.NotReconnected:
+                _err.WriteLine("Runner runtime verification: runner-not-reconnected (runner did not report a build identity after restart).");
+                break;
+            case RunnerRefreshOutcome.StaleRunnerRuntime stale:
+                _err.WriteLine($"Runner runtime verification: stale-runner-runtime (runner buildGitHash {stale.ReportedHash ?? "<null>"} != repo HEAD {stale.RepoHeadHash ?? "<unavailable>"}).");
+                break;
+            case RunnerRefreshOutcome.Skipped skipped:
+                _out.WriteLine($"Runner runtime verification: runner-refresh-skipped({skipped.Reason}).");
+                break;
+        }
+    }
+
+    private async Task<RunnerRefreshOutcome> VerifyRunnerRuntimeAsync(string repoRoot)
+    {
+        var repoHead = await TryReadRepoHeadAsync(repoRoot);
+        var hostname = _getLocalHostname();
+        if (string.IsNullOrWhiteSpace(hostname))
+        {
+            return new RunnerRefreshOutcome.UnknownIdentity("local hostname is unavailable; cannot identify local runner");
+        }
+
+        using var cts = new CancellationTokenSource(_runnerIdentityTimeout);
+        RunnerIdentityView? identity = null;
+        while (!cts.IsCancellationRequested)
+        {
+            identity = await TryReadRunnerIdentityAsync(hostname, cts.Token);
+            if (identity is not null)
+                break;
+            try
+            {
+                await Task.Delay(RunnerIdentityPollInterval, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        if (identity is null)
+        {
+            await VerifyRunnerDistManifestAsync(repoRoot, repoHead, "runner did not reconnect within the verification window");
+            return RunnerRefreshOutcome.NotReconnected.Instance;
+        }
+
+        if (identity.Status != "online")
+        {
+            return new RunnerRefreshOutcome.StaleRunnerRuntime(
+                ReportedHash: identity.BuildGitHash,
+                RepoHeadHash: repoHead,
+                Reason: $"runner reported status '{identity.Status}' instead of 'online'");
+        }
+
+        if (repoHead is null)
+        {
+            return new RunnerRefreshOutcome.UnknownIdentity("git rev-parse HEAD is unavailable; cannot compare identity");
+        }
+
+        if (string.IsNullOrWhiteSpace(identity.BuildGitHash))
+        {
+            return new RunnerRefreshOutcome.UnknownIdentity("runner did not report a buildGitHash; pre-T-001 runner cannot be verified");
+        }
+
+        return string.Equals(identity.BuildGitHash, repoHead, StringComparison.Ordinal)
+            ? RunnerRefreshOutcome.Current.Instance
+            : new RunnerRefreshOutcome.StaleRunnerRuntime(
+                ReportedHash: identity.BuildGitHash,
+                RepoHeadHash: repoHead,
+                Reason: "reported buildGitHash differs from repo HEAD");
+    }
+
+    private async Task<RunnerRefreshOutcome> VerifyRunnerDistManifestAsync(
+        string repoRoot,
+        string? repoHead,
+        string notReconnectedReason)
+    {
+        var manifestPath = Path.Combine(repoRoot, RunnerDistBuildInfoRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!_fileSystem.Exists(manifestPath))
+        {
+            return new RunnerRefreshOutcome.UnknownIdentity(
+                $"runner did not reconnect; dist/build-info.json not found at {manifestPath}");
+        }
+
+        string? manifestHash = null;
+        try
+        {
+            using var stream = _fileSystem.OpenRead(manifestPath);
+            using var reader = new StreamReader(stream);
+            var raw = await reader.ReadToEndAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
+            if (doc.RootElement.TryGetProperty("gitHash", out var element) && element.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                manifestHash = element.GetString();
+            }
+        }
+        catch (Exception ex)
+        {
+            return new RunnerRefreshOutcome.UnknownIdentity(
+                $"runner did not reconnect; could not read dist/build-info.json: {ex.Message}");
+        }
+
+        if (string.IsNullOrWhiteSpace(manifestHash) || repoHead is null)
+        {
+            return new RunnerRefreshOutcome.UnknownIdentity(
+                $"runner did not reconnect and dist/build-info.json is missing gitHash ({manifestPath})");
+        }
+
+        return string.Equals(manifestHash, repoHead, StringComparison.Ordinal)
+            ? RunnerRefreshOutcome.Current.Instance
+            : new RunnerRefreshOutcome.StaleRunnerRuntime(
+                ReportedHash: manifestHash,
+                RepoHeadHash: repoHead,
+                Reason: notReconnectedReason + "; dist/build-info.json differs from repo HEAD");
+    }
+
+    private async Task<string?> TryReadRepoHeadAsync(string repoRoot)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var (code, stdout, _) = await _commandExecutor.ExecuteAsync("git", ["rev-parse", "HEAD"], repoRoot).WaitAsync(cts.Token);
+            if (code != 0) return null;
+            var hash = stdout.Trim();
+            return string.IsNullOrWhiteSpace(hash) ? null : hash;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<RunnerIdentityView?> TryReadRunnerIdentityAsync(string hostname, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await _http.GetAsync($"/api/runner/identity?hostname={Uri.EscapeDataString(hostname)}", ct);
+            if (response.StatusCode == HttpStatusCode.NotFound) return null;
+            if (!response.IsSuccessStatusCode) return null;
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            if (!doc.RootElement.TryGetProperty("data", out var data)) return null;
+            return ReadRunnerIdentityView(data);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static RunnerIdentityView ReadRunnerIdentityView(System.Text.Json.JsonElement data)
+    {
+        string? GetString(string property)
+        {
+            if (!data.TryGetProperty(property, out var el) || el.ValueKind == System.Text.Json.JsonValueKind.Null)
+                return null;
+            return el.ValueKind == System.Text.Json.JsonValueKind.String ? el.GetString() : el.ToString();
+        }
+        DateTimeOffset? GetDate(string property)
+        {
+            if (!data.TryGetProperty(property, out var el) || el.ValueKind == System.Text.Json.JsonValueKind.Null)
+                return null;
+            if (el.ValueKind == System.Text.Json.JsonValueKind.String && DateTimeOffset.TryParse(el.GetString(), out var parsed))
+                return parsed;
+            return null;
+        }
+        return new RunnerIdentityView(
+            GetString("runnerId") ?? string.Empty,
+            GetString("hostname") ?? string.Empty,
+            GetString("buildGitHash"),
+            GetString("status") ?? "offline",
+            GetDate("lastHeartbeatAt"),
+            GetString("connectionState") ?? "disconnected");
+    }
+
+    private sealed record RunnerIdentityView(
+        string RunnerId,
+        string Hostname,
+        string? BuildGitHash,
+        string Status,
+        DateTimeOffset? LastHeartbeatAt,
+        string ConnectionState);
 
     private static string ResolveRepoRoot(string? explicitRoot)
     {
@@ -1409,4 +1666,39 @@ internal sealed class SourceCodeUpdater
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         return match.Success ? match.Groups["path"].Value : null;
     }
+}
+
+internal abstract record RunnerRefreshOutcome
+{
+    private RunnerRefreshOutcome() { }
+
+    public int ExitCode => this switch
+    {
+        StaleRunnerRuntime => 1,
+        NotReconnected => 1,
+        _ => 0,
+    };
+
+    /// <summary>Reported build identity matches the repo HEAD.</summary>
+    public sealed record Current : RunnerRefreshOutcome
+    {
+        public static readonly Current Instance = new();
+        private Current() { }
+    }
+
+    /// <summary>Runner runtime identity could not be determined.</summary>
+    public sealed record UnknownIdentity(string Reason) : RunnerRefreshOutcome;
+
+    /// <summary>Runner did not report a fresh build identity after the restart window.</summary>
+    public sealed record NotReconnected : RunnerRefreshOutcome
+    {
+        public static readonly NotReconnected Instance = new();
+        private NotReconnected() { }
+    }
+
+    /// <summary>Runner is online but reported build identity differs from the current source.</summary>
+    public sealed record StaleRunnerRuntime(string? ReportedHash, string? RepoHeadHash, string Reason) : RunnerRefreshOutcome;
+
+    /// <summary>Runner refresh was intentionally skipped before build/restart.</summary>
+    public sealed record Skipped(string Reason) : RunnerRefreshOutcome;
 }

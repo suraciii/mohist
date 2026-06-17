@@ -40,7 +40,9 @@ The Integrate stage SHALL execute deterministic integration work as standard Wor
 #### Scenario: Integrate runs tasks before checks
 
 - **WHEN** an issue enters Integrate
+- **AND** `mohist/merge` is configured to push with `push: true`
 - **THEN** the stage SHALL execute `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` as ordered StageRun tasks
+- **AND** it SHALL NOT execute an independent `integrate:push` task for the same delivery
 - **AND** it SHALL run `health:integrate` only after those tasks succeed
 
 #### Scenario: Integrate failure stays local
@@ -95,7 +97,7 @@ The workflow definition SHALL identify task work by source and execution policy,
 
 ### Requirement: Stage definitions preserve existing stage semantics
 
-The declarative definitions for Plan, Build, Check, and Integrate SHALL preserve the existing user-visible workflow semantics while moving stage differences into configuration and registries.
+The declarative definitions for Plan, Build, Check, and Integrate SHALL preserve the existing user-visible workflow semantics while moving stage differences into configuration and registries. The Integrate definition SHALL preserve a single push owner for default delivery when merge is responsible for pushing.
 
 #### Scenario: Plan definition preserves planning contract
 
@@ -118,7 +120,10 @@ The declarative definitions for Plan, Build, Check, and Integrate SHALL preserve
 #### Scenario: Integrate definition preserves integration contract
 
 - **WHEN** Integrate executes through the config-driven runner
+- **AND** `mohist/merge` is configured to push with `push: true`
 - **THEN** it SHALL execute spec sync, change archive, and branch merge as ordered stage tasks
+- **AND** branch merge SHALL own the remote push for that delivery
+- **AND** it SHALL NOT declare or run a separate default `integrate:push` task for the same delivery
 - **AND** it SHALL run the Integrate health check only after those tasks succeed
 
 ### Requirement: StageDefinition separates static promises from run-owned work sources

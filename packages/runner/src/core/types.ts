@@ -88,4 +88,5 @@ export interface RunnerRegistration {
   hostname?: string
   coderModels?: string[]
   maxWorkflowSlots?: number
+  buildGitHash?: string | null
 }
