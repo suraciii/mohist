@@ -1306,13 +1306,9 @@ internal sealed class InfoCollector
     {
         try
         {
-            var location = assembly.Location;
-            if (string.IsNullOrWhiteSpace(location))
-                location = AppContext.BaseDirectory;
+            var location = AppContext.BaseDirectory;
             if (string.IsNullOrWhiteSpace(location))
                 return null;
-            if (Directory.Exists(location))
-                return location;
             return location;
         }
         catch
