@@ -95,7 +95,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha base commit")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("* T-002 commit")
         case "commit -m SignalR push (#112) -m * T-002 commit":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -186,7 +186,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -296,7 +296,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -381,7 +381,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -443,7 +443,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha-2")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           commitCount++
@@ -504,7 +504,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -557,7 +557,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -607,7 +607,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -664,7 +664,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok("")
         case "commit -m SignalR push (#112)":
           return ok("[detached HEAD landing-sha] SignalR push (#112)")
@@ -744,7 +744,7 @@ describe("mohist/merge", () => {
           return ok("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return ok("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return ok(logLines)
         case "log -1 --format=%P landing-sha":
           return ok("base-sha\n")
