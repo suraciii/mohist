@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain;
@@ -16,6 +17,10 @@ namespace Mohist.Server.Workflow.Services;
 /// </summary>
 public class WorkflowProfileManager
 {
+    private static readonly Regex WholeTemplateTokenRegex = new(
+        @"^\s*\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$",
+        RegexOptions.Compiled);
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
@@ -300,8 +305,9 @@ public class WorkflowProfileManager
 
     /// <summary>
     /// 处理 task.with:
+    ///   - value 是完整的 ${{ path }} 模板字符串: 用 effectiveVars 中对应 JsonElement 替换, 保留对象/数组/数字等 JSON 类型
     ///   - value 是 JSON 对象 且 effectiveVars 中有同名 key: deep merge (vars 覆盖)
-    ///   - 其他 (包括 ${{ }} 模板字符串): 保留原值, 由 runner 端展开
+    ///   - 其他 (包括混合文本里的 ${{ }} 模板字符串): 保留原值, 由 runner 端展开
     /// </summary>
     public static Dictionary<string, JsonElement?>? ExpandTaskWith(
         VariableBundle? effectiveVars,
@@ -325,6 +331,12 @@ public class WorkflowProfileManager
 
             var v = value.Value;
 
+            if (TryResolveWholeTemplate(v, varsRoot, out var resolvedValue))
+            {
+                result[key] = resolvedValue.Clone();
+                continue;
+            }
+
             if (v.ValueKind == JsonValueKind.Object
                 && varsRoot.ValueKind == JsonValueKind.Object
                 && varsRoot.TryGetProperty(key, out var varsOverride)
@@ -339,6 +351,35 @@ public class WorkflowProfileManager
         }
 
         return result;
+    }
+
+    private static bool TryResolveWholeTemplate(JsonElement value, JsonElement varsRoot, out JsonElement resolved)
+    {
+        resolved = default;
+        if (value.ValueKind != JsonValueKind.String || varsRoot.ValueKind != JsonValueKind.Object)
+            return false;
+
+        var raw = value.GetString();
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        var match = WholeTemplateTokenRegex.Match(raw);
+        if (!match.Success)
+            return false;
+
+        var current = varsRoot;
+        var parts = match.Groups["path"].Value.Split('.');
+        var start = parts.Length > 0 && string.Equals(parts[0], "vars", StringComparison.Ordinal) ? 1 : 0;
+        for (var i = start; i < parts.Length; i++)
+        {
+            var part = parts[i];
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(part, out var next))
+                return false;
+            current = next;
+        }
+
+        resolved = current.Clone();
+        return true;
     }
 
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(

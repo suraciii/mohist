@@ -279,7 +279,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ExpandTaskWith_PreservesTemplateStrings()
+    public void ExpandTaskWith_ResolvesWholeTemplateStringToJsonValue()
     {
         var resolved = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -296,8 +296,9 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = WorkflowProfileManager.ExpandTaskWith(resolved, taskWith);
 
         Assert.NotNull(result);
-        // Template expression is PRESERVED, not expanded (runner expands later)
-        Assert.Equal("${{ agent }}", result["agent"]!.Value.GetString());
+        Assert.Equal(JsonValueKind.Object, result["agent"]!.Value.ValueKind);
+        Assert.Equal("opencode", result["agent"]!.Value.GetProperty("type").GetString());
+        Assert.Equal("sonnet-4", result["agent"]!.Value.GetProperty("model").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -350,7 +351,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void ExpandTaskWith_PreservesNestedTemplatePath()
+    public void ExpandTaskWith_ResolvesNestedWholeTemplatePath()
     {
         var resolved = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -365,8 +366,25 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         var result = WorkflowProfileManager.ExpandTaskWith(resolved, taskWith);
 
-        // Template preserved (runner expands later)
-        Assert.Equal("${{ config.deep.value }}", result!["x"]!.Value.GetString());
+        Assert.Equal("found-it", result!["x"]!.Value.GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void ExpandTaskWith_PreservesUnresolvedWholeTemplateString()
+    {
+        var resolved = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { other = 1 })));
+
+        var taskWith = new Dictionary<string, JsonElement?>
+        {
+            ["agent"] = JsonSerializer.SerializeToElement("${{ missing.agent }}"),
+        };
+
+        var result = WorkflowProfileManager.ExpandTaskWith(resolved, taskWith);
+
+        Assert.Equal("${{ missing.agent }}", result!["agent"]!.Value.GetString());
     }
 
     // --- helpers ---
