@@ -206,7 +206,7 @@ describe("Issue #112 regression — full agent + merge delivery pipeline", () =>
       }
       if (cmd === "checkout --detach base-sha") return gitOk("HEAD is now at base-sha")
       if (cmd === "merge --squash mo/issue-112") return gitOk("Squash commit -- not updating HEAD")
-      if (cmd === "log --format=* %s master..mo/issue-112") return gitOk("* T-001 commit")
+      if (cmd === "log --format=* %s base-sha..mo/issue-112") return gitOk("* T-001 commit")
       if (cmd === "commit -m Issue #102 regression (#112) -m * T-001 commit") return gitOk("[detached HEAD landing-sha] Issue #102 regression (#112)")
       if (cmd === "log -1 --format=%P landing-sha") return gitOk("base-sha\n")
       if (cmd === "push origin landing-sha:refs/heads/master") return gitOk("To origin\n   base-sha..landing-sha  master -> master")
@@ -400,7 +400,7 @@ describe("Issue #112 regression — full agent + merge delivery pipeline", () =>
           return gitOk("HEAD is now at base-sha")
         case "merge --squash mo/issue-112":
           return gitOk("Squash commit -- not updating HEAD")
-        case "log --format=* %s master..mo/issue-112":
+        case "log --format=* %s base-sha..mo/issue-112":
           return gitOk("* T-001 commit")
         case "commit -m Issue #102 regression (#112) -m * T-001 commit":
           return gitOk("[detached HEAD landing-sha] Issue #102 regression (#112)")

@@ -1095,7 +1095,7 @@ async function createSquashLanding(
       await git(workDir, ["reset", "--hard", "HEAD"], context.signal).catch(() => undefined)
       return { landingSha: null, output: combinedGitOutput(outputs), message: `Squash merge of '${source}' failed: ${merge.combinedOutput}` }
     }
-    const commitResult = await finishLandingCommit(workDir, message, context)
+    const commitResult = await finishLandingCommit(workDir, baseSha, message, context)
     outputs.push(commitResult.combinedOutput)
     if (!commitResult.success) {
       await git(workDir, ["reset", "--hard", "HEAD"], context.signal).catch(() => undefined)
@@ -1118,7 +1118,7 @@ async function createSquashLanding(
   return { landingSha: head.stdout.trim(), output: combinedGitOutput(outputs) }
 }
 
-async function finishLandingCommit(workDir: string, message: string, context: ActionContext) {
+async function finishLandingCommit(workDir: string, baseSha: string, message: string, context: ActionContext) {
   const title = stringAt(context.variables, ["issue", "title"]) ?? message
   const numberStr = typeof context.issueNumber === "number" && context.issueNumber > 0
     ? String(context.issueNumber)
@@ -1126,8 +1126,7 @@ async function finishLandingCommit(workDir: string, message: string, context: Ac
   const header = numberStr ? `${title} (#${numberStr})` : title
 
   const source = stringInput(context.with, "source") ?? "HEAD"
-  const target = stringInput(context.with, "target") ?? ""
-  const logResult = await git(workDir, ["log", "--format=* %s", `${target}..${source}`], context.signal)
+  const logResult = await git(workDir, ["log", "--format=* %s", `${baseSha}..${source}`], context.signal)
   const body = capCommitBody(logResult.success ? logResult.stdout.trim() : "")
 
   return body
