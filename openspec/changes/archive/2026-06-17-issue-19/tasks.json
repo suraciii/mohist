@@ -1,0 +1,67 @@
+{
+  "project": "mohist-local",
+  "description": "Restore Settings System log-level behavior and Runtime configuration on the .NET server by using supported configuration APIs instead of missing settings endpoints.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Harden settings config API",
+      "spec": "specs/http-api/spec.md#Settings configuration API exposes log level",
+      "description": "Make the .NET configuration API a reliable contract for issue 19 settings data. Ensure `/api/config` exposes `logLevel` and runtime scheduling keys, `PUT /api/config/logLevel` accepts only `DEBUG`, `INFO`, `WARN`, and `ERROR`, and unsupported runtime keys are rejected rather than silently accepted.",
+      "acceptanceCriteria": [
+        "`GET /api/config` returns `logLevel`, `maxConcurrentAgents`, `agentTimeout`, `taskTimeout`, `stageTimeout`, `pollInterval`, and `maxGracePeriods` without exposing secrets.",
+        "`PUT /api/config/logLevel` persists each supported level and rejects unsupported values with a 400-class validation error without changing the previous value.",
+        "`PUT /api/config/{key}` persists supported runtime scheduling keys and rejects unknown keys with a clear error response.",
+        "Backend regression tests cover log-level read/update/reject behavior and runtime scheduling key read/update behavior."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Validated .NET settings configuration API and backend tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep `/api/config` as the canonical contract; do not add duplicate `/api/log-level` or `/api/agent-runtime` endpoints unless implementation proves the existing contract cannot satisfy the specs."
+    },
+    {
+      "id": "T-002",
+      "title": "Restore System log-level control",
+      "spec": "specs/web-ui/spec.md#Settings System log level uses supported backend state",
+      "description": "Migrate the Web System log-level path away from missing `/api/log-level` calls and onto the supported config API while preserving the existing UI-facing hook shape. The System page must show the persisted log level, persist supported changes, and surface failures visibly instead of silently accepting them.",
+      "acceptanceCriteria": [
+        "Settings > System displays the actual persisted log level from `/api/config` and no longer falls back to hardcoded `INFO` except when `INFO` is the persisted value.",
+        "Changing Log Level to `DEBUG`, `INFO`, `WARN`, or `ERROR` persists through `PUT /api/config/logLevel` and refreshes the confirmed value.",
+        "Failed log-level saves show a visible error notification and do not leave the failed value presented as saved.",
+        "The Web settings client no longer requires `/api/log-level` for System log-level load or save on the .NET server.",
+        "Web regression tests cover real value loading, successful save, failed save, and supported option rendering."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Working Settings > System log-level UI backed by `/api/config` plus Web tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This task also satisfies `specs/settings-system-diagnostics/spec.md#Settings System log level reflects persisted state` and `specs/settings-system-diagnostics/spec.md#Settings System log level changes are durable and explicit`."
+    },
+    {
+      "id": "T-003",
+      "title": "Restore Runtime settings panel",
+      "spec": "specs/agent-runtime/spec.md#Agent runtime settings expose effective scheduling configuration",
+      "description": "Migrate the Runtime settings read/write path from missing `/api/agent-runtime` calls to a Web settings adapter backed by `/api/config` and `PUT /api/config/{key}`. The panel must load effective scheduling values, persist supported edits and resets, and explicitly disable or explain unsupported fields without failing the entire page.",
+      "acceptanceCriteria": [
+        "Settings > Runtime loads successfully on the .NET server when `/api/config` returns supported runtime scheduling values and no longer shows `Failed to load settings: Empty response from /agent-runtime`.",
+        "Runtime displays effective values for concurrency, session timeout, task timeout, stage timeout, poll interval, and grace-period behavior using correct unit conversions between server config and the existing UI model.",
+        "Saving changed supported fields writes only supported config keys through `PUT /api/config/{key}`, refetches confirmed state, and shows visible errors on failed writes.",
+        "Reset behavior only targets supported fields and does not report success for unsupported fields.",
+        "Unsupported or unavailable runtime fields render disabled with explanatory text instead of failing the whole panel or showing misleading persisted defaults.",
+        "The Web settings client no longer requires `/api/agent-runtime` for Runtime load or save on the .NET server.",
+        "Web regression tests cover load success, load failure, unit conversion, disabled unsupported fields, save success, save failure, and reset behavior."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Working Settings > Runtime panel backed by `/api/config` plus Web tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Keep the adapter in the settings entity API layer so `AgentSettingsSection` can continue consuming the stable `AgentRuntimeConfig` hook contract. Preserve issue non-goals: do not change runtime semantics, liveness checks, or model-selection behavior."
+    }
+  ]
+}

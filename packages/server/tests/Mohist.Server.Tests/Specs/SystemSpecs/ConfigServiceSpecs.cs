@@ -163,4 +163,155 @@ public class ConfigServiceSpecs : IAsyncLifetime
         Assert.False(doc.RootElement.TryGetProperty("model", out _));
         Assert.True(doc.RootElement.TryGetProperty("agent", out _));
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task GetConfig_ExposesLogLevelAndRuntimeSchedulingKeys()
+    {
+        var cfg = await _svc.GetConfigAsync();
+
+        Assert.True(cfg.ContainsKey("logLevel"), "logLevel should be exposed by config");
+        Assert.Equal("INFO", cfg["logLevel"]);
+
+        Assert.True(cfg.ContainsKey("maxConcurrentAgents"), "maxConcurrentAgents should be exposed by config");
+        Assert.True(cfg.ContainsKey("agentTimeout"), "agentTimeout should be exposed by config");
+        Assert.True(cfg.ContainsKey("taskTimeout"), "taskTimeout should be exposed by config");
+        Assert.True(cfg.ContainsKey("stageTimeout"), "stageTimeout should be exposed by config");
+        Assert.True(cfg.ContainsKey("pollInterval"), "pollInterval should be exposed by config");
+        Assert.True(cfg.ContainsKey("maxGracePeriods"), "maxGracePeriods should be exposed by config");
+
+        Assert.Equal(3, cfg["maxConcurrentAgents"]);
+        Assert.Equal(600, cfg["agentTimeout"]);
+        Assert.Equal(600, cfg["taskTimeout"]);
+        Assert.Equal(3600, cfg["stageTimeout"]);
+        Assert.Equal(5000, cfg["pollInterval"]);
+        Assert.Equal(3, cfg["maxGracePeriods"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("DEBUG")]
+    [InlineData("INFO")]
+    [InlineData("WARN")]
+    [InlineData("ERROR")]
+    public async Task Validate_LogLevel_AcceptsSupportedLevels(string level)
+    {
+        var (valid, error) = _svc.Validate("logLevel", level);
+        Assert.True(valid);
+        Assert.Null(error);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("debug")]
+    [InlineData("VERBOSE")]
+    [InlineData("TRACE")]
+    [InlineData("FATAL")]
+    [InlineData("")]
+    [InlineData("INFO ")]
+    public async Task Validate_LogLevel_RejectsUnsupportedValues(string level)
+    {
+        var (valid, error) = _svc.Validate("logLevel", level);
+        Assert.False(valid);
+        Assert.NotNull(error);
+        Assert.Contains("logLevel", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("DEBUG")]
+    [InlineData("INFO")]
+    [InlineData("WARN")]
+    [InlineData("ERROR")]
+    public async Task SetAsync_LogLevel_PersistsSupportedLevelAndIsReadable(string level)
+    {
+        await _svc.SetAsync("logLevel", level);
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(level, cfg["logLevel"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAsync_LogLevel_RejectsUnsupportedValue_AndLeavesPreviousUnchanged()
+    {
+        await _svc.SetAsync("logLevel", "WARN");
+        var before = await _svc.GetConfigAsync();
+        Assert.Equal("WARN", before["logLevel"]);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _svc.SetAsync("logLevel", "TRACE"));
+
+        var after = await _svc.GetConfigAsync();
+        Assert.Equal("WARN", after["logLevel"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task Validate_UnknownKey_ReturnsUnknownKeyError()
+    {
+        var (valid, error) = _svc.Validate("doesNotExist", "x");
+        Assert.False(valid);
+        Assert.NotNull(error);
+        Assert.Contains("Unknown", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task SetAsync_UnknownKey_Throws()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await _svc.SetAsync("doesNotExist", "x"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("maxConcurrentAgents", 5)]
+    [InlineData("agentTimeout", 900)]
+    [InlineData("taskTimeout", 1200)]
+    [InlineData("stageTimeout", 7200)]
+    [InlineData("pollInterval", 1500)]
+    [InlineData("maxGracePeriods", 5)]
+    public async Task SetAsync_RuntimeSchedulingKey_PersistsAndIsReadable(string key, int value)
+    {
+        await _svc.SetAsync(key, value);
+        var cfg = await _svc.GetConfigAsync();
+        Assert.Equal(value, cfg[key]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Theory]
+    [InlineData("maxConcurrentAgents")]
+    [InlineData("agentTimeout")]
+    [InlineData("taskTimeout")]
+    [InlineData("stageTimeout")]
+    [InlineData("pollInterval")]
+    [InlineData("maxGracePeriods")]
+    public async Task Validate_RuntimeSchedulingKey_RejectsNonNumberValue(string key)
+    {
+        var (valid, error) = _svc.Validate(key, "not-a-number");
+        Assert.False(valid);
+        Assert.NotNull(error);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public void GetSupportedLogLevels_ContainsAllFourRequiredLevels()
+    {
+        var levels = ConfigService.GetSupportedLogLevels();
+        Assert.Contains("DEBUG", levels);
+        Assert.Contains("INFO", levels);
+        Assert.Contains("WARN", levels);
+        Assert.Contains("ERROR", levels);
+        Assert.Equal(4, levels.Count);
+    }
 }

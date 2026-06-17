@@ -15,9 +15,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { SectionState } from './SectionState'
-
-const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
-const DEFAULT_LOG_LEVEL = 'INFO'
+import { ALL_LEVELS, type LogLevel } from '@/shared/lib/log-levels'
 
 function StatusBadge({ status }: { status: string | null | undefined }) {
   const running = status === 'active' || status === 'running'
@@ -70,9 +68,13 @@ function formatTimestamp(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
+function isLogLevel(value: string): value is LogLevel {
+  return (ALL_LEVELS as readonly string[]).includes(value)
+}
+
 export function SystemSettingsSection() {
-  const { data: logLevelData, isLoading: logLevelLoading } = useLogLevel()
-  const setLogLevel = useSetLogLevel()
+  const { data: logLevelData, isLoading: logLevelLoading, isError: logLevelError, error: logLevelErrorValue } = useLogLevel()
+  const setLogLevelMutation = useSetLogLevel()
   const { data: systemInfo, isLoading: infoLoading, isError: infoError, error: infoErrorValue, refetch: refetchInfo } = useSystemInfo()
   const systemUpdate = useSystemUpdate()
   const [trackingUpdate, setTrackingUpdate] = useState(false)
@@ -80,24 +82,28 @@ export function SystemSettingsSection() {
   const [reconnectState, setReconnectState] = useState<string | null>(null)
   const updateStatus = updateStatusEnvelope?.job ?? null
 
-  const [currentLevel, setCurrentLevel] = useState(DEFAULT_LOG_LEVEL)
+  const persistedLevel = logLevelData?.level ?? null
+  const [currentLevel, setCurrentLevel] = useState<LogLevel | null>(
+    persistedLevel && isLogLevel(persistedLevel) ? persistedLevel : null,
+  )
   const [saving, setSaving] = useState(false)
   const [logError, setLogError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (logLevelData?.level) {
-      setCurrentLevel(logLevelData.level)
+    if (persistedLevel && isLogLevel(persistedLevel)) {
+      setCurrentLevel(persistedLevel)
     }
-  }, [logLevelData])
+  }, [persistedLevel])
 
   const handleLogLevelChange = async (newLevel: string) => {
+    if (!isLogLevel(newLevel)) return
     const previousLevel = currentLevel
     setCurrentLevel(newLevel)
     setLogError(null)
     setSaving(true)
 
     try {
-      await setLogLevel.mutateAsync(newLevel)
+      await setLogLevelMutation.mutateAsync(newLevel)
     } catch (err) {
       setCurrentLevel(previousLevel)
       setLogError(err instanceof Error ? err.message : 'Failed to update log level')
@@ -200,22 +206,32 @@ export function SystemSettingsSection() {
   return (
     <div className="space-y-6">
       <CardSection title="Logging">
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-foreground/80">Log Level</label>
-          <Select value={currentLevel} onValueChange={(value) => value && handleLogLevelChange(value)} disabled={saving}>
-            <SelectTrigger className="w-full max-w-xs">
-              <SelectValue placeholder="Select log level" />
-            </SelectTrigger>
-            <SelectContent>
-              {LOG_LEVELS.map((level) => (
-                <SelectItem key={level} value={level}>
-                  {level}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {saving && <p className="text-xs text-muted-foreground/70">Saving...</p>}
-        </div>
+        {logLevelError ? (
+          <p className="text-xs text-muted-foreground">
+            {logLevelErrorValue instanceof Error ? logLevelErrorValue.message : 'Log level unavailable'}
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-foreground/80">Log Level</label>
+            <Select
+              value={currentLevel ?? undefined}
+              onValueChange={(value) => value && handleLogLevelChange(value)}
+              disabled={saving || !currentLevel}
+            >
+              <SelectTrigger className="w-full max-w-xs">
+                <SelectValue placeholder="Select log level" />
+              </SelectTrigger>
+              <SelectContent>
+                {ALL_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level}>
+                    {level}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {saving && <p className="text-xs text-muted-foreground/70">Saving...</p>}
+          </div>
+        )}
 
         {logError && (
           <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">

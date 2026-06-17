@@ -55,6 +55,11 @@ public static class ConfigRoutes
         config.MapGet("/", async (ConfigService svc) =>
         {
             var cfg = await svc.GetConfigAsync();
+            foreach (var key in cfg.Keys.ToList())
+            {
+                if (ConfigRouteHelpers.IsSecretKey(key))
+                    cfg[key] = "***";
+            }
             return ApiResults.Ok(cfg);
         });
 
@@ -64,11 +69,7 @@ public static class ConfigRoutes
             var safe = new Dictionary<string, string>();
             foreach (var (key, value) in all)
             {
-                safe[key] = key.Contains("token", StringComparison.OrdinalIgnoreCase)
-                    || key.Contains("key", StringComparison.OrdinalIgnoreCase)
-                    || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
-                    ? "***"
-                    : value;
+                safe[key] = ConfigRouteHelpers.IsSecretKey(key) ? "***" : value;
             }
             return ApiResults.Ok(safe);
         });
@@ -94,3 +95,11 @@ public static class ConfigRoutes
 public record ConfigValueRequest(object? Value);
 public record ModelRequest(string? Model);
 public record AgentConfigRequest(Dictionary<string, object?>? Agent, Dictionary<string, Dictionary<string, object?>>? StageAgents = null);
+
+internal static class ConfigRouteHelpers
+{
+    public static bool IsSecretKey(string key) =>
+        key.Contains("token", StringComparison.OrdinalIgnoreCase)
+        || key.Contains("key", StringComparison.OrdinalIgnoreCase)
+        || key.Contains("secret", StringComparison.OrdinalIgnoreCase);
+}

@@ -2,6 +2,10 @@ export interface GeneralConfig {
   agentTimeout: number
   maxConcurrentAgents: number
   pollInterval: number
+  logLevel: string
+  taskTimeout: number
+  stageTimeout: number
+  maxGracePeriods: number
 }
 
 export interface AgentRuntimeConfig {

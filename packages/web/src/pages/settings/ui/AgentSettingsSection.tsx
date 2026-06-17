@@ -1,17 +1,18 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/settings'
-import type { AgentRuntimeConfig } from '../../../entities/settings'
+import { useAgentRuntime, useConfig, useSetAgentRuntime } from '../../../entities/settings'
+import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
+import { agentRuntimeToConfigKey } from '../../../entities/settings/api/client'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { SectionState } from './SectionState'
 
 const DEFAULTS: AgentRuntimeConfig = {
-  timeout: 1800000,
+  timeout: 600000,
   stageTimeout: 3600000,
   taskTimeout: 600000,
-  maxConcurrent: 8,
-  maxGracePeriods: 2,
-  pollInterval: 30000,
+  maxConcurrent: 3,
+  maxGracePeriods: 3,
+  pollInterval: 5000,
 }
 
 function msToMin(ms: number): number {
@@ -171,12 +172,16 @@ function InputField({
   unit,
   value,
   error,
+  disabled,
+  disabledReason,
   onChange,
 }: {
   label: string
   unit: string
   value: number
   error: string | null
+  disabled?: boolean
+  disabledReason?: string
   onChange: (v: number) => void
 }) {
   return (
@@ -186,6 +191,7 @@ function InputField({
         <Input
           type="number"
           value={value}
+          disabled={disabled}
           onChange={(e) => {
             const v = parseInt(e.target.value, 10)
             onChange(isNaN(v) ? 0 : v)
@@ -194,13 +200,17 @@ function InputField({
         />
         <span className="text-sm text-muted-foreground">{unit}</span>
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {disabled && disabledReason && (
+        <p className="text-xs text-muted-foreground">{disabledReason}</p>
+      )}
+      {!disabled && error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }
 
 export function AgentSettingsSection() {
   const { data: runtimeConfig, isLoading, error, refetch } = useAgentRuntime()
+  const { data: config } = useConfig()
   const setAgentRuntime = useSetAgentRuntime()
 
   const [localValues, setLocalValues] = useState<FormValues>(() => configToForm(DEFAULTS))
@@ -210,6 +220,19 @@ export function AgentSettingsSection() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  const unsupportedFields = useMemo<Set<FieldKey>>(() => {
+    const set = new Set<FieldKey>()
+    if (!config) return set
+    for (const field of FIELDS) {
+      const configKey = agentRuntimeToConfigKey(field.key) as keyof GeneralConfig
+      const value = config[configKey]
+      if (value === undefined || value === null) {
+        set.add(field.key)
+      }
+    }
+    return set
+  }, [config])
 
   useEffect(() => {
     if (runtimeConfig) {
@@ -221,9 +244,9 @@ export function AgentSettingsSection() {
 
   const dirty = useMemo(() => {
     return (Object.keys(localValues) as FieldKey[]).some(
-      (k) => localValues[k] !== savedValues[k],
+      (k) => !unsupportedFields.has(k) && localValues[k] !== savedValues[k],
     )
-  }, [localValues, savedValues])
+  }, [localValues, savedValues, unsupportedFields])
 
   const hasValidationErrors = Object.keys(validationErrors).length > 0
 
@@ -250,6 +273,7 @@ export function AgentSettingsSection() {
   const handleSave = async () => {
     const errors: Partial<Record<FieldKey, string>> = {}
     for (const field of FIELDS) {
+      if (unsupportedFields.has(field.key)) continue
       const err = field.validate(localValues[field.key])
       if (err) errors[field.key] = err
     }
@@ -265,6 +289,7 @@ export function AgentSettingsSection() {
     try {
       const changed: Partial<AgentRuntimeConfig> = {}
       for (const key of Object.keys(localValues) as FieldKey[]) {
+        if (unsupportedFields.has(key)) continue
         if (localValues[key] !== savedValues[key]) {
           const config = formToConfig(localValues)
           changed[key] = config[key]
@@ -297,7 +322,19 @@ export function AgentSettingsSection() {
     setSaveError(null)
 
     try {
-      const result = await setAgentRuntime.mutateAsync(DEFAULTS)
+      const resetPayload: Partial<AgentRuntimeConfig> = {}
+      for (const field of FIELDS) {
+        if (unsupportedFields.has(field.key)) continue
+        resetPayload[field.key] = DEFAULTS[field.key]
+      }
+
+      if (Object.keys(resetPayload).length === 0) {
+        setSaveError('No supported runtime fields to reset.')
+        setSaving(false)
+        return
+      }
+
+      const result = await setAgentRuntime.mutateAsync(resetPayload)
       const form = configToForm(result)
       setLocalValues(form)
       setSavedValues(form)
@@ -352,6 +389,8 @@ export function AgentSettingsSection() {
             unit="minutes"
             value={localValues.timeout}
             error={validationErrors.timeout ?? null}
+            disabled={unsupportedFields.has('timeout')}
+            disabledReason="This runtime field is not exposed by the server configuration."
             onChange={(v) => handleChange('timeout', v)}
           />
           <InputField
@@ -359,6 +398,8 @@ export function AgentSettingsSection() {
             unit="minutes"
             value={localValues.stageTimeout}
             error={validationErrors.stageTimeout ?? null}
+            disabled={unsupportedFields.has('stageTimeout')}
+            disabledReason="This runtime field is not exposed by the server configuration."
             onChange={(v) => handleChange('stageTimeout', v)}
           />
           <InputField
@@ -366,6 +407,8 @@ export function AgentSettingsSection() {
             unit="minutes"
             value={localValues.taskTimeout}
             error={validationErrors.taskTimeout ?? null}
+            disabled={unsupportedFields.has('taskTimeout')}
+            disabledReason="This runtime field is not exposed by the server configuration."
             onChange={(v) => handleChange('taskTimeout', v)}
           />
         </div>
@@ -381,6 +424,8 @@ export function AgentSettingsSection() {
             unit="agents"
             value={localValues.maxConcurrent}
             error={validationErrors.maxConcurrent ?? null}
+            disabled={unsupportedFields.has('maxConcurrent')}
+            disabledReason="This runtime field is not exposed by the server configuration."
             onChange={(v) => handleChange('maxConcurrent', v)}
           />
           <InputField
@@ -388,6 +433,8 @@ export function AgentSettingsSection() {
             unit="seconds"
             value={localValues.pollInterval}
             error={validationErrors.pollInterval ?? null}
+            disabled={unsupportedFields.has('pollInterval')}
+            disabledReason="This runtime field is not exposed by the server configuration."
             onChange={(v) => handleChange('pollInterval', v)}
           />
         </div>
@@ -403,6 +450,8 @@ export function AgentSettingsSection() {
             unit="grace periods"
             value={localValues.maxGracePeriods}
             error={validationErrors.maxGracePeriods ?? null}
+            disabled={unsupportedFields.has('maxGracePeriods')}
+            disabledReason="This runtime field is not exposed by the server configuration."
             onChange={(v) => handleChange('maxGracePeriods', v)}
           />
         </div>

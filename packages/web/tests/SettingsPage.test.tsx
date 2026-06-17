@@ -34,6 +34,7 @@ vi.mock('../src/entities/settings/api/queries', async () => {
     useSystemUpdateStatus: vi.fn(),
     useAgentRuntime: vi.fn(),
     useSetAgentRuntime: vi.fn(),
+    useConfig: vi.fn(),
   }
 })
 
@@ -51,6 +52,7 @@ const {
   useSystemUpdateStatus,
   useAgentRuntime,
   useSetAgentRuntime,
+  useConfig,
 } = await import('../src/entities/settings/api/queries')
 
 function createMockQueryClient() {
@@ -148,6 +150,18 @@ beforeEach(() => {
   ;(useSetAgentRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
     mutate: vi.fn(),
     isPending: false,
+  })
+  ;(useConfig as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: {
+      agentTimeout: 600,
+      taskTimeout: 600,
+      stageTimeout: 3600,
+      maxConcurrentAgents: 3,
+      maxGracePeriods: 3,
+      pollInterval: 5000,
+    },
+    isLoading: false,
+    error: null,
   })
 })
 
@@ -728,6 +742,117 @@ describe('SettingsPage', () => {
       expect(screen.getByTestId('system-update-stage-Restoring runner')).toHaveAttribute('data-state', 'current')
       expect(screen.getByTestId('system-update-stage-Building')).toHaveAttribute('data-state', 'done')
       expect(screen.getByTestId('system-update-stage-Verifying runtime')).toHaveAttribute('data-state', 'pending')
+    })
+
+    it('displays the actual persisted log level from the API instead of a hardcoded value', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { level: 'DEBUG' },
+        isLoading: false,
+        isError: false,
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const trigger = screen.getByRole('combobox')
+      expect(trigger).toHaveTextContent('DEBUG')
+    })
+
+    it('renders the four supported log-level options', () => {
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const trigger = screen.getByRole('combobox')
+      fireEvent.click(trigger)
+
+      for (const level of ['DEBUG', 'INFO', 'WARN', 'ERROR']) {
+        expect(screen.getByRole('option', { name: level })).toBeInTheDocument()
+      }
+    })
+
+    it('persists a new log level through the config API and shows the saved value', async () => {
+      vi.useRealTimers()
+      const mutateAsync = vi.fn().mockResolvedValue({ level: 'ERROR' })
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { level: 'INFO' },
+        isLoading: false,
+        isError: false,
+      })
+      ;(useSetLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+        mutateAsync,
+        mutate: vi.fn(),
+        isPending: false,
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const trigger = screen.getByRole('combobox')
+      fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
+      fireEvent.mouseDown(trigger, { button: 0 })
+      fireEvent.click(trigger)
+
+      await waitFor(() => expect(screen.getByRole('option', { name: 'ERROR' })).toBeInTheDocument())
+      const errorOption = screen.getByRole('option', { name: 'ERROR' })
+      fireEvent.pointerDown(errorOption, { button: 0, pointerType: 'mouse' })
+      fireEvent.pointerUp(errorOption, { button: 0, pointerType: 'mouse' })
+      fireEvent.click(errorOption)
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('ERROR'))
+    })
+
+    it('surfaces a failed log-level save as a visible error and reverts the displayed value', async () => {
+      vi.useRealTimers()
+      const mutateAsync = vi.fn().mockRejectedValue(new Error('logLevel must be one of DEBUG, INFO, WARN, ERROR'))
+      ;(useSystemInfo as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: createSystemInfo(),
+        isLoading: false,
+        isError: false,
+        refetch: vi.fn(),
+      })
+      ;(useLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { level: 'INFO' },
+        isLoading: false,
+        isError: false,
+      })
+      ;(useSetLogLevel as ReturnType<typeof vi.fn>).mockReturnValue({
+        mutateAsync,
+        mutate: vi.fn(),
+        isPending: false,
+      })
+
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
+
+      const trigger = screen.getByRole('combobox')
+      fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' })
+      fireEvent.mouseDown(trigger, { button: 0 })
+      fireEvent.click(trigger)
+
+      await waitFor(() => expect(screen.getByRole('option', { name: 'WARN' })).toBeInTheDocument())
+      const warnOption = screen.getByRole('option', { name: 'WARN' })
+      fireEvent.pointerDown(warnOption, { button: 0, pointerType: 'mouse' })
+      fireEvent.pointerUp(warnOption, { button: 0, pointerType: 'mouse' })
+      fireEvent.click(warnOption)
+
+      await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith('WARN'))
+      await waitFor(() => expect(screen.getByText(/logLevel must be one of/i)).toBeInTheDocument())
+      await waitFor(() => expect(trigger).toHaveTextContent('INFO'))
     })
   })
 })
