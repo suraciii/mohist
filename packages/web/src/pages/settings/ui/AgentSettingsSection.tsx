@@ -217,6 +217,7 @@ export function AgentSettingsSection() {
   const [savedValues, setSavedValues] = useState<FormValues>(() => configToForm(DEFAULTS))
   const [validationErrors, setValidationErrors] = useState<Partial<Record<FieldKey, string>>>({})
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
 
   const unsupportedFields = useMemo<Set<FieldKey>>(() => {
@@ -267,6 +268,7 @@ export function AgentSettingsSection() {
   }
 
   const handleSave = async () => {
+    setSaveError(null)
     const errors: Partial<Record<FieldKey, string>> = {}
     for (const field of FIELDS) {
       if (unsupportedFields.has(field.key)) continue
@@ -310,6 +312,7 @@ export function AgentSettingsSection() {
   const confirmReset = async () => {
     setShowResetConfirm(false)
     setSaving(true)
+    setSaveError(null)
 
     try {
       const resetPayload: Partial<AgentRuntimeConfig> = {}
@@ -467,6 +470,10 @@ export function AgentSettingsSection() {
           Reset to Defaults
         </Button>
       </div>
+
+      {saveError && (
+        <p className="text-xs text-red-600">{saveError}</p>
+      )}
 
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">

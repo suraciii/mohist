@@ -298,15 +298,13 @@ public class IssueFeedbackApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task RejectEndpoint_RemovedReturns404()
+    public async Task RejectEndpoint_RejectsAwaitingApprovalIssue()
     {
         var (project, issueNumber, _, _) = await SeedAwaitingApprovalIssueAsync();
 
-        var response = await _client.PostAsJsonAsync(
+        await _client.PostOkAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/reject",
-            new { body = "should fail" });
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            new { message = "send back" });
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

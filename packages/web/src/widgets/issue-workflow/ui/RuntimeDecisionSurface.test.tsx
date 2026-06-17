@@ -46,10 +46,9 @@ const projects = [
   {
     id: 'test-project',
     name: 'Test Project',
-    path: '/tmp/test-project',
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
-    repositories: [{ name: 'main', path: '/tmp/test-project', baseBranch: 'main', isDefault: true }],
+    repositories: [{ name: 'main', gitUrl: 'https://example.com/test.git', baseBranch: 'main', isDefault: true }],
   },
 ]
 
