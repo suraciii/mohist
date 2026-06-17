@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { FileIcon, FolderIcon, ArrowLeftIcon } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
-import { MarkdownContent } from '@/shared/ui/components/markdown-content'
+import { MarkdownReader } from '@/shared/ui'
 import { useIssueWorkflowArtifactContent, type WorkflowArtifactDirectoryEntry } from '../../../entities/issue'
 
 interface ArtifactContentViewerProps {
@@ -21,12 +21,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   if (bytes < 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
   return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(1)} TB`
-}
-
-function isMarkdownPath(path?: string): boolean {
-  if (!path) return false
-  const lower = path.toLowerCase()
-  return lower.endsWith('.md') || lower.endsWith('.markdown')
 }
 
 function DirectoryEntryList({
@@ -188,10 +182,8 @@ export function ArtifactContentViewer({ issueNumber, artifactId, path, size, ope
                   <span>{formatBytes(selectedEntry.size)}</span>
                 </div>
               )}
-              {isMarkdownPath(selectedEntry?.relativePath ?? path) ? (
-                <div className="text-sm text-gray-800">
-                  <MarkdownContent content={data.content} />
-                </div>
+{data.contentType === 'text/markdown' ? (
+                <MarkdownReader content={data.content} baseHeadingLevel={2} />
               ) : (
                 <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-700 bg-gray-50 rounded-md p-3 border">
                   {data.content}

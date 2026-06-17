@@ -200,7 +200,7 @@ describe('LatestArtifactsPanel', () => {
     } as ReturnType<typeof useIssueWorkflowArtifacts>)
 
     mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: 'PASS', contentType: 'text/markdown' },
+      data: { kind: 'text', content: '# Title\n\nPASS', contentType: 'text/markdown' },
       isLoading: false,
       error: null,
     } as ReturnType<typeof useIssueWorkflowArtifactContent>)
@@ -214,12 +214,48 @@ describe('LatestArtifactsPanel', () => {
     fireEvent.click(screen.getByText('review.md'))
 
     await waitFor(() => {
-      expect(screen.getByText('PASS')).toBeInTheDocument()
       expect(screen.getByText('123 B')).toBeInTheDocument()
+      const reader = screen.getByTestId('markdown-reader')
+      expect(reader).toHaveAttribute('data-base-heading-level', '2')
+      expect(screen.getByRole('heading', { level: 2, name: 'Title' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 1, name: 'Title' })).not.toBeInTheDocument()
+      expect(screen.getByText('PASS')).toBeInTheDocument()
+      expect(screen.queryByText('# Title')).not.toBeInTheDocument()
     })
   })
 
-  it('renders directory entries and opens contained file content', async () => {
+  it('renders non-Markdown text artifact inside a <pre> block', async () => {
+    mockedUseIssueWorkflowArtifacts.mockReturnValue({
+      data: [makeFileArtifact({ artifactId: 'art-log', path: 'output.log', taskRunId: 'plan.1', contentType: 'text/plain' })],
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useIssueWorkflowArtifacts>)
+
+    mockedUseIssueWorkflowArtifactContent.mockReturnValue({
+      data: { kind: 'text', content: 'plain line 1\nplain line 2', contentType: 'text/plain' },
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useIssueWorkflowArtifactContent>)
+
+    render(<LatestArtifactsPanel issueNumber={1} workflowRunId="workflow-run-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('output.log')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('output.log'))
+
+    await waitFor(() => {
+      expect(screen.getByText((_, el) => el?.tagName === 'PRE' && /plain line 1\nplain line 2/.test(el.textContent ?? ''))).toBeInTheDocument()
+    })
+
+    const pre = screen.getByText((_, el) => el?.tagName === 'PRE' && /plain line 1\nplain line 2/.test(el.textContent ?? '')).closest('pre')
+    expect(pre).not.toBeNull()
+    expect(pre?.className).toContain('whitespace-pre-wrap')
+    expect(screen.queryByTestId('markdown-reader')).not.toBeInTheDocument()
+  })
+
+  it('renders directory entries and opens contained Markdown file content through MarkdownReader', async () => {
     mockedUseIssueWorkflowArtifacts.mockReturnValue({
       data: [makeDirectoryArtifact({ artifactId: 'art-specs', path: 'specs/' })],
       isLoading: false,
@@ -249,7 +285,7 @@ describe('LatestArtifactsPanel', () => {
     })
 
     mockedUseIssueWorkflowArtifactContent.mockReturnValue({
-      data: { kind: 'text', content: '# Spec', contentType: 'text/markdown' },
+      data: { kind: 'text', content: '# Spec\n\nSpec body', contentType: 'text/markdown' },
       isLoading: false,
       error: null,
     } as ReturnType<typeof useIssueWorkflowArtifactContent>)
@@ -257,7 +293,10 @@ describe('LatestArtifactsPanel', () => {
     fireEvent.click(screen.getByText('workflow.md'))
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Spec' })).toBeInTheDocument()
+      expect(screen.getByTestId('markdown-reader')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2, name: 'Spec' })).toBeInTheDocument()
+      expect(screen.getByText('Spec body')).toBeInTheDocument()
+      expect(screen.queryByText('# Spec')).not.toBeInTheDocument()
     })
   })
 })
@@ -329,9 +368,9 @@ describe('ArtifactContentViewer rendering edge cases', () => {
     fireEvent.click(screen.getByText('notes.markdown'))
 
     await waitFor(() => {
-      // The markdown content is rendered via react-markdown, so we expect a <h1> heading
-      // and <li> list items, NOT a <pre> block with raw markdown text.
-      expect(screen.getByRole('heading', { name: 'Heading', level: 1 })).toBeInTheDocument()
+      // The markdown content is rendered via MarkdownReader (baseHeadingLevel=2),
+      // so we expect an <h2> heading and <li> list items, NOT a <pre> block with raw markdown text.
+      expect(screen.getByRole('heading', { name: 'Heading', level: 2 })).toBeInTheDocument()
       expect(screen.getByText('item 1')).toBeInTheDocument()
       expect(screen.queryByText('# Heading')).not.toBeInTheDocument()
     })
