@@ -605,10 +605,15 @@ describe('IssueDetailPage Markdown rendering', () => {
       const issueApi = await import('../src/entities/issue/api/client')
       vi.mocked(issueApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+      const surface = await waitFor(() => {
+        const el = screen.getByTestId('runtime-decision-surface')
+        expect(el).toBeInTheDocument()
+        return el
       })
-      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      await waitFor(() => {
+        expect(within(surface).getByTestId('runtime-action-retry')).toBeInTheDocument()
+      })
+      fireEvent.click(within(surface).getByTestId('runtime-action-retry'))
       await waitFor(() => {
         expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
       })
@@ -624,14 +629,19 @@ describe('IssueDetailPage Markdown rendering', () => {
       const issueApi = await import('../src/entities/issue/api/client')
       vi.mocked(issueApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
-        expect(screen.getAllByRole('button', { name: 'Rerun Stage' }).length).toBeGreaterThan(0)
+      const surface = await waitFor(() => {
+        const el = screen.getByTestId('runtime-decision-surface')
+        expect(el).toBeInTheDocument()
+        return el
       })
-      fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+      await waitFor(() => {
+        expect(within(surface).getByTestId('runtime-action-retry')).toBeInTheDocument()
+        expect(within(surface).getByTestId('runtime-action-rerun')).toBeInTheDocument()
+      })
+      fireEvent.click(within(surface).getByTestId('runtime-action-retry'))
       await waitFor(() => {
         expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
-        expect(screen.getAllByRole('button', { name: 'Rerun Stage' }).length).toBeGreaterThan(0)
+        expect(within(surface).getByTestId('runtime-action-rerun')).toBeInTheDocument()
       })
     })
   })

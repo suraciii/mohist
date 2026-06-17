@@ -10,7 +10,7 @@ import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
-import { BranchBar, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel } from '../../../widgets/issue-workflow'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -467,6 +467,13 @@ export function IssueDetailPage() {
               Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
             </div>
           </div>
+
+          <RuntimeDecisionSurface
+            issue={issue}
+            timeline={workflowTimeline ?? null}
+            agentStatus={agentStatus ?? null}
+            hasActiveAgent={isAgentRunningOnThis}
+          />
 
           <WorkflowView issue={issue} />
 

@@ -1,0 +1,52 @@
+{
+  "project": "mohist-local",
+  "description": "Add a single primary runtime decision surface to Issue Detail and route runtime transport notices away from inline issue content.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Build the Issue Detail runtime decision surface",
+      "spec": "specs/issue-runtime-decision-surface/spec.md#issue-detail-renders-one-primary-runtime-decision-surface",
+      "description": "Implement a pure deriveRuntimeDecision() helper that maps existing API facts (workflowStage, health, approvalState, recovery, convergence, drift, startEligibility, workflowStageProgress, workflowTimeline, agentStatus) to exactly one summary (running/queued/approval-required/blocked/failed/done), the current task/check, and the context-specific action set. Build the RuntimeDecisionSurface component that renders that output, wire it to the existing approve/reject/retry/resume/rerun/stop/start mutations, and mount it above WorkflowView in IssueDetailPage while demoting the header pills, Actions card, and InlineApproval to supporting detail. Sessions and logs must stay reachable below as evidence.",
+      "acceptanceCriteria": [
+        "deriveRuntimeDecision() returns exactly one of running, queued, approval-required, blocked, failed, or done for representative fixtures covering each state.",
+        "A Check stage with a failed health/script verification resolves to 'failed', NOT 'approval required', even when approvalState.status is 'awaiting'.",
+        "When no explicit queue/wait signal is present, the helper falls back to running/idle rather than showing a false 'queued' (graceful degradation pending #23).",
+        "The surface names the current task/check using recovery.currentWorkItem, then workflowStageProgress.currentTaskTitle, then the first running task/check, then the stage name.",
+        "Surface action enablement follows recovery.allowedActions union workflowTimeline.availableActions; actions not present in those projections are disabled.",
+        "RuntimeDecisionSurface renders directly above the stage bar; the header pills, workflow step list, Actions card, and InlineApproval remain visible beneath it as supporting detail.",
+        "Sessions and logs remain reachable lower on Issue Detail as supporting evidence.",
+        "Unit tests for deriveRuntimeDecision() cover all six states, the failed-verification-overrides-approval case, current-task naming fallbacks, and action-availability following the projections.",
+        "Component tests render a single 'running' summary and a single 'approval required' summary near the top, each naming the current task/check and exposing the next action."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/widgets/issue-workflow/model/derive-runtime-decision.ts (+ unit tests), packages/web/src/widgets/issue-workflow/ui/RuntimeDecisionSurface.tsx (+ tests), and the integrated IssueDetailPage.tsx",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Decisions 1-5 of design.md. Keep derivation pure and React-free so precedence rules are unit-testable in isolation. Reuse the mutation hooks already wired in IssueDetailPage; do not duplicate query/mutation setup. Do not delete the legacy Actions card or InlineApproval in this task — demote them. Also satisfies 'Decision surface names the current task or check with its status', 'Decision surface exposes the context-specific next action', 'Sessions and logs are supporting evidence, not primary state', and the web-ui 'Issue Detail routes its primary runtime answer through the decision surface' requirement."
+    },
+    {
+      "id": "T-002",
+      "title": "Route runtime transport notices away from inline issue content",
+      "spec": "specs/issue-runtime-decision-surface/spec.md#runtime-transport-notices-are-routed-away-from-inline-issue-content",
+      "description": "Add a minimal hand-rolled toast host (no external dependency) and a useConnectionState(projectId) hook in events-hub.ts that exposes the SignalR HubConnection state (connecting/connected/reconnecting/disconnected). Route connection-disconnect, reconnect, and runner-drop notices to the toast host and/or the existing Activity surface, and audit the live-events to page render path so no transport text is rendered as plain inline content between Description, Commits, Comments, or other issue sections.",
+      "acceptanceCriteria": [
+        "useConnectionState(projectId) exposes connecting, connected, reconnecting, and disconnected states derived from HubConnection.onreconnecting/onreconnected/onclose.",
+        "Connection-disconnect, reconnect, and runner-drop notices render as toasts and/or Activity entries, never as plain inline text between issue content sections.",
+        "After the audit, Issue Detail content sections (Description, Commits, Comments, and other content regions) contain only issue content for a disconnected-transport fixture.",
+        "A component test renders IssueDetailPage over a disconnected-runtime fixture and asserts no transport notice text appears inline between content sections (covers the disconnected-runtime-notice rendering AC).",
+        "No new third-party toast dependency is introduced in packages/web/package.json."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/shared/ui/toast/ (toast host), useConnectionState in packages/web/src/shared/api/events-hub.ts, the audited render path, and the disconnected-runtime-notice component test",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Decision 6 of design.md. Constrain the toast host to transport/runner notices only; broader product toasts are out of scope. Depends on T-001 because the disconnected-runtime-notice test runs against the final IssueDetailPage layout that T-001 restructured (surface at top, content sections ordered). Also satisfies the web-ui 'Runtime transport notices do not render as inline issue content' requirement and the disconnected branch of the 'Decision surface has regression test coverage' requirement."
+    }
+  ]
+}
