@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
 import { useWorkflowProfiles, useWorkflowProfile } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
+import { CardSection } from '../../../shared/ui/components/card-section'
 import { SectionState } from './SectionState'
+import { SettingsSection } from './SettingsSection'
 
 function YamlViewer({ yaml }: { yaml: string }) {
   return (
-    <pre className="text-xs font-mono leading-relaxed text-foreground/85 whitespace-pre-wrap break-all bg-muted/40 rounded-md p-4 border max-h-[600px] overflow-auto">
+    <pre className="text-xs font-mono leading-relaxed text-foreground whitespace-pre-wrap break-all max-h-[600px] overflow-auto">
       {yaml}
     </pre>
   )
@@ -60,7 +62,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
   }
 
   return (
-    <div className="space-y-6">
+    <SettingsSection title="Workflow Profiles">
       <div>
         <button
           onClick={onBack}
@@ -71,7 +73,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
           All profiles
         </button>
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-medium text-foreground">{profile.displayName}</h3>
+          <h4 className="text-sm font-medium text-foreground">{profile.displayName}</h4>
           {profile.isDefault && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
               Default
@@ -81,55 +83,55 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
         <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{profile.id}</p>
         <p
           data-testid="workflow-profile-description"
-          className="text-sm text-foreground/90 mt-3 leading-relaxed whitespace-pre-line"
+          className="text-sm text-foreground mt-3 leading-relaxed whitespace-pre-line"
         >
           {profile.description}
         </p>
       </div>
 
-      <div className="space-y-3">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Stages</h4>
-        <div className="rounded-md border px-4 py-1">
+      <CardSection title="Stages" titleAs="h4" className="py-1">
+        <div>
           {profile.stages.map((s) => (
             <StageSummary key={s.stage} stage={s} />
           ))}
         </div>
-      </div>
+      </CardSection>
 
-      <div className="space-y-3">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Shared Stage Definition (YAML)</h4>
-        <p className="text-[11px] text-muted-foreground/80">
+      <CardSection title="Shared Stage Definition (YAML)" titleAs="h4">
+        <p className="text-[11px] text-muted-foreground mb-3">
           quick-fix and experiment reuse these stages from mohist/default; only the metadata above differs.
         </p>
         <YamlViewer yaml={profile.yaml} />
-      </div>
-    </div>
+      </CardSection>
+    </SettingsSection>
   )
 }
 
 function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      data-testid={`workflow-profile-${profile.id}`}
-      className="w-full text-left rounded-md border px-4 py-3 hover:bg-muted/50 transition-colors"
-    >
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground">{profile.displayName}</span>
-        {profile.isDefault && (
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
-            Default
-          </span>
-        )}
-      </div>
-      <p
-        data-testid={`workflow-profile-${profile.id}-description`}
-        className="text-xs text-foreground/85 mt-2 leading-relaxed whitespace-pre-line"
+    <CardSection className="p-0 hover:bg-muted/50 transition-colors">
+      <button
+        onClick={onClick}
+        data-testid={`workflow-profile-${profile.id}`}
+        className="w-full text-left p-4"
       >
-        {profile.description}
-      </p>
-      <p className="text-[10px] text-muted-foreground/70 mt-2 font-mono">{profile.id}</p>
-    </button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-foreground">{profile.displayName}</span>
+          {profile.isDefault && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
+              Default
+            </span>
+          )}
+        </div>
+        <p
+          data-testid={`workflow-profile-${profile.id}-description`}
+          className="text-xs text-muted-foreground mt-2 leading-relaxed whitespace-pre-line"
+        >
+          {profile.description}
+        </p>
+        <p className="text-[10px] text-muted-foreground/70 mt-2 font-mono">{profile.id}</p>
+      </button>
+    </CardSection>
   )
 }
 
@@ -156,18 +158,15 @@ export function WorkflowProfilesSection() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-medium text-foreground">Workflow Profiles</h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          Workflow profiles define how issues move through stages. Click a profile to view its definition.
-        </p>
-      </div>
+    <SettingsSection
+      title="Workflow Profiles"
+      description="Workflow profiles define how issues move through stages. Click a profile to view its definition."
+    >
       <div className="space-y-2">
         {profiles.map((p) => (
           <ProfileCard key={p.id} profile={p} onClick={() => setSelectedId(p.id)} />
         ))}
       </div>
-    </div>
+    </SettingsSection>
   )
 }

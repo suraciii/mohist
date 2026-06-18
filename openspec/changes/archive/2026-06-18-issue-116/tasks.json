@@ -1,0 +1,179 @@
+{
+  "project": "mohist",
+  "description": "Settings visual consistency refactor: unify all 6 Settings tabs on CardSection + a new SettingsSection page wrapper, converge text colors to three tokens, and source all icons from lucide-react.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Prepare shared Settings card + section wrappers",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-sections-use-the-unified-card-component",
+      "description": "Foundational shared primitives consumed by every tab. Fix CardSection's default-tone title token from text-foreground/80 to text-muted-foreground (it currently violates the new palette and is shared with IssueDetailPage). Add a new SettingsSection component (pages/settings/ui/SettingsSection.tsx) that renders the canonical page title <h3 className='text-sm font-medium text-foreground'> plus an optional description. Align SectionState loading skeleton to CardSection's rounded-lg border bg-card/50; keep its empty-state rounded-md border-dashed as a sub-element.",
+      "acceptanceCriteria": [
+        "CardSection default tone title renders text-muted-foreground (no text-foreground/80 in card-section.tsx)",
+        "SettingsSection component exists at pages/settings/ui/SettingsSection.tsx, exported, rendering an <h3> title and optional muted description",
+        "SectionState skeleton uses rounded-lg border bg-card/50; empty state keeps rounded-md border-dashed",
+        "IssueDetailPage (CardSection consumer) still renders without regression — web build (tsc -b) succeeds",
+        "pnpm --filter web run test:run passes for any CardSection/SectionState-related tests"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/shared/ui/components/card-section.tsx (edited), packages/web/src/pages/settings/ui/SettingsSection.tsx (new), packages/web/src/pages/settings/ui/SectionState.tsx (edited)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do NOT change CardSection default titleAs (stays h2) to avoid regressing IssueDetailPage; only the title text token changes. SettingsSection is settings-local, not in shared/ui."
+    },
+    {
+      "id": "T-002",
+      "title": "Replace ModelSelect inline SVG icons with lucide-react",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-icons-come-solely-from-lucide-react",
+      "description": "Self-contained icon-source migration, independent of the card/title work. Delete the three local icon components (SearchIcon, ChevronDownIcon, XIcon) in shared/ui/ModelSelect.tsx (lines 33-55); import Search, ChevronDown, X from lucide-react; swap the three usage sites (lines ~216, ~222, ~283). Lucide icons accept the same className (including the isCompact conditional sizing), so no layout change.",
+      "acceptanceCriteria": [
+        "ModelSelect.tsx defines no local SearchIcon/ChevronDownIcon/XIcon components and contains no <svg",
+        "All three icons are imported from lucide-react",
+        "packages/web/src/shared/ui/ModelSelect.test.tsx passes unchanged",
+        "Search chevron and clear affordances render at the same size/position as before"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/web/src/shared/ui/ModelSelect.tsx (edited)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Parallel with T-001; ModelSelect is a shared component but this task only touches ModelSelect.tsx, disjoint from the tab files."
+    },
+    {
+      "id": "T-003",
+      "title": "Migrate AI tab to unified wrappers and tokens",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-sections-use-the-unified-card-component",
+      "description": "In AiSettingsSection.tsx, wrap the page content in <SettingsSection title='External Coder Agent'> (remove the local <h3 className='text-sm font-medium'>). Convert the rounded-md border bg-muted px-3 py-2 model/overrides block to CardSection. Remap text-foreground/80 labels to text-muted-foreground.",
+      "acceptanceCriteria": [
+        "No local page-title <h3>; page title comes from SettingsSection",
+        "The model/overrides block uses CardSection (no hand-rolled rounded-md border bg-muted wrapper)",
+        "Zero matches for text-foreground/8 in AiSettingsSection.tsx",
+        "packages/web/src/pages/settings/ui/AiSettingsSection.test.tsx passes unchanged in intent"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/AiSettingsSection.tsx (edited)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Also satisfies token-palette requirement for this file. ModelSelect (T-002) is imported but unaffected by this task."
+    },
+    {
+      "id": "T-004",
+      "title": "Migrate Agent/Runtime tab to unified wrappers and tokens",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-text-colors-use-the-converged-token-palette",
+      "description": "In AgentSettingsSection.tsx, wrap the page content in <SettingsSection title='Coder Agent Runtime'>. Convert the rounded-md bg-muted border px-4 py-3 inner box to CardSection. Remap text-foreground/80 and text-foreground/85: form labels -> text-muted-foreground, body text -> text-foreground. Remove any text-gray-*.",
+      "acceptanceCriteria": [
+        "Page title comes from SettingsSection; inner box uses CardSection (no hand-rolled rounded-md bg-muted border wrapper)",
+        "Zero matches for text-foreground/8 and text-gray- in AgentSettingsSection.tsx",
+        "Timeouts/Concurrency/Recovery sub-headings still render correctly",
+        "SettingsPage.test.tsx passes with the agent tab rendering"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/AgentSettingsSection.tsx (edited)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "InputField is an internal sub-component; remap its label token, keep Input form-control styling untouched."
+    },
+    {
+      "id": "T-005",
+      "title": "Migrate System tab to unified page title and card-title parity",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-heading-hierarchy-is-standardized",
+      "description": "In SystemSettingsSection.tsx, wrap the page content in <SettingsSection title='System'> (remove any local page h3). All cards already use CardSection; verify their titles share the fixed uppercase/tracked style so the System tab no longer visually jumps from other tabs. Remap remaining text-foreground/80 and text-foreground/70 on sub-element labels (labels -> text-muted-foreground). Keep sub-element rounded-md border info boxes (design D3 — not cards).",
+      "acceptanceCriteria": [
+        "Page title comes from SettingsSection; System tab card titles match the CardSection fixed style used by other tabs",
+        "Zero matches for text-foreground/8 in SystemSettingsSection.tsx",
+        "Sub-element rounded-md border info boxes are preserved (not converted to CardSection)",
+        "settings-system-diagnostics functional behavior (log level, diagnostics) unchanged; SettingsPage.test.tsx passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/SystemSettingsSection.tsx (edited)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "System tab is already closest to the target since it uses CardSection; work is mostly page-title wrapping + sub-element token cleanup."
+    },
+    {
+      "id": "T-006",
+      "title": "Migrate Repositories tab to CardSection and remove hardcoded gray",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-text-colors-use-the-converged-token-palette",
+      "description": "In RepositoriesSection.tsx, wrap the page content in <SettingsSection title='Repositories'>. Convert the repo-row rounded-lg border cards and the rounded-lg border bg-muted/50 add-repository card to CardSection. Replace the hardcoded text-gray-500 with text-muted-foreground.",
+      "acceptanceCriteria": [
+        "Zero matches for text-gray- and text-foreground/8 in RepositoriesSection.tsx",
+        "Repo rows and the add-repository block use CardSection; no hand-rolled rounded-lg border card wrapper remains",
+        "Page title comes from SettingsSection",
+        "SettingsPage.test.tsx passes with the repositories tab rendering"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/RepositoriesSection.tsx (edited)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Input form controls (rounded-lg border-input) stay untouched per design D3."
+    },
+    {
+      "id": "T-007",
+      "title": "Migrate Workflows tab to CardSection and converged tokens",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-text-colors-use-the-converged-token-palette",
+      "description": "In WorkflowProfilesSection.tsx, wrap the page content in <SettingsSection title='Workflow Profiles'>. Convert the profile accordion (rounded-md border px-4 py-3) and the stage-definition box (rounded-md border px-4 py-1) to CardSection style. Remap text-foreground/85: YAML preview body -> text-foreground, captions/descriptions -> text-muted-foreground.",
+      "acceptanceCriteria": [
+        "Zero matches for text-foreground/8 in WorkflowProfilesSection.tsx",
+        "Profile and stage cards use CardSection (no hand-rolled rounded-md border card wrapper)",
+        "Page title comes from SettingsSection",
+        "SettingsPage.test.tsx passes with the workflows tab rendering"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/WorkflowProfilesSection.tsx (edited)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "SectionState (used here for loading/error/empty) is handled in T-001."
+    },
+    {
+      "id": "T-008",
+      "title": "Migrate Templates tab (TemplatesSection + TemplateEditor + NewTemplateDialog)",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-sections-use-the-unified-card-component",
+      "description": "Migrate the full Templates module. In TemplatesSection.tsx wrap the page in <SettingsSection title='Templates'> and convert TemplateRow (rounded-lg border bg-card/50 p-3) to CardSection. In TemplateEditor.tsx convert the outer card (rounded-lg border bg-card/60 p-4) to CardSection and remap text-foreground/80 labels to text-muted-foreground. In NewTemplateDialog.tsx remap text-foreground/80 labels to text-muted-foreground, leaving the rounded-lg border-input form controls untouched (design D3).",
+      "acceptanceCriteria": [
+        "TemplateRow and TemplateEditor outer card use CardSection; no hand-rolled rounded-lg border card wrapper in these files",
+        "Zero matches for text-foreground/8 and text-gray- across TemplatesSection.tsx, TemplateEditor.tsx, NewTemplateDialog.tsx",
+        "No new <svg introduced; Input/Textarea form-control rounding (rounded-lg border-input) preserved",
+        "SettingsPage.test.tsx passes with the templates tab rendering"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/TemplatesSection.tsx, TemplateEditor.tsx, NewTemplateDialog.tsx (edited)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Three files form one feature module, so migrated together to avoid an inconsistent intermediate state."
+    },
+    {
+      "id": "T-009",
+      "title": "Add settings consistency regression test and final verification",
+      "spec": "specs/settings-visual-consistency/spec.md#settings-text-colors-use-the-converged-token-palette",
+      "description": "Turn the one-time acceptance grep into a permanent contract. Add a vitest spec (e.g. pages/settings/ui/settings-consistency.test.ts) that reads all settings source files and asserts zero matches for text-gray-, text-foreground/8, /75, /80. Because the actual icon target (ModelSelect) lives in shared/ui rather than pages/settings, the test SHALL also assert shared/ui/ModelSelect.tsx contains no <svg and no local SearchIcon/ChevronDownIcon/XIcon definitions — making the T-002 icon contract permanent too. Then run the full settings test suite and typecheck to confirm no behavioral regression.",
+      "acceptanceCriteria": [
+        "New settings-consistency.test.ts passes",
+        "Repo-wide grep under packages/web/src/pages/settings shows 0 text-gray-, 0 text-foreground/8, 0 text-foreground/75, 0 text-foreground/80",
+        "shared/ui/ModelSelect.tsx shows 0 <svg and 0 local SearchIcon/ChevronDownIcon/XIcon definitions (permanent icon contract)",
+        "SettingsPage.test.tsx, AiSettingsSection.test.tsx, and shared/ui/ModelSelect.test.tsx all pass",
+        "pnpm --filter web exec tsc -b (typecheck) is clean"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/web/src/pages/settings/ui/settings-consistency.test.ts (new) + green test/typecheck run",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008"],
+      "passes": false,
+      "notes": "This is the only standalone test task; all other tasks include their own per-file test verification per the task-splitting rules. axe-core/Playwright Before-After screenshots are handled at integration/review time, not here."
+    }
+  ]
+}

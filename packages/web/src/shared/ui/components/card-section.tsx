@@ -29,7 +29,7 @@ const toneWrapper: Record<CardSectionTone, string> = {
 }
 
 const toneTitle: Record<CardSectionTone, string> = {
-  default: 'text-foreground/80',
+  default: 'text-muted-foreground',
   amber: 'text-amber-800',
   red: 'text-red-800',
   orange: 'text-orange-800',

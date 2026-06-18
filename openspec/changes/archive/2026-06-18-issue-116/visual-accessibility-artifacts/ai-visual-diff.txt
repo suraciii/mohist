@@ -1,0 +1,5 @@
+Section: ai
+Before: External Coder Agent used a hand-rolled rounded-md border bg-muted card and local h3 page title.
+After: page title is rendered by SettingsSection as h3 "External Coder Agent".
+After: detected 1 CardSection-style rounded-lg border containers in the rendered snapshot.
+Diff verdict: expected visual contract migration observed in deterministic rendered artifact.

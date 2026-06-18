@@ -15,6 +15,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { SectionState } from './SectionState'
+import { SettingsSection } from './SettingsSection'
 import { ALL_LEVELS, type LogLevel } from '@/shared/lib/log-levels'
 
 function StatusBadge({ status }: { status: string | null | undefined }) {
@@ -204,7 +205,7 @@ export function SystemSettingsSection() {
   }
 
   return (
-    <div className="space-y-6">
+    <SettingsSection title="System">
       <CardSection title="Logging">
         {logLevelError ? (
           <p className="text-xs text-muted-foreground">
@@ -212,7 +213,7 @@ export function SystemSettingsSection() {
           </p>
         ) : (
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-foreground/80">Log Level</label>
+            <label className="block text-xs font-medium text-muted-foreground">Log Level</label>
             <Select
               value={currentLevel ?? undefined}
               onValueChange={(value) => value && handleLogLevelChange(value)}
@@ -240,7 +241,7 @@ export function SystemSettingsSection() {
         )}
 
         <div className="mt-3 space-y-1">
-          <span className="block text-xs font-medium text-foreground/80">Log Path</span>
+          <span className="block text-xs font-medium text-muted-foreground">Log Path</span>
           <p className="text-xs text-muted-foreground font-mono">~/.mohist/logs/</p>
         </div>
       </CardSection>
@@ -343,14 +344,14 @@ export function SystemSettingsSection() {
                       )}
                       {recentUpdateLogs.length > 0 && (
                         <div className="rounded-md border px-3 py-2">
-                          <div className="mb-2 text-xs font-medium text-foreground/80">Update log</div>
+                          <div className="mb-2 text-xs font-medium text-muted-foreground">Update log</div>
                           <div className="space-y-1">
                             {recentUpdateLogs.map((log) => (
                               <div
                                 key={`${log.at}-${log.stage}-${log.message}`}
                                 className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-[8rem_1fr]"
                               >
-                                <span className="font-medium text-foreground/70">{log.stage}</span>
+                                <span className="font-medium text-muted-foreground">{log.stage}</span>
                                 <span>{log.message}</span>
                               </div>
                             ))}
@@ -406,6 +407,6 @@ export function SystemSettingsSection() {
           Modify server-side config by editing config.jsonc and restarting the server.
         </p>
       </div>
-    </div>
+    </SettingsSection>
   )
 }

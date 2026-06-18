@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { InfoIcon, PlusIcon, SearchIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
+import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { useProject } from '../../../entities/project'
 import {
@@ -10,6 +11,7 @@ import {
 } from '../../../entities/template'
 import type { ProjectTemplate, SystemTemplate } from '../../../entities/template'
 import { SectionState } from './SectionState'
+import { SettingsSection } from './SettingsSection'
 import { TemplateEditor, type TemplateEditorTarget, type EditorMode } from './TemplateEditor'
 import { NewTemplateDialog } from './NewTemplateDialog'
 
@@ -51,7 +53,7 @@ function StageBadge({ stage }: { stage: string | null }) {
     <span
       data-testid="template-stage-badge"
       title={`Stage: ${stage}`}
-      className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-foreground/80"
+      className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
     >
       <span className="inline-block h-1.5 w-1.5 rounded-full bg-foreground/40" />
       {stage}
@@ -132,9 +134,9 @@ function TemplateRow({
   }
 
   return (
-    <div
+    <CardSection
       data-testid={`template-row-${template.key}`}
-      className="space-y-2 rounded-lg border border-border bg-card/50 p-3"
+      className="space-y-2 p-3"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
@@ -203,7 +205,7 @@ function TemplateRow({
           )}
         </div>
       </div>
-    </div>
+    </CardSection>
   )
 }
 
@@ -240,15 +242,11 @@ export function TemplatesSection() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-medium text-foreground">Templates</h3>
-          <p className="text-xs text-muted-foreground mt-1">
-            Manage prompt templates for this project. Override system templates or add
-            project-unique keys.
-          </p>
-        </div>
+    <SettingsSection
+      title="Templates"
+      description="Manage prompt templates for this project. Override system templates or add project-unique keys."
+    >
+      <div className="flex justify-end">
         <Button
           size="sm"
           onClick={() => setNewDialogOpen(true)}
@@ -318,6 +316,6 @@ export function TemplatesSection() {
         projectId={projectId!}
         onClose={() => setNewDialogOpen(false)}
       />
-    </div>
+    </SettingsSection>
   )
 }

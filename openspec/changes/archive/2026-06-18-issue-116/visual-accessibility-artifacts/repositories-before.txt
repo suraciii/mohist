@@ -1,0 +1,1 @@
+Before: Repository rows used rounded-lg border bg-card/50 and included hardcoded text-gray-500.
