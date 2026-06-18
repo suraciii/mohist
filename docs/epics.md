@@ -17,13 +17,24 @@ Epic 是把零散 issue 组织成产品里程碑的工具。如果你只是被�
 
 ## 创建 Epic
 
+### CLI（推荐）
+
+```bash
+mo epic create "Add user authentication" \
+  --description "完整登录系统：注册、登录、密码重置、session 管理" \
+  --priority p1 \
+  --project <project-name-or-id>
+```
+
+`--description` / `-d` 接收长 markdown（推荐先写进文件再传入）；`--priority` 用 `p0`–`p3`。
+
 ### Web UI
 
 Epics 页（顶部导航）→ **New Epic**。
 
 ### API
 
-Epic 当前只能通过 API 创建（CLI 暂无 `mo epic` 命令）：
+也可直接调 API：
 
 ```bash
 curl -X POST http://localhost:3456/api/projects/<your-project>/epics \
@@ -69,15 +80,24 @@ curl -X POST http://localhost:3456/api/projects/<your-project>/epics \
 
 ## 把 Issue 关联到 Epic
 
-Issue 创建时指定（CLI 还不支持，需要 API）：
+### CLI（推荐）
+
+```bash
+mo epic link <epic-id-or-number> <issue-id-or-number>
+mo epic unlink <epic-id-or-number> <issue-id>
+```
+
+两者都接受 id 或 number。约束：一个 issue 只能属于一个 primary epic，重复关联会报 `DUPLICATE_EPIC_MEMBERSHIP`。
+
+### 其他方式
+
+Web UI 上 issue 详情页 → Edit → 选 Epic；或直接调 API：
 
 ```bash
 curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/issues \
   -H "Content-Type: application/json" \
   -d '{"issueId": "42"}'
 ```
-
-或 Web UI 上 issue 详情页 → Edit → 选 Epic。
 
 一个 issue 只能属于一个 epic（primary epic）。
 
@@ -125,13 +145,17 @@ curl http://localhost:3456/api/projects/<project>/epics/1
 Mark done：
 
 ```bash
-curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/done
+mo epic done <epic-id-or-number>
+# 或 API：
+# curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/done
 ```
 
 Close：
 
 ```bash
-curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/close
+mo epic close <epic-id-or-number>
+# 或 API：
+# curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/close
 ```
 
 ## 推荐工作流
@@ -151,7 +175,6 @@ Epic 只是组织工具，不参与执行。
 
 Roadmap（已知不足）：
 
-- CLI 暂无 `mo epic` 命令（用 API）
 - 没有 roadmap 时间线视图（只有列表）
 - Epic 不能嵌套
 - 没有 epic 间的依赖图

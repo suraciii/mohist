@@ -67,11 +67,35 @@ Switch to domain expert perspective. Explore the current technical implementatio
 
 **Gate:** Are the domain concepts accurate (verifiable against the code)? Are the real constraints identified? Is this the minimum domain context needed to plan — or have you drifted into premature design? Trim anything that looks like an implementation recipe.
 
-### 4. Converge into a PRD
+### 4. Scope: one issue or many?
 
-Assemble the three voices into a single PRD using the structure in `references/issue-body-template.md`. The PRD is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the `mohist` skill's job at issue-creation time.
+By now you understand the need (User Voice), the target product form (Product Shape), and the domain it touches (Domain Model). Before converging, decide the output shape: **one issue, or several.**
 
-Present the assembled PRD to the user for confirmation before any issue is created.
+Apply these rules **in this priority order** — a higher rule always overrides a lower one:
+
+1. **Bounded context (hard rule).** If the change touches more than one bounded context (e.g. Issue + Agent/Session + Web App-Shell), it MUST be split — one issue per context's internal change. Different contexts have different models, invariants, and owners; bundling them hides complexity and couples review and rollback. This rule never yields to the ones below.
+2. **Concern.** Within a context, if one issue would solve more than one concern, split it — one issue per concern. Tell-tale signs: you cannot name the issue in one phrase, or its acceptance criteria cluster into unrelated groups.
+3. **Scale.** If a single-context, single-concern change is still too large to plan/build/check in one workflow run, split it along natural seams.
+
+Then decide whether the split issues form an **epic**:
+
+- If they share **one milestone goal** (a single product outcome that ties them together) → produce an **epic + one PRD per issue**. The epic description captures the milestone (Goal / Background / Non-goals / Scope); each child issue gets its own three-voice PRD scoped to its context + concern. State inter-issue dependencies (which blocks which).
+- If they are independent (no shared milestone) → produce **several standalone issue PRDs**, no epic.
+
+If no rule triggers a split → single issue; proceed to Converge with one PRD.
+
+**Gate:** Can you name, for each proposed issue, exactly one bounded context and one concern? If any issue still bundles two contexts or two concerns, split again. If you propose an epic, can you state its milestone goal in one sentence? If not, the issues may not belong together.
+
+### 5. Converge
+
+Branch on the scope decision:
+
+- **Single issue:** assemble the three voices into one PRD using `references/issue-body-template.md`.
+- **Epic + issues:** write the epic description (Goal / Background / Non-goals / Scope — shape in the `mohist` skill's `references/epic-templates.md`), then one PRD per child issue using `references/issue-body-template.md`, each scoped to its own context + concern.
+
+The PRD content is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the `mohist` skill's job at creation time.
+
+Present the assembled output (single PRD, or epic description + issue PRDs) to the user for confirmation before anything is created.
 
 ## Iteration
 
@@ -90,14 +114,17 @@ Common backtrack triggers:
 
 - Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist` skill's responsibility. This skill produces PRD *content*; `mohist` turns it into an issue.
 - Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
+- When splitting, apply the rules strictly in priority order: bounded context → concern → scale. Do **not** split by UI surface (e.g. "the attention zone" vs "the pulse zone") or by phasing (e.g. "v1 snapshot" vs "v2 trend") — those are neither context nor concern boundaries, and they produce coupled, mis-scoped issues. Do not split by scale alone either: if context and concern are identical, keep it in one issue even if large (express the phasing inside that issue instead).
 - Do not start from a blank slate and patrol for random problems. Always begin from a user-provided seed.
 - Do not let Domain Model grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement.
 
 ## Handoff
 
-When the PRD is confirmed:
+When the output is confirmed:
 
-1. Point the user to the `mohist` skill to create the issue: the `mohist` skill will read the PRD, recommend a workflow and risk, generate frontmatter, and run `mo issue create` after user confirmation.
-2. The PRD content (the three voices + acceptance criteria + non-goals) becomes the issue body. `mohist` is responsible for the frontmatter and CLI mechanics.
+- **Single issue:** point the user to the `mohist` skill — it adds frontmatter, recommends workflow/risk, and runs `mo issue create` after confirmation.
+- **Epic + issues:** point the user to the `mohist` skill — it creates the epic (`mo epic create`), creates each issue (`mo issue create`), links them (`mo epic link`), and sets prerequisites. The epic description and each issue PRD become the bodies; `mohist` owns all CLI mechanics.
 
-The full PRD template is at `references/issue-body-template.md`.
+In both cases this skill produces only **content**; `mohist` owns the frontmatter and CLI execution.
+
+The issue PRD template is at `references/issue-body-template.md`. The epic description shape (Goal / Background / Non-goals / Scope) is in the `mohist` skill's `references/epic-templates.md`.

@@ -1,6 +1,6 @@
 ---
 name: mohist
-description: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。
+description: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。
 ---
 
 # mohist
@@ -149,3 +149,95 @@ When assigning priority, use lowercase (`p0`–`p3`):
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.
 - [ ] The body's five sections appear in order: User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals.
 - [ ] The user has confirmed the recommendation and body summary before `mo issue create` runs.
+
+## Creating epics
+
+This skill also owns the **mechanics** of creating a Mohist epic. An epic is an
+organizational milestone that groups 3+ issues toward a single product goal; it
+does **not** participate in workflow execution and has no risk or workflow
+fields. Epic content is a lightweight milestone description, not the five-section
+PRD used for issues.
+
+### When to create an epic (and when not to)
+
+Create an epic when ALL hold:
+
+- The goal needs **3+ issues** to complete.
+- There is a **clear milestone outcome** you can name in one sentence.
+- You want to **track progress** toward that outcome as a unit.
+
+Do NOT create an epic for:
+
+- A single independent change → just create an issue.
+- A fuzzy goal you can't yet bound → leave issues in backlog until it clarifies.
+- Refactors or technical cleanup with no product milestone → use issues + labels.
+
+When in doubt, start with issues; promote to an epic once the milestone shape is
+clear. Over-creating epics is the failure mode to avoid.
+
+### Epic shape (no frontmatter)
+
+Unlike issues, an epic has **no frontmatter, no workflow, no risk**. Do not invent
+frontmatter fields for an epic — they are ignored. An epic has only:
+`title`, `description` (long markdown), `priority`, and a derived `status`.
+
+The `description` follows the milestone template in `references/epic-templates.md`:
+Goal, Background, Non-goals, Scope (the issues it will contain).
+
+### Priority guidance for epics
+
+Epic priority rates the **milestone's** importance, not any single issue's. Use
+`p0`–`p3` (lowercase), same scale semantics as issues but applied to the milestone.
+
+### Creating an epic
+
+```bash
+mo epic create "<title>" --description "<markdown>" --priority p2
+# -d / --description: the milestone markdown (see epic-templates.md)
+# -p / --priority: p0|p1|p2|p3
+# --project <id>: target project (else active project)
+```
+
+Note: `mo epic create` currently takes the description inline via `-d` only; there
+is no `--description-file` yet. For long descriptions, write the markdown to a
+file first, then pass its contents to `-d` via your shell, or use the API. (A
+`--description-file` flag to match `mo issue create --body-file` is tracked as a
+follow-up.)
+
+### Linking issues to an epic
+
+```bash
+mo epic link <epic-id-or-number> <issue-id-or-number>
+mo epic unlink <epic-id-or-number> <issue-id>
+```
+
+Constraint: **an issue belongs to at most one primary epic.** Linking an issue
+already in another epic fails with `DUPLICATE_EPIC_MEMBERSHIP`. Both args accept
+id or number.
+
+### Lifecycle: done vs close
+
+- `mo epic done <id>` — marks the milestone shipped. Requires **all** linked
+  issues delivered; else fails with `EPIC_NOT_READY_TO_MARK_DONE`.
+- `mo epic close <id>` — abandons the milestone (not done, just dropped).
+
+Use `done` for completed milestones, `close` for cancelled ones.
+
+### User confirmation flow
+
+Before creating, present to the user and wait for confirmation:
+
+1. `title`, a one-line `description` gist, and `priority`.
+2. The planned linked-issue list (numbers + titles) — or state "link later".
+3. On confirm, run `mo epic create`; then `mo epic link` for each planned issue.
+
+Never create an epic without confirmation.
+
+### End-to-end creation checklist
+
+- [ ] The goal genuinely needs 3+ issues (not over-creating).
+- [ ] `description` follows Goal/Background/Non-goals/Scope.
+- [ ] `priority` is `p0`–`p3`.
+- [ ] No frontmatter/workflow/risk fields invented.
+- [ ] User confirmed title, description summary, priority, and link plan.
+- [ ] Lifecycle choice (done later vs close) is understood.
