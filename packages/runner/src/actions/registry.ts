@@ -7,12 +7,18 @@ import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
 import {
+  buildCleanupWith,
+  resolveMaxCleanupAttempts,
+  type WorktreeSnapshot,
+} from "../runtime/worktree-cleanup.js"
+import {
   abortRebaseIfInProgressAction,
   applyWorkflowAgentDefault,
   combinedRebaseGitOutput,
   rebaseAction,
   rebaseConflictFiles,
   rebaseStatusAction,
+  runRebaseResolverFollowup,
   runRebaseConflictResolver,
   verifyRebaseCompleteAction,
 } from "./rebase.js"
@@ -198,6 +204,20 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
       }
       return prepareDirtyOutput(baseBranch, null, null, [], 0, clean.output, "Prepare aborted: worktree is dirty before rebase. Commit or clean the workspace before retrying.")
     }
+    if (conflictResolver) {
+      const cleanup = await prepareResolverCleanup(
+        context,
+        conflictResolver,
+        [],
+        0,
+        "before-rebase",
+      )
+      const output = [initialStatus.stdout, ...cleanup.outputs].filter(Boolean).join("\n\n")
+      if (cleanup.ok) {
+        return await prepareAfterInitialClean(context, baseBranch, remote, maxRetries, conflictResolver, output)
+      }
+      return prepareDirtyOutput(baseBranch, null, null, [], 0, output, cleanup.message ?? "Prepare aborted: worktree is dirty before rebase. Commit or clean the workspace before retrying.")
+    }
     return prepareDirtyOutput(baseBranch, null, null, [], 0, initialStatus.stdout, "Prepare aborted: worktree is dirty before rebase. Commit or clean the workspace before retrying.")
   }
 
@@ -234,7 +254,7 @@ async function prepareAfterInitialClean(
   if (rebaseResult.success) {
     const after = await git(workDir, ["rev-parse", "HEAD"], context.signal)
     const preparedHeadSha = after.success ? after.stdout.trim() : null
-    const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseOutput)
+    const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseOutput, null)
     if (clean) return clean
     return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseOutput, undefined)
   }
@@ -268,8 +288,25 @@ async function prepareAfterInitialClean(
     if (verified.ok) {
       const after = await git(workDir, ["rev-parse", "HEAD"], context.signal)
       const preparedHeadSha = after.success ? after.stdout.trim() : null
-      const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, allConflicts.flat(), attempts, combinedRebaseGitOutput(gitOutputs))
-      if (clean) return clean
+      const cleanup = await prepareResolverCleanup(
+        context,
+        conflictResolver,
+        allConflicts.flat(),
+        attempts,
+        "after-rebase",
+      )
+      gitOutputs.push(...cleanup.outputs)
+      if (!cleanup.ok) {
+        return prepareDirtyOutput(
+          baseBranch,
+          preparedBaseSha,
+          preparedHeadSha,
+          allConflicts.flat(),
+          attempts,
+          combinedRebaseGitOutput(gitOutputs),
+          cleanup.message ?? "Prepare failed: worktree remained dirty after rebase.",
+        )
+      }
       return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, allConflicts.flat(), attempts, combinedRebaseGitOutput(gitOutputs), undefined)
     }
 
@@ -289,6 +326,7 @@ async function prepareCleanWorktreeResult(
   conflicts: string[],
   resolveAttempts: number,
   gitOutput: string,
+  dirtyMessage: string | null,
 ): Promise<ActionResult | null> {
   const status = await git(context.workDir, ["status", "--porcelain"], context.signal)
   if (!status.success) {
@@ -307,7 +345,167 @@ async function prepareCleanWorktreeResult(
     return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, undefined)
   }
   const output = [gitOutput, "Prepare left a dirty worktree after rebase:", status.stdout.trim()].filter(Boolean).join("\n\n")
-  return prepareDirtyOutput(baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, "Prepare failed: worktree remained dirty after rebase.")
+  return prepareDirtyOutput(baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, dirtyMessage ?? "Prepare failed: worktree remained dirty after rebase.")
+}
+
+async function prepareResolverCleanup(
+  context: ActionContext,
+  conflictResolver: JsonObject,
+  conflicts: string[],
+  resolveAttempts: number,
+  phase: "before-rebase" | "after-rebase",
+): Promise<{ ok: boolean; outputs: string[]; message: string | null }> {
+  const outputs: string[] = []
+  let snapshot = await prepareWorktreeSnapshot(context)
+  if (snapshot.kind === "error") {
+    return {
+      ok: false,
+      outputs: [snapshot.output],
+      message: phase === "before-rebase"
+        ? "Prepare failed: could not inspect dirty worktree before rebase."
+        : "Prepare failed: could not inspect worktree after rebase conflict resolution.",
+    }
+  }
+  if (snapshot.snapshot.isClean) return { ok: true, outputs, message: null }
+
+  const maxCleanupAttempts = resolveMaxCleanupAttempts(context.variables)
+  let cleanupAttempts = 0
+  while (!snapshot.snapshot.isClean && cleanupAttempts < maxCleanupAttempts) {
+    cleanupAttempts += 1
+    const cleanupWork = prepareConflictCleanupWorkItem(context, resolveAttempts, phase)
+    const cleanupWith = buildCleanupWith(cleanupWork, {
+      prompt: prepareConflictCleanupBasePrompt(conflicts, phase),
+      ...objectInput(conflictResolver, "with"),
+    }, snapshot.snapshot, cleanupAttempts)
+    cleanupWith["session"] = prepareConflictResolverSession(context, conflictResolver, resolveAttempts)
+    applyWorkflowAgentDefault(cleanupWith, context.variables)
+    const cleanupResult = await runRebaseResolverFollowup(
+      context,
+      stringInput(conflictResolver, "title") ?? "Clean up rebase conflict resolution",
+      cleanupWith,
+      `conflict-cleanup-${resolveAttempts}-${cleanupAttempts}`,
+    )
+    if (cleanupResult.output) outputs.push(cleanupResult.output)
+    if (cleanupResult.status !== "success") {
+      return {
+        ok: false,
+        outputs,
+        message: `Prepare failed: conflict resolver cleanup attempt ${cleanupAttempts} failed: ${cleanupResult.message ?? cleanupResult.status}`,
+      }
+    }
+
+    snapshot = await prepareWorktreeSnapshot(context)
+    if (snapshot.kind === "error") {
+      return {
+        ok: false,
+        outputs: [...outputs, snapshot.output],
+        message: "Prepare failed: could not inspect worktree after prepare cleanup.",
+      }
+    }
+  }
+
+  if (snapshot.snapshot.isClean) {
+    if (cleanupAttempts > 0) outputs.push(`Prepare resolver cleaned ${phase === "before-rebase" ? "pre-rebase" : "post-rebase"} worktree after ${cleanupAttempts} cleanup attempt(s).`)
+    return { ok: true, outputs, message: null }
+  }
+
+  outputs.push(formatPrepareDirtySnapshot("Prepare resolver left a dirty worktree after cleanup:", snapshot.snapshot))
+  return {
+    ok: false,
+    outputs,
+    message: `Prepare failed: worktree remained dirty after ${cleanupAttempts} conflict resolver cleanup attempt(s).`,
+  }
+}
+
+async function prepareWorktreeSnapshot(context: ActionContext): Promise<
+  | { kind: "ok"; snapshot: WorktreeSnapshot }
+  | { kind: "error"; output: string; exitCode: number }
+> {
+  const status = await git(context.workDir, ["status", "--porcelain"], context.signal)
+  if (!status.success) {
+    return {
+      kind: "error",
+      output: status.combinedOutput || `git status --porcelain failed with exit ${status.exitCode}`,
+      exitCode: status.exitCode,
+    }
+  }
+  return { kind: "ok", snapshot: parsePorcelainSnapshot(status.stdout) }
+}
+
+function parsePorcelainSnapshot(status: string): WorktreeSnapshot {
+  const staged: string[] = []
+  const unstaged: string[] = []
+  const untracked: string[] = []
+
+  for (const rawLine of status.split(/\r?\n/)) {
+    if (!rawLine.trim()) continue
+    if (rawLine.startsWith("?? ")) {
+      untracked.push(rawLine.slice(3).trim())
+      continue
+    }
+    const indexStatus = rawLine[0]
+    const worktreeStatus = rawLine[1]
+    const path = rawLine.slice(3).trim()
+    if (!path) continue
+    if (indexStatus !== " " && indexStatus !== "?") staged.push(path)
+    if (worktreeStatus !== " " && worktreeStatus !== "?") unstaged.push(path)
+  }
+
+  return {
+    staged: [...new Set(staged)],
+    unstaged: [...new Set(unstaged)],
+    untracked: [...new Set(untracked)],
+    isClean: staged.length === 0 && unstaged.length === 0 && untracked.length === 0,
+  }
+}
+
+function prepareConflictCleanupWorkItem(context: ActionContext, resolveAttempts: number, phase: "before-rebase" | "after-rebase"): WorkItem {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: `${context.workId}-${phase}-cleanup-${resolveAttempts}`,
+    workType: "task",
+    stage: context.stage,
+    title: phase === "before-rebase" ? "Clean up prepare retry worktree" : "Clean up rebase conflict resolution",
+    uses: "mohist/acp-agent",
+    with: null,
+    variables: context.variables,
+    projectId: context.projectId,
+    issueNumber: context.issueNumber,
+  }
+}
+
+function prepareConflictResolverSession(context: ActionContext, conflictResolver: JsonObject, resolveAttempts: number) {
+  return stringInput(objectInput(conflictResolver, "with"), "session") ?? `${context.workId}-conflict-resolve-${resolveAttempts}`
+}
+
+function prepareConflictCleanupBasePrompt(conflicts: string[], phase: "before-rebase" | "after-rebase") {
+  const list = conflicts.length > 0
+    ? conflicts.map((file) => `- ${file}`).join("\n")
+    : "- (no conflicted files recorded)"
+  return [
+    phase === "before-rebase"
+      ? "The prepare action is retrying, but the worktree already contains uncommitted changes from an earlier prepare/rebase attempt."
+      : "The rebase conflict resolver completed and `git rebase` is no longer in progress, but the prepare action found uncommitted worktree changes.",
+    phase === "before-rebase"
+      ? "Clean up only the leftover changes from the earlier prepare attempt before the runner starts a new rebase."
+      : "Clean up only the leftover changes from the rebase conflict resolution.",
+    "",
+    "Original conflict files:",
+    list,
+  ].join("\n")
+}
+
+function formatPrepareDirtySnapshot(label: string, snapshot: WorktreeSnapshot) {
+  return [
+    label,
+    `Staged:\n${formatPrepareFileList(snapshot.staged)}`,
+    `Unstaged:\n${formatPrepareFileList(snapshot.unstaged)}`,
+    `Untracked:\n${formatPrepareFileList(snapshot.untracked)}`,
+  ].join("\n")
+}
+
+function formatPrepareFileList(files: string[]) {
+  return files.length === 0 ? "- (none)" : files.map((file) => `- ${file}`).join("\n")
 }
 
 function isOnlyUntracked(status: string) {

@@ -114,6 +114,80 @@ describe("mohist/prepare", () => {
     expect(output.output).toContain("packages/runner/src/actions/registry.ts")
   })
 
+  it("DirtyWorktreeBeforePrepareWithResolver_RunsCleanupThenRebases", async () => {
+    const calls = installGit(async (_workDir, args, allCalls) => {
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "status --porcelain": {
+          const count = allCalls.filter((c) => c === "status --porcelain").length
+          return ok(count < 3 ? " M packages/web/src/shared/ui/components/card-section.tsx\n" : "")
+        }
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base123\n")
+        case "rev-parse HEAD":
+          return ok(allCalls.filter((c) => c === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase origin/master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+    let cleanupCalls = 0
+    const prompts: string[] = []
+    const sessions: Array<string | undefined> = []
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseConflictResolverForTest(async (resolverContext) => {
+      cleanupCalls += 1
+      prompts.push(String(resolverContext.with?.prompt ?? ""))
+      sessions.push(typeof resolverContext.with?.session === "string" ? resolverContext.with.session : undefined)
+      expect(resolverContext.workId).toBe("integrate:prepare.1-conflict-cleanup-0-1")
+      expect(resolverContext.title).toBe("Clean up rebase conflict resolution")
+      return { status: "success", message: "committed cleanup", output: "committed card section props" }
+    })
+
+    const result = await prepareAction(context({
+      baseBranch: "master",
+      maxConflictRetries: 1,
+      conflictResolver: { with: {} },
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(cleanupCalls).toBe(1)
+    expect(prompts[0]).toContain("Cleanup Follow-up (attempt 1)")
+    expect(prompts[0]).toContain("already contains uncommitted changes")
+    expect(prompts[0]).toContain("packages/web/src/shared/ui/components/card-section.tsx")
+    expect(sessions[0]).toBe("integrate:prepare.1-conflict-resolve-0")
+    expect(output).toMatchObject({
+      kind: "prepare",
+      status: "completed",
+      prepared: true,
+      preparedBaseSha: "base123",
+      preparedHeadSha: "after",
+      resolveAttempts: 0,
+      failureKind: null,
+    })
+    expect(output.output).toContain("Prepare resolver cleaned pre-rebase worktree after 1 cleanup attempt")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "status --porcelain",
+      "status --porcelain",
+      "status --porcelain",
+      "fetch origin master",
+      "rev-parse origin/master",
+      "rev-parse HEAD",
+      "rebase origin/master",
+      "rev-parse HEAD",
+      "status --porcelain",
+    ])
+  })
+
   it("SuccessfulRebaseLeavesDirtyWorktree_FailsBeforeExecutorCleanup", async () => {
     const calls = installGit(async (_workDir, args, allCalls) => {
       switch (args.join(" ")) {
@@ -344,6 +418,95 @@ describe("mohist/prepare", () => {
       failureKind: null,
     })
     expect(output.output).toContain("agent staged resolved files")
+  })
+
+  it("RebaseConflicts_ResolverLeavesDirtyWorktree_RunsBoundedCleanupFollowup", async () => {
+    const calls = installGit(async (_workDir, args, allCalls) => {
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "status --porcelain": {
+          const count = allCalls.filter((c) => c === "status --porcelain").length
+          return ok(count === 1 ? "" : count === 2 ? " M packages/web/src/shared/ui/components/card-section.tsx\n" : "")
+        }
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base123\n")
+        case "rev-parse HEAD":
+          return ok("after\n")
+        case "rebase origin/master":
+          return fail("CONFLICT (content): Merge conflict in packages/web/src/shared/ui/components/card-section.tsx")
+        case "diff --name-only --diff-filter=U":
+          return ok(resolverCalls > 0 ? "" : "packages/web/src/shared/ui/components/card-section.tsx\n")
+        case "merge-base origin/master HEAD":
+          return ok("base123\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+    let resolverCalls = 0
+    const prompts: string[] = []
+    const sessions: Array<string | undefined> = []
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseConflictResolverForTest(async (resolverContext) => {
+      resolverCalls += 1
+      prompts.push(String(resolverContext.with?.prompt ?? ""))
+      sessions.push(typeof resolverContext.with?.session === "string" ? resolverContext.with.session : undefined)
+      if (resolverCalls === 1) {
+        expect(resolverContext.workId).toBe("integrate:prepare.1-conflict-resolve-1")
+        return { status: "success", message: "resolved", output: "agent completed rebase" }
+      }
+      expect(resolverContext.workId).toBe("integrate:prepare.1-conflict-cleanup-1-1")
+      expect(resolverContext.title).toBe("Clean up rebase conflict resolution")
+      return { status: "success", message: "committed cleanup", output: "committed card section props" }
+    })
+
+    const result = await prepareAction(context({
+      baseBranch: "master",
+      maxConflictRetries: 1,
+      conflictResolver: { with: {} },
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(resolverCalls).toBe(2)
+    expect(prompts[0]).toContain("Complete Git Rebase Conflict Resolution")
+    expect(prompts[1]).toContain("Cleanup Follow-up (attempt 1)")
+    expect(prompts[1]).toContain("packages/web/src/shared/ui/components/card-section.tsx")
+    expect(sessions[1]).toBe("integrate:prepare.1-conflict-resolve-1")
+    expect(output).toMatchObject({
+      kind: "prepare",
+      status: "completed",
+      prepared: true,
+      preparedBaseSha: "base123",
+      preparedHeadSha: "after",
+      resolveAttempts: 1,
+      failureKind: null,
+    })
+    expect(output.output).toContain("committed card section props")
+    expect(output.output).toContain("Prepare resolver cleaned post-rebase worktree after 1 cleanup attempt")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "status --porcelain",
+      "fetch origin master",
+      "rev-parse origin/master",
+      "rev-parse HEAD",
+      "rebase origin/master",
+      "diff --name-only --diff-filter=U",
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "diff --name-only --diff-filter=U",
+      "rev-parse HEAD",
+      "rev-parse origin/master",
+      "merge-base origin/master HEAD",
+      "rev-parse HEAD",
+      "status --porcelain",
+      "status --porcelain",
+    ])
   })
 
   it("RebaseConflicts_ResolverFails_ReportsConflictFailureKindAndAbortsRebase", async () => {
