@@ -7,10 +7,11 @@ import type { ActionResult, JsonObject, WorkItem } from "../core/types.js"
 
 export interface ArtifactUploader {
   uploadArtifact(
-    workflowRunId: string,
+    ownerId: string,
     workId: string,
     upload: ArtifactUploadRequest,
     signal: AbortSignal,
+    ownerKind?: string,
   ): Promise<ArtifactUploadResponse>
 }
 
@@ -327,10 +328,11 @@ export interface UploadCapturedArtifactsResult {
 
 export async function uploadCapturedArtifacts(
   connection: ArtifactUploader,
-  workflowRunId: string,
+  ownerId: string,
   workId: string,
   captures: ReadonlyArray<CapturedArtifact>,
   signal: AbortSignal,
+  ownerKind = "workflow",
 ): Promise<UploadCapturedArtifactsResult> {
   const uploads: ArtifactUploadResponse[] = []
   const failures: ArtifactCaptureFailure[] = []
@@ -343,7 +345,7 @@ export async function uploadCapturedArtifacts(
       content: capture.content,
     }
     try {
-      const response = await connection.uploadArtifact(workflowRunId, workId, request, signal)
+      const response = await connection.uploadArtifact(ownerId, workId, request, signal, ownerKind)
       uploads.push(response)
     } catch (error) {
       failures.push({

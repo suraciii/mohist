@@ -163,6 +163,7 @@ public class ArchitectureRules
 
         var featureRoots = new HashSet<string>(StringComparer.Ordinal)
         {
+            "Agent",
             "Epic",
             "Issue",
             "Project",
@@ -260,10 +261,11 @@ public class ArchitectureRules
     }
 
     private static readonly string[] DomainNamespaces =
-        ["Issue", "Workflow", "Epic", "Project", "Runner", "Sessions"];
+        ["Agent", "Issue", "Workflow", "Epic", "Project", "Runner", "Sessions"];
 
     private static readonly (string from, string to)[] AllowedDomainDependencies =
     [
+        ("Agent", "Runner"),
         ("Issue", "Workflow"),
         ("Issue", "Epic"),
         ("Issue", "Project"),

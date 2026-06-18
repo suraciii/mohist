@@ -347,7 +347,16 @@ export class WorkExecutor {
     }
     let uploads
     try {
-      uploads = await uploadCapturedArtifacts(this.connection, work.workflowRunId, work.workId, captureOutcome.captures, signal)
+      const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
+      const ownerId = ownerKind === "agent-job" ? work.agentJobId : work.workflowRunId
+      if (!ownerId) {
+        return {
+          ...result,
+          status: "failed",
+          message: `${result.message ? result.message + "; " : ""}artifact upload failed: missing ${ownerKind === "agent-job" ? "agentJobId" : "workflowRunId"}`.slice(0, 4000),
+        }
+      }
+      uploads = await uploadCapturedArtifacts(this.connection, ownerId, work.workId, captureOutcome.captures, signal, ownerKind)
     } catch (error) {
       return {
         ...result,

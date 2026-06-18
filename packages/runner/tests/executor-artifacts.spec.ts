@@ -9,22 +9,24 @@ import type { ServerConnection, ArtifactUploadResponse } from "../src/server/con
 import type { CapturedArtifact } from "../src/runtime/artifact-capture.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | "report"> {
-  public uploads: Array<{ path: string; size: number; contentType: string | null; content: Uint8Array }> = []
+  public uploads: Array<{ ownerId: string; ownerKind?: string; workId: string; path: string; size: number; contentType: string | null; content: Uint8Array }> = []
   public uploadFailures = new Map<string, Error>()
   public nextUploadId = 0
 
   async uploadArtifact(
-    workflowRunId: string,
+    ownerId: string,
     workId: string,
     upload: { path: string; contentType?: string | null; contentHash?: string | null; size: number; content: Uint8Array; filename?: string },
+    _signal?: AbortSignal,
+    ownerKind?: string,
   ): Promise<ArtifactUploadResponse> {
-    this.uploads.push({ path: upload.path, size: upload.size, contentType: upload.contentType ?? null, content: upload.content })
+    this.uploads.push({ ownerId, ownerKind, workId, path: upload.path, size: upload.size, contentType: upload.contentType ?? null, content: upload.content })
     const failure = this.uploadFailures.get(upload.path)
     if (failure) throw failure
     this.nextUploadId += 1
     return {
       uploadId: `artup_${this.nextUploadId}`,
-      workflowRunId,
+      workflowRunId: ownerId,
       workId,
       taskRunId: "task-run-1",
       path: upload.path,
@@ -381,5 +383,36 @@ describe("WorkExecutor artifact capture", () => {
     expect(result.message).toMatch(/openspecChangeDir/)
     expect(connection.uploads).toEqual([])
     expect(result.artifactUploadIds).toBeUndefined()
+  })
+
+  it("uploadsArtifactsForAgentJobWorkUsingAgentJobOwner", async () => {
+    await writeFile(join(workDir, "review.md"), "looks good", "utf8")
+    const connection = new FakeServerConnection()
+    const executor = new WorkExecutor(
+      makeRegistry(async () => ({ status: "success", message: "agent done" })),
+      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      connection as never,
+      {} as never,
+      null,
+      workDir,
+    )
+
+    const work = buildWork({ files: [{ path: "review.md" }] })
+    work.workflowRunId = ""
+    work.ownerKind = "agent-job"
+    work.agentJobId = "agent-job-1"
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(result.message).toBe("agent done")
+    expect(result.artifactUploadIds).toEqual(["artup_1"])
+    expect(connection.uploads).toHaveLength(1)
+    expect(connection.uploads[0]).toMatchObject({
+      ownerId: "agent-job-1",
+      ownerKind: "agent-job",
+      workId: "work-1",
+      path: "review.md",
+    })
   })
 })

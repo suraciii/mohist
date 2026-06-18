@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -21,7 +23,10 @@ public static class GrainTestConfig
 {
     public static MohistDbContext CreateDbContext(string connectionString)
     {
-        var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connectionString).Options;
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
+            .Options;
         return new MohistDbContext(options);
     }
 
@@ -33,7 +38,9 @@ public static class GrainTestConfig
     {
         siloBuilder.UseInMemoryReminderService();
         siloBuilder.AddMemoryGrainStorageAsDefault();
-        siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
+        siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
+            .UseSqlite(connectionString)
+            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
@@ -45,5 +52,12 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton(eventStore);
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         siloBuilder.Services.AddScoped<AgentSessionQuery>();
+        siloBuilder.Services.Configure<AgentJobOptions>(opts =>
+        {
+            opts.DispatchBackoffInitial = TimeSpan.FromMilliseconds(50);
+            opts.DispatchBackoffCap = TimeSpan.FromMilliseconds(200);
+            opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
+            opts.JobTimeout = TimeSpan.FromSeconds(10);
+        });
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Events;
 using Orleans.Hosting;
 
@@ -31,6 +32,7 @@ public static class MohistSiloRegistration
         // Handlers are registered there too, since grains need them.
         silo.Services.AddCloudEventBus();
         silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
+        silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
 
         return silo;
     }

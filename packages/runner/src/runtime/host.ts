@@ -110,7 +110,13 @@ export class RunnerHost {
         const work = await this.connection.poll(signal)
         if (!work) break
 
-        const key = `${work.workflowRunId}:${work.workId}`
+        // In-flight key uses ownerKind + owner identity + workId so that
+        // an agent-job (workflowRunId = "") and a workflow can never
+        // collide on the same key, even if their workIds happened to match.
+        const ownerId = work.ownerKind === "agent-job"
+          ? (work.agentJobId ?? "")
+          : work.workflowRunId
+        const key = `${work.ownerKind ?? "workflow"}:${ownerId}:${work.workId}`
         const run = this.executeAndReport(work, signal)
           .catch((error) => {
             console.error(`work ${work.workId} failed before report:`, error)

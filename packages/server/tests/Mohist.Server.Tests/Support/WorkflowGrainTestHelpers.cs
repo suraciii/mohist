@@ -193,7 +193,8 @@ public static class WorkflowGrainTestHelpers
     public static async Task ReportAsync(IGrainFactory grains, string runnerId, string workflowRunId, string workId, WorkResult result)
     {
         var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportResultAsync(workflowRunId, workId, result);
+        var dispatch = new WorkDispatch(workflowRunId, workId);
+        await runner.ReportResultAsync(dispatch, workId, result);
     }
 
     public static async Task ReportAsync(IGrainFactory grains, string runnerId, WorkDispatch work, WorkResult result)

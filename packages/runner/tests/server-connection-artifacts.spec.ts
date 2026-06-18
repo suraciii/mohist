@@ -107,6 +107,27 @@ describe("ServerConnection.uploadArtifact", () => {
       connection.uploadArtifact("wf-1", "work-1", { path: "review.md", size: 1, content: new Uint8Array([0x01]) }, new AbortController().signal),
     ).rejects.toMatchObject({ status: 500 })
   })
+
+  it("usesAgentJobArtifactEndpointWhenOwnerKindIsAgentJob", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 200,
+      body: JSON.stringify({ data: { uploadId: "artup_agent", workflowRunId: "agent-job-1", workId: "agent-work-1", path: "review.md", size: 5 } }),
+    }))
+    const connection = new ServerConnection(options())
+
+    const result = await connection.uploadArtifact(
+      "agent-job-1",
+      "agent-work-1",
+      { path: "review.md", size: 5, content: new TextEncoder().encode("hello") },
+      new AbortController().signal,
+      "agent-job",
+    )
+
+    expect(result.uploadId).toBe("artup_agent")
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/api/agent-jobs/agent-job-1/work/agent-work-1/artifact-uploads")
+    expect(url).not.toContain("/api/workflow-runs//")
+  })
 })
 
 describe("ServerConnection.report", () => {
@@ -148,6 +169,104 @@ describe("ServerConnection.report", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const body = JSON.parse(init.body as string)
     expect(body.artifactUploadIds).toBeNull()
+  })
+
+  it("sendsOwnerKindAndAgentJobIdForAgentJobWork", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({}) }))
+    const connection = new ServerConnection(options())
+
+    await connection.report(
+      {
+        workflowRunId: "",
+        workId: "agent-work-1",
+        workType: "agent-job",
+        ownerKind: "agent-job",
+        agentJobId: "agent-job-abc",
+      },
+      { status: "completed" },
+      new AbortController().signal,
+    )
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(body.ownerKind).toBe("agent-job")
+    expect(body.agentJobId).toBe("agent-job-abc")
+    expect(body.workflowRunId).toBeUndefined()
+  })
+
+  it("normalizesAgentJobOwnerKindBeforeReporting", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({}) }))
+    const connection = new ServerConnection(options())
+
+    await connection.report(
+      {
+        workflowRunId: "",
+        workId: "agent-work-uppercase",
+        workType: "agent-job",
+        ownerKind: "AGENT-JOB",
+        agentJobId: "agent-job-uppercase",
+      },
+      { status: "completed" },
+      new AbortController().signal,
+    )
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(body.ownerKind).toBe("agent-job")
+    expect(body.agentJobId).toBe("agent-job-uppercase")
+    expect(body.workflowRunId).toBeUndefined()
+  })
+
+  it("sendsWorkflowRunIdForWorkflowWork", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({}) }))
+    const connection = new ServerConnection(options())
+
+    await connection.report(
+      {
+        workflowRunId: "wf-1",
+        workId: "work-1",
+        workType: "task",
+        ownerKind: "workflow",
+      },
+      { status: "completed" },
+      new AbortController().signal,
+    )
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(body.ownerKind).toBe("workflow")
+    expect(body.workflowRunId).toBe("wf-1")
+  })
+})
+
+describe("ServerConnection.poll", () => {
+  it("preservesOwnerKindAndAgentJobIdFromDispatchResponse", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          workflowRunId: "",
+          workId: "agent-work-1",
+          workType: "agent-job",
+          uses: "mohist/acp-agent",
+          with: "{\"prompt\":\"hi\"}",
+          variables: "{\"workspace\":{\"path\":\"/tmp/agent\"}}",
+          stage: "agent",
+          title: "Agent Job",
+          ownerKind: "agent-job",
+          agentJobId: "agent-job-abc",
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    const item = await connection.poll(new AbortController().signal)
+
+    expect(item).not.toBeNull()
+    expect(item!.ownerKind).toBe("agent-job")
+    expect(item!.agentJobId).toBe("agent-job-abc")
+    expect(item!.workId).toBe("agent-work-1")
+    expect(item!.workflowRunId).toBe("")
   })
 })
 
