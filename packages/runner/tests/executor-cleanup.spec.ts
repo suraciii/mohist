@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { promisify } from "node:util"
-import { WorkExecutor, setCleanupAgentActionForTest, setExecutorGitRunnerForTest } from "../src/runtime/executor.js"
+import { WorkExecutor, setCleanupAgentActionForTest, setExecutorGitRunnerForTest, setExecutorLockHolderProbeForTest } from "../src/runtime/executor.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -30,6 +30,7 @@ beforeEach(async () => {
 afterEach(async () => {
   setCleanupAgentActionForTest(null)
   setExecutorGitRunnerForTest(null)
+  setExecutorLockHolderProbeForTest(null)
   await rm(workDir, { recursive: true, force: true })
 })
 
@@ -188,6 +189,104 @@ describe("WorkExecutor clean worktree invariant", () => {
     expect(result.message).toBe("agent done")
     const after = await exec("git", ["status", "--porcelain"], { cwd: workDir })
     expect(after.stdout).toBe("")
+  })
+
+  it("clearsStaleGitIndexLockBeforeAgentCleanupCommit", async () => {
+    // A stale Git index lock is runner control-plane state, not task
+    // output. The runner should clear it before asking the agent to
+    // perform the bounded cleanup commit so a crashed previous Git
+    // command does not make all cleanup retries fail.
+    await dirtyRepoWith({ path: "src/stale-lock.ts", content: "export const stale = 1\n", tracked: true })
+    const lockPath = join(workDir, ".git", "index.lock")
+    await writeFile(lockPath, "", "utf8")
+    const old = new Date(Date.now() - 120_000)
+    await utimes(lockPath, old, old)
+
+    let cleanupCalls = 0
+    setExecutorLockHolderProbeForTest(async () => ({ held: false }))
+    setCleanupAgentActionForTest(async (ctx) => {
+      cleanupCalls += 1
+      await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" })
+      await exec("git", ["add", "src/stale-lock.ts"], { cwd: ctx.workDir })
+      await exec("git", ["commit", "-m", "cleanup stale lock test", "-q"], { cwd: ctx.workDir })
+      return { status: "success", message: "committed stale lock cleanup" }
+    })
+
+    const executor = buildExecutor(makeRegistry(async () => ({ status: "success", message: "agent done" })))
+
+    const result = await executor.execute(buildWork({ uses: "mohist/acp-agent" }), new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(result.cleanupAttempts).toBe(1)
+    expect(cleanupCalls).toBe(1)
+    await expect(stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" })
+    const after = await exec("git", ["status", "--porcelain"], { cwd: workDir })
+    expect(after.stdout).toBe("")
+  })
+
+  it("doesNotClearStaleGitIndexLockWhenStillHeld", async () => {
+    await dirtyRepoWith({ path: "src/held-lock.ts", content: "export const held = 1\n", tracked: true })
+    const lockPath = join(workDir, ".git", "index.lock")
+    await writeFile(lockPath, "", "utf8")
+    const old = new Date(Date.now() - 120_000)
+    await utimes(lockPath, old, old)
+    let cleanupCalls = 0
+    setExecutorLockHolderProbeForTest(async (_workDir, observedPath) => {
+      expect(observedPath).toBe(lockPath)
+      return { held: true, detail: "git 1234" }
+    })
+    setCleanupAgentActionForTest(async () => {
+      cleanupCalls += 1
+      return { status: "success" }
+    })
+
+    const executor = buildExecutor(makeRegistry(async () => ({ status: "success", message: "agent done" })))
+
+    const result = await executor.execute(buildWork({ uses: "mohist/acp-agent" }), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.cleanupAttempts).toBe(0)
+    expect(cleanupCalls).toBe(0)
+    expect(result.message).toMatch(/still held/i)
+    const evidence = JSON.parse(result.output ?? "{}")
+    expect(evidence).toMatchObject({
+      kind: "git-index-lock",
+      reason: "git index lock is still held: git 1234",
+      unstaged: ["src/held-lock.ts"],
+    })
+    await stat(lockPath)
+  })
+
+  it("doesNotAskAgentCleanupWhenGitIndexLockIsFresh", async () => {
+    // A fresh lock may still belong to a running Git process. The
+    // runner must not remove it or spend cleanup attempts by sending
+    // the agent into a commit that cannot succeed.
+    await dirtyRepoWith({ path: "src/fresh-lock.ts", content: "export const fresh = 1\n", tracked: true })
+    const lockPath = join(workDir, ".git", "index.lock")
+    await writeFile(lockPath, "", "utf8")
+    let cleanupCalls = 0
+    setCleanupAgentActionForTest(async () => {
+      cleanupCalls += 1
+      return { status: "success" }
+    })
+
+    const executor = buildExecutor(makeRegistry(async () => ({ status: "success", message: "agent done" })))
+
+    const result = await executor.execute(buildWork({ uses: "mohist/acp-agent" }), new AbortController().signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.cleanupAttempts).toBe(0)
+    expect(cleanupCalls).toBe(0)
+    expect(result.message).toMatch(/git index lock blocked cleanup/i)
+    expect(result.message).toMatch(/fresh/i)
+    const evidence = JSON.parse(result.output ?? "{}")
+    expect(evidence).toMatchObject({
+      kind: "git-index-lock",
+      cleanupAttempts: 0,
+      unstaged: ["src/fresh-lock.ts"],
+    })
+    expect(evidence.lockPath).toBe(lockPath)
+    await stat(lockPath)
   })
 
   it("rendersTemplateVariablesInCleanupExpectationPaths", async () => {
