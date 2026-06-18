@@ -127,6 +127,8 @@ export function useConnectionState(
 ): ConnectionStatus {
   const { publishToasts = true } = options
   const toastCtx = useContext(RuntimeToastContext)
+  const toastCtxRef = useRef(toastCtx)
+  toastCtxRef.current = toastCtx
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const lastReportedRef = useRef<ConnectionStatus | null>(null)
 
@@ -141,8 +143,8 @@ export function useConnectionState(
       setStatus(next)
       if (lastReportedRef.current === next) return
       lastReportedRef.current = next
-      if (publishToasts && toastCtx) {
-        toastCtx.push(buildNoticeForStatus(next))
+      if (publishToasts && toastCtxRef.current) {
+        toastCtxRef.current.push(buildNoticeForStatus(next))
       }
     }
 
@@ -174,7 +176,7 @@ export function useConnectionState(
       connection.onclose(() => {})
       connection.stop().catch(() => {})
     }
-  }, [projectId, publishToasts, toastCtx])
+  }, [projectId, publishToasts])
 
   return status
 }
