@@ -1,0 +1,33 @@
+{
+  "project": "mohist-local",
+  "description": "Add the `mo epic` top-level CLI command group wiring 8 subcommands to the existing project-scoped EpicRoutes endpoints, with table/json output, project override, conflict surfacing, and integration tests.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement `mo epic` command group (8 subcommands + output substrate + tests)",
+      "spec": "specs/cli-interface/spec.md#Epic CLI Commands",
+      "description": "Deliver the complete `mo epic` top-level command group as a peer to `mo issue`/`mo project`, wiring list/create/show/update/link/unlink/done/close to the existing EpicRoutes.cs endpoints via a new MohistCliCommands.Epic.cs. Extend MohistCliApi with behavior-preserving write-method output helpers (PrintPost/Patch/DeleteWithOutputAsync) and add EpicList/EpicShow/EpicMembership table shapes so every subcommand supports -o table|json. Conflict codes (DUPLICATE_EPIC_MEMBERSHIP, EPIC_NOT_READY_TO_MARK_DONE, EPIC_ALREADY_TERMINAL) surface via the existing envelope printer with non-zero exit. Cover all four mandated cases plus namespace isolation in CliEpicCommandSpecs.cs.",
+      "acceptanceCriteria": [
+        "`mo epic` is registered as a top-level group in MohistCliCommands.Build alongside IssueCommands; `mo epic --help` lists all 8 subcommands (list, create, show, update, link, unlink, done, close) and each subcommand `--help` lists its positional args and options.",
+        "`mo epic list` sends GET /api/projects/{p}/epics; in table mode prints number/title/status/priority columns; an empty project prints a clear 'No epics' state; in json mode returns the API envelope verbatim.",
+        "`mo epic create <title> [--description] [--priority]` validates a non-empty title client-side (prints error, exit 1, no HTTP request) and otherwise POSTs {title,description,priority} returning the new epic.",
+        "`mo epic show <id|num>` passes the argument verbatim to GET /api/projects/{p}/epics/{id} (server owns the int/id dual-track resolution); `mo epic show 8` hits the epics endpoint, not /issues/8 (namespace isolation).",
+        "`mo epic update <id|num> [--title] [--description] [--priority]` PATCHes /{id} sending only the supplied optional fields.",
+        "`mo epic link <epic-id|num> <issue-id|num>` POSTs to /{id}/issues; on a DUPLICATE_EPIC_MEMBERSHIP conflict the CLI prints the error with the code to stderr, exits non-zero, and never reports silent success.",
+        "`mo epic unlink <epic-id|num> <issue-id>` DELETEs /{id}/issues/{issueId} and prints a confirmation.",
+        "`mo epic done <id|num>` POSTs to /{id}/done; succeeds when all linked issues are delivered; on an EPIC_NOT_READY_TO_MARK_DONE conflict surfaces the code on stderr with non-zero exit and no silent success.",
+        "`mo epic close <id|num>` POSTs to /{id}/close; on an EPIC_ALREADY_TERMINAL conflict surfaces the code with non-zero exit.",
+        "Every subcommand accepts --project/--project-id (resolved via api.ResolveProjectIdAsync, same as mo issue) and -o table|json (table mode via MohistCliApi.TableShape).",
+        "MohistCliApi gains behavior-preserving PrintPostWithOutputAsync/PrintPatchWithOutputAsync/PrintDeleteWithOutputAsync that render table mode on success and defer to the existing error/json path on conflict; the full existing CLI test suite (CliProjectCommandSpecs and issue command specs) still passes.",
+        "CliEpicCommandSpecs.cs is added and passes, covering: list empty/non-empty, create missing title (no API call), link DUPLICATE_EPIC_MEMBERSHIP conflict, done EPIC_NOT_READY_TO_MARK_DONE conflict, and show-by-number namespace isolation — all via the RecordingHttpHandler substrate."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Epic.cs (new); packages/cli/Mohist.Cli/MohistCliApi.cs (write-output helpers + EpicList/EpicShow/EpicMembership in TableShape enum); packages/cli/Mohist.Cli/TableRenderer.cs (three new render cases); packages/cli/Mohist.Cli/MohistCliCommands.cs (one-line group registration); packages/cli/tests/Mohist.Cli.Tests/CliEpicCommandSpecs.cs (new)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Follow the IssueCommands pattern (MohistCliCommands.Issue.cs). CLI passes <id|num> verbatim — server owns the dual-track resolution (EpicRoutes.cs:35-37), so no CLI-side parsing. Conflict codes surface automatically via PrintResponseAsync envelope handling; no per-command error branches needed (design D2/D3). The D4 write-output-helper refactor MUST stay behavior-preserving — run the full CLI test suite to guard regressions across all existing commands. Strictly no server-side changes (EpicRoutes.cs, Epic domain model, and Web UI are untouched per Non-Goals)."
+    }
+  ]
+}
