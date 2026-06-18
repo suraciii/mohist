@@ -17,7 +17,8 @@ import { ArchivedPage } from '../pages/archived/ui/ArchivedPage'
 import { ProjectGuard, MobileBottomNav, FAB } from '../widgets/app-shell'
 import { Toaster } from 'sonner'
 import { RuntimeToastHost } from '../shared/ui/toast'
-import { HomePage } from '../pages/home/ui/HomePage'
+import { DashboardPage } from '../pages/dashboard/ui/DashboardPage'
+import { IssuesPage } from '../pages/issues/ui/IssuesPage'
 import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
 
@@ -50,7 +51,8 @@ function AppContent() {
             <Route element={<ProjectGuard />}>
               <Route path="/" element={<NavigateToCurrentProject />} />
               <Route path="/:projectName" element={<ProjectRouteScope />}>
-                <Route index element={<HomePage />} />
+                <Route index element={<DashboardPage />} />
+                <Route path="issues" element={<IssuesPage />} />
                 <Route path="issues/:number" element={<IssueDetailPage />} />
                 <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
                 <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
@@ -65,7 +67,7 @@ function AppContent() {
               </Route>
             </Route>
           </Routes>
-          {isProjectRoot(location.pathname) && <FAB onClick={() => setCreateIssueOpen(true)} />}
+          {shouldShowCreateIssueFab(location.pathname) && <FAB onClick={() => setCreateIssueOpen(true)} />}
         </div>
         <MobileBottomNav />
       </SidebarInset>
@@ -98,7 +100,7 @@ function ProjectRouteScope() {
 function ProjectNameGuard({ projectName }: { projectName?: string }) {
   const { projects, currentProject } = useProject()
 
-  if (!projectName || projects.length === 0) return <HomePage />
+  if (!projectName || projects.length === 0) return <DashboardPage />
   const project = projects.find((candidate) => candidate.name === projectName)
   if (!project) {
     return <Navigate to="/" replace />
@@ -108,8 +110,11 @@ function ProjectNameGuard({ projectName }: { projectName?: string }) {
   return <Outlet />
 }
 
-function isProjectRoot(pathname: string) {
-  return pathname.split('/').filter(Boolean).length === 1
+function shouldShowCreateIssueFab(pathname: string) {
+  const segments = pathname.split('/').filter(Boolean)
+  if (segments.length === 1) return true
+  if (segments.length === 2 && segments[1] === 'issues') return true
+  return false
 }
 
 export default function App() {

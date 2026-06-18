@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
-  HomeIcon,
-  ActivityIcon,
+  LayoutDashboardIcon,
   ListTodoIcon,
+  ActivityIcon,
   ArchiveIcon,
   FileTextIcon,
   SettingsIcon,
@@ -39,9 +39,13 @@ interface AppSidebarProps {
 }
 
 const primaryNav = [
-  { key: 'home', label: 'Board', icon: HomeIcon, to: '/' },
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, to: '/' },
+  { key: 'issues', label: 'Issues', icon: ListTodoIcon, to: '/issues' },
   { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity' },
   { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics' },
+] as const
+
+const archivedNav = [
   { key: 'archived', label: 'Archived', icon: ArchiveIcon, to: '/archived' },
 ] as const
 
@@ -262,6 +266,23 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
     (item) => item.key !== 'settings' || currentProject !== null,
   )
 
+  function renderNavItem(item: (typeof primaryNav)[number] | (typeof configureNav)[number] | (typeof archivedNav)[number]) {
+    const to = toProjectPath(item.to)
+    const active = isNavActive(location.pathname, to)
+    return (
+      <SidebarMenuItem key={item.key}>
+        <SidebarMenuButton
+          isActive={active}
+          onClick={() => navigate(to)}
+          data-testid={`nav-${item.key}`}
+        >
+          <item.icon />
+          <span>{item.label}</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    )
+  }
+
   return (
     <Sidebar collapsible="icon" variant="sidebar">
       <SidebarHeader>
@@ -309,22 +330,7 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {primaryNav.map((item) => {
-                const to = toProjectPath(item.to)
-                const active = isNavActive(location.pathname, to)
-                return (
-                  <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton
-                      isActive={active}
-                      onClick={() => navigate(to)}
-                      data-testid={`nav-${item.key}`}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
+              {primaryNav.map((item) => renderNavItem(item))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -333,22 +339,15 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <SidebarGroupLabel>Configure</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {visibleConfigureNav.map((item) => {
-                const to = toProjectPath(item.to)
-                const active = isNavActive(location.pathname, to)
-                return (
-                  <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton
-                      isActive={active}
-                      onClick={() => navigate(to)}
-                      data-testid={`nav-${item.key}`}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
+              {visibleConfigureNav.map((item) => renderNavItem(item))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {archivedNav.map((item) => renderNavItem(item))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

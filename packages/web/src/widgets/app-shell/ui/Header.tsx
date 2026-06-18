@@ -8,14 +8,31 @@ function usePageTitle(): string {
   const location = useLocation()
   const params = useParams<{ number?: string; id?: string; section?: string }>()
   const segments = location.pathname.split('/').filter(Boolean)
+  const firstSegment = segments[0] ?? ''
   const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
 
-  if (section === '/') return 'Board'
+  if (firstSegment === 'issues') {
+    return segments.length > 1 ? `Issue #${params.number ?? segments[1]}` : 'Issues'
+  }
+  if (firstSegment === 'activity') return 'Activity'
+  if (firstSegment === 'epics') {
+    if (segments.length > 1) return `Epic #${params.id?.slice(0, 8) ?? ''}`
+    return 'Epics'
+  }
+  if (firstSegment === 'archived') return 'Archived'
+  if (firstSegment === 'logs') return 'Logs'
+  if (firstSegment === 'settings') {
+    const sub = params.section
+    if (!sub || sub === 'ai') return 'Settings'
+    return `Settings · ${sub.charAt(0).toUpperCase()}${sub.slice(1)}`
+  }
+
+  if (section === '/issues') return 'Issues'
   if (section.startsWith('/activity')) return 'Activity'
   if (section === '/epics') return 'Epics'
   if (section.startsWith('/epics/')) return `Epic #${params.id?.slice(0, 8) ?? ''}`
   if (section.startsWith('/issues/')) {
-    return params.number ? `Issue #${params.number}` : 'Issue'
+    return `Issue #${params.number ?? section.split('/')[2]}`
   }
   if (section === '/archived') return 'Archived'
   if (section.startsWith('/logs')) return 'Logs'
@@ -24,6 +41,8 @@ function usePageTitle(): string {
     if (!section || section === 'ai') return 'Settings'
     return `Settings · ${section.charAt(0).toUpperCase()}${section.slice(1)}`
   }
+
+  if (section === '/') return 'Dashboard'
   return 'Mohist'
 }
 

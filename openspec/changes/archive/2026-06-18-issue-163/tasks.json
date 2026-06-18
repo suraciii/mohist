@@ -1,0 +1,51 @@
+{
+  "project": "mohist-local",
+  "description": "Dashboard default landing + composition skeleton; Kanban demoted to Issues route; primary navigation restructured (Dashboard/Issues) across desktop and mobile.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "App-shell landing restructure: Dashboard default landing + Kanban at Issues",
+      "spec": "specs/dashboard-shell/spec.md#Dashboard is the default landing page",
+      "description": "Create the Dashboard composition host as the new default landing and relocate the Kanban to an Issues route. Add packages/web/src/pages/dashboard/ui/DashboardPage.tsx rendering a page container with four named zone mount-point placeholders (Attention/Pulse/Productivity/Digest) via a small DashboardZonePlaceholder component, and move the project empty-state ('No projects yet' -> Create Project) from HomePage onto DashboardPage (reuse useProjects + CreateProjectDialog; move useDocumentTitle here). Repurpose packages/web/src/pages/home/ui/HomePage.tsx into packages/web/src/pages/issues/ui/IssuesPage.tsx as a Kanban-only page (strip the empty-state). In packages/web/src/app/App.tsx, point the project index route and the ProjectNameGuard no-projects fallback at DashboardPage, add a new `issues` index route rendering IssuesPage (coexisting with the existing `issues/:number` detail route), and generalize the FAB gate (isProjectRoot) so the mobile create-issue FAB shows on both the Dashboard route and the Issues route. Update Header.usePageTitle() so the project root yields 'Dashboard' (was 'Board') and section '/issues' yields 'Issues' before the existing /issues/ detail check, and update Header.test.tsx accordingly. This is one coherent app-shell change: making Dashboard the default is inseparable from moving Kanban off the default and repointing the Header titles.",
+      "acceptanceCriteria": [
+        "Navigating to '/' or '/:projectName' renders DashboardPage (the skeleton), not the Kanban board",
+        "DashboardPage renders exactly four zone placeholders with stable identities Attention, Pulse, Productivity, Digest; each is empty (no zone content implemented)",
+        "Each zone placeholder exposes a stable identity (e.g. data-zone='attention|pulse|productivity|digest') so downstream issues E/F/G/H can target it",
+        "When the project list is empty, DashboardPage shows 'No projects yet' with a 'Create Project' action that opens CreateProjectDialog, and does not render zone placeholders or the Kanban",
+        "The '/issues' route renders the Kanban board; '/issues/:number' still renders Issue Detail (the index route does not shadow the detail route)",
+        "Kanban filter, search, sort, and URL query behavior (?priorities=...&labels=...) work unchanged on '/issues' and the existing kanban-board tests pass without modification",
+        "Header shows 'Dashboard' on the project root and 'Issues' on the '/issues' route; Header.test.tsx assertions are updated and pass",
+        "The mobile FAB appears on both the Dashboard route and the Issues route",
+        "DashboardPage unit tests (four slots, empty-state, no Kanban) and a routing test (issues index vs issues/:number) pass"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/dashboard/ui/DashboardPage.tsx, packages/web/src/pages/issues/ui/IssuesPage.tsx, updated packages/web/src/app/App.tsx and Header.tsx, updated Header.test.tsx, new Dashboard/routing tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do not implement any zone content (Attention/Pulse/Productivity/Digest) — that belongs to issues E/F/G/H; only empty placeholders. Also satisfies dashboard-shell requirements 'Dashboard provides four zone mount-point slots' and 'Dashboard shows project empty-state', and web-ui requirement 'Kanban behavior is preserved on the Issues route' (the MODIFIED REQ-WUI-209-* behaviors relocate to the Issues page)."
+    },
+    {
+      "id": "T-002",
+      "title": "Primary navigation restructure: Dashboard + Issues across desktop sidebar and mobile",
+      "spec": "specs/web-ui/spec.md#Primary navigation leads with Dashboard and Issues",
+      "description": "Restructure primary navigation so it leads with Dashboard and Issues and stays synchronized across desktop and mobile. In packages/web/src/widgets/app-shell/ui/AppSidebar.tsx, replace the Board/home primaryNav item with a Dashboard item (targeting the project root) followed by an Issues item (targeting '/issues'); the Workspace group becomes Dashboard/Issues/Activity/Epics, Configure stays Logs/Settings, and Archived moves to render last so the overall order is Dashboard/Issues/Activity/Epics/Logs/Settings/Archived. In packages/web/src/widgets/app-shell/ui/MobileBottomNav.tsx, add Dashboard and Issues entries so mobile exposes the same primary destinations as desktop. Keep the existing isNavActive() behavior, which correctly highlights the Issues item on both '/issues' and '/issues/:number'.",
+      "acceptanceCriteria": [
+        "AppSidebar contains a 'Dashboard' entry and an 'Issues' entry, with Dashboard preceding Issues",
+        "No 'Board' or 'Home' nav entry pointing at the Kanban-as-home remains in the sidebar",
+        "Activating 'Dashboard' navigates to the project root (DashboardPage); activating 'Issues' navigates to '/issues' (Kanban)",
+        "MobileBottomNav exposes Dashboard and Issues destinations consistent with the desktop sidebar, and activating either navigates to the same route as the desktop entry",
+        "Canonical navigation order is preserved: Dashboard, Issues, Activity, Epics, Logs, Settings, Archived",
+        "Navigation presence/order tests for desktop sidebar and mobile bottom nav pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated packages/web/src/widgets/app-shell/ui/AppSidebar.tsx and MobileBottomNav.tsx, new navigation tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 because the Dashboard and Issues routes/pages must exist for the nav items to be usable. Also satisfies web-ui requirement 'Desktop and mobile navigation stay synchronized'."
+    }
+  ]
+}

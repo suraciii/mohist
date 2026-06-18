@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import type { Project } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { AppSidebar } from './AppSidebar'
 
@@ -18,26 +17,25 @@ vi.mock('../../../entities/project', async (importOriginal) => {
 })
 
 vi.mock('../../../entities/agent', () => ({
-  useAgentStatus: () => ({ data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } }),
+  useAgentStatus: () => ({
+    data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
+  }),
 }))
 
-const projects: Project[] = [
-  {
-    id: 'proj-selected',
-    name: 'audit-test-1',
-    repositories: [],
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-]
+const TEST_PROJECT = {
+  id: 'test-project',
+  name: 'demo',
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+  repositories: [],
+}
 
-function renderSidebar(initialProjectId: string | null) {
+function renderSidebar(initialRoute: string, initialProjectId: string | null = TEST_PROJECT.id) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId={initialProjectId} initialProjects={projects}>
-        <MemoryRouter initialEntries={['/']}>
+      <ProjectProvider initialProjectId={initialProjectId} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter initialEntries={[initialRoute]}>
           <SidebarProvider>
             <AppSidebar onCreateIssue={vi.fn()} />
           </SidebarProvider>
@@ -47,21 +45,131 @@ function renderSidebar(initialProjectId: string | null) {
   )
 }
 
-describe('AppSidebar', () => {
+function getNavTestIdsInOrder(): string[] {
+  return screen.getAllByTestId(/^nav-/).map((node) => node.getAttribute('data-testid') ?? '')
+}
+
+function getNavLabelsInOrder(): string[] {
+  return getNavTestIdsInOrder().map((testId) => {
+    const node = screen.getByTestId(testId)
+    return node.textContent?.trim() ?? ''
+  })
+}
+
+describe('AppSidebar primary navigation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   afterEach(() => {
     cleanup()
     window.localStorage.clear()
   })
 
+  it('contains Dashboard and Issues entries with Dashboard preceding Issues', () => {
+    renderSidebar('/demo')
+
+    const dashboard = screen.getByTestId('nav-dashboard')
+    const issues = screen.getByTestId('nav-issues')
+
+    expect(dashboard).toBeInTheDocument()
+    expect(within(dashboard).getByText('Dashboard')).toBeInTheDocument()
+    expect(issues).toBeInTheDocument()
+    expect(within(issues).getByText('Issues')).toBeInTheDocument()
+
+    const dashboardIndex = getNavTestIdsInOrder().indexOf('nav-dashboard')
+    const issuesIndex = getNavTestIdsInOrder().indexOf('nav-issues')
+    expect(dashboardIndex).toBeGreaterThanOrEqual(0)
+    expect(issuesIndex).toBeGreaterThan(dashboardIndex)
+  })
+
+  it('does not contain Board or Home primary nav entries', () => {
+    renderSidebar('/demo')
+
+    expect(screen.queryByTestId('nav-board')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('nav-home')).not.toBeInTheDocument()
+
+    expect(screen.queryByText('Board')).not.toBeInTheDocument()
+    expect(screen.queryByText('Home')).not.toBeInTheDocument()
+  })
+
+  it('preserves the canonical navigation order: Dashboard, Issues, Activity, Epics, Logs, Settings, Archived', () => {
+    renderSidebar('/demo')
+
+    const order = getNavTestIdsInOrder()
+    expect(order).toEqual([
+      'nav-dashboard',
+      'nav-issues',
+      'nav-activity',
+      'nav-epics',
+      'nav-logs',
+      'nav-settings',
+      'nav-archived',
+    ])
+  })
+
+  it('navigates to the project root when Dashboard is activated', () => {
+    renderSidebar('/demo/issues/42')
+
+    fireEvent.click(screen.getByTestId('nav-dashboard'))
+
+    expect(screen.getByTestId('nav-dashboard')).toHaveAttribute('data-active', 'true')
+    expect(screen.getByTestId('nav-issues')).not.toHaveAttribute('data-active', 'true')
+  })
+
+  it('navigates to /issues when Issues is activated', () => {
+    renderSidebar('/demo')
+
+    fireEvent.click(screen.getByTestId('nav-issues'))
+
+    expect(screen.getByTestId('nav-issues')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('highlights the Issues entry on both /issues and /issues/:number (existing isNavActive behavior)', () => {
+    const { unmount } = renderSidebar('/demo/issues')
+    expect(screen.getByTestId('nav-issues')).toHaveAttribute('data-active', 'true')
+    unmount()
+
+    renderSidebar('/demo/issues/42')
+    expect(screen.getByTestId('nav-issues')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('highlights the Dashboard entry on the project root', () => {
+    renderSidebar('/demo')
+
+    expect(screen.getByTestId('nav-dashboard')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('renders Archived after Logs and Settings (Archived renders last)', () => {
+    renderSidebar('/demo')
+
+    const order = getNavTestIdsInOrder()
+    const logsIndex = order.indexOf('nav-logs')
+    const settingsIndex = order.indexOf('nav-settings')
+    const archivedIndex = order.indexOf('nav-archived')
+
+    expect(logsIndex).toBeGreaterThanOrEqual(0)
+    expect(settingsIndex).toBeGreaterThan(logsIndex)
+    expect(archivedIndex).toBeGreaterThan(settingsIndex)
+  })
+
+  it('exposes Dashboard and Issues labels in the rendered navigation set', () => {
+    renderSidebar('/demo')
+
+    const labels = getNavLabelsInOrder()
+    expect(labels).toContain('Dashboard')
+    expect(labels).toContain('Issues')
+  })
+
   it('hides Settings while keeping Logs visible when no project is selected', () => {
-    renderSidebar(null)
+    renderSidebar('/demo', null)
 
     expect(screen.getByTestId('nav-logs')).toBeInTheDocument()
     expect(screen.queryByTestId('nav-settings')).not.toBeInTheDocument()
   })
 
   it('shows Settings when a project is selected', () => {
-    renderSidebar('proj-selected')
+    renderSidebar('/demo')
 
     expect(screen.getByTestId('nav-logs')).toBeInTheDocument()
     expect(screen.getByTestId('nav-settings')).toBeInTheDocument()
