@@ -5,6 +5,7 @@ import { agentRuntimeToConfigKey } from '../../../entities/settings/api/client'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
+import { Tooltip } from '@/shared/ui/components/tooltip'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -129,7 +130,7 @@ const FIELDS: FieldDef[] = [
     key: 'maxConcurrent',
     label: 'Max Concurrent',
     unit: 'sessions',
-    description: 'Maximum number of external coder agent sessions running simultaneously.',
+    description: 'Upper bound constrained by runner capacity shown in the sidebar (active/max); excess tasks queue.',
     validate: validateMaxConcurrent,
     group: 'concurrency',
   },
@@ -137,14 +138,14 @@ const FIELDS: FieldDef[] = [
     key: 'pollInterval',
     label: 'Poll Interval',
     unit: 'seconds',
-    description: 'How often the server checks for issue state changes.',
+    description: 'Shorter = more realtime but higher CPU/network.',
     validate: validatePollInterval,
     group: 'concurrency',
   },
   {
     key: 'maxGracePeriods',
-    label: 'Retry Budget',
-    unit: 'grace periods',
+    label: 'Retry attempts',
+    unit: 'times',
     description: 'Maximum retry attempts after an external coder agent failure.',
     validate: validateGracePeriods,
     group: 'recovery',
@@ -172,6 +173,7 @@ function TimeoutDiagram({ session, stage, task }: { session: number; stage: numb
 function InputField({
   label,
   unit,
+  description,
   value,
   error,
   disabled,
@@ -180,6 +182,7 @@ function InputField({
 }: {
   label: string
   unit: string
+  description?: string
   value: number
   error: string | null
   disabled?: boolean
@@ -188,7 +191,9 @@ function InputField({
 }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs font-medium text-muted-foreground">{label}</label>
+      <label className="block text-xs font-medium text-muted-foreground">
+        {description ? <Tooltip content={description}>{label}</Tooltip> : label}
+      </label>
       <div className="flex items-center gap-2">
         <Input
           type="number"
@@ -311,6 +316,20 @@ export function AgentSettingsSection() {
     setShowResetConfirm(true)
   }
 
+  const renderField = (field: FieldDef) => (
+    <InputField
+      key={field.key}
+      label={field.label}
+      unit={field.unit}
+      description={field.description}
+      value={localValues[field.key]}
+      error={validationErrors[field.key] ?? null}
+      disabled={unsupportedFields.has(field.key)}
+      disabledReason="This runtime field is not exposed by the server configuration."
+      onChange={(v) => handleChange(field.key, v)}
+    />
+  )
+
   const confirmReset = async () => {
     setShowResetConfirm(false)
     setSaving(true)
@@ -376,33 +395,7 @@ export function AgentSettingsSection() {
           task={localValues.taskTimeout}
         />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <InputField
-            label="Session Timeout"
-            unit="minutes"
-            value={localValues.timeout}
-            error={validationErrors.timeout ?? null}
-            disabled={unsupportedFields.has('timeout')}
-            disabledReason="This runtime field is not exposed by the server configuration."
-            onChange={(v) => handleChange('timeout', v)}
-          />
-          <InputField
-            label="Stage Timeout"
-            unit="minutes"
-            value={localValues.stageTimeout}
-            error={validationErrors.stageTimeout ?? null}
-            disabled={unsupportedFields.has('stageTimeout')}
-            disabledReason="This runtime field is not exposed by the server configuration."
-            onChange={(v) => handleChange('stageTimeout', v)}
-          />
-          <InputField
-            label="Task Timeout"
-            unit="minutes"
-            value={localValues.taskTimeout}
-            error={validationErrors.taskTimeout ?? null}
-            disabled={unsupportedFields.has('taskTimeout')}
-            disabledReason="This runtime field is not exposed by the server configuration."
-            onChange={(v) => handleChange('taskTimeout', v)}
-          />
+          {FIELDS.filter((field) => field.group === 'timeout').map(renderField)}
         </div>
       </div>
 
@@ -411,24 +404,7 @@ export function AgentSettingsSection() {
       <div className="space-y-4">
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Concurrency</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <InputField
-            label="Max Concurrent"
-            unit="agents"
-            value={localValues.maxConcurrent}
-            error={validationErrors.maxConcurrent ?? null}
-            disabled={unsupportedFields.has('maxConcurrent')}
-            disabledReason="This runtime field is not exposed by the server configuration."
-            onChange={(v) => handleChange('maxConcurrent', v)}
-          />
-          <InputField
-            label="Poll Interval"
-            unit="seconds"
-            value={localValues.pollInterval}
-            error={validationErrors.pollInterval ?? null}
-            disabled={unsupportedFields.has('pollInterval')}
-            disabledReason="This runtime field is not exposed by the server configuration."
-            onChange={(v) => handleChange('pollInterval', v)}
-          />
+          {FIELDS.filter((field) => field.group === 'concurrency').map(renderField)}
         </div>
       </div>
 
@@ -437,15 +413,7 @@ export function AgentSettingsSection() {
       <div className="space-y-4">
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recovery</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <InputField
-            label="Retry Budget"
-            unit="grace periods"
-            value={localValues.maxGracePeriods}
-            error={validationErrors.maxGracePeriods ?? null}
-            disabled={unsupportedFields.has('maxGracePeriods')}
-            disabledReason="This runtime field is not exposed by the server configuration."
-            onChange={(v) => handleChange('maxGracePeriods', v)}
-          />
+          {FIELDS.filter((field) => field.group === 'recovery').map(renderField)}
         </div>
         <p className="text-xs text-muted-foreground">
           Number of times an external coder agent can fail and be retried before the issue is marked as interrupted.

@@ -1,0 +1,109 @@
+{
+  "project": "mohist-local",
+  "description": "Settings page UX improvements — workflow stage preview, repository empty-state CTA, first-visit onboarding banner, runtime field descriptions with Tooltip primitive, and project-context gating of the Settings nav entry.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Workflows tab: stage chips on profile cards + description clamp",
+      "spec": "specs/settings-ux/spec.md#Workflow profile cards show stage preview and concept explanation",
+      "description": "Update WorkflowProfilesSection.tsx so each ProfileCard renders a 4-chip stage preview (plan → build → check → integrate) sourced from a shared DEFAULT_WORKFLOW_STAGES constant (the list endpoint does not return stages and the proposal forbids backend changes; all current profiles share these stages). Add CSS line-clamp-2 to the card description with overflow measurement (useLayoutEffect comparing scrollHeight to clientHeight) so a 'Read more' toggle appears only when the description overflows, expanding the full text on click. The top-level concept paragraph already exists — verify it remains and do not duplicate.",
+      "acceptanceCriteria": [
+        "Each workflow profile card renders exactly 4 stage chips labeled plan, build, check, integrate, visible without clicking into the profile",
+        "ProfileCard descriptions longer than 2 lines are clamped and show a 'Read more' control; expanding reveals the full text",
+        "ProfileCard descriptions that fit within 2 lines render in full with no 'Read more' control",
+        "The top-level 'Workflow profiles define how issues move through stages' explanation remains visible above the profile list",
+        "DEFAULT_WORKFLOW_STAGES constant is isolated and documented so it can be swapped for per-profile data later",
+        "New unit tests assert: stage chips present on cards; 'Read more' appears only for overflowing descriptions (mock a long vs short description)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/WorkflowProfilesSection.tsx with stage chips and description clamp; updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "WorkflowProfileInfo (list type) lacks stages — use the constant, do not fetch per-profile detail. The concept paragraph at lines 160-165 is already present; do not re-add it."
+    },
+    {
+      "id": "T-002",
+      "title": "Repositories tab: empty-state CTA with focus handoff + conditional form",
+      "spec": "specs/settings-ux/spec.md#Repository empty state provides a prominent CTA with focus handoff",
+      "description": "Update RepositoriesSection.tsx so the inline 'Add Repository' form is NOT rendered in the empty state. Add a local showForm state (default false). In the empty state, render a prominent 'Add your first repository' CTA via the existing SectionState children slot; clicking the CTA sets showForm=true and a useEffect on showForm focuses the Name input ref. Once at least one repository exists, the form is always rendered (showForm ignored). Reuse the existing SectionState primitive — do not introduce a new empty-state component.",
+      "acceptanceCriteria": [
+        "When no repositories are configured, the tab shows a prominent 'Add your first repository' CTA button (via SectionState children)",
+        "Clicking the CTA automatically focuses the repository Name input field",
+        "In the empty state, the inline 'Add Repository' form is not rendered alongside the CTA",
+        "When at least one repository exists, the inline 'Add Repository' form renders as before and the empty-state CTA is not shown",
+        "New unit tests assert: empty state renders CTA; CTA click focuses the Name input (ref/mock); empty state does not render the add form; non-empty state renders the add form"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/RepositoriesSection.tsx with CTA, conditional form, and focus handoff; updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "SectionState already accepts a children slot for empty-state body — use it rather than branching the component. Existing data-testid 'repository-add-form' and 'repository-add-name' must be preserved on the form/input for test stability."
+    },
+    {
+      "id": "T-003",
+      "title": "Onboarding banner on Coder Agent tab with localStorage persistence",
+      "spec": "specs/settings-ux/spec.md#First-visit onboarding banner on Coder Agent tab is dismissable and persistent",
+      "description": "Add a small OnboardingBanner component and render it in SettingsPage.tsx above the TabsContent for the Coder Agent tab (section === 'ai'). The banner shows guidance text ('Start here — select the coder agent model used for workflow tasks') and a dismiss control. Dismissal state persists in localStorage under key 'mohist:settings-onboarding-dismissed' (matching the established mohist: namespace used by ProjectContext and IssueModelSelector). The banner renders on first visit (no key), disappears after dismissal, and reappears if the key is cleared. Keep the banner in SettingsPage (not inside AiSettingsSection) so AiSettingsSection stays focused.",
+      "acceptanceCriteria": [
+        "First visit to Settings → Coder Agent tab (no localStorage key) shows the dismissable onboarding banner",
+        "Dismissing the banner writes 'mohist:settings-onboarding-dismissed' to localStorage and the banner does not reappear on subsequent visits",
+        "Clearing localStorage re-triggers the banner on next visit",
+        "The banner only appears on the Coder Agent (section === 'ai') tab, not on other settings tabs",
+        "SettingsPage.test.tsx continues to pass after the SettingsPage.tsx change",
+        "New unit tests assert: first-visit render; dismiss persists across remounts; re-trigger after localStorage.clear(); banner absent on non-ai tabs"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/OnboardingBanner.tsx (new) and SettingsPage.tsx wiring for section === 'ai'; updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the only task that modifies SettingsPage.tsx — it owns the SettingsPage.test.tsx regression gate. Use raw localStorage.getItem/setItem (the established pattern), not a context/store."
+    },
+    {
+      "id": "T-004",
+      "title": "Runtime fields: Tooltip primitive + business descriptions + Retry rename",
+      "spec": "specs/settings-ux/spec.md#Runtime fields expose business-level descriptions and corrected labels",
+      "description": "Add a minimal dependency-free Tooltip component to shared/ui/components/tooltip.tsx (hover + keyboard focus, no animation library, no new npm deps). Extend InputField in AgentSettingsSection.tsx to accept description and render it through the Tooltip on the field label, surfacing on hover and focus. Drive the Concurrency/Recovery render sites from the existing FIELDS array (including label and unit) to eliminate the pre-existing drift where maxConcurrent unit is 'sessions' in FIELDS but 'agents' at the render site. Rename the maxGracePeriods field label to 'Retry attempts' and unit to 'times' (replacing 'Retry Budget' / 'grace periods'); keep the internal field key maxGracePeriods unchanged (no API/config-key impact). Refresh descriptions: maxConcurrent ('upper bound constrained by runner capacity shown in the sidebar (active/max); excess tasks queue'), pollInterval ('shorter = more realtime but higher CPU/network'). Stage/Task/Session Timeout descriptions stay as-is.",
+      "acceptanceCriteria": [
+        "All 6 Runtime fields (Session/Stage/Task Timeout, Max Concurrent, Poll Interval, Retry attempts) display a business-level description via Tooltip on hover and on keyboard focus",
+        "The retry field renders with label 'Retry attempts' and unit 'times'; neither 'Retry Budget' nor 'grace periods' appears in the UI",
+        "Max Concurrent description references runner capacity and queueing; Poll Interval description references the realtime/CPU-network tradeoff",
+        "Stage Timeout / Task Timeout / Session Timeout descriptions are unchanged",
+        "Tooltip is dependency-free (no new npm dependencies added to packages/web/package.json)",
+        "New unit tests assert: labels/units render from FIELDS (Retry attempts / times); Tooltip shows the description on hover and focus; maxConcurrent unit is consistent between FIELDS and render"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/shared/ui/components/tooltip.tsx (new) and packages/web/src/pages/settings/ui/AgentSettingsSection.tsx consuming FIELDS via Tooltip; updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Bundling the Tooltip primitive with its only consumer in this issue follows the abstraction+migration bundling guidance; Issue C/D can extend the Tooltip later. Native 'title' attribute is insufficient because it does not fire on keyboard focus."
+    },
+    {
+      "id": "T-005",
+      "title": "Hide Settings nav entry when no project is selected",
+      "spec": "specs/settings-ux/spec.md#Settings nav entry is gated on project context",
+      "description": "Update AppSidebar.tsx so the Settings item is filtered out of the rendered configureNav list when useProject().currentProject is null. Leave the Logs entry unchanged. Do not modify ProjectGuard.tsx — direct-URL access to /settings (bypassed at ProjectGuard.tsx:19) remains an accepted edge case out of scope for this nav-visibility change. Normal flow (a project selected) is unaffected: Settings remains visible and navigable.",
+      "acceptanceCriteria": [
+        "When no project is selected (currentProject === null), the Settings nav entry is not rendered in the sidebar",
+        "When a project is selected, the Settings nav entry is visible and navigable as before",
+        "The Logs nav entry remains visible regardless of project selection state",
+        "Direct-URL access to /settings still renders the page (ProjectGuard bypass unchanged)",
+        "New/existing unit tests assert: Settings nav hidden when currentProject is null; Settings nav visible when a project is selected"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/widgets/app-shell/ui/AppSidebar.tsx with project-context filtering of the Settings nav item; updated tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Filter at render time in the configureNav.map — do not mutate the shared configureNav constant. Uses existing useProject().currentProject (Project | null) for the null check."
+    }
+  ]
+}

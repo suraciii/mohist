@@ -256,7 +256,11 @@ function AgentStatusFooter() {
 export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
+  const { currentProject } = useProject()
   const toProjectPath = useProjectPath()
+  const visibleConfigureNav = configureNav.filter(
+    (item) => item.key !== 'settings' || currentProject !== null,
+  )
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
@@ -329,7 +333,7 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <SidebarGroupLabel>Configure</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {configureNav.map((item) => {
+              {visibleConfigureNav.map((item) => {
                 const to = toProjectPath(item.to)
                 const active = isNavActive(location.pathname, to)
                 return (

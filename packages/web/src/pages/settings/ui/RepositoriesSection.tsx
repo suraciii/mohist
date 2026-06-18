@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRepository } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
@@ -20,6 +20,16 @@ export function RepositoriesSection({ projectId }: Props) {
   const [newName, setNewName] = useState('')
   const [newGitUrl, setNewGitUrl] = useState('')
   const [newBranch, setNewBranch] = useState('main')
+  const [showForm, setShowForm] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const repositoryList = repositories ?? []
+  const hasRepositories = repositoryList.length > 0
+
+  useEffect(() => {
+    if (showForm) {
+      nameInputRef.current?.focus()
+    }
+  }, [showForm])
 
   function handleAdd() {
     if (!newName.trim() || !newGitUrl.trim()) return
@@ -37,15 +47,21 @@ export function RepositoriesSection({ projectId }: Props) {
       <div data-testid="repositories-section">
         {isLoading ? (
           <SectionState variant="loading" skeletonRows={2} />
-        ) : !repositories || repositories.length === 0 ? (
+        ) : !hasRepositories ? (
           <SectionState
             variant="empty"
             title="Repositories"
             description="No repositories configured for this project."
-          />
+          >
+            {!showForm && (
+              <Button onClick={() => setShowForm(true)} size="sm" className="mt-3">
+                Add your first repository
+              </Button>
+            )}
+          </SectionState>
         ) : (
           <div className="space-y-2" data-testid="repositories-list">
-            {repositories.map((repo) => (
+            {repositoryList.map((repo) => (
               <CardSection
                 key={repo.name}
                 data-testid={`repository-${repo.name}`}
@@ -114,60 +130,62 @@ export function RepositoriesSection({ projectId }: Props) {
             ))}
           </div>
         )}
-
-      <CardSection
-        title="Add Repository"
-        titleAs="h4"
-        className="p-3"
-        data-testid="repository-add-form"
-      >
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs" htmlFor="repository-add-name">Name</Label>
-              <Input
-                id="repository-add-name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="e.g. frontend"
-                className="h-8 text-sm"
-                data-testid="repository-add-name"
-              />
-            </div>
-            <div>
-              <Label className="text-xs" htmlFor="repository-add-branch">Base Branch</Label>
-              <Input
-                id="repository-add-branch"
-                value={newBranch}
-                onChange={(e) => setNewBranch(e.target.value)}
-                placeholder="main"
-                className="h-8 text-sm"
-                data-testid="repository-add-branch"
-              />
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs" htmlFor="repository-add-giturl">Git URL</Label>
-            <Input
-              id="repository-add-giturl"
-              value={newGitUrl}
-              onChange={(e) => setNewGitUrl(e.target.value)}
-              placeholder="https://github.com/org/repo.git"
-              className="h-8 text-sm"
-              data-testid="repository-add-giturl"
-            />
-          </div>
-          <Button
-            onClick={handleAdd}
-            disabled={!newName.trim() || !newGitUrl.trim() || addRepo.isPending}
-            size="sm"
-            className="w-full"
-            data-testid="repository-add-submit"
+        {(hasRepositories || showForm) && (
+          <CardSection
+            title="Add Repository"
+            titleAs="h4"
+            className="p-3"
+            data-testid="repository-add-form"
           >
-            {addRepo.isPending ? 'Adding...' : 'Add Repository'}
-          </Button>
-        </div>
-      </CardSection>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs" htmlFor="repository-add-name">Name</Label>
+                  <Input
+                    ref={nameInputRef}
+                    id="repository-add-name"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. frontend"
+                    className="h-8 text-sm"
+                    data-testid="repository-add-name"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs" htmlFor="repository-add-branch">Base Branch</Label>
+                  <Input
+                    id="repository-add-branch"
+                    value={newBranch}
+                    onChange={(e) => setNewBranch(e.target.value)}
+                    placeholder="main"
+                    className="h-8 text-sm"
+                    data-testid="repository-add-branch"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs" htmlFor="repository-add-giturl">Git URL</Label>
+                <Input
+                  id="repository-add-giturl"
+                  value={newGitUrl}
+                  onChange={(e) => setNewGitUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo.git"
+                  className="h-8 text-sm"
+                  data-testid="repository-add-giturl"
+                />
+              </div>
+              <Button
+                onClick={handleAdd}
+                disabled={!newName.trim() || !newGitUrl.trim() || addRepo.isPending}
+                size="sm"
+                className="w-full"
+                data-testid="repository-add-submit"
+              >
+                {addRepo.isPending ? 'Adding...' : 'Add Repository'}
+              </Button>
+            </div>
+          </CardSection>
+        )}
       </div>
     </SettingsSection>
   )
