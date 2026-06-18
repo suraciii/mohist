@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ActivityIcon, ListTodoIcon, MenuIcon } from 'lucide-react'
+import { LayoutDashboardIcon, ListTodoIcon, ActivityIcon, MenuIcon } from 'lucide-react'
 import { useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
 import { useProjectPath } from '../../../entities/project'
@@ -19,6 +19,18 @@ export function MobileBottomNav() {
   const toProjectPath = useProjectPath()
 
   const tabs: Tab[] = [
+    {
+      label: 'Dashboard',
+      path: '/',
+      testId: 'mobile-nav-dashboard',
+      icon: <LayoutDashboardIcon className="size-5" />,
+    },
+    {
+      label: 'Issues',
+      path: '/issues',
+      testId: 'mobile-nav-issues',
+      icon: <ListTodoIcon className="size-5" />,
+    },
     {
       label: 'Activity',
       path: '/activity',
