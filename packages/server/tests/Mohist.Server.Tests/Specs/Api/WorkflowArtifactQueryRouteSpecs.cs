@@ -41,7 +41,7 @@ public class WorkflowArtifactQueryRouteSpecs
 
         var issueResponse = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
-            new { title = "artifact query test" });
+            new { title = "artifact query test", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
         var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;

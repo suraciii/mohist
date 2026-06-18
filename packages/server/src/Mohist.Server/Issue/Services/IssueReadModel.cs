@@ -41,7 +41,9 @@ public class IssueReadModel
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
-    public IssueStartEligibility StartEligibility { get; set; } = IssueStartEligibility.Ready();
+    public bool IsDraft { get; set; }
+    public bool CanStart { get; set; }
+    public IssueStartBlockerDto? Blocker { get; set; }
     public RepositoryInfo? Repository { get; set; }
     public IssueRepositoryProblem? RepositoryProblem { get; set; }
     public IssuePrimaryEpic? PrimaryEpic { get; set; }

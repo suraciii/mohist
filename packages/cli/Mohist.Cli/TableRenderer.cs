@@ -127,8 +127,8 @@ internal sealed class TableRenderer
     private void RenderIssueList(JsonNode? data)
     {
         var rows = AsArray(data);
-        var headers = new[] { "number", "title", "stage", "status", "priority" };
-        var widths = new[] { 7, TitleSoftCap, 16, 12, 9 };
+        var headers = new[] { "number", "title", "stage", "status", "priority", "state" };
+        var widths = new[] { 7, TitleSoftCap, 16, 12, 9, TitleSoftCap };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
@@ -138,6 +138,7 @@ internal sealed class TableRenderer
             var stage = StringOf(row, "workflowStage");
             var status = StringOf(row, "status");
             var priority = StringOf(row, "priority");
+            var state = FormatIssueState(row);
             cells.Add(new[]
             {
                 number,
@@ -145,6 +146,7 @@ internal sealed class TableRenderer
                 Truncate(stage, 16),
                 Truncate(status, 12),
                 Truncate(priority, 9),
+                Truncate(state, TitleSoftCap),
             });
         }
 
@@ -179,6 +181,30 @@ internal sealed class TableRenderer
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
         if (!string.IsNullOrEmpty(body))
             _out.WriteLine($"body:     {Truncate(body, BodySoftCap)}");
+        _out.WriteLine($"state:    {FormatIssueState(data)}");
+    }
+
+    internal static string FormatIssueState(JsonNode? data)
+    {
+        if (data is null) return "";
+        var isDraft = BoolOf(data, "isDraft");
+        if (isDraft) return "draft";
+        var blocker = data["blocker"];
+        if (blocker is JsonObject blockerObj)
+        {
+            var kind = blockerObj["kind"]?.GetValue<string>();
+            if (kind == "draft") return "draft";
+            if (kind == "waiting-for")
+            {
+                var issue = blockerObj["issue"] as JsonObject;
+                var blockedNumber = issue?["number"]?.GetValue<int?>();
+                if (blockedNumber is int n) return $"Waiting for #{n}";
+                return "Waiting for prerequisite";
+            }
+        }
+        var canStart = BoolOf(data, "canStart");
+        if (canStart) return "ready";
+        return "";
     }
 
     private void RenderWorkflowStatus(JsonNode? data)

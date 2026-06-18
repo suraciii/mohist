@@ -732,7 +732,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var issue = await CreateIssueAsync(projectId, "Reactivation reads latest", "secondary");
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         // Force the issue grain to load and capture its current state.
-        var initial = await issueGrain.GetStartEligibilityAsync();
+        var initial = await issueGrain.GetStartReadinessAsync();
         Assert.NotNull(initial);
 
         // When the project repository configuration is changed AFTER the issue grain
@@ -748,7 +748,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         // resolves from the current project configuration, proving the grain does not
         // cache resolved repository state and re-activation does not reintroduce
         // stale data.
-        var after = await issueGrain.GetStartEligibilityAsync();
+        var after = await issueGrain.GetStartReadinessAsync();
         Assert.NotNull(after);
 
         using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}");
@@ -962,11 +962,11 @@ public class IssueRepositoryResolutionRegressionSpecs
         return await issueQuery.GetAsync(projectId, number);
     }
 
-    private async Task<CreatedIssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null)
+    private async Task<CreatedIssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null, bool isDraft = false)
     {
         using var response = await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
-            new { title, repositoryName },
+            new { title, repositoryName, isDraft },
             JsonOptions);
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();

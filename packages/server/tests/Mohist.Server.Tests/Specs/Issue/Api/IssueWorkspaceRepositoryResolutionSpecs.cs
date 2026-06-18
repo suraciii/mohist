@@ -216,11 +216,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         return json.GetProperty("data").GetProperty("id").GetString()!;
     }
 
-    private async Task<IssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null)
+    private async Task<IssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null, bool isDraft = false)
     {
         using var response = await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
-            new { title, repositoryName });
+            new { title, repositoryName, isDraft });
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         return new IssueDto(

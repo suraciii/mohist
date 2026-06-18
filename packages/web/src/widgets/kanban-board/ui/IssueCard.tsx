@@ -33,7 +33,7 @@ function getStatusIndicator(issue: Issue, isAgentRunning: boolean): StatusIndica
   if (issue.health === IssueHealth.Blocked) return 'blocked'
   if (issue.status === IssueStatus.Cancelled) return 'cancelled'
   if (issue.approvalState?.status === 'awaiting') return 'approval'
-  if (issue.startEligibility?.waitingForCompletion?.length) return 'waiting'
+  if (issue.blocker?.kind === 'waiting-for') return 'waiting'
   if (isAgentRunning) return 'running'
   if (
     issue.drift?.drifted &&
@@ -45,6 +45,19 @@ function getStatusIndicator(issue: Issue, isAgentRunning: boolean): StatusIndica
     return 'drift'
   }
   return null
+}
+
+function DraftPill() {
+  return (
+    <span
+      data-testid="draft-pill"
+      className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold"
+      title="This issue is still a draft and cannot be started yet"
+    >
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+      Draft
+    </span>
+  )
 }
 
 function StatusPill({ indicator }: { indicator: StatusIndicator }) {
@@ -226,14 +239,20 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     issue.workflowStage === WorkflowStage.Integrate &&
     !isDone &&
     (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted)
+  const isDraft = issue.isDraft
+  const waitingFor = !isDraft && issue.blocker?.kind === 'waiting-for' ? issue.blocker.issue : null
+  const cardDeEmphasis = isDone
+    ? 'opacity-70'
+    : isDraft
+      ? 'opacity-60 border-dashed bg-muted/30'
+      : ''
 
   return (
     <Link
       to={toProjectPath(`/issues/${issue.number}`)}
       data-testid="issue-card"
-      className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${
-        isDone ? 'opacity-70' : ''
-      }`}
+      data-draft={isDraft ? 'true' : undefined}
+      className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${cardDeEmphasis}`}
       style={{ borderLeftColor: getStripColor(issue.labels) }}
     >
       {isCancelled && (
@@ -250,6 +269,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             #{issue.number}
           </span>
           <PriorityChip priority={issue.priority} />
+          {isDraft && <DraftPill />}
           {showWorkflowStagePill && <WorkflowStagePill issue={issue} />}
           <WorkflowStageProgressIndicator progress={issue.workflowStageProgress} />
           {isIntegrateWithFailure && (
@@ -284,7 +304,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
         </div>
 
         <h3
-          className="text-sm font-medium text-foreground"
+          className={`text-sm font-medium ${isDraft ? 'text-muted-foreground italic' : 'text-foreground'}`}
           style={{
             display: '-webkit-box',
             WebkitLineClamp: 2,
@@ -329,6 +349,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           {(isInterrupted ||
             (!isCancelled &&
               !isDone &&
+              !isDraft &&
               !isAwaitingApproval &&
               issue.workflowStage &&
               !isAgentRunning)) && (
@@ -376,9 +397,10 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           </div>
         )}
 
-        {issue.startEligibility?.waitingForCompletion?.length && !isCancelled && (
+        {waitingFor && !isCancelled && (
           <div className="mt-1.5">
             <p
+              data-testid="blocker-reason"
               className="text-[11px] text-amber-600"
               style={{
                 display: '-webkit-box',
@@ -386,13 +408,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}
-              title={
-                issue.startEligibility.message ??
-                `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`
-              }
+              title={waitingFor.title ? `Waiting for #${waitingFor.number} ${waitingFor.title}` : `Waiting for #${waitingFor.number}`}
             >
-              {issue.startEligibility.message ??
-                `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`}
+              {`Waiting for #${waitingFor.number}`}
             </p>
           </div>
         )}

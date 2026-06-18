@@ -16,6 +16,7 @@ public sealed partial class Issue
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
+    private bool _isDraft;
     private readonly List<IssueEvent> _pendingEvents = new();
 
     public required string Id { get; init; }
@@ -96,6 +97,12 @@ public sealed partial class Issue
     {
         get => [.. _prerequisiteNumbers];
         init => _prerequisiteNumbers = value ?? [];
+    }
+
+    public bool IsDraft
+    {
+        get => _isDraft;
+        init => _isDraft = value;
     }
 
     public string? RepositoryRef

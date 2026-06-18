@@ -68,9 +68,9 @@ const epic = {
 }
 
 const issues = [
-  { id: 'issue-1', number: 1, title: 'Done issue' },
-  { id: 'issue-2', number: 2, title: 'Blocked issue' },
-  { id: 'issue-3', number: 3, title: 'Candidate issue' },
+  { id: 'issue-1', number: 1, title: 'Done issue', isDraft: false, canStart: false, blocker: null, status: 'done', health: 'done' },
+  { id: 'issue-2', number: 2, title: 'Blocked issue', isDraft: false, canStart: false, blocker: null, status: 'in_progress', health: 'blocked' },
+  { id: 'issue-3', number: 3, title: 'Candidate issue', isDraft: false, canStart: true, blocker: null, status: 'backlog', health: 'active' },
 ]
 
 function renderPage() {
@@ -501,7 +501,7 @@ const searchEpic = {
 }
 
 const searchIssues = [
-  { id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as const },
+  { id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as const, isDraft: false, canStart: false, blocker: null },
   {
     id: 'issue-archived',
     number: 4,
@@ -520,15 +520,12 @@ const searchIssues = [
     number: 6,
     title: 'Blocked candidate',
     status: 'backlog' as const,
-    startEligibility: {
-      startable: false,
-      reason: 'waiting-for-completion',
-      message: 'Waiting for #1',
-      waitingForCompletion: [{ issueId: 'issue-1', number: 1, title: 'Done issue', completed: false, status: 'backlog', health: 'active' }],
-    },
+    isDraft: false,
+    canStart: false,
+    blocker: { kind: 'waiting-for', issue: { number: 1, title: 'Done issue' } },
   },
-  { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as const },
-  { id: 'issue-3', number: 3, title: 'Candidate issue', status: 'in_progress' as const },
+  { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as const, isDraft: false, canStart: false, blocker: null },
+  { id: 'issue-3', number: 3, title: 'Candidate issue', status: 'in_progress' as const, isDraft: false, canStart: true, blocker: null },
 ]
 
 describe('EpicDetailPage searchable Add Issue', () => {

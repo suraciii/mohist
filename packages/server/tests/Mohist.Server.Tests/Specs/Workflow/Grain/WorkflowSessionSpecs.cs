@@ -182,7 +182,8 @@ public class WorkflowSessionSpecs
             title = issueTitle,
             body = "track workflow session",
             labels = Array.Empty<string>(),
-            priority = "p1"
+            priority = "p1",
+            isDraft = false
         });
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);

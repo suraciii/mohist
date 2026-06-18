@@ -120,11 +120,9 @@ function formatAddIssueError(error: unknown): string {
 function getCandidateUnavailableReason(issue: Issue): string | null {
   if (issue.status === IssueStatus.Done) return 'Closed'
   if (issue.archivedAt) return 'Archived'
-  if (issue.startEligibility?.startable === false) {
-    if (issue.startEligibility.message) return issue.startEligibility.message
-    const firstWait = issue.startEligibility.waitingForCompletion?.[0]
-    if (firstWait) return `Waiting for #${firstWait.number}`
-    return 'Not startable'
+  if (issue.blocker?.kind === 'draft') return 'Still a draft'
+  if (issue.blocker?.kind === 'waiting-for') {
+    return `Waiting for #${issue.blocker.issue.number}`
   }
   return null
 }

@@ -90,6 +90,12 @@ internal sealed class MohistCliApi
     public async Task<int> PrintPostAsync(string path, object body) =>
         await PrintResponseAsync(await _http.PostAsJsonAsync(path, body, JsonOptions));
 
+    public async Task<PostResult> PostAndReadAsync(string path, object body)
+    {
+        var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
+        return await ReadPostResultAsync(response);
+    }
+
     public async Task<int> PrintPutAsync(string path, object body) =>
         await PrintResponseAsync(await _http.PutAsJsonAsync(path, body, JsonOptions));
 
@@ -392,6 +398,33 @@ internal sealed class MohistCliApi
         var code = node["code"]?.GetValue<string>();
         _err.WriteLine(code is null ? error : $"{error} ({code})");
         return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+    }
+
+    public sealed record PostResult(int ExitCode, JsonNode? Data, string? Error, string? Code);
+
+    private async Task<PostResult> ReadPostResultAsync(HttpResponseMessage response)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+        if (node is null)
+        {
+            var statusOk = response.IsSuccessStatusCode;
+            _out.WriteLine(response.StatusCode.ToString());
+            return new PostResult(statusOk ? 0 : 1, null, statusOk ? null : response.ReasonPhrase, null);
+        }
+
+        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
+        if (success)
+        {
+            var data = node["data"];
+            _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
+            return new PostResult(0, data, null, null);
+        }
+
+        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+        var code = node["code"]?.GetValue<string>();
+        _err.WriteLine(code is null ? error : $"{error} ({code})");
+        return new PostResult(response.StatusCode == HttpStatusCode.NotFound ? 4 : 1, null, error, code);
     }
 
     private sealed class ApiResponseException : Exception

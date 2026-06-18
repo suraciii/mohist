@@ -126,26 +126,20 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
     {
         EnsureIssue();
-        var eligibility = await GetStartEligibilityAsync();
-        if (!eligibility.Startable)
-            throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
-
         var reusedRunId = await TryReuseActiveWorkflowAsync();
         if (reusedRunId is not null)
             return reusedRunId;
-
-        return await StartWorkflowAsync(project);
+        var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
+        var repo = resolution.Repository!;
+        var undeliveredPrerequisites = await LoadUndeliveredPrerequisiteNumbersAsync();
+        var wrId = $"wr_{Guid.NewGuid():N}";
+        _issue!.Start(wrId, undeliveredPrerequisites);
+        return await StartWorkflowAsync(project, wrId, repo);
     }
 
-    private async Task<string> StartWorkflowAsync(WorkflowProjectContext? project)
+    private async Task<string> StartWorkflowAsync(WorkflowProjectContext? project, string wrId, RepositoryInfo repo)
     {
         var issue = _issue!;
-
-        var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(issue));
-        var repo = resolution.Repository!;
-
-        var wrId = $"wr_{Guid.NewGuid():N}";
-        issue.StartWorkflow(wrId);
 
         var projectGrain = GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId);
         var projectInfo = await projectGrain.GetAsync();
@@ -330,6 +324,8 @@ public class IssueGrain : Grain, IIssueGrain
     {
         EnsureIssue();
         _issue!.Update(data.Title, data.Body, data.Labels, data.Priority);
+        if (data.IsDraft.HasValue)
+            _issue.SetDraft(data.IsDraft.Value);
         await SaveIssueAsync();
     }
 
@@ -372,7 +368,7 @@ public class IssueGrain : Grain, IIssueGrain
             await CompleteWorkAsync(workflowRunId);
     }
 
-    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null)
+    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -388,7 +384,8 @@ public class IssueGrain : Grain, IIssueGrain
             labels,
             priority ?? "p2",
             resolvedRef,
-            risk);
+            risk,
+            isDraft);
 
         _issue = issue;
         await SaveIssueAsync();
@@ -416,18 +413,37 @@ public class IssueGrain : Grain, IIssueGrain
         await SaveIssueAsync();
     }
 
-    public async Task<IssueStartEligibility> GetStartEligibilityAsync()
+    public async Task<IssueStartReadiness> GetStartReadinessAsync()
     {
         EnsureIssue();
-        var prerequisites = new List<IssuePrerequisiteSummary>();
+        var summaries = new List<IssuePrerequisiteSummary>();
         foreach (var prerequisiteNumber in _issue!.PrerequisiteNumbers)
         {
             var summary = await LoadIssueSummaryAsync(prerequisiteNumber);
             if (summary is not null)
-                prerequisites.Add(summary);
+                summaries.Add(summary);
         }
 
-        return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
+        var summariesByNumber = summaries.ToDictionary(s => s.Number);
+        var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
+        var blocker = _issue!.StartBlocker(undelivered);
+        var blockerDto = IssueStartBlockerDto.FromDomain(blocker, summariesByNumber);
+        return new IssueStartReadiness(
+            IsDraft: _issue.IsDraft,
+            CanStart: blockerDto is null,
+            Blocker: blockerDto);
+    }
+
+    private async Task<IReadOnlySet<int>> LoadUndeliveredPrerequisiteNumbersAsync()
+    {
+        var undelivered = new HashSet<int>();
+        foreach (var prerequisiteNumber in _issue!.PrerequisiteNumbers)
+        {
+            var summary = await LoadIssueSummaryAsync(prerequisiteNumber);
+            if (summary is not null && !summary.Completed)
+                undelivered.Add(prerequisiteNumber);
+        }
+        return undelivered;
     }
 
     private async Task EnsurePromptsReferencesResolveAsync(Workflow.Domain.Definition.WorkflowDefinition definition, IReadOnlyDictionary<string, string> mergedPrompts)
@@ -543,5 +559,6 @@ public record UpdateIssueData(
     [property: Id(0)] string? Title = null,
     [property: Id(1)] string? Body = null,
     [property: Id(2)] string[]? Labels = null,
-    [property: Id(3)] string? Priority = null
+    [property: Id(3)] string? Priority = null,
+    [property: Id(4)] bool? IsDraft = null
 );

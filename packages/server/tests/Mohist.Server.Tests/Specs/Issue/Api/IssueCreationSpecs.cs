@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
@@ -39,12 +40,12 @@ public class IssueCreationSpecs
         return project;
     }
 
-    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? risk = null)
+    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? risk = null, bool isDraft = false)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId, risk);
+        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId, risk, isDraft);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
 
@@ -348,7 +349,7 @@ public class IssueCreationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task AddPrerequisite_StartEligibilityAndStartGateComeFromIssueGrain()
+    public async Task AddPrerequisite_StartReadinessAndStartGateComeFromIssueGrain()
     {
         var project = await SetupProjectAsync();
         var prereq = await CreateIssueAsync(project.Id, "Prereq");
@@ -357,13 +358,14 @@ public class IssueCreationSpecs
 
         await grain.AddPrerequisiteAsync(prereq.Number);
         var info = await GetIssueInfoAsync(project.Id, dependent.Number);
-        var eligibility = await grain.GetStartEligibilityAsync();
+        var readiness = await grain.GetStartReadinessAsync();
 
         Assert.NotNull(info);
         Assert.Contains(prereq.Number, info.PrerequisiteNumbers);
-        Assert.False(eligibility.Startable);
-        Assert.Contains(eligibility.WaitingForCompletion, p => p.Number == prereq.Number);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkAsync());
+        Assert.False(readiness.CanStart);
+        var waiting = Assert.IsType<IssueStartBlockerDto.WaitingForBlocker>(readiness.Blocker);
+        Assert.Equal(prereq.Number, waiting.Issue.Number);
+        await Assert.ThrowsAsync<IssueStartBlockedException>(() => grain.StartWorkAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -381,10 +383,10 @@ public class IssueCreationSpecs
         var prereqRunId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", RepositoryBaseBranch: "main"));
         await prereqGrain.CompleteWorkAsync(prereqRunId);
 
-        var eligibility = await dependentGrain.GetStartEligibilityAsync();
+        var readiness = await dependentGrain.GetStartReadinessAsync();
 
-        Assert.True(eligibility.Startable);
-        Assert.Empty(eligibility.WaitingForCompletion);
+        Assert.True(readiness.CanStart);
+        Assert.Null(readiness.Blocker);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -73,6 +73,35 @@ internal static class MohistCliCommands
     internal static Option<string?> StageOption() =>
         new("--stage", "-s") { Description = "Filter by stage" };
 
+    internal static (Option<bool> Ready, Option<bool> Draft) IsDraftFlags(string action)
+    {
+        var ready = new Option<bool>("--ready")
+        {
+            Description = $"Mark the issue as ready (isDraft=false) when {action}ing",
+        };
+        var draft = new Option<bool>("--draft")
+        {
+            Description = $"Mark the issue as a draft (isDraft=true) when {action}ing (default for new issues)",
+        };
+        return (ready, draft);
+    }
+
+    internal enum DraftFlagState
+    {
+        Ready,
+        Draft,
+        Unspecified,
+        Conflicting,
+    }
+
+    internal static DraftFlagState ResolveDraftFlagState(bool ready, bool draft)
+    {
+        if (ready && draft) return DraftFlagState.Conflicting;
+        if (ready) return DraftFlagState.Ready;
+        if (draft) return DraftFlagState.Draft;
+        return DraftFlagState.Unspecified;
+    }
+
     internal static string ProjectQuery(string? projectId) => Query(ProjectId: projectId);
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);

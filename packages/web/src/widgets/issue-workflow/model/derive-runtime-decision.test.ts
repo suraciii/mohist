@@ -17,8 +17,10 @@ function baseIssue(overrides: Partial<RuntimeDecisionInput['issue']> = {}): Runt
     convergence: undefined,
     drift: undefined,
     workflowStageProgress: undefined,
-    startEligibility: undefined,
     prerequisites: [],
+    isDraft: false,
+    canStart: true,
+    blocker: null,
     ...overrides,
   }
 }
@@ -197,21 +199,8 @@ describe('deriveRuntimeDecision', () => {
         status: IssueStatus.Backlog,
         workflowStage: null,
         health: IssueHealth.Active,
-        startEligibility: {
-          startable: false,
-          reason: 'waiting-for-completion',
-          message: 'Waiting for #98',
-          waitingForCompletion: [
-            {
-              issueId: 'i-98',
-              number: 98,
-              title: 'Prereq issue',
-              completed: false,
-              status: IssueStatus.InProgress,
-              health: IssueHealth.Active,
-            },
-          ],
-        },
+        canStart: false,
+        blocker: { kind: 'waiting-for', issue: { number: 98, title: 'Prereq issue' } },
       }),
     })
 

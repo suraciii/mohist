@@ -276,7 +276,7 @@ public class WorkflowArtifactUploadRouteSpecs
 
         var issueResponse = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
-            new { title = "needs upload" });
+            new { title = "needs upload", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
         var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;

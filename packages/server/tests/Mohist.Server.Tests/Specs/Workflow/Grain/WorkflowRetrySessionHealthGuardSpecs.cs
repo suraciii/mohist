@@ -310,6 +310,7 @@ public class WorkflowRetrySessionHealthGuardSpecs
             labels = Array.Empty<string>(),
             priority = "p1",
             projectId = project.Id,
+            isDraft = false,
         });
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);

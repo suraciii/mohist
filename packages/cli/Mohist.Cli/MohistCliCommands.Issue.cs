@@ -115,6 +115,7 @@ internal static class IssueCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
         var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low, medium, high); overrides frontmatter risk" };
+        var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("creating");
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(bodyOpt);
         cmd.Options.Add(bodyFileOpt);
@@ -126,6 +127,8 @@ internal static class IssueCommands
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(workflowProfileOpt);
         cmd.Options.Add(riskOpt);
+        cmd.Options.Add(readyOpt);
+        cmd.Options.Add(draftOpt);
         cmd.SetAction(ctx =>
         {
             var title = ctx.GetValue(titleArg);
@@ -139,6 +142,8 @@ internal static class IssueCommands
             var model = ctx.GetValue(modelOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
             var risk = ctx.GetValue(riskOpt);
+            var ready = ctx.GetValue(readyOpt);
+            var draft = ctx.GetValue(draftOpt);
             return CreateAsync();
 
             async Task<int> CreateAsync()
@@ -146,6 +151,18 @@ internal static class IssueCommands
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
+                var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
+                if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
+                {
+                    api.Error.WriteLine("--ready and --draft are mutually exclusive");
+                    return 1;
+                }
+                var isDraft = draftState switch
+                {
+                    MohistCliCommands.DraftFlagState.Draft => true,
+                    MohistCliCommands.DraftFlagState.Ready => false,
+                    _ => true,
+                };
                 var resolvedBody = await BodyInputResolver.ResolveAsync(
                     body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
                 if (resolvedBody is BodyInputResolver.Result.Failure)
@@ -155,7 +172,7 @@ internal static class IssueCommands
                 var (effectiveBody, effectiveWorkflow, effectiveRisk) =
                     ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
 
-                return await api.PrintPostAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
+                var result = await api.PostAndReadAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
                 {
                     title,
                     body = effectiveBody,
@@ -164,7 +181,11 @@ internal static class IssueCommands
                     model,
                     workflowProfileId = effectiveWorkflow,
                     risk = effectiveRisk,
+                    isDraft,
                 });
+                if (result.ExitCode == 0)
+                    PrintCreateGuidance(result.Data, api.Output);
+                return result.ExitCode;
             }
         });
         return cmd;
@@ -263,11 +284,12 @@ internal static class IssueCommands
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var bodyOpt = new Option<string?>("--body", "-b") { Description = "New body (mutually exclusive with --body-file and --body-stdin)" };
         var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read new body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body and --body-stdin)" };
-        var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read new body from stdin (mutually exclusive with --body and --body-file)" };
+        var bodyStdinOpt = new Option<bool>("--body-stdin") { Description = "Read new body from stdin (mutually exclusive with --body and --body-stdin)" };
         var labelOpt = MohistCliCommands.LabelOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
+        var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("updating");
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
         cmd.Options.Add(bodyOpt);
@@ -278,6 +300,8 @@ internal static class IssueCommands
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
+        cmd.Options.Add(readyOpt);
+        cmd.Options.Add(draftOpt);
         cmd.SetAction(ctx =>
         {
             var number = ctx.GetValue(numberArg);
@@ -290,6 +314,8 @@ internal static class IssueCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
+            var ready = ctx.GetValue(readyOpt);
+            var draft = ctx.GetValue(draftOpt);
             return UpdateAsync();
 
             async Task<int> UpdateAsync()
@@ -297,6 +323,12 @@ internal static class IssueCommands
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
+                var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
+                if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
+                {
+                    api.Error.WriteLine("--ready and --draft are mutually exclusive");
+                    return 1;
+                }
                 var hasAnyBodySource =
                     !string.IsNullOrWhiteSpace(body) ||
                     !string.IsNullOrWhiteSpace(bodyFile) ||
@@ -316,6 +348,12 @@ internal static class IssueCommands
                     labels,
                     priority,
                     model,
+                    isDraft = draftState switch
+                    {
+                        MohistCliCommands.DraftFlagState.Draft => (bool?)true,
+                        MohistCliCommands.DraftFlagState.Ready => (bool?)false,
+                        _ => null,
+                    },
                 });
             }
         });
@@ -347,7 +385,43 @@ internal static class IssueCommands
                     new { });
             }
         });
-         return cmd;
+        return cmd;
+    }
+
+    internal static void PrintCreateGuidance(System.Text.Json.Nodes.JsonNode? data, TextWriter output)
+    {
+        if (data is null) return;
+        var blocker = data["blocker"];
+        var isDraft = data["isDraft"]?.GetValue<bool>() ?? false;
+        var number = data["number"]?.GetValue<int?>();
+        if (isDraft && number is int draftNumber)
+        {
+            output.WriteLine($"Mark the issue ready with 'mo issue update {draftNumber} --ready' before starting.");
+            return;
+        }
+        if (isDraft)
+        {
+            output.WriteLine("Mark the issue ready with 'mo issue update <number> --ready' before starting.");
+            return;
+        }
+        if (blocker is System.Text.Json.Nodes.JsonObject blockerObj)
+        {
+            var kind = blockerObj["kind"]?.GetValue<string>();
+            if (kind == "waiting-for")
+            {
+                var issue = blockerObj["issue"] as System.Text.Json.Nodes.JsonObject;
+                var blockedNumber = issue?["number"]?.GetValue<int?>();
+                if (blockedNumber is int n)
+                {
+                    output.WriteLine($"Waiting for #{n} to be delivered before this issue can start.");
+                    return;
+                }
+                output.WriteLine("Waiting for a prerequisite issue to be delivered before this issue can start.");
+                return;
+            }
+        }
+        if (number is int n2)
+            output.WriteLine($"Tip: Run 'mo issue start {n2}' to begin processing");
     }
 
     private static Command BuildRebase(MohistCliApi api)

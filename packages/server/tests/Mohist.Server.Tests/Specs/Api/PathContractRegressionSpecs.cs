@@ -238,7 +238,7 @@ public class PathContractRegressionSpecs
 
         var issue = await (await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues",
-            new { title = "Dispatch contract", projectId = projectId }))
+            new { title = "Dispatch contract", projectId = projectId, isDraft = false }))
             .Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
 

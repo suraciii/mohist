@@ -97,6 +97,19 @@ function HealthPill({ health }: { health: IssueHealth }) {
   )
 }
 
+function DraftPill() {
+  return (
+    <span
+      data-testid="draft-pill"
+      className="inline-flex items-center gap-1 rounded-full bg-muted text-muted-foreground px-2 py-0.5 text-[10px] font-semibold"
+      title="This issue is still a draft and cannot be started yet"
+    >
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+      Draft
+    </span>
+  )
+}
+
 function formatRelativeTime(iso: string): string {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime())
   const seconds = Math.floor(diff / 1000)
@@ -393,6 +406,7 @@ export function IssueDetailPage() {
                 #{issue.number}
               </span>
               <PriorityChip priority={issue.priority} />
+              {issue.isDraft && <DraftPill />}
               <WorkflowStagePill stage={issue.workflowStage ?? undefined} />
               <HealthPill health={issue.health} />
               {isAgentRunningOnThis && (
@@ -906,9 +920,52 @@ export function IssueDetailPage() {
                 <div className="space-y-2">
                   {isBacklog && (
                     <>
-                      {issue.startEligibility?.waitingForCompletion?.length ? (
-                        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700">
-                          {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`}
+                      {issue.isDraft ? (
+                        <div
+                          data-testid="start-readiness"
+                          data-blocker="draft"
+                          className="rounded-md bg-muted border border-border px-3 py-2 text-sm text-muted-foreground"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <DraftPill />
+                            <span className="text-xs font-semibold uppercase tracking-wide">
+                              Still a draft
+                            </span>
+                          </div>
+                          <p className="text-xs">
+                            This issue has not been marked ready yet. Mark it ready to enable Start.
+                          </p>
+                          <Button
+                            data-testid="start-button"
+                            disabled
+                            className="w-full mt-2"
+                            title="This issue is still a draft"
+                          >
+                            Still a draft
+                          </Button>
+                        </div>
+                      ) : issue.blocker?.kind === 'waiting-for' ? (
+                        <div
+                          data-testid="start-readiness"
+                          data-blocker="waiting-for"
+                          data-waiting-for={issue.blocker.issue.number}
+                          className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700"
+                        >
+                          <div className="font-medium">
+                            Waiting for #{issue.blocker.issue.number}
+                            {issue.blocker.issue.title ? ` ${issue.blocker.issue.title}` : ''}
+                          </div>
+                          <p className="text-xs mt-0.5">
+                            This issue cannot start until its prerequisite is delivered.
+                          </p>
+                          <Button
+                            data-testid="start-button"
+                            disabled
+                            className="w-full mt-2"
+                            title={`Waiting for prerequisite #${issue.blocker.issue.number}`}
+                          >
+                            Waiting for #{issue.blocker.issue.number}
+                          </Button>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -918,6 +975,7 @@ export function IssueDetailPage() {
                             </div>
                           )}
                           <Button
+                            data-testid="start-button"
                             onClick={() => startMutation.mutate()}
                             disabled={runnerUnavailable || isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
                             className="w-full"
@@ -1152,6 +1210,42 @@ export function IssueDetailPage() {
                         )}
                       </div>
                     ))}
+                  </div>
+                </CardSection>
+              )}
+
+              {isBacklog && (
+                <CardSection
+                  title="Readiness"
+                  tone={issue.isDraft ? 'default' : issue.canStart ? 'green' : 'amber'}
+                >
+                  <div className="space-y-2 text-sm" data-testid="readiness-panel">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Draft</span>
+                      <span data-testid="readiness-is-draft">
+                        {issue.isDraft ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Can start</span>
+                      <span data-testid="readiness-can-start">
+                        {issue.canStart ? 'Yes' : 'No'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Blocker</span>
+                      <span
+                        data-testid="readiness-blocker"
+                        data-blocker-kind={issue.blocker?.kind ?? 'none'}
+                        className="text-right"
+                      >
+                        {issue.blocker?.kind === 'draft'
+                          ? 'Still a draft'
+                          : issue.blocker?.kind === 'waiting-for'
+                            ? `Waiting for #${issue.blocker.issue.number}`
+                            : 'None'}
+                      </span>
+                    </div>
                   </div>
                 </CardSection>
               )}

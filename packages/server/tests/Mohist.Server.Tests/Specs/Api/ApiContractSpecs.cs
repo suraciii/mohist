@@ -219,7 +219,7 @@ public class ApiContractSpecs
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString();
         await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "trunk", isDefault = true });
-        var issueResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues", new { title = "Needs rebase" });
+        var issueResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues", new { title = "Needs rebase", isDraft = false });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();
         var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;
