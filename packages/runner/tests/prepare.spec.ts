@@ -60,6 +60,7 @@ describe("mohist/prepare", () => {
       "rev-parse HEAD",
       "rebase origin/master",
       "rev-parse HEAD",
+      "status --porcelain",
     ])
     const output = JSON.parse(result.output ?? "{}")
     expect(output).toMatchObject({
@@ -76,7 +77,7 @@ describe("mohist/prepare", () => {
     expect(output).not.toHaveProperty("pushed")
   })
 
-  it("DirtyWorktree_CommitsPendingChangesBeforeFetch", async () => {
+  it("DirtyWorktreeBeforePrepare_FailsWithoutCommittingPendingChanges", async () => {
     const calls = installGit(async (_workDir, args) => {
       switch (args.join(" ")) {
         case "rev-parse --git-path rebase-merge":
@@ -85,18 +86,6 @@ describe("mohist/prepare", () => {
           return ok("/fake/worktree/.git/rebase-apply\n")
         case "status --porcelain":
           return ok(" M packages/runner/src/actions/registry.ts\n")
-        case "add .":
-          return ok("")
-        case "commit -m Prepare rebase onto master":
-          return ok("[mo/issue-82 abc123] Prepare rebase onto master")
-        case "fetch origin master":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("base123\n")
-        case "rev-parse HEAD":
-          return ok("after\n")
-        case "rebase origin/master":
-          return ok("Successfully rebased")
         default:
           return fail(`unexpected git call: ${args.join(" ")}`)
       }
@@ -105,10 +94,66 @@ describe("mohist/prepare", () => {
     setRebaseConflictResolverForTest(async () => ({ status: "success", message: "noop", output: "" }))
 
     const result = await prepareAction(context({ baseBranch: "master" }))
+    const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(calls.indexOf("commit -m Prepare rebase onto master")).toBeGreaterThan(-1)
-    expect(calls.indexOf("commit -m Prepare rebase onto master")).toBeLessThan(calls.indexOf("fetch origin master"))
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("worktree is dirty before rebase")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "status --porcelain",
+    ])
+    expect(calls).not.toContain("add .")
+    expect(calls).not.toContain("commit -m Prepare rebase onto master")
+    expect(output).toMatchObject({
+      kind: "prepare",
+      status: "failed",
+      prepared: false,
+      failureKind: "retry-safe",
+    })
+    expect(output.output).toContain("packages/runner/src/actions/registry.ts")
+  })
+
+  it("SuccessfulRebaseLeavesDirtyWorktree_FailsBeforeExecutorCleanup", async () => {
+    const calls = installGit(async (_workDir, args, allCalls) => {
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "status --porcelain":
+          return ok(allCalls.filter((c) => c === "status --porcelain").length === 1
+            ? ""
+            : " M packages/web/src/pages/settings/ui/WorkflowProfilesSection.tsx\n?? openspec/changes/issue-116/\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base123\n")
+        case "rev-parse HEAD":
+          return ok(allCalls.filter((c) => c === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase origin/master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+    setRebaseExistsCheckerForTest(() => false)
+
+    const result = await prepareAction(context({ baseBranch: "master" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("worktree remained dirty after rebase")
+    expect(output).toMatchObject({
+      kind: "prepare",
+      status: "failed",
+      prepared: false,
+      preparedBaseSha: "base123",
+      preparedHeadSha: "after",
+      failureKind: "retry-safe",
+    })
+    expect(output.output).toContain("Prepare left a dirty worktree after rebase")
+    expect(output.output).toContain("openspec/changes/issue-116")
   })
 
   it("RebaseConflicts_ResolverSucceeds_OutputsConflictAttemptsAndPreparedHead", async () => {
@@ -173,6 +218,7 @@ describe("mohist/prepare", () => {
       "rev-parse origin/master",
       "merge-base origin/master HEAD",
       "rev-parse HEAD",
+      "status --porcelain",
     ])
     expect(output).toMatchObject({
       kind: "prepare",

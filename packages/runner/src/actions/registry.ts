@@ -10,7 +10,6 @@ import {
   abortRebaseIfInProgressAction,
   applyWorkflowAgentDefault,
   combinedRebaseGitOutput,
-  commitRebasePendingChanges,
   rebaseAction,
   rebaseConflictFiles,
   rebaseStatusAction,
@@ -166,9 +165,12 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
     return prepareOutput(false, baseBranch, null, null, [], 0, abortResult.combinedOutput, "retry-safe", abortResult.exitCode)
   }
 
-  const sourceCommit = await commitRebasePendingChanges(workDir, `Prepare rebase onto ${baseBranch}`, context.signal)
-  if (!sourceCommit.success) {
-    return prepareOutput(false, baseBranch, null, null, [], 0, sourceCommit.combinedOutput, "retry-safe", sourceCommit.exitCode)
+  const initialStatus = await git(workDir, ["status", "--porcelain"], context.signal)
+  if (!initialStatus.success) {
+    return prepareOutput(false, baseBranch, null, null, [], 0, initialStatus.combinedOutput, "retry-safe", initialStatus.exitCode)
+  }
+  if (initialStatus.stdout.trim()) {
+    return prepareDirtyOutput(baseBranch, null, null, [], 0, initialStatus.stdout, "Prepare aborted: worktree is dirty before rebase. Commit or clean the workspace before retrying.")
   }
 
   const fetch = await git(workDir, ["fetch", remote, baseBranch], context.signal)
@@ -189,7 +191,10 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
   const rebaseResult = await git(workDir, ["rebase", baseRef], context.signal)
   if (rebaseResult.success) {
     const after = await git(workDir, ["rev-parse", "HEAD"], context.signal)
-    return prepareOutput(true, baseBranch, preparedBaseSha, after.success ? after.stdout.trim() : null, [], 0, rebaseResult.combinedOutput, undefined)
+    const preparedHeadSha = after.success ? after.stdout.trim() : null
+    const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseResult.combinedOutput)
+    if (clean) return clean
+    return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseResult.combinedOutput, undefined)
   }
 
   let conflicts = await rebaseConflictFiles(context)
@@ -220,7 +225,10 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
     gitOutputs.push(verified.output)
     if (verified.ok) {
       const after = await git(workDir, ["rev-parse", "HEAD"], context.signal)
-      return prepareOutput(true, baseBranch, preparedBaseSha, after.success ? after.stdout.trim() : null, allConflicts.flat(), attempts, combinedRebaseGitOutput(gitOutputs), undefined)
+      const preparedHeadSha = after.success ? after.stdout.trim() : null
+      const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, allConflicts.flat(), attempts, combinedRebaseGitOutput(gitOutputs))
+      if (clean) return clean
+      return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, allConflicts.flat(), attempts, combinedRebaseGitOutput(gitOutputs), undefined)
     }
 
     conflicts = await rebaseConflictFiles(context)
@@ -229,6 +237,24 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
 
   await git(workDir, ["rebase", "--abort"], context.signal)
   return prepareOutput(false, baseBranch, preparedBaseSha, null, allConflicts.flat(), attempts, combinedRebaseGitOutput(gitOutputs), "conflict", 1)
+}
+
+async function prepareCleanWorktreeResult(
+  context: ActionContext,
+  baseBranch: string,
+  preparedBaseSha: string | null,
+  preparedHeadSha: string | null,
+  conflicts: string[],
+  resolveAttempts: number,
+  gitOutput: string,
+): Promise<ActionResult | null> {
+  const status = await git(context.workDir, ["status", "--porcelain"], context.signal)
+  if (!status.success) {
+    return prepareOutput(false, baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, status.combinedOutput, "retry-safe", status.exitCode)
+  }
+  if (!status.stdout.trim()) return null
+  const output = [gitOutput, "Prepare left a dirty worktree after rebase:", status.stdout.trim()].filter(Boolean).join("\n\n")
+  return prepareDirtyOutput(baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, "Prepare failed: worktree remained dirty after rebase.")
 }
 
 function prepareOutput(
@@ -241,6 +267,7 @@ function prepareOutput(
   gitOutput: string,
   failureKind: "conflict" | "retry-safe" | undefined,
   exitCode: number | null = null,
+  failureMessage: string | null = null,
 ): ActionResult {
   // Schema convention: `failureKind` is always present (null on success).
   // Downstream renderers (CLI DeliveryFailureGuidance, web delivery-failure.ts)
@@ -261,7 +288,19 @@ function prepareOutput(
   })
   return prepared
     ? { status: "success", message: "Prepare completed", output }
-    : { status: "failure", message: `Prepare failed${failureKind ? ` (${failureKind})` : ""}: ${gitOutput || "unknown error"}`, output, exitCode: exitCode ?? 1 }
+    : { status: "failure", message: failureMessage ?? `Prepare failed${failureKind ? ` (${failureKind})` : ""}: ${gitOutput || "unknown error"}`, output, exitCode: exitCode ?? 1 }
+}
+
+function prepareDirtyOutput(
+  baseBranch: string,
+  preparedBaseSha: string | null,
+  preparedHeadSha: string | null,
+  conflicts: string[],
+  resolveAttempts: number,
+  gitOutput: string,
+  message: string,
+): ActionResult {
+  return prepareOutput(false, baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, gitOutput, "retry-safe", 1, message)
 }
 
 export async function publishAction(context: ActionContext): Promise<ActionResult> {
