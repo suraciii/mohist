@@ -114,7 +114,7 @@ export class WorkExecutor {
       if (error instanceof WorktreeProbeError) {
         return worktreeProbeFailure(work, error)
       }
-      return failure(work, error instanceof Error ? error.message : String(error))
+      return failure(work, errorMessage(error))
     }
   }
 
@@ -639,4 +639,12 @@ function safeParseJson(value: string): JsonObject | null {
 
 function mergeCleanupCount(result: WorkItemResult, attempts: number): WorkItemResult {
   return { ...result, cleanupAttempts: attempts }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === "object" && "name" in error && "message" in error) {
+    return String((error as { message: unknown }).message)
+  }
+  return String(error)
 }
