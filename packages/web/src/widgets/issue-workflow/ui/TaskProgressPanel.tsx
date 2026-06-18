@@ -3,6 +3,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
 import type { StageTaskState, WorkflowStage } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
+import { resolveDeliveryFailureFromMessage, resolveDeliveryFailureFromOutput } from '../../../shared/lib/delivery-failure'
 
 interface TaskProgressPanelProps {
   issueNumber: number
@@ -32,6 +33,11 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
   const [expanded, setExpanded] = useState(false)
   const isFailed = task.status === 'failed'
   const isInProgress = isRunning && task.status === 'running'
+  const isDeliveryTask = isDeliveryFailureTask(task)
+  const deliveryGuidance = isFailed && isDeliveryTask
+    ? (resolveDeliveryFailureFromOutput(task.output).guidance
+      ?? resolveDeliveryFailureFromMessage(typeof task.reason === 'string' ? task.reason : null).guidance)
+    : null
 
   return (
     <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border'} overflow-hidden`}>
@@ -62,9 +68,19 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
         )}
       </Button>
       {expanded && isFailed && (
-        <div className="px-2.5 pb-2 border-t border-red-100 bg-red-50/50">
+        <div className="px-2.5 pb-2 border-t border-red-100 bg-red-50/50 space-y-1.5">
           {task.reason && (
-            <p className="text-xs text-amber-600 mb-1.5">{task.reason}</p>
+            <p className="text-xs text-amber-600">{task.reason}</p>
+          )}
+          {deliveryGuidance && (
+            <div className="rounded border border-red-200 bg-white px-2 py-1.5 text-xs text-red-700 space-y-0.5">
+              <div className="flex items-center gap-2 font-semibold">
+                <span className="text-[10px] uppercase tracking-wide opacity-80">Failure kind</span>
+                <span className="rounded bg-red-100 px-1.5 py-0.5 font-mono text-[11px]">{deliveryGuidance.failureKind}</span>
+                <span>{deliveryGuidance.label}</span>
+              </div>
+              <p className="leading-snug">{deliveryGuidance.nextAction}</p>
+            </div>
           )}
           <p className="text-xs text-red-600 whitespace-pre-wrap">
             {typeof task.output === 'string' ? task.output : task.output != null ? JSON.stringify(task.output) : 'Task failed'}
@@ -73,6 +89,14 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
       )}
     </div>
   )
+}
+
+function isDeliveryFailureTask(task: StageTaskState): boolean {
+  const uses = task.origin?.uses
+  if (typeof uses !== 'string') {
+    return typeof task.taskId === 'string' && (task.taskId.startsWith('integrate:prepare') || task.taskId.startsWith('integrate:publish'))
+  }
+  return uses === 'mohist/prepare' || uses === 'mohist/publish'
 }
 
 function ProgressBar({ completed, failed, total }: { completed: number; failed: number; total: number }) {

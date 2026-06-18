@@ -1,0 +1,67 @@
+{
+  "project": "mohist",
+  "description": "Split the opaque Integrate integrate:merge delivery into two real, ordered tasks — integrate:prepare (rebase + first-class conflict resolution) and integrate:publish (land one commit + push) — with classified, recoverable delivery failures.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement split delivery runner actions (mohist/prepare + mohist/publish) and remove mohist/merge",
+      "spec": "specs/merge-delivery/spec.md#Integrate delivery is prepare then publish",
+      "description": "In packages/runner/src/actions, add prepareAction: operate in the issue worktree (context.workDir where mo/issue-N is HEAD), fetch the latest base, rebase the issue branch onto it, and reuse the existing rebase.ts conflict-resolution machinery (runConflictResolver, verifyRebaseComplete, abortRebaseIfInProgress) so conflict resolution is the task's visible work with its own attempts/evidence. Add publishAction: operate in project.path, checkout base, git merge --squash the prepared issue branch into a single commit, then git push it to the remote; it MUST contain no agent conflict-resolution loop. Emit a structured failureKind in each action's output JSON (conflict from prepare; base-moved on squash conflict or non-fast-forward push; retry-safe for transient errors). Guarantee a clean workspace on failure (rebase --abort for prepare; merge --abort / reset base for publish). Register mohist/prepare and mohist/publish in createDefaultRegistry(), delete mergeAction and the mohist/merge registration, and replace tests/merge.spec.ts with tests/prepare.spec.ts and tests/publish.spec.ts reusing the injectable git/resolver test harness.",
+      "acceptanceCriteria": [
+        "prepareAction rebases mo/issue-N onto the fetched base branch and records preparedBaseSha and the prepared candidate head in its output",
+        "prepareAction resolves conflicts via the reused rebase conflict-resolution path and reports failureKind 'conflict' when a conflict cannot be resolved, with git rebase --abort leaving no rebase in progress",
+        "publishAction lands the issue changes as exactly one commit on the base branch in project.path and pushes it to the remote, recording the landed commit and that the push occurred",
+        "publishAction performs no agent conflict-resolution loop; when the base moved it reports failureKind 'base-moved' and restores the base branch to its pre-publish state with no partial commit",
+        "transient publish failures report failureKind 'retry-safe'; only publish ever runs git push",
+        "mohist/merge and mergeAction are removed; createDefaultRegistry() registers mohist/prepare and mohist/publish",
+        "prepare.spec.ts and publish.spec.ts pass, asserting the exact git call sequences and the parsed output shape including failureKind; merge.spec.ts is deleted"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/registry.ts (+ reused exports from rebase.ts), packages/runner/tests/prepare.spec.ts, packages/runner/tests/publish.spec.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Linked worktrees share the project repo refs, so publish in project.path sees the mo/issue-N ref that prepare rebased in the issue worktree — add a test asserting this. Keep the closed failureKind set aligned with specs/merge-delivery/spec.md."
+    },
+    {
+      "id": "T-002",
+      "title": "Switch the default Integrate stage to integrate:prepare then integrate:publish",
+      "spec": "specs/workflow-definition/spec.md#REQ-WD-002 Integrate uses the standard task/check stage contract",
+      "description": "Update packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml: replace the single integrate:merge (mohist/merge) task with integrate:prepare (mohist/prepare, baseBranch from project.baseBranch, with a conflictResolver titled 'Resolve prepare conflicts') followed by integrate:publish (mohist/publish, source mo/issue-${{ issue.number }}, target project.baseBranch, message 'Complete issue #${{ issue.number }}'). Preserve the integrate:spec-sync then integrate:archive-change ordering ahead of delivery, and keep the health check, lockBehavior: sequential, and project-integration resource unchanged. Align workflow-run delivery/freeze facts and the post-publish-health-failed reason with the prepare+publish split.",
+      "acceptanceCriteria": [
+        "mohist-default.workflow.yaml declares integrate:prepare then integrate:publish in that order, after integrate:archive-change, using mohist/prepare and mohist/publish respectively",
+        "integrate:spec-sync precedes integrate:archive-change which precedes integrate:prepare which precedes integrate:publish",
+        "the Integrate health check, lockBehavior: sequential, and project-integration resource are unchanged",
+        "the default workflow loads/validates without errors (existing workflow-definition tests pass)",
+        "no code or config references the removed mohist/merge action, integrate:merge task, or post-merge-health-failed reason"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The server binds Integrate tasks generically from the yaml, so no server domain-model change is expected beyond the yaml; verify by loading the default workflow profile."
+    },
+    {
+      "id": "T-003",
+      "title": "Surface delivery failure kinds in the CLI and Web UI",
+      "spec": "specs/merge-delivery/spec.md#Delivery failures are classified into actionable kinds",
+      "description": "Render the prepare/publish failureKind (conflict, base-moved, retry-safe) and its recommended next action wherever failed Integrate delivery task results are shown: the CLI task-failure output and the Web task/log surfaces. Reuse the existing structured task-result output channel — do not introduce a new transport or domain event. Map each failureKind to the corresponding guidance (conflict -> needs attention; base-moved -> prepare again then publish; retry-safe -> just retry).",
+      "acceptanceCriteria": [
+        "CLI delivery task failure output includes the failureKind and the recommended next action",
+        "Web task/log surface displays the failureKind and recommended next action for failed prepare/publish tasks",
+        "failureKind rendering relies on the existing task-result output payload; no new realtime channel or domain event is added",
+        "unit/component tests cover the failureKind-to-guidance mapping for all three kinds in both CLI and Web"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CLI failure-rendering path, Web task/log failure-rendering components, and their tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Scope is limited to displaying the kind already emitted by the runner actions; keep the CLI/Web change proportional and do not build new failure infrastructure."
+    }
+  ]
+}

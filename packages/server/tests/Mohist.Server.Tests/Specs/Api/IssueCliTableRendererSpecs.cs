@@ -340,6 +340,199 @@ public class IssueCliTableRendererSpecs
         Assert.Equal(MohistCliApi.TableShape.RepoList, MohistCliApi.ParseTableShape("RepoList"));
     }
 
+    public static IEnumerable<object[]> DeliveryFailureKindMatrix() => new List<object[]>
+    {
+        new object[] { DeliveryFailureGuidance.Conflict, "Conflict needs attention", "Conflicts could not be resolved automatically." },
+        new object[] { DeliveryFailureGuidance.BaseMoved, "Base branch moved", "Prepare the branch again, then publish." },
+        new object[] { DeliveryFailureGuidance.RetrySafe, "Transient failure", "Retry the task" },
+    };
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [MemberData(nameof(DeliveryFailureKindMatrix))]
+    public void DeliveryFailureGuidance_ResolveGuidance_ExposesLabelAndNextActionForAllKinds(
+        string kind, string expectedLabel, string expectedActionFragment)
+    {
+        var guidance = DeliveryFailureGuidance.ResolveGuidance(kind);
+
+        Assert.NotNull(guidance);
+        Assert.Equal(expectedLabel, guidance!.Value.Label);
+        Assert.Contains(expectedActionFragment, guidance.Value.NextAction);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData("Prepare failed (conflict): CONFLICT in foo.ts", DeliveryFailureGuidance.Conflict, "Conflict needs attention")]
+    [InlineData("Publish failed (base-moved): non-fast-forward", DeliveryFailureGuidance.BaseMoved, "Base branch moved")]
+    [InlineData("Prepare failed (retry-safe): network reset", DeliveryFailureGuidance.RetrySafe, "Transient failure")]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_ExtractsKind(
+        string message, string expectedKind, string expectedLabel)
+    {
+        var (kind, guidance) = DeliveryFailureGuidance.Resolve(message, output: null);
+
+        Assert.Equal(expectedKind, kind);
+        Assert.NotNull(guidance);
+        Assert.Equal(expectedLabel, guidance!.Value.Label);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData(DeliveryFailureGuidance.Conflict)]
+    [InlineData(DeliveryFailureGuidance.BaseMoved)]
+    [InlineData(DeliveryFailureGuidance.RetrySafe)]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_ExtractsKind(string kind)
+    {
+        var output = JsonNode.Parse($$"""
+            {
+              "kind": "{{(kind == DeliveryFailureGuidance.BaseMoved ? "publish" : "prepare")}}",
+              "status": "failed",
+              "failureKind": "{{kind}}"
+            }
+            """);
+
+        var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
+
+        Assert.Equal(kind, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_RecursesIntoNestedOutputField()
+    {
+        var output = JsonNode.Parse("""
+            {
+              "output": "{\"failureKind\":\"retry-safe\"}"
+            }
+            """);
+
+        var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
+
+        Assert.Equal(DeliveryFailureGuidance.RetrySafe, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_ReturnsNullForUnknownKind()
+    {
+        var (kind, guidance) = DeliveryFailureGuidance.Resolve("Prepare failed (something-else): foo", output: null);
+
+        Assert.Null(kind);
+        Assert.Null(guidance);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromEmpty_ReturnsNull()
+    {
+        Assert.Null(DeliveryFailureGuidance.ResolveFailureKind((string?)null));
+        Assert.Null(DeliveryFailureGuidance.ResolveFailureKind((JsonNode?)null));
+        Assert.Null(DeliveryFailureGuidance.ResolveFailureKind(string.Empty));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData("Prepare failed (conflict): CONFLICT in foo.ts", DeliveryFailureGuidance.Conflict)]
+    [InlineData("Publish failed (base-moved): non-fast-forward", DeliveryFailureGuidance.BaseMoved)]
+    [InlineData("Prepare failed (retry-safe): network reset", DeliveryFailureGuidance.RetrySafe)]
+    public async Task RenderTable_WorkflowStatus_SurfacesDeliveryFailureKindLabelAndNextAction(
+        string failureMessage, string expectedKind)
+    {
+        var data = JsonNode.Parse($$"""
+            {
+              "issueId": "iss_141",
+              "issueNumber": 141,
+              "title": "Split Integrate delivery",
+              "stage": "integrate",
+              "runtimeStatus": "failed",
+              "workflowRunId": "wr_141",
+              "workflow": {
+                "workflowRunId": "wr_141",
+                "status": "failed",
+                "currentStage": "integrate",
+                "failure": {
+                  "reason": "TaskFailed",
+                  "stage": "integrate",
+                  "taskId": "integrate:prepare",
+                  "message": "{{failureMessage}}"
+                },
+                "stages": [
+                  { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
+                ]
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowStatus);
+
+        var text = output.ToString();
+        Assert.Contains("delivery failure:", text);
+        Assert.Contains(expectedKind, text);
+        Assert.Contains("next action:", text);
+
+        var resolved = DeliveryFailureGuidance.Resolve(failureMessage, null);
+        var label = resolved.Guidance!.Value.Label;
+        Assert.Contains(label, text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RenderTable_WorkflowStatus_OmitsDeliveryFailureSectionWhenKindUnknown()
+    {
+        var data = JsonNode.Parse("""
+            {
+              "issueId": "iss_141",
+              "issueNumber": 141,
+              "title": "Split Integrate delivery",
+              "stage": "integrate",
+              "runtimeStatus": "failed",
+              "workflowRunId": "wr_141",
+              "workflow": {
+                "workflowRunId": "wr_141",
+                "status": "failed",
+                "currentStage": "integrate",
+                "failure": {
+                  "reason": "TaskFailed",
+                  "stage": "integrate",
+                  "taskId": "integrate:publish",
+                  "message": "Some other failure without a kind"
+                },
+                "stages": [
+                  { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
+                ]
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowStatus);
+
+        var text = output.ToString();
+        Assert.DoesNotContain("delivery failure:", text);
+    }
+
     private static string InvokeTruncate(string value, int softCap)
     {
         var mi = typeof(TableRenderer).GetMethod(

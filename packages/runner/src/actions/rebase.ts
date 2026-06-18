@@ -10,9 +10,12 @@ const DEFAULT_MAX_CONFLICT_RETRIES = 3
 type GitRunner = typeof defaultGit
 type ExistsChecker = typeof exists
 type ConflictResolverRunner = typeof acpAgentAction
+type GitResult = Awaited<ReturnType<GitRunner>>
 let git: GitRunner = defaultGit
 let pathExists: ExistsChecker = exists
 let conflictResolverRunner: ConflictResolverRunner = acpAgentAction
+
+export type RebaseGitResult = GitResult
 
 export function setRebaseGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
@@ -171,6 +174,36 @@ function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: n
     "7. When rebase completes, verify there is no rebase in progress and no conflict markers remain.",
     "8. Run the project's full build and test suite as a regression check. If anything fails, fix it before finishing.",
   ].join("\n")
+}
+
+export async function commitRebasePendingChanges(workDir: string, message: string, signal: AbortSignal) {
+  return await commitPendingChanges(workDir, message, signal)
+}
+
+export async function abortRebaseIfInProgressAction(context: ActionContext) {
+  return await abortRebaseIfInProgress(context)
+}
+
+export async function rebaseConflictFiles(context: ActionContext) {
+  return await conflictFiles(context)
+}
+
+export async function verifyRebaseCompleteAction(context: ActionContext, baseBranch: string) {
+  return await verifyRebaseComplete(context, baseBranch)
+}
+
+export async function runRebaseConflictResolver(
+  context: ActionContext,
+  conflictResolver: JsonObject,
+  conflicts: string[],
+  baseBranch: string,
+  attempt: number,
+): Promise<ActionResult> {
+  return await runConflictResolver(context, conflictResolver, conflicts, baseBranch, attempt)
+}
+
+export function combinedRebaseGitOutput(outputs: string[]) {
+  return combinedGitOutput(outputs)
 }
 
 export async function rebaseStatusAction(context: ActionContext): Promise<ActionResult> {
