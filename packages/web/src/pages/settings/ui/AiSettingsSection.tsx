@@ -4,7 +4,9 @@ import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStage
 import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { Button } from '@/shared/ui/components/button'
+import { CardSection } from '@/shared/ui/components/card-section'
 import { SectionState } from './SectionState'
+import { SettingsSection } from './SettingsSection'
 
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
 
@@ -62,23 +64,23 @@ export function AiSettingsSection() {
 
   return (
     <div className="space-y-8">
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium text-foreground">External Coder Agent</h3>
-
-        <div className="space-y-1.5">
-          <div className="flex items-baseline justify-between gap-2">
-            <label className="block text-xs font-medium text-foreground/80">Default Coder Agent Model</label>
-            <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
+      <SettingsSection title="External Coder Agent">
+        <CardSection>
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
+              <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
+            <ModelSelect
+              value={opencodeModelData?.model ?? null}
+              placeholder="Opencode default"
+              models={coderModels}
+              onChange={handleSetOpencodeModel}
+            />
           </div>
-          <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
-          <ModelSelect
-            value={opencodeModelData?.model ?? null}
-            placeholder="Opencode default"
-            models={coderModels}
-            onChange={handleSetOpencodeModel}
-          />
-        </div>
-      </div>
+        </CardSection>
+      </SettingsSection>
 
       <hr className="border" />
 

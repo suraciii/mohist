@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2Icon, CircleAlertIcon, Loader2Icon, RotateCcwIcon, SaveIcon, XIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
+import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import {
   useExtractVariables,
@@ -200,9 +201,9 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
   const canSave = !isReadOnly && bodyTrimmed.length > 0 && !upsert.isPending
 
   return (
-    <div
+    <CardSection
       data-testid="template-editor"
-      className="space-y-3 rounded-lg border border-border bg-card/60 p-4"
+      className="space-y-3"
     >
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-medium text-foreground">
@@ -224,7 +225,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-key"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Key
             </label>
@@ -240,7 +241,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-displayname"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Display Name
             </label>
@@ -256,7 +257,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-description"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Description
             </label>
@@ -272,7 +273,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-tags"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Tags (comma separated)
             </label>
@@ -288,7 +289,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-stage"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Stage
             </label>
@@ -305,7 +306,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-body"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Body
             </label>
@@ -324,7 +325,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-preview-vars"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Preview Variables (JSON object)
             </label>
@@ -349,7 +350,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           <div>
             <label
               htmlFor="template-editor-preview"
-              className="block text-xs font-medium text-foreground/80"
+              className="block text-xs font-medium text-muted-foreground"
             >
               Preview
             </label>
@@ -379,7 +380,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           </div>
 
           <div>
-            <div className="text-xs font-medium text-foreground/80">Referenced Variables</div>
+            <div className="text-xs font-medium text-muted-foreground">Referenced Variables</div>
             {variables.length === 0 ? (
               <p
                 data-testid="template-editor-variables-empty"
@@ -454,6 +455,6 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           </Button>
         )}
       </div>
-    </div>
+    </CardSection>
   )
 }

@@ -1,0 +1,1 @@
+Before: Template rows and editor used rounded-lg border bg-card/50 or bg-card/60 wrappers.

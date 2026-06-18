@@ -1,0 +1,5 @@
+Section: system
+Before: System card titles visually drove the page with h2 uppercase tracking-wider styling while other tabs used local h3 page titles.
+After: page title is rendered by SettingsSection as h3 "System".
+After: detected 7 CardSection-style rounded-lg border containers in the rendered snapshot.
+Diff verdict: expected visual contract migration observed in deterministic rendered artifact.

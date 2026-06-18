@@ -82,7 +82,7 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
         </DialogDescription>
         <div className="space-y-2">
           <div>
-            <label className="block text-xs font-medium text-foreground/80">Key</label>
+            <label className="block text-xs font-medium text-muted-foreground">Key</label>
             <Input
               value={key}
               onChange={(e) => {
@@ -107,7 +107,7 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
             )}
           </div>
           <div>
-            <label className="block text-xs font-medium text-foreground/80">Display Name</label>
+            <label className="block text-xs font-medium text-muted-foreground">Display Name</label>
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
@@ -117,7 +117,7 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-foreground/80">Body</label>
+            <label className="block text-xs font-medium text-muted-foreground">Body</label>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}

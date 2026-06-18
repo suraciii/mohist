@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { ChevronDown, Search, X } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
@@ -28,30 +29,6 @@ export function describeModel(id: string): ModelDescriptor {
     fullId: id,
     provider: id.slice(0, slashIdx),
   }
-}
-
-function SearchIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-function ChevronDownIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-    </svg>
-  )
 }
 
 export interface ModelSelectProps {
@@ -213,13 +190,13 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
           ) : (
             <span className="truncate text-muted-foreground">{placeholder}</span>
           )}
-          <ChevronDownIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
         <PopoverContent className={`p-0 ${isCompact ? 'w-56' : 'w-72'}`} align="end">
           <div className="p-2">
             <div className="relative">
               <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                <SearchIcon className={isCompact ? 'h-3.5 w-3.5 text-muted-foreground' : 'h-4 w-4 text-muted-foreground'} />
+                <Search className={isCompact ? 'h-3.5 w-3.5 text-muted-foreground' : 'h-4 w-4 text-muted-foreground'} />
               </div>
               <Input
                 ref={searchRef}
@@ -257,7 +234,7 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
                           ? 'bg-blue-50 text-blue-700'
                           : model.id === value
                             ? 'bg-muted text-foreground'
-                            : 'text-foreground/80 hover:bg-muted'
+                            : 'text-foreground hover:bg-muted'
                       } ${isCompact ? 'px-2 py-1' : 'px-3 py-1.5'}`}
                     >
                       <div className="flex min-w-0 flex-col items-start">
@@ -280,7 +257,7 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
           className="text-muted-foreground hover:bg-red-50 hover:text-red-500"
           title="Clear"
         >
-          <XIcon className="h-4 w-4" />
+          <X className="h-4 w-4" />
         </Button>
       )}
     </div>

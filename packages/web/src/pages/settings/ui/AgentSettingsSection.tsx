@@ -3,8 +3,10 @@ import { useAgentRuntime, useConfig, useSetAgentRuntime } from '../../../entitie
 import type { AgentRuntimeConfig, GeneralConfig } from '../../../entities/settings'
 import { agentRuntimeToConfigKey } from '../../../entities/settings/api/client'
 import { Button } from '@/shared/ui/components/button'
+import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { SectionState } from './SectionState'
+import { SettingsSection } from './SettingsSection'
 
 const DEFAULTS: AgentRuntimeConfig = {
   timeout: 600000,
@@ -161,9 +163,9 @@ function TimeoutDiagram({ session, stage, task }: { session: number; stage: numb
   ]
 
   return (
-    <div className="rounded-md bg-muted border px-4 py-3">
+    <CardSection>
       <pre className="text-xs text-muted-foreground font-mono leading-5 whitespace-pre">{lines.join('\n')}</pre>
-    </div>
+    </CardSection>
   )
 }
 
@@ -186,7 +188,7 @@ function InputField({
 }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs font-medium text-foreground/80">{label}</label>
+      <label className="block text-xs font-medium text-muted-foreground">{label}</label>
       <div className="flex items-center gap-2">
         <Input
           type="number"
@@ -362,12 +364,10 @@ export function AgentSettingsSection() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h3 className="text-sm font-medium text-foreground">Coder Agent Runtime</h3>
-        <p className="text-xs text-muted-foreground mt-1">Configure how Mohist schedules external coder agent sessions.</p>
-      </div>
-
+    <SettingsSection
+      title="Coder Agent Runtime"
+      description="Configure how Mohist schedules external coder agent sessions."
+    >
       <div className="space-y-4">
         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeouts</h4>
         <TimeoutDiagram
@@ -500,6 +500,6 @@ export function AgentSettingsSection() {
           </div>
         </div>
       )}
-    </div>
+    </SettingsSection>
   )
 }
