@@ -313,6 +313,132 @@ describe('IssueDetailPage runtime decision surface', () => {
   })
 })
 
+describe('IssueDetailPage repository metadata containment', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.innerWidth = 1280
+    window.dispatchEvent(new Event('resize'))
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('bounds long repository metadata within the details column at desktop width', async () => {
+    const gitUrl = 'https://github.com/suraciii/mohist.git'
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        projectName: 'mohist-local',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl,
+        },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('repository-metadata-row')).toBeTruthy())
+    expect(screen.getByTestId('issue-detail-page-container')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('issue-detail-page-container')).not.toHaveClass('overflow-x-hidden')
+    expect(screen.getByTestId('issue-detail-content-grid')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('issue-detail-right-rail')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('issue-detail-details-metadata')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('repository-metadata-row')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('repository-metadata-value')).toHaveClass('min-w-0')
+    expect(screen.getByTestId('repository-name')).toHaveTextContent('master')
+    expect(screen.getByTestId('repository-base-branch')).toHaveTextContent('master')
+
+    const url = screen.getByTestId('repository-git-url')
+    expect(url).toHaveTextContent(gitUrl)
+    expect(url).toHaveAttribute('title', gitUrl)
+    expect(url).toHaveClass('block', 'min-w-0', 'break-all')
+  })
+
+  it('contains long diff branch names without page-level hidden overflow', async () => {
+    const head = 'feature/super-long-branch-name-that-would-otherwise-force-horizontal-page-scroll-at-desktop-width'
+    const base = 'release/equally-long-target-branch-name-that-needs-local-wrapping-not-page-clipping'
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseIssueDiff.mockReturnValue({
+      data: {
+        available: true,
+        reason: null,
+        base,
+        head,
+        mergeBase: 'abc123',
+        ahead: 2,
+        behind: 1,
+        canFastForward: false,
+        comparison: 'merge-base',
+        summary: { filesChanged: 3, commits: 2, additions: 10, deletions: 4 },
+        files: [],
+      },
+    })
+
+    renderPage()
+
+    const banner = await waitFor(() => screen.getByTestId('diff-summary-banner'))
+    expect(screen.getByTestId('issue-detail-page-container')).not.toHaveClass('overflow-x-hidden')
+    expect(banner).toHaveClass('min-w-0')
+    expect(screen.getByTestId('diff-summary-head')).toHaveClass('break-all')
+    expect(screen.getByTestId('diff-summary-head')).toHaveAttribute('title', head)
+    expect(screen.getByTestId('diff-summary-base')).toHaveClass('break-all')
+    expect(screen.getByTestId('diff-summary-base')).toHaveAttribute('title', base)
+  })
+})
+
+describe('IssueDetailPage icon-only controls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('exposes an accessible name and baseline icon-button sizing for the edit issue control', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue(),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const editButton = await waitFor(() => screen.getByTestId('edit-issue-button'))
+    expect(editButton).toHaveAttribute('aria-label', 'Edit issue')
+    expect(screen.getByRole('button', { name: 'Edit issue' })).toBe(editButton)
+    expect(editButton).toHaveClass('size-8')
+    expect(editButton).not.toHaveClass('size-7')
+    expect(editButton).not.toHaveClass('size-6')
+  })
+})
+
 function TransportNoticeTrigger() {
   const toast = useRuntimeToast()
   return (

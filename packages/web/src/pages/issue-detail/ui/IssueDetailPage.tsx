@@ -375,8 +375,8 @@ export function IssueDetailPage() {
 
   return (
     <>
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
+      <div className="flex-1 min-w-0 overflow-y-auto" data-testid="issue-detail-page-container">
+        <div className="max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6">
           <button
             type="button"
             onClick={() => navigate(toProjectPath())}
@@ -417,8 +417,9 @@ export function IssueDetailPage() {
               </h1>
               <Button
                 variant="ghost"
-                size="icon-sm"
+                size="icon"
                 onClick={() => setEditOpen(true)}
+                aria-label="Edit issue"
                 title="Edit issue"
                 data-testid="edit-issue-button"
               >
@@ -481,12 +482,12 @@ export function IssueDetailPage() {
           <IssueWorkflowProfileEditor issueNumber={issueNumber} />
 
           {diffData?.available === true && (
-            <div className="rounded-lg border border-gray-200 bg-white p-4 mb-6">
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-gray-500">
-                  <span className="font-medium text-gray-700">{diffData.head}</span>
+            <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-4 mb-6" data-testid="diff-summary-banner">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span className="min-w-0 text-gray-500 break-words">
+                  <span className="font-medium text-gray-700 break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
                   {' wants to merge into '}
-                  <span className="font-medium text-gray-700">{diffData.base}</span>
+                  <span className="font-medium text-gray-700 break-all" title={diffData.base} data-testid="diff-summary-base">{diffData.base}</span>
                 </span>
                 <span className="text-gray-300">·</span>
                 <span className="text-gray-500">
@@ -508,16 +509,16 @@ export function IssueDetailPage() {
                 <span className="text-green-600">+{diffData.summary.additions}</span>
                 <span className="text-red-500">-{diffData.summary.deletions}</span>
               </div>
-              <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
-                <span>showing merge-base → {diffData.head}</span>
+              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
+                <span className="min-w-0 break-words">showing merge-base → <span className="break-all" title={diffData.head}>{diffData.head}</span></span>
                 <span>·</span>
                 <span>Workspace retained</span>
               </div>
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-6" data-testid="issue-detail-content-grid">
+            <div className="min-w-0 lg:col-span-2 space-y-6">
               <BranchBar issueNumber={issueNumber} stage={workflowStage} isAgentRunning={isAgentRunningOnThis} />
               {issue.body && (
                   <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -536,13 +537,13 @@ export function IssueDetailPage() {
               )}
 
               {diffData?.available === true && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-sm text-gray-500">
-                      <span>
-                        <span className="font-medium text-gray-700">{diffData.head}</span>
+                <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                      <span className="min-w-0 break-words">
+                        <span className="font-medium text-gray-700 break-all" title={diffData.head}>{diffData.head}</span>
                         {' → '}
-                        <span className="font-medium text-gray-700">{diffData.base}</span>
+                        <span className="font-medium text-gray-700 break-all" title={diffData.base}>{diffData.base}</span>
                       </span>
                       <span className="text-gray-300">·</span>
                       <span>{diffData.summary.filesChanged} files changed · +{diffData.summary.additions} -{diffData.summary.deletions}</span>
@@ -686,39 +687,50 @@ export function IssueDetailPage() {
               </div>
             </div>
 
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4" data-testid="issue-detail-right-rail">
               <CardSection title="Details">
-                <dl className="space-y-2 text-sm">
-                  <div className="flex justify-between gap-3">
+                <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
+                  <div className="flex min-w-0 justify-between gap-3">
                     <dt className="text-muted-foreground">Issue Stage</dt>
-                    <dd className="text-foreground font-medium text-right">
+                    <dd className="min-w-0 text-foreground font-medium text-right">
                       {formatStageName(issue.status)}
                     </dd>
                   </div>
                   {workflowStage && (
-                    <div className="flex justify-between gap-3">
+                    <div className="flex min-w-0 justify-between gap-3">
                       <dt className="text-muted-foreground">Workflow Stage</dt>
-                      <dd className="text-foreground font-medium text-right">
+                      <dd className="min-w-0 text-foreground font-medium text-right">
                         {formatStageName(workflowStage)}
                       </dd>
                     </div>
                   )}
                   {issue.projectName && (
-                    <div className="flex justify-between gap-3">
+                    <div className="flex min-w-0 justify-between gap-3">
                       <dt className="text-muted-foreground">Project</dt>
-                      <dd className="text-foreground text-right">
+                      <dd className="min-w-0 text-foreground text-right break-words">
                         {issue.projectName}
                       </dd>
                     </div>
                   )}
                   {issue.repository && (
-                    <div className="flex justify-between gap-3">
-                      <dt className="text-muted-foreground">Repository</dt>
-                      <dd className="text-foreground text-right">
-                        {issue.repository.name}
+                    <div className="flex min-w-0 justify-between gap-3" data-testid="repository-metadata-row">
+                      <dt className="shrink-0 text-muted-foreground">Repository</dt>
+                      <dd className="min-w-0 text-foreground text-right" data-testid="repository-metadata-value">
+                        <span className="block min-w-0 break-words" data-testid="repository-name">
+                          {issue.repository.name}
+                        </span>
+                        {issue.repository.baseBranch && (
+                          <span className="block min-w-0 text-xs text-muted-foreground/80 break-words" data-testid="repository-base-branch">
+                            {issue.repository.baseBranch}
+                          </span>
+                        )}
                         {issue.repository.gitUrl && (
-                          <span className="text-muted-foreground/70 text-xs ml-1">
-                            ({issue.repository.gitUrl})
+                          <span
+                            className="block min-w-0 break-all text-xs text-muted-foreground/70"
+                            title={issue.repository.gitUrl}
+                            data-testid="repository-git-url"
+                          >
+                            {issue.repository.gitUrl}
                           </span>
                         )}
                       </dd>
@@ -800,6 +812,95 @@ export function IssueDetailPage() {
               {(issue.health === IssueHealth.Blocked || issue.convergence) && (
                 <WorkflowConvergencePanel convergence={issue.convergence} />
               )}
+
+              {(!isBacklog || issue.workflowRunId) && (
+                <CardSection title="Runtime/Sessions">
+                  <div className="space-y-4">
+                    {!isBacklog && workflowStage && (
+                      <TaskProgressPanel
+                        issueNumber={issueNumber}
+                        currentStage={workflowStage}
+                        isAgentRunning={isAgentRunningOnThis}
+                      />
+                    )}
+
+                    {!isBacklog && issue.workflowRunId && (
+                      <WorkflowSessionsPanel
+                        issueNumber={issueNumber}
+                        workflowRunId={issue.workflowRunId}
+                      />
+                    )}
+                  </div>
+                </CardSection>
+              )}
+
+              <CardSection title="Configuration">
+                <div className="space-y-4">
+                  <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
+
+                  {isBacklog && (
+                    <div className="border-t border-border/60 pt-4" data-testid="prerequisite-configuration-controls">
+                      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Prerequisites</h3>
+                      <div className="flex gap-2">
+                        <Input
+                          type="number"
+                          value={prereqInput}
+                          onChange={(e) => {
+                            setPrereqInput(e.target.value)
+                            setPrereqError(null)
+                          }}
+                          placeholder="Issue #"
+                          className="min-w-0 flex-1"
+                        />
+                        <Button
+                          onClick={() => {
+                            const num = parseInt(prereqInput, 10)
+                            if (isNaN(num) || num === issueNumber) {
+                              setPrereqError('Enter a valid issue number')
+                              return
+                            }
+                            setPrereqError(null)
+                            addPrerequisiteMutation.mutate(num)
+                            setPrereqInput('')
+                          }}
+                          disabled={!prereqInput || addPrerequisiteMutation.isPending}
+                        >
+                          {addPrerequisiteMutation.isPending ? 'Adding...' : 'Add'}
+                        </Button>
+                      </div>
+                      {prereqError && (
+                        <p className="mt-1 text-xs text-red-600">{prereqError}</p>
+                      )}
+                      {addPrerequisiteMutation.error && (
+                        <p className="mt-1 text-xs text-red-600">
+                          {(addPrerequisiteMutation.error as Error).message?.includes('circular')
+                            ? 'Circular prerequisite: this would create a cycle'
+                            : (addPrerequisiteMutation.error as Error).message}
+                        </p>
+                      )}
+                      {issue.prerequisites && issue.prerequisites.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-border/60">
+                          <p className="text-xs text-muted-foreground mb-2">Remove prerequisite:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {issue.prerequisites.map((prereq) => (
+                              <Button
+                                key={prereq.number}
+                                variant="secondary"
+                                size="xs"
+                                onClick={() => removePrerequisiteMutation.mutate(prereq.number)}
+                                disabled={removePrerequisiteMutation.isPending}
+                              >
+                                #{prereq.number}
+                                <span className="text-muted-foreground">×</span>
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </CardSection>
 
               <CardSection title="Actions">
                 <div className="space-y-2">
@@ -1029,10 +1130,6 @@ export function IssueDetailPage() {
                       {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
                   )}
-
-                  <div className="pt-3 mt-2 border-t border-border/60">
-                    <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
-                  </div>
                 </div>
               </CardSection>
 
@@ -1058,83 +1155,6 @@ export function IssueDetailPage() {
                   </div>
                 </CardSection>
               )}
-
-              {isBacklog && (
-                <CardSection title="Add Prerequisite">
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      value={prereqInput}
-                      onChange={(e) => {
-                        setPrereqInput(e.target.value)
-                        setPrereqError(null)
-                      }}
-                      placeholder="Issue #"
-                      className="flex-1"
-                    />
-                    <Button
-                      onClick={() => {
-                        const num = parseInt(prereqInput, 10)
-                        if (isNaN(num) || num === issueNumber) {
-                          setPrereqError('Enter a valid issue number')
-                          return
-                        }
-                        setPrereqError(null)
-                        addPrerequisiteMutation.mutate(num)
-                        setPrereqInput('')
-                      }}
-                      disabled={!prereqInput || addPrerequisiteMutation.isPending}
-                    >
-                      {addPrerequisiteMutation.isPending ? 'Adding...' : 'Add'}
-                    </Button>
-                  </div>
-                  {prereqError && (
-                    <p className="mt-1 text-xs text-red-600">{prereqError}</p>
-                  )}
-                  {addPrerequisiteMutation.error && (
-                    <p className="mt-1 text-xs text-red-600">
-                      {(addPrerequisiteMutation.error as Error).message?.includes('circular')
-                        ? 'Circular prerequisite: this would create a cycle'
-                        : (addPrerequisiteMutation.error as Error).message}
-                    </p>
-                  )}
-                  {issue.prerequisites && issue.prerequisites.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/60">
-                      <p className="text-xs text-muted-foreground mb-2">Remove prerequisite:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {issue.prerequisites.map((prereq) => (
-                          <Button
-                            key={prereq.number}
-                            variant="secondary"
-                            size="xs"
-                            onClick={() => removePrerequisiteMutation.mutate(prereq.number)}
-                            disabled={removePrerequisiteMutation.isPending}
-                          >
-                            #{prereq.number}
-                            <span className="text-muted-foreground">×</span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardSection>
-              )}
-
-              {!isBacklog && workflowStage && (
-                <TaskProgressPanel
-                  issueNumber={issueNumber}
-                  currentStage={workflowStage}
-                  isAgentRunning={isAgentRunningOnThis}
-                />
-              )}
-
-              {!isBacklog && issue.workflowRunId && (
-                <WorkflowSessionsPanel
-                  issueNumber={issueNumber}
-                  workflowRunId={issue.workflowRunId}
-                />
-              )}
-
             </div>
           </div>
         </div>
