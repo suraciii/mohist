@@ -168,19 +168,72 @@ internal sealed class MohistCliApi
         try
         {
             using var response = await _http.GetAsync(path);
-
-            if (string.Equals(mode, "json", StringComparison.Ordinal))
-                return await PrintResponseAsync(response);
-
-            var data = await ReadSuccessDataAsync(response);
-            var shape = ParseTableShape(tableShape);
-            return await RenderTableAsync(data, shape);
+            return await PrintEnvelopeAsync(response, mode, tableShape);
         }
         catch (HttpRequestException)
         {
             _err.WriteLine(ServerUnavailableMessage);
             return 1;
         }
+    }
+
+    public async Task<int> PrintPostWithOutputAsync(string path, object body, string mode, string? tableShape = null)
+    {
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
+            return await PrintEnvelopeAsync(response, mode, tableShape);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+    }
+
+    public async Task<int> PrintPatchWithOutputAsync(string path, object body, string mode, string? tableShape = null)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Patch, path)
+            {
+                Content = JsonContent.Create(body, options: JsonOptions),
+            };
+            using var response = await _http.SendAsync(request);
+            return await PrintEnvelopeAsync(response, mode, tableShape);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+    }
+
+    public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null)
+    {
+        try
+        {
+            using var response = await _http.DeleteAsync(path);
+            return await PrintEnvelopeAsync(response, mode, tableShape);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+    }
+
+    private async Task<int> PrintEnvelopeAsync(HttpResponseMessage response, string mode, string? tableShape)
+    {
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+            return await PrintResponseAsync(response);
+
+        if (!response.IsSuccessStatusCode)
+            return await PrintResponseAsync(response);
+
+        var data = await ReadSuccessDataAsync(response);
+        var shape = ParseTableShape(tableShape);
+        return await RenderTableAsync(data, shape);
     }
 
     public enum TableShape
@@ -196,6 +249,10 @@ internal sealed class MohistCliApi
         FeedbackShow,
         AgentList,
         AgentShow,
+        EpicList,
+        EpicShow,
+        EpicLink,
+        EpicUnlink,
     }
 
     internal static TableShape ParseTableShape(string? shape)

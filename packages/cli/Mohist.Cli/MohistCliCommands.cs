@@ -25,6 +25,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(AgentCommands.Build(api));
+        root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
 
         return root;
