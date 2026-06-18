@@ -847,7 +847,8 @@ function buildRebaseConflictPrompt(conflicts: string[], source: string, target: 
     phase === "rebase"
       ? "4. Continue the rebase yourself with `GIT_EDITOR=true git rebase --continue` until the rebase is complete and no rebase is in progress."
       : "4. Do not create the merge commit. The runner will commit after verifying the conflict is resolved.",
-    "5. If verification fails because of your resolution, fix it before finishing.",
+    "5. After the rebase is complete, run the project's full build and test suite as a regression check. If anything fails, fix it before finishing.",
+    "6. Do not report success until build and tests pass.",
   ].join("\n")
 }
 
@@ -1041,7 +1042,8 @@ function buildPushRebaseConflictPrompt(remoteRef: string, conflicts: string[], a
     "3. Stage resolved files with `git add`.",
     "4. Run `GIT_EDITOR=true git rebase --continue`.",
     "5. If more conflicts appear, keep resolving and continuing until the rebase fully completes.",
-    "6. Do not push and do not force push. The runner will verify and push after the rebase is complete.",
+    "6. After the rebase fully completes, run the project's full build and test suite as a regression check. If anything fails, fix it before finishing.",
+    "7. Do not push and do not force push. The runner will verify and push after the rebase is complete.",
   ].join("\n")
 }
 
