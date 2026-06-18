@@ -162,7 +162,7 @@ function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: n
     "3. Stage resolved files and continue the rebase yourself.",
     "4. The rebase may have conflicts in multiple commits. Keep looping until the rebase is fully complete.",
     "5. If verification fails because of your resolution, fix it before finishing.",
-    "6. After the rebase fully completes, run the project's full build and test suite as a regression check. If anything fails, fix it before finishing.",
+    "6. After the rebase fully completes, run focused verification relevant to the conflicted files. Avoid broad evidence-generation tests or unrelated full-suite commands unless the conflict requires them.",
     "",
     "Steps - loop until complete:",
     "1. Read each conflict file.",
@@ -172,7 +172,7 @@ function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: n
     "5. Run `GIT_EDITOR=true git rebase --continue`.",
     "6. If more conflicts appear, go back to step 1. Do not stop after only one commit.",
     "7. When rebase completes, verify there is no rebase in progress and no conflict markers remain.",
-    "8. Run the project's full build and test suite as a regression check. If anything fails, fix it before finishing.",
+    "8. Run focused verification relevant to the conflicted files. If anything fails, fix it before finishing.",
   ].join("\n")
 }
 

@@ -156,6 +156,118 @@ describe("mohist/prepare", () => {
     expect(output.output).toContain("openspec/changes/issue-116")
   })
 
+  it("SuccessfulRebaseLeavesOnlyUntrackedFiles_AutoCleansAndSucceeds", async () => {
+    const calls = installGit(async (_workDir, args, allCalls) => {
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "status --porcelain":
+          return ok(allCalls.filter((c) => c === "status --porcelain").length === 1 ||
+            allCalls.includes("clean -fd")
+            ? ""
+            : "?? openspec/changes/issue-116/\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base123\n")
+        case "rev-parse HEAD":
+          return ok(allCalls.filter((c) => c === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase origin/master":
+          return ok("Successfully rebased")
+        case "clean -fd":
+          return ok("Removing openspec/changes/issue-116/\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+    setRebaseExistsCheckerForTest(() => false)
+
+    const result = await prepareAction(context({ baseBranch: "master" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "status --porcelain",
+      "fetch origin master",
+      "rev-parse origin/master",
+      "rev-parse HEAD",
+      "rebase origin/master",
+      "rev-parse HEAD",
+      "status --porcelain",
+      "clean -fd",
+      "status --porcelain",
+    ])
+    expect(output).toMatchObject({
+      kind: "prepare",
+      status: "completed",
+      prepared: true,
+      preparedBaseSha: "base123",
+      preparedHeadSha: "after",
+      failureKind: null,
+    })
+    expect(output.output).toContain("Prepare auto-cleaned untracked files left after rebase")
+    expect(output.output).toContain("openspec/changes/issue-116")
+  })
+
+  it("OnlyUntrackedFilesBeforePrepare_AutoCleansThenRebases", async () => {
+    const calls = installGit(async (_workDir, args, allCalls) => {
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "status --porcelain":
+          return ok(allCalls.length === 3
+            ? "?? openspec/changes/issue-116/\n"
+            : "")
+        case "clean -fd":
+          return ok("Removing openspec/changes/issue-116/\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base123\n")
+        case "rev-parse HEAD":
+          return ok(allCalls.filter((c) => c === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase origin/master":
+          return ok("Current branch is up to date.\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+    setRebaseExistsCheckerForTest(() => false)
+
+    const result = await prepareAction(context({ baseBranch: "master" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+      "status --porcelain",
+      "clean -fd",
+      "status --porcelain",
+      "fetch origin master",
+      "rev-parse origin/master",
+      "rev-parse HEAD",
+      "rebase origin/master",
+      "rev-parse HEAD",
+      "status --porcelain",
+    ])
+    expect(output).toMatchObject({
+      kind: "prepare",
+      status: "completed",
+      prepared: true,
+      preparedBaseSha: "base123",
+      preparedHeadSha: "after",
+      failureKind: null,
+    })
+    expect(output.output).toContain("Prepare auto-cleaned untracked files before rebase")
+  })
+
   it("RebaseConflicts_ResolverSucceeds_OutputsConflictAttemptsAndPreparedHead", async () => {
     const calls = installGit(async (_workDir, args) => {
       switch (args.join(" ")) {
