@@ -145,18 +145,21 @@ public class IssueApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Prerequisites_ProjectIntoStartEligibility()
+    public async Task Prerequisites_ProjectIntoBlocker()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}" });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Prereq", projectId = project.Id });
-        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dependent", projectId = project.Id });
+        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Prereq", projectId = project.Id, isDraft = false });
+        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dependent", projectId = project.Id, isDraft = false });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{dependent.Number}");
 
-        Assert.False(detail.StartEligibility.Startable);
+        Assert.False(detail.CanStart);
+        Assert.NotNull(detail.Blocker);
+        Assert.Equal("waiting-for", detail.Blocker!.Kind);
+        Assert.Equal(prereq.Number, detail.Blocker.Issue!.Number);
         Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
     }
 
@@ -168,13 +171,13 @@ public class IssueApiSpecs
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-gate-{Guid.NewGuid():N}" });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate prereq", projectId = project.Id });
-        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate dependent", projectId = project.Id });
+        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate prereq", projectId = project.Id, isDraft = false });
+        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate dependent", projectId = project.Id, isDraft = false });
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
 
         using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/start", null);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -213,7 +216,7 @@ public class IssueApiSpecs
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-status-{Guid.NewGuid():N}" });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lifecycle status issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lifecycle status issue", projectId = project.Id, isDraft = false });
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", new { });
         try
@@ -252,13 +255,14 @@ public class IssueApiSpecs
         Assert.Equal(epic.Id, issueDetail.PrimaryEpic?.Id);
     }
 
-    private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, StartEligibilityDto StartEligibility, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
+    private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, bool IsDraft, bool CanStart, BlockerDto? Blocker, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
     private sealed record WorkflowProfileDto(string Id, string Name, string Description);
     private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description, string[] SuitableFor);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
     private sealed record PrerequisiteDto(int Number, bool Completed);
-    private sealed record StartEligibilityDto(bool Startable);
+    private sealed record BlockerDto(string Kind, BlockerIssueDto? Issue);
+    private sealed record BlockerIssueDto(int Number, string Title);
     private sealed record PrimaryEpicDto(string Id, string Title);
     private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStatus);
     private sealed record SystemInfoDto(

@@ -14,6 +14,7 @@ public sealed partial class Issue
         string priority = "p2",
         string? repositoryRef = null,
         string? risk = null,
+        bool isDraft = true,
         DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
@@ -29,6 +30,7 @@ public sealed partial class Issue
             Priority = priority,
             Risk = risk,
             RepositoryRef = repositoryRef,
+            IsDraft = isDraft,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
@@ -63,12 +65,59 @@ public sealed partial class Issue
         Touch(now);
     }
 
+    public void SetDraft(bool isDraft, DateTime? now = null)
+    {
+        if (_status == IssueStatus.InProgress || _status == IssueStatus.Done || _status == IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{Number} has started and can no longer change draft state");
+        if (_isDraft == isDraft) return;
+        var oldIsDraft = _isDraft;
+        _isDraft = isDraft;
+        Touch(now);
+        RecordEvent(new IssueDraftChanged(oldIsDraft, isDraft));
+    }
+
     public void StartWorkflow(string wrId, DateTime? now = null)
     {
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");
         if (_activeWorkflowRunId is not null)
             throw new InvalidOperationException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
+        _activeWorkflowRunId = NormalizeOptional(wrId);
+        _status = IssueStatus.InProgress;
+        Touch(now);
+        RecordEvent(new IssueWorkStarted(wrId));
+    }
+
+    public IssueStartBlocker? StartBlocker(IReadOnlySet<int>? undeliveredPrerequisites)
+    {
+        if (_isDraft) return new IssueStartBlocker.Draft();
+        if (undeliveredPrerequisites is { Count: > 0 })
+        {
+            foreach (var number in _prerequisiteNumbers)
+            {
+                if (undeliveredPrerequisites.Contains(number))
+                    return new IssueStartBlocker.WaitingFor(number);
+            }
+        }
+        return null;
+    }
+
+    public bool CanStart(IReadOnlySet<int>? undeliveredPrerequisites) =>
+        StartBlocker(undeliveredPrerequisites) is null;
+
+    public void Start(string wrId, IReadOnlySet<int>? undeliveredPrerequisites, DateTime? now = null)
+    {
+        var blocker = StartBlocker(undeliveredPrerequisites);
+        if (blocker is IssueStartBlocker.Draft)
+            throw new IssueStartBlockedException(blocker, $"Issue #{Number} is still a draft and cannot be started");
+        if (blocker is IssueStartBlocker.WaitingFor waiting)
+            throw new IssueStartBlockedException(blocker, $"Issue #{Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
+
+        if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}");
+        if (_activeWorkflowRunId is not null)
+            throw new InvalidOperationException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
+
         _activeWorkflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         Touch(now);

@@ -61,12 +61,9 @@ export interface IssuePrerequisiteSummary {
   health: IssueHealth
 }
 
-export interface IssueStartEligibility {
-  startable: boolean
-  reason: 'ready' | 'not-startable-lifecycle' | 'waiting-for-completion'
-  message?: string
-  waitingForCompletion: IssuePrerequisiteSummary[]
-}
+export type IssueStartBlocker =
+  | { kind: 'draft' }
+  | { kind: 'waiting-for'; issue: { number: number; title: string; stage?: string; status?: string } }
 
 export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted'
 export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed'
@@ -168,7 +165,9 @@ export interface Issue {
   blockedReason?: string
   checkSuite?: CheckSuite | null
   prerequisites?: IssuePrerequisiteSummary[]
-  startEligibility?: IssueStartEligibility
+  isDraft: boolean
+  canStart: boolean
+  blocker: IssueStartBlocker | null
   drift?: BaseDriftInfo | null
   primaryEpic?: { id: string; number: number | null; title: string; status: string; priority: string } | null
   recovery?: RecoveryProjection | null

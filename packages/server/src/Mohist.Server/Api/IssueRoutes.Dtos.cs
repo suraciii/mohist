@@ -13,7 +13,8 @@ public record CreateIssueRequest(
     Dictionary<string, string>? StageModels = null,
     string? WorkflowProfileId = null,
     string? RepositoryName = null,
-    string? Risk = null);
+    string? Risk = null,
+    bool? IsDraft = null);
 
 public record UpdateIssueRequest(
     string? Title = null,
@@ -23,7 +24,8 @@ public record UpdateIssueRequest(
     string? Model = null,
     Dictionary<string, object?>? AgentConfig = null,
     Dictionary<string, string>? StageModels = null,
-    Dictionary<string, Dictionary<string, string>>? StageVariables = null);
+    Dictionary<string, Dictionary<string, string>>? StageVariables = null,
+    bool? IsDraft = null);
 
 public record CreateFeedbackRequest(string Stage, string Body);
 

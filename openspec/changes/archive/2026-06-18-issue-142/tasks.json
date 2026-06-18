@@ -1,0 +1,93 @@
+{
+  "project": "mohist",
+  "description": "Add authored IsDraft (default draft) to issues, make Issue.Start() the single authority for start preconditions reporting a typed Blocker, retire IssueStartEligibility, and expose isDraft/canStart/blocker across API, Web UI, and CLI.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Domain: IsDraft, IssueStartBlocker, and Start() enforcement",
+      "spec": "specs/issue-start-readiness/spec.md",
+      "description": "Add the authored IsDraft field (default true on Issue.Create) and a SetDraft command to the Issue entity. Introduce a typed IssueStartBlocker sum (Draft | WaitingFor(Issue) | none) and derived StartBlocker(undeliveredPrerequisites)/CanStart queries. Add a new Start(wrId, undeliveredPrerequisites) method that enforces draft -> prerequisite -> execution-status -> active-run precedence and reports the concrete blocker. This task is purely additive: leave the legacy StartWorkflow() and IssueStartEligibility untouched so the server still compiles.",
+      "acceptanceCriteria": [
+        "Issue.IsDraft is an authored field; Issue.Create() sets IsDraft=true; SetDraft(bool) toggles both directions while the issue has not started and records an IssueDraftChanged event.",
+        "IssueStartBlocker is a typed sum (Draft, WaitingFor(Issue) carrying the prerequisite issue, none=null); StartBlocker(undelivered) returns Draft when IsDraft (precedence over prerequisites), WaitingFor(Issue) when ready and an undelivered prerequisite exists, and null otherwise.",
+        "Issue.Start(wrId, undeliveredPrerequisites) refuses a draft with a reason equivalent to 'still a draft', refuses a ready issue with an undelivered prerequisite, refuses terminal/already-running issues, and only enters the pipeline when unblocked; refusal throws a typed exception carrying the IssueStartBlocker.",
+        "CanStart is derived from StartBlocker and is never settable as an authored fact.",
+        "Issue serialization round-trips IsDraft: a new issue persists IsDraft=true; a state blob predating the field deserializes to IsDraft=false (ready), satisfying the existing-issues migration with no backfill.",
+        "Legacy StartWorkflow() and IssueStartEligibility remain unchanged and the server build is green.",
+        "Domain unit tests cover: default-draft, SetDraft both directions, all three blocker cases, Start refusal reason per case, Start success when unblocked, CanStart-not-authored, and the IsDraft serialization round-trip / migration default."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue domain changes (Issue.cs, Issue.Transitions.cs, new IssueStartBlocker type) plus passing domain unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Additive only. Do not delete IssueStartEligibility or modify the existing StartWorkflow() signature here; the cutover and deletion happen in T-002. Prerequisite delivery is passed in as a set of undelivered prerequisite numbers because delivery is cross-aggregate state the Issue cannot self-evaluate."
+    },
+    {
+      "id": "T-002",
+      "title": "Server cutover: wire start readiness through the API and retire IssueStartEligibility",
+      "spec": "specs/http-api/spec.md",
+      "description": "Switch the grain, querier, start route, and DTOs to the new domain surface. IssueGrain.StartWorkAsync gathers undelivered prerequisites and calls Issue.Start(...); GetStartEligibilityAsync becomes GetStartReadinessAsync returning isDraft/canStart/blocker. The start handler returns the typed blocker on refusal. IssueReadModel/IssueInfo expose isDraft/canStart/blocker and drop StartEligibility; IssueQuerier projects blocker (replacing FromPrerequisites). CreateIssueRequest/UpdateIssueRequest gain IsDraft and create defaults to draft. Delete IssueStartEligibility and its calculators.",
+      "acceptanceCriteria": [
+        "IssueStartEligibility (type, Ready, FromPrerequisites) and its [GenerateSerializer] decoration are deleted; grep for IssueStartEligibility / startEligibility returns no references in packages/server.",
+        "IssueReadModel and IssueInfo expose isDraft, canStart, and blocker ({kind:'draft'} | {kind:'waiting-for', issue:{number,...}} | null) and do not expose startEligibility or waitingForDelivery.",
+        "IssueQuerier projects canStart/blocker (including the draft case) where it previously called IssueStartEligibility.FromPrerequisites.",
+        "CreateIssueRequest and UpdateIssueRequest accept IsDraft?; create with IsDraft omitted creates a draft issue; grain.CreateAsync wires IsDraft through to Issue.Create.",
+        "POST /api/issues/:number/start returns a 400 with canStart=false and the concrete blocker (Draft for a draft issue, WaitingFor(Issue) for an undelivered prerequisite) and does not enqueue start-pipeline; a ready, unblocked issue starts normally.",
+        "GET /api/issues and GET /api/issues/:number include isDraft, canStart, and blocker and omit startEligibility/waitingForDelivery.",
+        "IssueGrain.StartWorkAsync uses Issue.Start(...) as the single enforcement authority (no separate eligibility pre-check that can diverge).",
+        "Existing prerequisite-based blocking is preserved and expressed as the WaitingFor(Issue) blocker; an issue waiting for prerequisite delivery is not assigned blocked status or any agent/session/workflow failure state (delivers the issue-prerequisites capability delta).",
+        "API/integration tests cover: create-defaults-to-draft, start draft refused with Draft blocker, start waiting refused with WaitingFor(Issue) blocker, start ready proceeds, list/detail expose the new fields and not the old, waiting-for-delivery does not set blocked status, and circular-prerequisite declaration still rejects while returning the new readiness fields."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Grain/querier/route/DTO/read-model changes with IssueStartEligibility removed, plus passing API/integration tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This is the breaking-cutover task; it must land atomically because deleting IssueStartEligibility breaks all references at once. Reuse the existing prerequisite-summary loading in the grain/querier to derive the undelivered set; do not add new cross-aggregate queries. Also delivers the issue-prerequisites delta (eligibility summarization removed, waiting-for-delivery re-expressed as the WaitingFor(Issue) blocker and kept a non-failure state)."
+    },
+    {
+      "id": "T-003",
+      "title": "Web UI: draft indicator and Start control driven by isDraft/canStart/blocker",
+      "spec": "specs/web-ui/spec.md",
+      "description": "Render a dimmed Draft indicator on board cards and the Issue Detail card for draft backlog issues, driven by the API isDraft field. Disable the Start control with the concrete reason for draft and waiting-for issues, reading canStart/blocker. Render card/list blocker reasons from blocker instead of startEligibility.waitingForDelivery, and update the Issue Detail prerequisite/readiness section to use isDraft/canStart/blocker.",
+      "acceptanceCriteria": [
+        "Board backlog cards and the Issue Detail card render a visible Draft indicator for issues with isDraft=true and visually de-emphasize them relative to ready backlog issues; draft state is read from isDraft, not labels/body/title.",
+        "The Start control is disabled with a concrete reason for isDraft issues ('still a draft') and for blocker=WaitingFor(Issue) issues ('waiting for #N'); a start attempt surfaces the server's actionable message.",
+        "Card/list surfaces render the start-blocker reason (Draft, Waiting for #N) from the blocker field and no longer reference startEligibility.waitingForDelivery.",
+        "Issue Detail prerequisite/readiness rendering uses isDraft/canStart/blocker and does not parse the issue body or reference startEligibility.",
+        "Component tests cover: draft card indicator + de-emphasis, disabled Start for draft and waiting blockers, blocker rendering on cards, and no usage of startEligibility/waitingForDelivery in the rendered output."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web UI board/detail changes consuming isDraft/canStart/blocker, plus passing component tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Consume only the new API fields shipped in T-002. If a dedicated /ready endpoint is added later it is out of scope here; marking ready flows through PATCH isDraft."
+    },
+    {
+      "id": "T-004",
+      "title": "CLI: create defaults to draft, mark-ready, and render isDraft/canStart/blocker",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Make mo issue create default to draft and accept an explicit ready/draft flag; make mo issue update able to toggle isDraft. Create success output guides marking ready for drafts and only shows the start tip for ready+startable issues. list/show render draft state and the blocker reason from isDraft/canStart/blocker. mo issue start surfaces draft and waiting-for rejections from the server.",
+      "acceptanceCriteria": [
+        "mo issue create without an explicit draft/ready choice creates a draft issue; an explicit ready option sends isDraft=false.",
+        "mo issue create success output for a draft issue does not print the start tip and instead guides marking ready; the start tip is shown only for a ready, unblocked issue.",
+        "mo issue update accepts an option to set isDraft (mark ready or return to draft) without starting the issue.",
+        "mo issue list and mo issue show render draft state and a blocker reason (e.g. 'Waiting for #N') from isDraft/canStart/blocker and do not parse the body or reference startEligibility/waitingForDelivery.",
+        "mo issue start surfaces the server rejection for a draft ('still a draft') and for a waiting-for prerequisite issue, exits non-zero, and makes no further enqueuing request.",
+        "CLI tests cover: create-defaults-to-draft, explicit-ready create, mark-ready update, create success guidance (draft vs ready+startable), list/show rendering from API fields, and start rejection messages."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CLI create/update/list/show/start changes consuming isDraft/canStart/blocker, plus passing CLI tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Consume only the new API fields shipped in T-002. CLI remains a thin client and must not compute isDraft/canStart/blocker locally."
+    }
+  ]
+}

@@ -26,12 +26,27 @@ public static partial class IssueRoutes
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
-                var eligibility = await grain.GetStartEligibilityAsync();
-                if (!eligibility.Startable)
-                    return ApiResults.Conflict(eligibility.Message ?? "Issue is waiting for prerequisites", "start_blocked", eligibility);
-
                 await grain.StartWorkAsync();
                 return ApiResults.Ok();
+            }
+            catch (IssueStartBlockedException ex)
+            {
+                var blockerDto = IssueStartBlockerDto.FromDomain(ex.Blocker);
+                var code = ex.Blocker switch
+                {
+                    IssueStartBlocker.Draft => "draft",
+                    IssueStartBlocker.WaitingFor => "waiting_for_prerequisite",
+                    _ => "start_blocked",
+                };
+                return ApiResults.Fail(
+                    ex.Message,
+                    400,
+                    code,
+                    new
+                    {
+                        canStart = false,
+                        blocker = blockerDto,
+                    });
             }
             catch (MissingPromptsException ex)
             {

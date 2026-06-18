@@ -4,6 +4,7 @@ public union IssueEvent(
     IssueCreated,
     IssueLabelsChanged,
     IssuePriorityChanged,
+    IssueDraftChanged,
     IssuePrerequisiteAdded,
     IssuePrerequisiteRemoved,
     IssueWorkStarted,
@@ -27,6 +28,10 @@ public sealed record IssueLabelsChanged(
 public sealed record IssuePriorityChanged(
     string OldPriority,
     string NewPriority);
+
+public sealed record IssueDraftChanged(
+    bool OldIsDraft,
+    bool NewIsDraft);
 
 public sealed record IssuePrerequisiteAdded(
     int PrerequisiteNumber);

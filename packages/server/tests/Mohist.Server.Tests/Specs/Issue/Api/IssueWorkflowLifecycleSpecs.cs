@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
@@ -202,7 +203,7 @@ public class IssueWorkflowLifecycleSpecs
         var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.issueId);
         await dependentGrain.AddPrerequisiteAsync(prereq.number);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => dependentGrain.StartWorkAsync());
+        await Assert.ThrowsAsync<IssueStartBlockedException>(() => dependentGrain.StartWorkAsync());
 
         await using var db = new MohistDbContext(new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_connectionString)
@@ -294,7 +295,7 @@ public class IssueWorkflowLifecycleSpecs
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
         var grain = _grains.GetGrain<IIssueGrain>(issueId);
-        await grain.CreateAsync(projectId, number, "Lifecycle", null, null, null, null, issueId);
+        await grain.CreateAsync(projectId, number, "Lifecycle", null, null, null, null, issueId, isDraft: false);
         return (issueId, number);
     }
 

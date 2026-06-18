@@ -33,26 +33,6 @@ The system SHALL evaluate a prerequisite issue as delivered only when the prereq
 - **AND** Issue #200 does not have `mergeState=merged`
 - **THEN** prerequisite issue #200 SHALL be reported as waiting for delivery for Issue #201
 
-### Requirement: Start eligibility summarizes whether an Issue may enter the pipeline
-
-The system SHALL compute start eligibility for an Issue from its startable workflow state and all declared start prerequisites. If any prerequisite issue is not delivered, start eligibility SHALL be not startable and SHALL identify the prerequisite issue or issues waiting for delivery.
-
-#### Scenario: Issue is waiting for one prerequisite issue
-
-- **WHEN** Issue #201 has prerequisite issue #200
-- **AND** Issue #200 is not delivered
-- **THEN** Issue #201 start eligibility SHALL be not startable
-- **AND** Issue #201 SHALL expose `waitingForDelivery` containing Issue #200
-- **AND** the user-facing reason SHALL be equivalent to `Waiting for #200`
-
-#### Scenario: Issue becomes startable after delivery
-
-- **WHEN** Issue #201 has prerequisite issue #200
-- **AND** Issue #200 becomes delivered
-- **THEN** Issue #201 start eligibility SHALL no longer wait for Issue #200
-- **AND** no manual prerequisite cleanup SHALL be required
-- **AND** the system SHALL NOT auto-start Issue #201
-
 ### Requirement: Start prerequisite declarations reject circular relationships
 
 The system SHALL reject a start prerequisite declaration that would make an Issue directly or indirectly require itself before start.
@@ -72,7 +52,7 @@ The system SHALL reject a start prerequisite declaration that would make an Issu
 
 ### Requirement: Waiting for delivery is not a failure state
 
-The system SHALL represent an Issue waiting for prerequisite delivery as start eligibility state, not as `blocked` status, agent failure, session failure, or workflow stage failure.
+The system SHALL represent an Issue waiting for prerequisite delivery as a derived start-readiness blocker on the Issue itself (a `WaitingFor(Issue)` non-startable state), not as `blocked` status, agent failure, session failure, or workflow stage failure.
 
 #### Scenario: Waiting issue remains normal backlog work
 

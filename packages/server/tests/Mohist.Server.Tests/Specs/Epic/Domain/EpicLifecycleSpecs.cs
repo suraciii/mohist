@@ -272,7 +272,7 @@ public class EpicLifecycleSpecs
 
     private async Task<IssueDto> CreateIssueAsync(string projectId, string title)
     {
-        return await _client.PostDataAsync<IssueDto>($"/api/projects/{projectId}/issues", new { title });
+        return await _client.PostDataAsync<IssueDto>($"/api/projects/{projectId}/issues", new { title, isDraft = false });
     }
 
     private async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)

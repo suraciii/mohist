@@ -236,8 +236,10 @@ export function RuntimeDecisionSurface({
               convergence: issue.convergence ?? undefined,
               drift: issue.drift ?? undefined,
               workflowStageProgress: issue.workflowStageProgress ?? undefined,
-              startEligibility: issue.startEligibility ?? undefined,
               prerequisites: issue.prerequisites ?? [],
+              isDraft: issue.isDraft,
+              canStart: issue.canStart,
+              blocker: issue.blocker,
             }
           : null,
         timeline: timeline

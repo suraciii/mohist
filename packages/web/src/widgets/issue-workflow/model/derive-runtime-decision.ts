@@ -56,8 +56,10 @@ export interface RuntimeDecisionInput {
     | 'convergence'
     | 'drift'
     | 'workflowStageProgress'
-    | 'startEligibility'
     | 'prerequisites'
+    | 'isDraft'
+    | 'canStart'
+    | 'blocker'
   > | null | undefined
   timeline?: Pick<WorkflowTimeline, 'currentStage' | 'status' | 'stages' | 'pendingWork' | 'availableActions'> | null
   agentStatus?: Pick<AgentStatus, 'runnerAvailable' | 'runnerMessage' | 'capacity' | 'activeAgents'> | null
@@ -347,11 +349,12 @@ function pickCurrentTask(
 }
 
 function buildWaitReason(input: RuntimeDecisionInput): string | null {
-  const eligibility = input.issue?.startEligibility
-  if (eligibility?.reason === 'waiting-for-completion') {
-    if (eligibility.message) return eligibility.message
-    const first = eligibility.waitingForCompletion?.[0]
-    if (first) return `Waiting for #${first.number} ${first.title}`.trim()
+  const blocker = input.issue?.blocker
+  if (blocker?.kind === 'draft') {
+    return 'Issue is still a draft. Mark it ready before starting.'
+  }
+  if (blocker?.kind === 'waiting-for') {
+    return `Waiting for #${blocker.issue.number} ${blocker.issue.title}`.trim()
   }
 
   if (input.agentStatus?.runnerAvailable === false) {
@@ -417,7 +420,7 @@ function determineSummary(input: RuntimeDecisionInput): RuntimeSummary {
 
   const waitReason = buildWaitReason(input)
   const hasExplicitQueueSignal =
-    !!input.issue?.startEligibility?.waitingForCompletion?.length
+    !!input.issue?.blocker
     || input.agentStatus?.runnerAvailable === false
     || (!!input.agentStatus?.capacity?.max && (input.agentStatus.capacity.active >= input.agentStatus.capacity.max))
     || input.hasActiveAgent === false

@@ -234,7 +234,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         await UseNoArtifactTemplateAsync(project.Id);
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Active run profile sync issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Active run profile sync issue", projectId = project.Id, isDraft = false });
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-sync-runner-{Guid.NewGuid():N}");
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");

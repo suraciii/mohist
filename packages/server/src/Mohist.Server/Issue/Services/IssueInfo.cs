@@ -30,6 +30,9 @@ public class IssueInfo
     public string? BlockedReason { get; set; }
     public string? WorkflowRunId { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
+    public bool IsDraft { get; set; }
+    public bool CanStart { get; set; }
+    public IssueStartBlockerDto? Blocker { get; set; }
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public string? WorkflowProfileMode { get; set; }
     public WorkflowAttention? Attention { get; set; }
@@ -70,30 +73,87 @@ public class IssuePrerequisiteSummary
     };
 }
 
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[JsonDerivedType(typeof(IssueStartBlockerDto.DraftBlocker), "draft")]
+[JsonDerivedType(typeof(IssueStartBlockerDto.WaitingForBlocker), "waiting-for")]
 [GenerateSerializer]
-public class IssueStartEligibility
+public abstract class IssueStartBlockerDto
 {
-    [Id(0)] public bool Startable { get; set; }
-    [Id(1)] public string Reason { get; set; } = "ready";
-    [Id(2)] public string? Message { get; set; }
-    [Id(3)] public IssuePrerequisiteSummary[] WaitingForCompletion { get; set; } = [];
-
-    public static IssueStartEligibility Ready() => new() { Startable = true };
-
-    public static IssueStartEligibility FromPrerequisites(IssuePrerequisiteSummary[] prerequisites)
+    [JsonIgnore]
+    public string Kind => this switch
     {
-        var waiting = prerequisites.Where(p => !p.Completed).ToArray();
-        return waiting.Length == 0
-            ? Ready()
-            : new IssueStartEligibility
+        DraftBlocker => "draft",
+        WaitingForBlocker => "waiting-for",
+        _ => string.Empty,
+    };
+
+    [GenerateSerializer]
+    public sealed class DraftBlocker : IssueStartBlockerDto;
+
+    [GenerateSerializer]
+    public sealed class WaitingForBlocker : IssueStartBlockerDto
+    {
+        [Id(0)] public IssuePrerequisiteRefDto Issue { get; set; } = null!;
+    }
+
+    public static IssueStartBlockerDto? FromDomain(IssueStartBlocker? blocker) => blocker switch
+    {
+        null => null,
+        IssueStartBlocker.Draft => new DraftBlocker(),
+        IssueStartBlocker.WaitingFor waiting => new WaitingForBlocker
+        {
+            Issue = new IssuePrerequisiteRefDto
             {
-                Startable = false,
-                Reason = "waiting-for-completion",
-                Message = $"Waiting for #{waiting[0].Number}",
-                WaitingForCompletion = waiting,
+                Number = waiting.PrerequisiteNumber,
+            },
+        },
+        _ => null,
+    };
+
+    public static IssueStartBlockerDto? FromDomain(
+        IssueStartBlocker? blocker,
+        IReadOnlyDictionary<int, IssuePrerequisiteSummary>? summariesByNumber)
+    {
+        if (blocker is null) return null;
+        if (blocker is IssueStartBlocker.Draft) return new DraftBlocker();
+        if (blocker is IssueStartBlocker.WaitingFor waiting)
+        {
+            var summary = summariesByNumber is not null && summariesByNumber.TryGetValue(waiting.PrerequisiteNumber, out var s)
+                ? s
+                : null;
+            return new WaitingForBlocker
+            {
+                Issue = summary is null
+                    ? new IssuePrerequisiteRefDto { Number = waiting.PrerequisiteNumber }
+                    : IssuePrerequisiteRefDto.FromSummary(summary),
             };
+        }
+        return null;
     }
 }
+
+[GenerateSerializer]
+public class IssuePrerequisiteRefDto
+{
+    [Id(0)] public int Number { get; set; }
+    [Id(1)] public string Title { get; set; } = "";
+    [Id(2)] public string Stage { get; set; } = "";
+    [Id(3)] public string Status { get; set; } = "";
+
+    public static IssuePrerequisiteRefDto FromSummary(IssuePrerequisiteSummary summary) => new()
+    {
+        Number = summary.Number,
+        Title = summary.Title,
+        Stage = summary.Stage,
+        Status = summary.Status,
+    };
+}
+
+[GenerateSerializer]
+public sealed record IssueStartReadiness(
+    [property: Id(0)] bool IsDraft,
+    [property: Id(1)] bool CanStart,
+    [property: Id(2)] IssueStartBlockerDto? Blocker);
 
 [GenerateSerializer]
 public class IssuePrimaryEpic

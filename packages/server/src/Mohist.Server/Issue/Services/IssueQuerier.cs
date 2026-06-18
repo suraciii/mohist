@@ -166,6 +166,7 @@ public class IssueQuerier
             WorkflowRunId = issue.ActiveWorkflowRunId,
             WorkflowProfileId = IssueWorkflowProfiles.DefaultId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
+            IsDraft = issue.IsDraft,
             Repository = resolution.Repository,
             RepositoryProblem = resolution.Problem,
         };
@@ -200,6 +201,9 @@ public class IssueQuerier
         WorkflowProfileId = issue.WorkflowProfileId,
         WorkflowProfileMode = issue.WorkflowProfileMode,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
+        IsDraft = issue.IsDraft,
+        CanStart = issue.CanStart,
+        Blocker = issue.Blocker,
         Repository = issue.Repository,
         RepositoryProblem = issue.RepositoryProblem,
     };
@@ -408,16 +412,22 @@ public class IssueQuerier
                 prereqIssues[issue.Number] = ToReadModel(ToInfo(issue));
             }
         }
-        foreach (var group in prereqRows.GroupBy(p => p.IssueNumber))
+        var prereqGroups = prereqRows.GroupBy(p => p.IssueNumber).ToDictionary(g => g.Key);
+        foreach (var issue in issues)
         {
-            if (!byNumber.TryGetValue(group.Key, out var issue)) continue;
-            var summaries = group
-                .Select(p => prereqIssues.TryGetValue(p.PrerequisiteNumber, out var prereq) ? IssuePrerequisiteSummary.FromReadModel(prereq) : null)
-                .Where(p => p is not null)
-                .Cast<IssuePrerequisiteSummary>()
-                .ToArray();
+            var summaries = prereqGroups.TryGetValue(issue.Number, out var group)
+                ? group
+                    .Select(p => prereqIssues.TryGetValue(p.PrerequisiteNumber, out var prereq) ? IssuePrerequisiteSummary.FromReadModel(prereq) : null)
+                    .Where(p => p is not null)
+                    .Cast<IssuePrerequisiteSummary>()
+                    .ToArray()
+                : [];
             issue.Prerequisites = summaries;
-            issue.StartEligibility = IssueStartEligibility.FromPrerequisites(summaries);
+            var summariesByNumber = summaries.ToDictionary(s => s.Number);
+            var undelivered = new HashSet<int>(summaries.Where(s => !s.Completed).Select(s => s.Number));
+            var blocker = ComputeBlockerForReadModel(issue, undelivered);
+            issue.Blocker = IssueStartBlockerDto.FromDomain(blocker, summariesByNumber);
+            issue.CanStart = blocker is null;
         }
 
         var epicLinks = await db.EpicIssues.AsNoTracking()
@@ -506,6 +516,18 @@ public class IssueQuerier
     {
         try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
         catch { return null; }
+    }
+
+    private static IssueStartBlocker? ComputeBlockerForReadModel(IssueReadModel issue, IReadOnlySet<int> undeliveredPrerequisites)
+    {
+        if (issue.IsDraft) return new IssueStartBlocker.Draft();
+        if (undeliveredPrerequisites.Count == 0) return null;
+        foreach (var number in issue.PrerequisiteNumbers)
+        {
+            if (undeliveredPrerequisites.Contains(number))
+                return new IssueStartBlocker.WaitingFor(number);
+        }
+        return null;
     }
 
 }

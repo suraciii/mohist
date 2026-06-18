@@ -46,7 +46,17 @@ public static partial class IssueRoutes
             var number = await counter.NextAsync();
             var issueId = $"issue_{Guid.NewGuid():N}";
             var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
-            await issueGrain.CreateAsync(project.Id, number, req.Title, req.Body, req.Labels, req.Priority, resolution.Repository!.Name, issueId, req.Risk);
+            await issueGrain.CreateAsync(
+                project.Id,
+                number,
+                req.Title,
+                req.Body,
+                req.Labels,
+                req.Priority,
+                resolution.Repository!.Name,
+                issueId,
+                req.Risk,
+                isDraft: req.IsDraft ?? true);
             var issue = await issuesQuery.GetAsync(project.Id, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
@@ -75,8 +85,15 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            await grain.UpdateFullAsync(new UpdateIssueData(
-                req.Title, req.Body, req.Labels, req.Priority));
+            try
+            {
+                await grain.UpdateFullAsync(new UpdateIssueData(
+                    req.Title, req.Body, req.Labels, req.Priority, req.IsDraft));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
             var info = await issuesQuery.GetAsync(project.Id, number);
             return ApiResults.Ok(info);
         });
