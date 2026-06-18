@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useRef, type ReactNode } from 'react'
-import { MarkdownReader } from './MarkdownReader'
+import { MarkdownReader, type MarkdownAttachment } from './MarkdownReader'
 import * as SharedUiBarrel from '@/shared/ui'
 
 type ResizeObserverCtor = new (callback: ResizeObserverCallback) => ResizeObserver
@@ -124,6 +124,88 @@ describe('MarkdownReader default rendering', () => {
     expect(inline.className).toContain('rounded')
     expect(inline.className).toContain('text-xs')
     expect(inline.className).toContain('font-mono')
+  })
+})
+
+describe('MarkdownReader attachment references', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  const imageAttachment: MarkdownAttachment = {
+    url: '/api/attachments/att_image/content',
+    contentType: 'image/png',
+    fileName: 'screenshot.png',
+    size: 1536,
+  }
+
+  const fileAttachment: MarkdownAttachment = {
+    url: '/api/attachments/att_file/content',
+    contentType: 'text/plain',
+    fileName: 'debug.log',
+    size: 2048,
+  }
+
+  it('keeps the sanitized default path when no resolver is supplied', () => {
+    render(<MarkdownReader content="See [log](att:file) and ![shot](att:image)." baseHeadingLevel={2} />)
+
+    expect(screen.getByText('log')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'shot' })).not.toHaveAttribute('src')
+    expect(screen.queryByTestId('markdown-attachment-file-card')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('markdown-attachment-fallback')).not.toBeInTheDocument()
+  })
+
+  it('renders image att references inline and opens a dismissible lightbox', () => {
+    render(
+      <MarkdownReader
+        content="Before\n\n![shot](att:image)\n\nAfter"
+        baseHeadingLevel={2}
+        resolveAttachment={(id) => (id === 'image' ? imageAttachment : null)}
+      />,
+    )
+
+    const trigger = screen.getByTestId('markdown-attachment-image-trigger')
+    const image = screen.getByRole('img', { name: 'shot' })
+    expect(image).toHaveAttribute('src', imageAttachment.url)
+    expect(trigger).toBeInTheDocument()
+
+    fireEvent.click(trigger)
+    expect(screen.getByTestId('markdown-attachment-lightbox')).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Preview screenshot.png' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('markdown-attachment-lightbox'))
+    expect(screen.queryByTestId('markdown-attachment-lightbox')).not.toBeInTheDocument()
+  })
+
+  it('renders non-image att references as downloadable file cards', () => {
+    render(
+      <MarkdownReader
+        content="[debug log](att:file)"
+        baseHeadingLevel={2}
+        resolveAttachment={(id) => (id === 'file' ? fileAttachment : null)}
+      />,
+    )
+
+    const card = screen.getByTestId('markdown-attachment-file-card')
+    expect(card).toHaveAttribute('href', fileAttachment.url)
+    expect(card).toHaveAttribute('download', fileAttachment.fileName)
+    expect(card).toHaveTextContent('debug.log')
+    expect(card).toHaveTextContent('2.0 KB')
+    expect(card).toHaveTextContent('text/plain')
+    expect(screen.queryByRole('link', { name: 'debug log' })).not.toBeInTheDocument()
+  })
+
+  it('renders unresolved att references as safe fallbacks without using untrusted URLs', () => {
+    const resolveAttachment = vi.fn(() => null)
+    render(<MarkdownReader content="Missing [file](att:missing) and ![image](att:gone)." baseHeadingLevel={2} resolveAttachment={resolveAttachment} />)
+
+    expect(resolveAttachment).toHaveBeenCalledWith('missing')
+    expect(resolveAttachment).toHaveBeenCalledWith('gone')
+    expect(screen.getAllByTestId('markdown-attachment-fallback')).toHaveLength(2)
+    expect(screen.getByText('Attachment unavailable: missing')).toBeInTheDocument()
+    expect(screen.getByText('Attachment unavailable: gone')).toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 })
 

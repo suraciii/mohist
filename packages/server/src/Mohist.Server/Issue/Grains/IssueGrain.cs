@@ -4,6 +4,7 @@ using Mohist.Server.SystemInfo;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -37,6 +38,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly ConfigService _configService;
+    private readonly AttachmentService _attachmentService;
     private readonly IEventStore _eventStore;
     private readonly IEventPublisher _eventBus;
     private readonly IConfiguration _configuration;
@@ -54,6 +56,7 @@ public class IssueGrain : Grain, IIssueGrain
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
         ConfigService configService,
+        AttachmentService attachmentService,
         IEventStore eventStore,
         IEventPublisher eventBus,
         IConfiguration configuration,
@@ -70,6 +73,7 @@ public class IssueGrain : Grain, IIssueGrain
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
         _configService = configService;
+        _attachmentService = attachmentService;
         _eventStore = eventStore;
         _eventBus = eventBus;
         _configuration = configuration;
@@ -323,10 +327,12 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task UpdateFullAsync(UpdateIssueData data)
     {
         EnsureIssue();
+        await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Id, data.AttachmentIds);
         _issue!.Update(data.Title, data.Body, data.Labels, data.Priority);
         if (data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
         await SaveIssueAsync();
+        await _attachmentService.BindIssueAsync(_issue.ProjectId, _issue.Id, data.AttachmentIds);
     }
 
     public async Task<IssueWorkflowStatus?> GetWorkflowStatusAsync()
@@ -368,15 +374,17 @@ public class IssueGrain : Grain, IIssueGrain
             await CompleteWorkAsync(workflowRunId);
     }
 
-    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false)
+    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
         var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
+        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
+        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
 
         var issue = Domain.Issue.Create(
-            issueId ?? $"issue_{Guid.NewGuid():N}",
+            resolvedIssueId,
             projectId,
             number,
             title,
@@ -389,6 +397,7 @@ public class IssueGrain : Grain, IIssueGrain
 
         _issue = issue;
         await SaveIssueAsync();
+        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
         return issue.Id;
     }
 
@@ -532,7 +541,7 @@ public class IssueGrain : Grain, IIssueGrain
         }
     }
 
-    public async Task<IssueCommentResult> AddCommentAsync(string body)
+    public async Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null)
     {
         if (_issue is null) throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
 
@@ -545,9 +554,11 @@ public class IssueGrain : Grain, IIssueGrain
             Body = body,
         };
 
+        await _attachmentService.ValidateCommentBindAsync(_issue.ProjectId, comment.Id, attachmentIds);
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.IssueComments.Add(comment);
         await db.SaveChangesAsync();
+        await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
         return new IssueCommentResult(comment.Id, comment.Body);
     }
@@ -560,5 +571,6 @@ public record UpdateIssueData(
     [property: Id(1)] string? Body = null,
     [property: Id(2)] string[]? Labels = null,
     [property: Id(3)] string? Priority = null,
-    [property: Id(4)] bool? IsDraft = null
+    [property: Id(4)] bool? IsDraft = null,
+    [property: Id(5)] string[]? AttachmentIds = null
 );

@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
@@ -71,7 +72,19 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            var comment = await grain.AddCommentAsync(req.Body);
+            IssueCommentResult comment;
+            try
+            {
+                comment = await grain.AddCommentAsync(req.Body, req.AttachmentIds);
+            }
+            catch (AttachmentLimitException ex)
+            {
+                return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded");
+            }
+            catch (AttachmentValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_attachment");
+            }
             return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
         });
 

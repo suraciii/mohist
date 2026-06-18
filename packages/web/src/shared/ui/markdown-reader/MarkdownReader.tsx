@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
-import Markdown, { type Components, type ExtraProps } from 'react-markdown'
+import { createPortal } from 'react-dom'
+import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/shared/ui/components/button'
 import { cn } from '@/shared/lib/utils'
@@ -23,12 +24,21 @@ export type MarkdownReaderProps = {
   showToc?: boolean
   showHeadingAnchors?: boolean
   showCopyCode?: boolean
+  resolveAttachment?: (id: string) => MarkdownAttachment | null | undefined
   className?: string
+}
+
+export type MarkdownAttachment = {
+  url: string
+  contentType: string
+  fileName: string
+  size: number
 }
 
 type CodeProps = ComponentProps<'code'> & ExtraProps
 type PreProps = ComponentProps<'pre'> & ExtraProps
 type AnchorProps = ComponentProps<'a'> & ExtraProps
+type ImageProps = ComponentProps<'img'> & ExtraProps
 type TableSectionProps = ComponentProps<'thead'> & ExtraProps
 type TableRowProps = ComponentProps<'tr'> & ExtraProps
 type TableCellProps = ComponentProps<'th'> & ExtraProps
@@ -40,6 +50,44 @@ type OlProps = ComponentProps<'ol'> & ExtraProps
 type LiProps = ComponentProps<'li'> & ExtraProps
 
 const CodeBlockContext = createContext(false)
+const ATTACHMENT_PREFIX = 'att:'
+
+function isAttachmentHref(href: string | undefined): href is string {
+  return typeof href === 'string' && href.startsWith(ATTACHMENT_PREFIX)
+}
+
+function getAttachmentId(href: string) {
+  return href.slice(ATTACHMENT_PREFIX.length)
+}
+
+function isInlineImageAttachment(attachment: MarkdownAttachment) {
+  return /^image\/(png|jpe?g|gif|webp)$/i.test(attachment.contentType)
+}
+
+function formatAttachmentSize(size: number) {
+  if (!Number.isFinite(size) || size < 0) return 'Unknown size'
+  if (size < 1024) return `${size} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = size / 1024
+  for (let index = 0; index < units.length; index += 1) {
+    if (value < 1024 || index === units.length - 1) {
+      return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
+    }
+    value /= 1024
+  }
+  return `${size} B`
+}
+
+function MarkdownAttachmentFallback({ id }: { id: string }) {
+  return (
+    <span
+      data-testid="markdown-attachment-fallback"
+      className="inline-flex items-center rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800"
+    >
+      Attachment unavailable: {id}
+    </span>
+  )
+}
 
 function MarkdownCodeBlock({
   children,
@@ -86,7 +134,33 @@ function MarkdownPre({ children, ...props }: PreProps) {
   )
 }
 
-function MarkdownLink({ children, href, ...props }: AnchorProps) {
+function MarkdownLink({ children, href, resolveAttachment, ...props }: AnchorProps & { resolveAttachment?: MarkdownReaderProps['resolveAttachment'] }) {
+  if (isAttachmentHref(href) && resolveAttachment) {
+    const id = getAttachmentId(href)
+    const attachment = resolveAttachment(id)
+    if (!attachment) return <MarkdownAttachmentFallback id={id} />
+
+    return (
+      <a
+        href={attachment.url}
+        download={attachment.fileName}
+        data-testid="markdown-attachment-file-card"
+        className="my-3 flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 text-left no-underline shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40"
+        {...props}
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-semibold uppercase text-gray-600">
+          {attachment.fileName.split('.').pop()?.slice(0, 4) || 'file'}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-gray-900">{attachment.fileName || children}</span>
+          <span className="mt-0.5 block text-xs text-gray-500">
+            {formatAttachmentSize(attachment.size)} · {attachment.contentType || 'application/octet-stream'}
+          </span>
+        </span>
+      </a>
+    )
+  }
+
   return (
     <a
       href={href}
@@ -96,6 +170,35 @@ function MarkdownLink({ children, href, ...props }: AnchorProps) {
       {children}
     </a>
   )
+}
+
+function MarkdownImage({ alt, src, resolveAttachment, onOpenLightbox, ...props }: ImageProps & {
+  resolveAttachment?: MarkdownReaderProps['resolveAttachment']
+  onOpenLightbox: (attachment: MarkdownAttachment) => void
+}) {
+  if (isAttachmentHref(src) && resolveAttachment) {
+    const id = getAttachmentId(src)
+    const attachment = resolveAttachment(id)
+    if (!attachment || !isInlineImageAttachment(attachment)) return <MarkdownAttachmentFallback id={id} />
+
+    return (
+      <button
+        type="button"
+        data-testid="markdown-attachment-image-trigger"
+        className="my-3 block max-w-full cursor-zoom-in rounded-lg border border-gray-200 bg-white p-0 shadow-sm"
+        onClick={() => onOpenLightbox(attachment)}
+      >
+        <img
+          src={attachment.url}
+          alt={alt || attachment.fileName}
+          className="max-h-[520px] max-w-full rounded-lg object-contain"
+          {...props}
+        />
+      </button>
+    )
+  }
+
+  return <img alt={alt} src={src} {...props} />
 }
 
 function MarkdownHr(props: HrProps) {
@@ -115,13 +218,16 @@ function buildReaderComponents(
   base: HeadingLevel,
   showCopyCode: boolean,
   showAnchors: boolean,
+  resolveAttachment: MarkdownReaderProps['resolveAttachment'],
+  onOpenLightbox: (attachment: MarkdownAttachment) => void,
 ): Components {
   const headings = buildHeadingOverrides({ base, showAnchors, slugger })
   return {
     ...headings,
     code: (props) => <MarkdownCodeBlock {...props} showCopyCode={showCopyCode} />,
     pre: MarkdownPre as Components['pre'],
-    a: MarkdownLink as Components['a'],
+    a: (props) => <MarkdownLink {...props} resolveAttachment={resolveAttachment} />,
+    img: (props) => <MarkdownImage {...props} resolveAttachment={resolveAttachment} onOpenLightbox={onOpenLightbox} />,
     table: (({ children, ...props }: TableSectionProps) => (
       <MarkdownTableWrapper {...(props as { node?: unknown })}>
         <MarkdownTable>{children}</MarkdownTable>
@@ -178,6 +284,26 @@ function buildReaderComponents(
   }
 }
 
+function MarkdownAttachmentLightbox({ attachment, onDismiss }: { attachment: MarkdownAttachment; onDismiss: () => void }) {
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Preview ${attachment.fileName}`}
+      data-testid="markdown-attachment-lightbox"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+      onClick={onDismiss}
+    >
+      <img
+        src={attachment.url}
+        alt={attachment.fileName}
+        className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+      />
+    </div>,
+    document.body,
+  )
+}
+
 function MarkdownToc({ entries }: { entries: HeadingEntry[] }) {
   if (entries.length === 0) return null
   return (
@@ -212,11 +338,13 @@ export function MarkdownReader({
   showToc = false,
   showHeadingAnchors = false,
   showCopyCode = false,
+  resolveAttachment,
   className,
 }: MarkdownReaderProps) {
   const isCollapsible = mode === 'collapsible'
   const [expanded, setExpanded] = useState(false)
   const [measuredOverflow, setMeasuredOverflow] = useState(false)
+  const [lightboxAttachment, setLightboxAttachment] = useState<MarkdownAttachment | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
   const { entries, slugger } = useMemo(
@@ -225,8 +353,14 @@ export function MarkdownReader({
   )
 
   const components = useMemo(
-    () => buildReaderComponents(slugger, baseHeadingLevel, showCopyCode, showHeadingAnchors),
-    [slugger, baseHeadingLevel, showCopyCode, showHeadingAnchors],
+    () => buildReaderComponents(slugger, baseHeadingLevel, showCopyCode, showHeadingAnchors, resolveAttachment, setLightboxAttachment),
+    [slugger, baseHeadingLevel, showCopyCode, showHeadingAnchors, resolveAttachment],
+  )
+  const urlTransform = useMemo(
+    () => (resolveAttachment
+      ? (url: string) => (isAttachmentHref(url) ? url : defaultUrlTransform(url))
+      : undefined),
+    [resolveAttachment],
   )
 
   useEffect(() => {
@@ -276,7 +410,7 @@ export function MarkdownReader({
         )}
         style={shouldConstrain ? { maxHeight: `${collapsedHeight}px` } : undefined}
       >
-        <Markdown remarkPlugins={[remarkGfm]} components={components}>
+        <Markdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
           {content}
         </Markdown>
         {shouldConstrain && (
@@ -298,6 +432,9 @@ export function MarkdownReader({
             {collapseActive ? 'Collapse' : 'Expand'}
           </Button>
         </div>
+      )}
+      {lightboxAttachment && (
+        <MarkdownAttachmentLightbox attachment={lightboxAttachment} onDismiss={() => setLightboxAttachment(null)} />
       )}
     </div>
   )

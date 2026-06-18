@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
@@ -46,17 +47,29 @@ public static partial class IssueRoutes
             var number = await counter.NextAsync();
             var issueId = $"issue_{Guid.NewGuid():N}";
             var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
-            await issueGrain.CreateAsync(
-                project.Id,
-                number,
-                req.Title,
-                req.Body,
-                req.Labels,
-                req.Priority,
-                resolution.Repository!.Name,
-                issueId,
-                req.Risk,
-                isDraft: req.IsDraft ?? true);
+            try
+            {
+                await issueGrain.CreateAsync(
+                    project.Id,
+                    number,
+                    req.Title,
+                    req.Body,
+                    req.Labels,
+                    req.Priority,
+                    resolution.Repository!.Name,
+                    issueId,
+                    req.Risk,
+                    req.IsDraft ?? true,
+                    req.AttachmentIds);
+            }
+            catch (AttachmentLimitException ex)
+            {
+                return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded");
+            }
+            catch (AttachmentValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_attachment");
+            }
             var issue = await issuesQuery.GetAsync(project.Id, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
@@ -88,11 +101,19 @@ public static partial class IssueRoutes
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
-                    req.Title, req.Body, req.Labels, req.Priority, req.IsDraft));
+                    req.Title, req.Body, req.Labels, req.Priority, req.IsDraft, req.AttachmentIds));
             }
             catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message);
+            }
+            catch (AttachmentLimitException ex)
+            {
+                return ApiResults.Fail(ex.Message, 413, "attachment_count_limit_exceeded");
+            }
+            catch (AttachmentValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
             var info = await issuesQuery.GetAsync(project.Id, number);
             return ApiResults.Ok(info);

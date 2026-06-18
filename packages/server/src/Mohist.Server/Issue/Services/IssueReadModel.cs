@@ -40,6 +40,7 @@ public class IssueReadModel
     public string? WorkflowProfileMode { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
+    public AttachmentInfo[] Attachments { get; set; } = [];
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
     public bool IsDraft { get; set; }
     public bool CanStart { get; set; }
@@ -64,3 +65,9 @@ public sealed record IssueFeedbackResolutionDto(
     string? ResolutionTaskId,
     string? ResolvedAt,
     string? ResolutionSummary);
+
+public sealed record AttachmentInfo(
+    string Id,
+    string FileName,
+    string ContentType,
+    long Size);

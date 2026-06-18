@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -92,6 +93,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddHostedService<IssueWorkflowReconciliationService>();
+        services.AddHostedService<AttachmentCleanupService>();
         services.AddSingleton<ConfigService>();
         services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
@@ -114,6 +116,9 @@ public static class MohistServiceRegistration
         services.AddSingleton<SystemUpdateService>();
         services.AddSingleton<IWorkflowArtifactStorage, FileSystemWorkflowArtifactStorage>();
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
+        services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
+        services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
+        services.AddScoped<AttachmentService>();
         services.AddScoped<WorkflowArtifactUploadService>();
         services.AddScoped<AgentJobArtifactUploadService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();

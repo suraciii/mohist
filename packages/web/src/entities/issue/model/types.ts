@@ -42,6 +42,14 @@ export interface Comment {
   issueId: string
   body: string
   createdAt: string
+  attachments?: AttachmentInfo[]
+}
+
+export interface AttachmentInfo {
+  id: string
+  fileName: string
+  contentType: string
+  size: number
 }
 
 export interface ApprovalState {
@@ -155,6 +163,7 @@ export interface Issue {
   projectName?: string
   repository?: { name: string; gitUrl: string; baseBranch: string } | null
   comments?: Comment[]
+  attachments?: AttachmentInfo[]
   approvalState?: ApprovalState
   priority?: string | null
   risk?: string | null
