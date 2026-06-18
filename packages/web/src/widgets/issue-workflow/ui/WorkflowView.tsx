@@ -445,10 +445,19 @@ function TaskItem({
   const artifactSummaries = task.artifactSummaries ?? []
   const hasArtifacts = artifactSummaries.length > 0
   const isDeliveryTask = isDeliveryFailureTask(task)
+  const taskReason = typeof task.reason === 'string' ? task.reason : null
+  const outputResolution = resolveDeliveryFailureFromOutput(taskOutput)
+  const messageResolution = resolveDeliveryFailureFromMessage(taskReason)
   const deliveryFailure = isFailed && isDeliveryTask
-    ? (resolveDeliveryFailureFromOutput(taskOutput).guidance
-      ?? resolveDeliveryFailureFromMessage(typeof task.reason === 'string' ? task.reason : null).guidance)
+    ? (outputResolution.guidance ?? messageResolution.guidance)
     : null
+  const branchEvidence =
+    (outputResolution.failureKind === 'branch-invariant-violation'
+      ? outputResolution.evidence
+      : null) ??
+    (messageResolution.failureKind === 'branch-invariant-violation'
+      ? messageResolution.evidence
+      : null)
   const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
@@ -532,6 +541,7 @@ function TaskItem({
                 failureKind={deliveryFailure.failureKind}
                 label={deliveryFailure.label}
                 nextAction={deliveryFailure.nextAction}
+                evidence={branchEvidence}
               />
             )}
             {hasReason && (
@@ -597,15 +607,23 @@ function DeliveryFailureBanner({
   failureKind,
   label,
   nextAction,
+  evidence,
 }: {
   failureKind: DeliveryFailureKind
   label: string
   nextAction: string
+  evidence?: {
+    expectedBranch: string
+    observedBranch: string
+    observedRef?: string | null
+    boundary?: 'start' | 'end' | null
+  } | null
 }) {
   const colors: Record<DeliveryFailureKind, string> = {
     conflict: 'border-red-300 bg-red-50 text-red-800',
     'base-moved': 'border-amber-300 bg-amber-50 text-amber-800',
     'retry-safe': 'border-blue-300 bg-blue-50 text-blue-800',
+    'branch-invariant-violation': 'border-purple-300 bg-purple-50 text-purple-800',
   }
   return (
     <div className={`rounded-md border px-2.5 py-2 text-xs space-y-1 ${colors[failureKind]}`}>
@@ -614,6 +632,30 @@ function DeliveryFailureBanner({
         <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px]">{failureKind}</span>
         <span>{label}</span>
       </div>
+      {failureKind === 'branch-invariant-violation' && (
+        <div className="rounded bg-white/60 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+          <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: runner/action (not issue work)</div>
+          {evidence?.boundary && (
+            <div>
+              <span className="font-sans opacity-70">boundary:</span> {evidence.boundary}
+            </div>
+          )}
+          <div>
+            <span className="font-sans opacity-70">expected:</span>{' '}
+            <span className="text-green-700">{evidence?.expectedBranch || '(unknown)'}</span>
+          </div>
+          <div>
+            <span className="font-sans opacity-70">observed:</span>{' '}
+            <span className="text-red-700">
+              {evidence?.observedBranch
+                ? evidence.observedBranch
+                : evidence?.observedRef
+                  ? `(detached at ${evidence.observedRef})`
+                  : '(unknown)'}
+            </span>
+          </div>
+        </div>
+      )}
       <p className="leading-snug">{nextAction}</p>
     </div>
   )
@@ -1172,7 +1214,9 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   let healthSummary = ''
   let healthLogExcerpt = ''
   let nextAction = 'Review the failure above and take action to resolve the issue.'
-  const deliveryGuidance = resolveDeliveryFailureFromMessage(blockedReason).guidance
+  const deliveryResolution = resolveDeliveryFailureFromMessage(blockedReason)
+  const deliveryGuidance = deliveryResolution.guidance
+  const branchEvidence = deliveryResolution.evidence
   let deliveryFailureLabel: string | null = null
 
   if (blockedReason) {
@@ -1197,6 +1241,9 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
     }
   }
 
+  const isBranchViolation =
+    deliveryGuidance?.failureKind === 'branch-invariant-violation' && branchEvidence
+
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
       <div className="flex items-center gap-2">
@@ -1212,6 +1259,30 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
             <span className="font-medium">Failure kind:</span>{' '}
             <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px] mr-1">{deliveryGuidance.failureKind}</span>
             {deliveryFailureLabel}
+          </div>
+        )}
+        {isBranchViolation && branchEvidence && (
+          <div className="rounded border border-purple-300 bg-purple-50 px-2.5 py-2 text-xs text-purple-800 space-y-0.5 font-mono">
+            <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: runner/action (not issue work)</div>
+            {branchEvidence.boundary && (
+              <div>
+                <span className="font-sans opacity-70">boundary:</span> {branchEvidence.boundary}
+              </div>
+            )}
+            <div>
+              <span className="font-sans opacity-70">expected:</span>{' '}
+              <span className="text-green-700">{branchEvidence.expectedBranch || '(unknown)'}</span>
+            </div>
+            <div>
+              <span className="font-sans opacity-70">observed:</span>{' '}
+              <span className="text-red-700">
+                {branchEvidence.observedBranch
+                  ? branchEvidence.observedBranch
+                  : branchEvidence.observedRef
+                    ? `(detached at ${branchEvidence.observedRef})`
+                    : '(unknown)'}
+              </span>
+            </div>
           </div>
         )}
         {capabilityOrFiles && (

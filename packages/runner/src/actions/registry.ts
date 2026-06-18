@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, WorkItem } from "../core/types.js"
 import { arrayInput, numberInput, objectInput, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
@@ -17,13 +17,21 @@ import {
   verifyRebaseCompleteAction,
 } from "./rebase.js"
 import { git as defaultGit } from "./git.js"
+import { LandingWorkspaceInfo, WorkspaceManager, defaultRunnerRoot } from "../runtime/workspace.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 type GitRunner = typeof defaultGit
 type ExistsChecker = typeof exists
+type WorkLike = { variables?: JsonObject | null; workflowRunId?: string | null }
+
+export interface DeliveryWorkspaceManager {
+  createLandingWorkspace(work: WorkLike, signal: AbortSignal): Promise<LandingWorkspaceInfo>
+  disposeLandingWorkspace(landing: LandingWorkspaceInfo | string, signal: AbortSignal): Promise<{ path: string; disposed: boolean; error?: string }>
+}
 
 let git: GitRunner = defaultGit
 let pathExists: ExistsChecker = exists
+let workspaceManager: DeliveryWorkspaceManager = new WorkspaceManager(defaultRunnerRoot())
 
 export function setDeliveryGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
@@ -31,6 +39,14 @@ export function setDeliveryGitRunnerForTest(runner: GitRunner | null) {
 
 export function setDeliveryExistsCheckerForTest(checker: ExistsChecker | null) {
   pathExists = checker ?? exists
+}
+
+export function setDeliveryWorkspaceManagerForTest(manager: DeliveryWorkspaceManager | null) {
+  workspaceManager = manager ?? new WorkspaceManager(defaultRunnerRoot())
+}
+
+export function getDeliveryWorkspaceManager(): WorkspaceManager {
+  return workspaceManager as WorkspaceManager
 }
 
 export class ActionRegistry {
@@ -129,16 +145,21 @@ function isPromiseVerdict(value: string) {
 export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
   const source = stringInput(context.with, "source") ?? "HEAD"
+  const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
 
-  const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal)
+  // The merge-ready preflight is ref-safe: read-only `rev-parse` and
+  // `merge-base` against the workflow workspace, then run the actual
+  // `merge --squash --no-commit` probe in an isolated landing workspace
+  // so the workflow workspace never leaves `workspace.branch`.
+  const base = await git(workDir, ["rev-parse", baseBranch], context.signal)
   if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseBranch}'`, base.exitCode, [], new Date().toISOString())
 
-  const head = await git(context.workDir, ["rev-parse", source], context.signal)
+  const head = await git(workDir, ["rev-parse", source], context.signal)
   if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve source", head.exitCode, [], new Date().toISOString())
 
-  const mergeBase = await git(context.workDir, ["merge-base", baseBranch, source], context.signal)
+  const mergeBase = await git(workDir, ["merge-base", baseBranch, source], context.signal)
   const checkedAt = new Date().toISOString()
-  const preflight = await runSquashMergePreflight(context.workDir, baseBranch, source, context.signal)
+  const preflight = await runSquashMergePreflight(buildPublishWorkItem(context), baseBranch, source, context.signal)
 
   return mergeReadyResult(
     preflight.canMerge,
@@ -311,16 +332,80 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
   const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
   const remoteTarget = `${remote}/${target}`
 
-  const prePublish = await git(workDir, ["rev-parse", target], context.signal)
-  if (!prePublish.success) {
-    return publishOutput(false, source, target, workDir, null, false, prePublish.combinedOutput, "retry-safe", prePublish.exitCode)
+  // Step 1: workflow workspace is read-only. The base-branch landing
+  // commit is built in an isolated landing workspace created by
+  // WorkspaceManager so the workflow workspace stays on
+  // `workspace.branch` for the entire publish task.
+  const sourceResolve = await git(workDir, ["rev-parse", source], context.signal)
+  if (!sourceResolve.success) {
+    return publishOutput(false, source, target, workDir, null, false, sourceResolve.combinedOutput, "retry-safe", sourceResolve.exitCode)
   }
-  let restoreSha = prePublish.stdout.trim()
 
-  const status = await git(workDir, ["status", "--porcelain"], context.signal)
+  // Step 2: create an isolated landing workspace clone from the workflow
+  // workspace. Its `origin` is reset to the configured gitUrl so push
+  // targets the real upstream. The clone's object store shares the
+  // workflow workspace's objects via alternates (read-only), so removing
+  // the landing directory cannot corrupt the workflow workspace.
+  let landing: LandingWorkspaceInfo | null = null
+  try {
+    landing = await workspaceManager.createLandingWorkspace(buildPublishWorkItem(context), context.signal)
+  } catch (err) {
+    const messageText = err instanceof Error ? err.message : String(err)
+    return publishOutput(false, source, target, workDir, null, false, `Publish aborted: failed to create isolated landing workspace: ${messageText}`, "retry-safe", 1)
+  }
+
+  try {
+    return await publishInLandingWorkspace(context, workDir, landing, source, target, remote, remoteTarget, message)
+  } finally {
+    if (landing) await workspaceManager.disposeLandingWorkspace(landing, context.signal)
+  }
+}
+
+async function publishInLandingWorkspace(
+  context: ActionContext,
+  workDir: string,
+  landing: LandingWorkspaceInfo,
+  source: string,
+  target: string,
+  remote: string,
+  remoteTarget: string,
+  message: string,
+): Promise<ActionResult> {
+  const landingDir = landing.path
+  const signal = context.signal
+
+  const fetch = await git(landingDir, ["fetch", remote, target], signal)
+  if (!fetch.success) {
+    return publishOutput(false, source, target, workDir, null, false, fetch.combinedOutput, "retry-safe", fetch.exitCode)
+  }
+
+  const remoteHead = await git(landingDir, ["rev-parse", remoteTarget], signal)
+  if (!remoteHead.success) {
+    return publishOutput(false, source, target, workDir, null, false, remoteHead.combinedOutput, "retry-safe", remoteHead.exitCode)
+  }
+  let restoreSha = remoteHead.stdout.trim()
+
+  const checkout = await git(landingDir, ["checkout", target], signal)
+  if (!checkout.success) {
+    const rebaseMerge = await git(landingDir, ["rev-parse", "--git-path", "rebase-merge"], signal)
+    const rebaseApply = await git(landingDir, ["rev-parse", "--git-path", "rebase-apply"], signal)
+    const mergeHead = await git(landingDir, ["rev-parse", "--git-path", "MERGE_HEAD"], signal)
+    if (
+      (rebaseMerge.success && pathExists(resolveGitDirPath(landingDir, rebaseMerge.stdout.trim())))
+      || (rebaseApply.success && pathExists(resolveGitDirPath(landingDir, rebaseApply.stdout.trim())))
+    ) {
+      await git(landingDir, ["rebase", "--abort"], signal)
+    } else if (mergeHead.success && pathExists(resolveGitDirPath(landingDir, mergeHead.stdout.trim()))) {
+      await git(landingDir, ["merge", "--abort"], signal)
+    }
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
+    return publishOutput(false, source, target, workDir, null, false, checkout.combinedOutput, "retry-safe", checkout.exitCode)
+  }
+
+  const status = await git(landingDir, ["status", "--porcelain"], signal)
   if (status.success && status.stdout.trim()) {
     const dirty = status.stdout.trim()
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
     return publishOutput(
       false,
       source,
@@ -328,50 +413,23 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
       workDir,
       null,
       false,
-      `Publish aborted: target branch '${target}' had a dirty working tree. Destructive 'git reset --hard ${restoreSha}' was used to restore the workspace. Untracked or user-modified files that were discarded:\n${dirty}`,
+      `Publish aborted: target branch '${target}' had a dirty working tree in the landing workspace. Discarded untracked/user-modified files:\n${dirty}`,
       "retry-safe",
       status.exitCode,
     )
   }
 
-  const fetch = await git(workDir, ["fetch", remote, target], context.signal)
-  if (!fetch.success) {
-    return publishOutput(false, source, target, workDir, null, false, fetch.combinedOutput, "retry-safe", fetch.exitCode)
-  }
-
-  const remoteHead = await git(workDir, ["rev-parse", remoteTarget], context.signal)
-  if (!remoteHead.success) {
-    return publishOutput(false, source, target, workDir, null, false, remoteHead.combinedOutput, "retry-safe", remoteHead.exitCode)
-  }
-
-  const checkout = await git(workDir, ["checkout", target], context.signal)
-  if (!checkout.success) {
-    const rebaseMerge = await git(workDir, ["rev-parse", "--git-path", "rebase-merge"], context.signal)
-    const rebaseApply = await git(workDir, ["rev-parse", "--git-path", "rebase-apply"], context.signal)
-    const mergeHead = await git(workDir, ["rev-parse", "--git-path", "MERGE_HEAD"], context.signal)
-    if (
-      (rebaseMerge.success && pathExists(resolveGitDirPath(workDir, rebaseMerge.stdout.trim())))
-      || (rebaseApply.success && pathExists(resolveGitDirPath(workDir, rebaseApply.stdout.trim())))
-    ) {
-      await git(workDir, ["rebase", "--abort"], context.signal)
-    } else if (mergeHead.success && pathExists(resolveGitDirPath(workDir, mergeHead.stdout.trim()))) {
-      await git(workDir, ["merge", "--abort"], context.signal)
-    }
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
-    return publishOutput(false, source, target, workDir, null, false, checkout.combinedOutput, "retry-safe", checkout.exitCode)
-  }
-
-  const fastForward = await git(workDir, ["merge", "--ff-only", remoteTarget], context.signal)
+  const fastForward = await git(landingDir, ["merge", "--ff-only", remoteTarget], signal)
   if (!fastForward.success) {
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
     return publishOutput(false, source, target, workDir, null, false, fastForward.combinedOutput, "base-moved", fastForward.exitCode)
   }
 
   restoreSha = remoteHead.stdout.trim()
 
-  const sourceContainsTarget = await git(workDir, ["merge-base", "--is-ancestor", remoteTarget, source], context.signal)
+  const sourceContainsTarget = await git(landingDir, ["merge-base", "--is-ancestor", remoteTarget, source], signal)
   if (!sourceContainsTarget.success) {
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
     return publishOutput(
       false,
       source,
@@ -385,31 +443,46 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
     )
   }
 
-  const squash = await git(workDir, ["merge", "--squash", source], context.signal)
+  const squash = await git(landingDir, ["merge", "--squash", source], signal)
   if (!squash.success) {
-    await git(workDir, ["merge", "--abort"], context.signal)
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    await git(landingDir, ["merge", "--abort"], signal)
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
     return publishOutput(false, source, target, workDir, null, false, squash.combinedOutput, "base-moved", squash.exitCode)
   }
 
-  const commitMessage = buildPublishCommitMessage(message, workDir, source, target, context)
-  const commit = await git(workDir, ["commit", ...commitMessage], context.signal)
+  const commitMessage = buildPublishCommitMessage(message, landingDir, source, target, context)
+  const commit = await git(landingDir, ["commit", ...commitMessage], signal)
   if (!commit.success) {
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
     return publishOutput(false, source, target, workDir, null, false, commit.combinedOutput, "retry-safe", commit.exitCode)
   }
 
-  const head = await git(workDir, ["rev-parse", "HEAD"], context.signal)
+  const head = await git(landingDir, ["rev-parse", "HEAD"], signal)
   const landedCommit = head.success ? head.stdout.trim() : null
 
-  const push = await git(workDir, ["push", remote, target], context.signal)
+  const push = await git(landingDir, ["push", remote, target], signal)
   if (!push.success) {
-    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    await git(landingDir, ["reset", "--hard", restoreSha], signal)
     const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
     return publishOutput(false, source, target, workDir, landedCommit, false, push.combinedOutput, failureKind, push.exitCode)
   }
 
   return publishOutput(true, source, target, workDir, landedCommit, true, push.combinedOutput, undefined, push.exitCode)
+}
+
+function buildPublishWorkItem(context: ActionContext): WorkItem {
+  return {
+    workflowRunId: context.workflowRunId,
+    workId: context.workId,
+    workType: context.workType,
+    stage: context.stage ?? null,
+    title: context.title ?? null,
+    uses: context.uses ?? null,
+    with: context.with ?? null,
+    variables: context.variables,
+    projectId: context.projectId ?? null,
+    issueNumber: context.issueNumber ?? null,
+  }
 }
 
 function publishOutput(
@@ -471,31 +544,60 @@ function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string
   return canMerge ? { status: "success", message: "Merge ready", output, exitCode } : { status: "failure", message: error ?? "Merge is not ready", output, exitCode }
 }
 
-async function runSquashMergePreflight(workDir: string, target: string, source: string, signal: AbortSignal): Promise<{ canMerge: boolean; conflictFiles: string[]; error: string | null; exitCode: number | null }> {
-  const originalRef = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
-  const originalSha = await git(workDir, ["rev-parse", "HEAD"], signal)
+async function runSquashMergePreflight(work: WorkLike, target: string, source: string, signal: AbortSignal): Promise<{ canMerge: boolean; conflictFiles: string[]; error: string | null; exitCode: number | null }> {
+  // Ref-safe preflight: the workflow workspace never has its branch
+  // switched. The `merge --squash --no-commit` probe runs against an
+  // isolated landing workspace that is created from the workflow
+  // workspace's refs and disposed when the probe finishes. The
+  // structured output (`canMerge`, `conflictFiles`, etc.) is preserved.
+  let landing: LandingWorkspaceInfo | null = null
+  try {
+    landing = await workspaceManager.createLandingWorkspace(work, signal)
+  } catch (err) {
+    const messageText = err instanceof Error ? err.message : String(err)
+    return { canMerge: false, conflictFiles: [], error: `Merge-ready preflight aborted: failed to create isolated landing workspace: ${messageText}`, exitCode: 1 }
+  }
 
-  const checkout = await git(workDir, ["checkout", target], signal)
+  try {
+    return await runSquashMergePreflightInLanding(landing.path, target, source, signal)
+  } finally {
+    // Best-effort dispose. A dispose failure does not flip a detected
+    // conflict into a passing result: we already captured the merge
+    // outcome above. The landing dir is an isolated clone of the
+    // workflow workspace, so leaving it behind cannot affect the
+    // workflow workspace's branch or working tree.
+    await workspaceManager.disposeLandingWorkspace(landing, signal)
+  }
+}
+
+async function runSquashMergePreflightInLanding(landingDir: string, target: string, source: string, signal: AbortSignal): Promise<{ canMerge: boolean; conflictFiles: string[]; error: string | null; exitCode: number | null }> {
+  // The landing clone is materialized from the workflow workspace and
+  // has its `origin` reset to the real upstream gitUrl. We fetch the
+  // base branch fresh from upstream before running the probe so the
+  // preflight matches what `integrate:publish` would actually land.
+  const fetch = await git(landingDir, ["fetch", "origin", target], signal)
+  if (!fetch.success) {
+    return { canMerge: false, conflictFiles: [], error: fetch.combinedOutput, exitCode: fetch.exitCode }
+  }
+
+  const checkout = await git(landingDir, ["checkout", target], signal)
   if (!checkout.success) {
     return { canMerge: false, conflictFiles: [], error: checkout.combinedOutput, exitCode: checkout.exitCode }
   }
 
-  const merge = await git(workDir, ["merge", "--squash", "--no-commit", source], signal)
+  const merge = await git(landingDir, ["merge", "--squash", "--no-commit", source], signal)
 
   let conflictFiles: string[] = []
   if (!merge.success) {
-    const status = await git(workDir, ["diff", "--name-only", "--diff-filter=U"], signal)
+    const status = await git(landingDir, ["diff", "--name-only", "--diff-filter=U"], signal)
     if (status.success && status.stdout.trim()) {
       conflictFiles = [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
     }
   }
 
-  await git(workDir, ["reset", "--hard"], signal)
-  if (originalRef.success && originalRef.stdout.trim() && originalRef.stdout.trim() !== "HEAD") {
-    await git(workDir, ["checkout", originalRef.stdout.trim()], signal)
-  } else if (originalSha.success) {
-    await git(workDir, ["checkout", originalSha.stdout.trim()], signal)
-  }
+  // Reset the landing workspace back to the base branch ref so the
+  // disposed dir is clean. The workflow workspace is untouched.
+  await git(landingDir, ["reset", "--hard", `origin/${target}`], signal)
 
   return {
     canMerge: merge.success,

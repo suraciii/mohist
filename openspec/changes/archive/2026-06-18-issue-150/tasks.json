@@ -1,0 +1,106 @@
+{
+  "project": "mohist-local",
+  "description": "Keep workflow execution on the run branch: add isolated landing workspaces, make publish and merge-ready preflight branch-stable, enforce a workspace branch-stability invariant at task boundaries, and surface branch-invariant-violation failures distinctly.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Isolated temporary landing workspace support in WorkspaceManager",
+      "spec": "specs/worktree-manager/spec.md#Isolated temporary landing workspaces for branch-stable delivery",
+      "description": "Add create/dispose + prune support for isolated temporary landing workspaces to WorkspaceManager (packages/runner/src/runtime/workspace.ts). A landing workspace is a `git clone --shared` from the workflow workspace path under `<runnerRoot>/<projectSlug>/landing/<runId>-<uuid>/`, with its `origin` reset to the configured remote gitUrl, so publish/preflight can construct base-branch commits outside the workflow workspace. It is disposable via rm -rf without touching the workspace's object store, and a prune pass removes stale landing dirs from crashed runs.",
+      "acceptanceCriteria": [
+        "createLandingWorkspace returns a path whose repository has both the base branch and run branch refs visible (clone --shared from the workflow workspace)",
+        "the landing workspace origin is reset to the configured repository gitUrl before it is handed to the caller",
+        "disposing the landing workspace (rm -rf) does not corrupt the workflow workspace's git objects, refs, or current branch",
+        "a stale landing directory from a prior/crashed run is pruned when a workspace is ensured for the same run",
+        "unit tests cover create/dispose, origin reset, isolation from the workflow workspace, and prune"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/workspace.ts landing-workspace API + unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use `git clone --shared` (alternates, read-only object refs) rather than a linked `git worktree add`, per design Decision 3 — a linked worktree's removal can damage the shared object store."
+    },
+    {
+      "id": "T-002",
+      "title": "Branch-stable publish via isolated landing workspace",
+      "spec": "specs/merge-delivery/spec.md#Publish lands one commit and pushes to the remote",
+      "description": "Rework publishAction (packages/runner/src/actions/registry.ts) so it never checks out the base branch in the workflow workspace. The workspace is used only read-only (rev-parse source, merge-base --is-ancestor to confirm the run branch is prepared against the latest remote base); the landing commit is built in an isolated landing workspace (checkout base, fetch, merge --ff-only, merge --squash, commit, push) and then disposed. Preserve the retry-safe/base-moved failure kinds and rollback semantics, with rollback now targeting the landing workspace rather than reset --hard on the workflow workspace.",
+      "acceptanceCriteria": [
+        "publishAction git calls against the workflow workspace contain no `checkout <baseBranch>`, `merge --squash`, `commit`, or `push` — those execute in the landing workspace",
+        "the workflow workspace remains on workspace.branch before, during, and after publish",
+        "publish still lands a single commit on the base branch and pushes it, with tree/parent/message equivalent to the prior in-workspace behavior",
+        "a failed publish leaves the workflow workspace clean and on the run branch; rollback discards/resets the landing workspace only",
+        "retry-safe and base-moved failure kinds are still reported correctly",
+        "publish.spec.ts and push.spec.ts are rewritten to assert no `checkout <baseBranch>` in the workspace call set and correct landing-workspace sequencing, and pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/registry.ts publishAction rework + updated publish/push tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "References specs/merge-delivery/spec.md#Failed delivery leaves a clean workspace for the rollback-on-run-branch requirement (the requirement body strengthens it to also leave the workspace on workspace.branch)."
+    },
+    {
+      "id": "T-003",
+      "title": "Branch-stable merge-ready squash-mergeability preflight",
+      "spec": "specs/worktree-manager/spec.md#Read-only squash mergeability preflight",
+      "description": "Rework runSquashMergePreflight (packages/runner/src/actions/registry.ts, used by mergeReadyAction) to be ref-safe: it SHALL NOT check out the base branch in the workflow workspace. Run the `merge --squash --no-commit` probe in an isolated landing workspace, capture conflict files, and discard the workspace. The structured merge-ready output (kind, strategy, targetBranch, baseSha, candidateHeadSha, mergeBaseSha, canMerge, conflictFiles, checkedAt) remains unchanged; only the location of the checkout changes.",
+      "acceptanceCriteria": [
+        "preflight git calls against the workflow workspace contain no `checkout <baseBranch>` or `merge --squash`",
+        "the workspace remains on workspace.branch before and after the preflight, with the run branch ref unchanged",
+        "structured output fields are unchanged (kind/strategy/targetBranch/baseSha/candidateHeadSha/mergeBaseSha/canMerge/conflictFiles/checkedAt)",
+        "a clean candidate reports canMerge:true; a conflicting candidate reports conflictFiles and canMerge:false; a cleanup failure does not turn a detected conflict into a passing result",
+        "merge-ready unit tests are updated to assert ref-safety and the unchanged output shape, and pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/actions/registry.ts runSquashMergePreflight rework + updated merge-ready tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Reuses the same landing-workspace mechanism as publish for squash-semantics parity; `git merge-tree` ref-only is a deferred optimization (design Open Questions)."
+    },
+    {
+      "id": "T-004",
+      "title": "Task-boundary branch-stability verification and evidence",
+      "spec": "specs/workspace-branch-stability/spec.md#Task boundary branch verification records branch-stability evidence",
+      "description": "Add start/end branch-stability checks to WorkExecutor.executeOne (packages/runner/src/runtime/executor.ts): verify `git rev-parse --abbrev-ref HEAD` equals variables.workspace.branch before the action runs and again after it succeeds, placed before enforceCleanWorktree so a wrong branch is never misreported as a dirty worktree. On mismatch, report a branch-invariant-violation failure with expected and observed branch and the boundary. Record branch-stability evidence in the result JSON alongside clean-worktree evidence. This also codifies prepare as branch-stable — the checks will fail on any regression that checks out the base branch.",
+      "acceptanceCriteria": [
+        "executeOne verifies the workspace is on workspace.branch before the action and records start evidence; on mismatch it does not run the action and reports branch-invariant-violation",
+        "after a successful action, executeOne verifies the branch again and records end evidence; a task that ended off the run branch is not reported completed",
+        "branch-invariant-violation evidence includes the expected and observed branch and the boundary, and is distinct from dirty-worktree and git-index-lock evidence",
+        "dirty-worktree evidence is only reported when the branch matches workspace.branch",
+        "retrying a task whose workspace left the run branch restores workspace.branch via workspace.ensure without manual user action",
+        "executor unit tests cover start/end checks, evidence shape, dirty-worktree-vs-branch-violation ordering, and retry restore"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/runner/src/runtime/executor.ts branch-stability checks + evidence + tests",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Also satisfies specs/workflow-run/spec.md#Task completion persists clean-worktree verification evidence (branch-stability evidence alongside clean-worktree) and protects specs/merge-delivery/spec.md#Prepare reconciles the issue branch with the base branch (prepare already branch-stable; no prepare code change expected)."
+    },
+    {
+      "id": "T-005",
+      "title": "Render branch-invariant-violation failures in CLI and Web",
+      "spec": "specs/workspace-branch-stability/spec.md#Branch-invariant violations are surfaced as distinct runner/action bugs",
+      "description": "Surface the new branch-invariant-violation failure kind in user-facing diagnostics: the CLI DeliveryFailureGuidance and the web delivery-failure renderer render it as a runner/action bug showing expected vs observed branch evidence, distinct from dirty-worktree, conflict, base-moved, retry-safe, and provider failures. Include CLI and web test coverage.",
+      "acceptanceCriteria": [
+        "CLI DeliveryFailureGuidance renders branch-invariant-violation with expected/observed branch evidence and attributes it to the runner/action, not issue work",
+        "the web delivery-failure renderer renders the same kind and evidence distinctly from dirty-worktree, conflict, base-moved, retry-safe, and provider failures",
+        "unit/component tests cover the CLI guidance branch and the web rendering for the new kind"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "CLI DeliveryFailureGuidance + web delivery-failure renderer updates + tests",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Also supports specs/merge-delivery/spec.md#Delivery failures are classified into actionable kinds (the branch-invariant-violation kind in the delivery failure taxonomy)."
+    }
+  ]
+}

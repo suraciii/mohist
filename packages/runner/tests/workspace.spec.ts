@@ -176,6 +176,202 @@ describe("WorkspaceManager.slugify", () => {
   })
 })
 
+describe("WorkspaceManager landing workspaces", () => {
+  it("CreateLandingWorkspace_ClonesSharedAndExposesBaseAndRunBranchRefs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const workspace = await manager.ensure(work("wr-land-1", "issue-1", repo), signal)
+    // Advance the run branch with a commit so the landing clone must see
+    // both the base branch ref and the prepared run branch ref.
+    await writeFile(join(workspace.path, "draft.txt"), "draft\n")
+    await git(workspace.path, "add", ".")
+    await git(workspace.path, "commit", "-m", "issue work")
+
+    const landing = await manager.createLandingWorkspace(work("wr-land-1", "issue-1", repo), signal)
+    expect(landing.runBranch).toBe("mohist/run-wr-land-1")
+    expect(landing.baseBranch).toBe("master")
+    expect(landing.gitUrl).toBe(repo)
+    expect(landing.path.startsWith(join(runnerRoot, "mohist-local", "landing", "wr-land-1-"))).toBe(true)
+    expect(landing.path).not.toBe(workspace.path)
+
+    // The landing clone is a separate working tree and not the workspace.
+    expect(exists(join(landing.path, ".git"))).toBe(true)
+    expect(landing.path).not.toBe(workspace.path)
+
+    // Both refs visible: the base branch (master) and the run branch
+    // (mohist/run-wr-land-1).
+    const baseRef = await runCommand("git", ["-C", landing.path, "rev-parse", "--verify", "refs/heads/master"], ".", signal)
+    expect(baseRef.exitCode).toBe(0)
+    const runRef = await runCommand("git", ["-C", landing.path, "rev-parse", "--verify", "refs/heads/mohist/run-wr-land-1"], ".", signal)
+    expect(runRef.exitCode).toBe(0)
+
+    // The landing workspace was created with `git clone --shared`, so its
+    // .git/objects/info/alternates should reference the workspace path.
+    const alternates = await readFile(join(landing.path, ".git", "objects", "info", "alternates"), "utf8").catch(() => "")
+    expect(alternates).toContain(workspace.path)
+
+    await manager.disposeLandingWorkspace(landing, signal)
+  })
+
+  it("CreateLandingWorkspace_ResetsOriginToConfiguredGitUrl", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    await manager.ensure(work("wr-land-2", "issue-2", repo), signal)
+    const landing = await manager.createLandingWorkspace(work("wr-land-2", "issue-2", repo), signal)
+
+    // The landing workspace's origin must be the configured repository
+    // gitUrl, not the bare cache or the workspace path. This is what
+    // lets publish push to the real upstream from the landing workspace.
+    const remote = await runCommand("git", ["-C", landing.path, "remote", "get-url", "origin"], ".", signal)
+    expect(remote.exitCode).toBe(0)
+    expect(remote.stdout.trim()).toBe(repo)
+
+    await manager.disposeLandingWorkspace(landing, signal)
+  })
+
+  it("DisposeLandingWorkspace_RmRfDoesNotCorruptWorkflowWorkspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const workspace = await manager.ensure(work("wr-land-3", "issue-3", repo), signal)
+    await writeFile(join(workspace.path, "keep.txt"), "keep me\n")
+    await git(workspace.path, "add", ".")
+    await git(workspace.path, "commit", "-m", "issue work")
+
+    const landing = await manager.createLandingWorkspace(work("wr-land-3", "issue-3", repo), signal)
+    expect(exists(landing.path)).toBe(true)
+
+    const result = await manager.disposeLandingWorkspace(landing, signal)
+    expect(result.disposed).toBe(true)
+    expect(exists(landing.path)).toBe(false)
+
+    // After disposing the landing workspace, the workflow workspace must
+    // be unaffected: same path, same branch, same working tree, same
+    // commit history, and the run branch must still point at the
+    // committed work.
+    const head = await runCommand("git", ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
+    expect(head.exitCode).toBe(0)
+    expect(head.stdout.trim()).toBe("mohist/run-wr-land-3")
+    expect(await readFile(join(workspace.path, "keep.txt"), "utf8")).toBe("keep me\n")
+    const runSha = await runCommand("git", ["-C", workspace.path, "rev-parse", "HEAD"], ".", signal)
+    expect(runSha.exitCode).toBe(0)
+
+    // The workspace's object store is intact: the run branch ref is
+    // still resolvable, and a fresh clone --shared can be made from it
+    // (would fail with a corrupt object store).
+    const refCheck = await runCommand("git", ["-C", workspace.path, "rev-parse", "--verify", "refs/heads/mohist/run-wr-land-3"], ".", signal)
+    expect(refCheck.exitCode).toBe(0)
+    expect(refCheck.stdout.trim()).toBe(runSha.stdout.trim())
+  })
+
+  it("EnsureWorkspace_PrunesStaleLandingDirsFromPriorCrashedRun", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    // First run materializes the workflow workspace.
+    await manager.ensure(work("wr-prune-1", "issue-p", repo), signal)
+    const firstLanding = await manager.createLandingWorkspace(work("wr-prune-1", "issue-p", repo), signal)
+    expect(exists(firstLanding.path)).toBe(true)
+
+    // Simulate a crashed run: the landing directory is left behind and
+    // NOT disposed. The next ensure() for the same runId must remove it.
+    const second = await manager.ensure(work("wr-prune-1", "issue-p", repo), signal)
+    expect(exists(firstLanding.path)).toBe(false)
+
+    // The workflow workspace is intact.
+    const head = await runCommand("git", ["-C", second.path, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
+    expect(head.exitCode).toBe(0)
+    expect(head.stdout.trim()).toBe("mohist/run-wr-prune-1")
+
+    // A subsequent create for the same run creates a fresh landing dir.
+    const newLanding = await manager.createLandingWorkspace(work("wr-prune-1", "issue-p", repo), signal)
+    expect(newLanding.path).not.toBe(firstLanding.path)
+    expect(exists(newLanding.path)).toBe(true)
+    await manager.disposeLandingWorkspace(newLanding, signal)
+  })
+
+  it("PruneLandingWorkspaces_RemovesOnlyMatchingRunIdDirectories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    // Two distinct runIds. Create landing dirs for each by directly
+    // placing directories at the expected path.
+    const itemA = work("wr-prune-A", "issue-A", repo)
+    const itemB = work("wr-prune-B", "issue-B", repo)
+    await manager.ensure(itemA, signal)
+    await manager.ensure(itemB, signal)
+
+    const landingRootA = join(runnerRoot, "mohist-local", "landing")
+    const staleA = join(landingRootA, "wr-prune-A-leftover")
+    const staleB = join(landingRootA, "wr-prune-B-leftover")
+    await runCommand("mkdir", ["-p", staleA], ".", signal)
+    await runCommand("mkdir", ["-p", staleB], ".", signal)
+    // write a marker file so deleteDirectory is meaningful
+    await writeFile(join(staleA, "leftover.txt"), "x")
+    await writeFile(join(staleB, "leftover.txt"), "x")
+
+    // Re-ensure run A — only A's leftover must be removed.
+    await manager.ensure(itemA, signal)
+    expect(exists(staleA)).toBe(false)
+    expect(exists(staleB)).toBe(true)
+
+    // Re-ensure run B — now B's leftover is removed.
+    await manager.ensure(itemB, signal)
+    expect(exists(staleB)).toBe(false)
+  })
+
+  it("CreateLandingWorkspace_RespectsSuppliedWorkspacePath", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const suppliedWorkspacePath = join(runnerRoot, "supplied", "workspaces", "issue-9")
+    const item = work("wr-supplied-landing", "issue-s", repo)
+    ;(item.variables as Record<string, unknown>).workspace = { path: suppliedWorkspacePath, branch: "mohist/run-wr-supplied-landing", changeDir: null }
+    const workspace = await manager.ensure(item, signal)
+    expect(workspace.path).toBe(suppliedWorkspacePath)
+
+    const landing = await manager.createLandingWorkspace(item, signal)
+    expect(landing.path).not.toBe(suppliedWorkspacePath)
+    expect(landing.path.startsWith(join(runnerRoot, "mohist-local", "landing", "wr-supplied-landing-"))).toBe(true)
+
+    // Origin reset still happens for the supplied-path scenario.
+    const remote = await runCommand("git", ["-C", landing.path, "remote", "get-url", "origin"], ".", signal)
+    expect(remote.exitCode).toBe(0)
+    expect(remote.stdout.trim()).toBe(repo)
+
+    await manager.disposeLandingWorkspace(landing, signal)
+  })
+
+  it("DisposeLandingWorkspace_OfMissingPathIsIdempotent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
+    const manager = new WorkspaceManager(join(root, "runner"))
+    const signal = new AbortController().signal
+    const missing = join(root, "runner", "mohist-local", "landing", "wr-missing-leftover")
+    const result = await manager.disposeLandingWorkspace(missing, signal)
+    expect(result.disposed).toBe(true)
+  })
+})
+
 async function createRepo(root: string, name: string) {
   const repo = join(root, name)
   await git(root, "init", repo)

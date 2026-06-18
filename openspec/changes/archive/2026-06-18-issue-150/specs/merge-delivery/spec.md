@@ -1,20 +1,4 @@
-# OpenSpec Capability: merge-delivery
-
-### Requirement: Integrate delivery is prepare then publish
-
-The Integrate delivery SHALL be executed as two ordered, independently visible tasks: `integrate:prepare` followed by `integrate:publish`. Each task SHALL be a genuine, independently tracked unit of work that appears in the task list with its own title, status, attempts, and result evidence. The delivery SHALL NOT be performed by a single opaque merge task, and conflict resolution SHALL NOT run hidden inside another task.
-
-#### Scenario: Delivery appears as two visible tasks
-
-- **WHEN** an issue reaches the delivery portion of Integrate
-- **THEN** the task list SHALL show `integrate:prepare` and `integrate:publish` as separate ordered tasks
-- **AND** each task SHALL carry its own title, status, attempts, and result evidence
-
-#### Scenario: Publish runs only after prepare succeeds
-
-- **WHEN** `integrate:prepare` has not reached a successful terminal state
-- **THEN** `integrate:publish` SHALL NOT execute
-- **AND** a failed prepare SHALL block publish through ordinary task-failure semantics
+## MODIFIED Requirements
 
 ### Requirement: Prepare reconciles the issue branch with the base branch
 

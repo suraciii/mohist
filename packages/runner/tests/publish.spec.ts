@@ -1,112 +1,122 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { publishAction, setDeliveryExistsCheckerForTest, setDeliveryGitRunnerForTest } from "../src/actions/registry.js"
-import type { ActionContext, JsonObject } from "../src/core/types.js"
+import {
+  publishAction,
+  setDeliveryExistsCheckerForTest,
+  setDeliveryGitRunnerForTest,
+  setDeliveryWorkspaceManagerForTest,
+} from "../src/actions/registry.js"
+import type { LandingWorkspaceInfo } from "../src/runtime/workspace.js"
+import type { DeliveryWorkspaceManager } from "../src/actions/registry.js"
+import type { ActionContext, JsonObject, WorkItem } from "../src/core/types.js"
 
 type GitResponse = { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }
+
+type WorkspaceCall = { workDir: string; args: string[] }
+
+const WORKSPACE_PATH = "/workspace"
+const LANDING_PATH = "/landing/wr-publish-1"
 
 afterEach(() => {
   setDeliveryGitRunnerForTest(null)
   setDeliveryExistsCheckerForTest(null)
+  setDeliveryWorkspaceManagerForTest(null)
 })
 
-function installGit(respond: (workDir: string, args: string[], calls: string[]) => GitResponse | Promise<GitResponse>) {
-  const calls: string[] = []
+function installGitAndLanding(respond: (calls: WorkspaceCall[]) => GitResponse | Promise<GitResponse>) {
+  const calls: WorkspaceCall[] = []
   const respondAndTrack = async (workDir: string, args: string[]) => {
-    calls.push(args.join(" "))
-    const result = await respond(workDir, args, calls)
-    if (!result.success && result.combinedOutput.startsWith("unexpected git call: ")) {
-      const fallback = defaultPublishGitResponse(args)
-      if (fallback) return fallback
-    }
-    return result
+    const record: WorkspaceCall = { workDir, args: [...args] }
+    calls.push(record)
+    return await respond(calls)
   }
   setDeliveryGitRunnerForTest(respondAndTrack)
-  return calls
+  const landing: LandingWorkspaceInfo = {
+    path: LANDING_PATH,
+    runId: "wr-publish-1",
+    runBranch: "mohist/run-wr-publish-1",
+    baseBranch: "master",
+    gitUrl: "https://example.com/repo.git",
+  }
+  const manager: DeliveryWorkspaceManager = {
+    createLandingWorkspace: async (_work, _signal) => landing,
+    disposeLandingWorkspace: async (target, _signal) => {
+      const path = typeof target === "string" ? target : target.path
+      return { path, disposed: true }
+    },
+  }
+  setDeliveryWorkspaceManagerForTest(manager)
+  return { calls, landing }
 }
 
-function defaultPublishGitResponse(args: string[]) {
-  const command = args.join(" ")
-  if (command === "fetch origin master" || command === "fetch origin main") return ok("")
-  if (command === "rev-parse origin/master" || command === "rev-parse origin/main") return ok("pre-publish-sha\n")
-  if (command === "merge --ff-only origin/master" || command === "merge --ff-only origin/main") return ok("Already up to date.")
-  if (command.startsWith("merge-base --is-ancestor origin/master ") || command.startsWith("merge-base --is-ancestor origin/main ")) return ok("")
-  return null
+function ok(stdout: string) {
+  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
 }
 
-describe("mohist/publish", () => {
-  it("PublishReady_OperatesInProjectPath_SquashLandsAndPushes", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
-          return ok("")
-        case "checkout master":
-          return ok("Switched to branch 'master'")
-        case "merge --squash mo/issue-82":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
-          return ok("[master abc123] SignalR realtime push (#82)")
-        case "rev-parse HEAD":
-          return ok("abc123\n")
-        case "push origin master":
-          return ok("To https://example.com/repo.git\n   pre-publish-sha..abc123  master -> master")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
+function fail(stderr: string) {
+  return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
+}
+
+function workspaceCalls(calls: WorkspaceCall[]) {
+  return calls.filter((c) => c.workDir === WORKSPACE_PATH).map((c) => c.args.join(" "))
+}
+
+function landingCalls(calls: WorkspaceCall[]) {
+  return calls.filter((c) => c.workDir === LANDING_PATH).map((c) => c.args.join(" "))
+}
+
+function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
+  return {
+    workflowRunId: "wr-publish-1",
+    workId: "integrate:publish.1",
+    workType: "task",
+    stage: "integrate",
+    title: "Publish changes",
+    uses: "mohist/publish",
+    with: withOverrides,
+    variables: {
+      project: { path: WORKSPACE_PATH },
+      issue: { title: "SignalR realtime push", number: 82 },
+      repository: {
+        gitUrl: "https://example.com/repo.git",
+        baseBranch: "master",
+        name: "master",
+      },
+      mohist: { runId: "wr-publish-1" },
+      ...variables,
+    },
+    workDir: WORKSPACE_PATH,
+    issueNumber: 82,
+    signal: new AbortController().signal,
+  }
+}
+
+describe("mohist/publish (branch-stable)", () => {
+  it("PublishReady_LandsInIsolatedLandingWorkspaceAndPushes", async () => {
+    const { calls } = installGitAndLanding(async () => {
+      return fail(`unexpected git call`)
     })
 
-    const result = await publishAction(context({
-      source: "mo/issue-82",
-      target: "master",
-      message: "Complete issue #82",
-    }))
-    const output = JSON.parse(result.output ?? "{}")
+    const workspaceSeen: string[] = []
+    const landingSeen: string[] = []
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      if (workDir === WORKSPACE_PATH) workspaceSeen.push(command)
+      else if (workDir === LANDING_PATH) landingSeen.push(command)
 
-    expect(result.status).toBe("success")
-    expect(calls).toEqual([
-      "rev-parse master",
-      "status --porcelain",
-      "fetch origin master",
-      "rev-parse origin/master",
-      "checkout master",
-      "merge --ff-only origin/master",
-      "merge-base --is-ancestor origin/master mo/issue-82",
-      "merge --squash mo/issue-82",
-      "commit -m SignalR realtime push (#82) -m mo/issue-82 into master",
-      "rev-parse HEAD",
-      "push origin master",
-    ])
-    expect(output).toMatchObject({
-      kind: "publish",
-      status: "completed",
-      source: "mo/issue-82",
-      target: "master",
-      workDir: "/repo",
-      landedCommit: "abc123",
-      pushed: true,
-      failureKind: null,
-    })
-    expect(output).not.toHaveProperty("resolveAttempts")
-  })
-
-  it("StaleLocalTarget_FastForwardsToRemoteBeforeSquashAndPush", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("stale-local-sha\n")
-        case "status --porcelain":
-          return ok("")
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
         case "fetch origin master":
-          return ok("From https://example.com/repo.git\n * branch            master     -> FETCH_HEAD")
+          return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
         case "merge --ff-only origin/master":
-          return ok("Updating stale-local-sha..remote-head-sha\nFast-forward")
+          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -118,7 +128,7 @@ describe("mohist/publish", () => {
         case "push origin master":
           return ok("To https://example.com/repo.git\n   remote-head-sha..abc123  master -> master")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -130,38 +140,123 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(calls.indexOf("merge --ff-only origin/master")).toBeLessThan(calls.indexOf("merge --squash mo/issue-82"))
+    // Workflow workspace only sees the read-only source-anchor check.
+    expect(workspaceSeen).toEqual(["rev-parse mo/issue-82"])
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    // No checkout/merge/commit/push against the workflow workspace.
+    expect(workspaceSeen.some((c) => c.startsWith("checkout "))).toBe(false)
+    expect(workspaceSeen.some((c) => c.startsWith("merge --squash "))).toBe(false)
+    expect(workspaceSeen.some((c) => c.startsWith("commit "))).toBe(false)
+    expect(workspaceSeen.some((c) => c.startsWith("push "))).toBe(false)
+    expect(workspaceSeen.some((c) => c === "checkout master")).toBe(false)
+
+    // Landing workspace has the full landing sequence.
+    expect(landingSeen).toEqual([
+      "fetch origin master",
+      "rev-parse origin/master",
+      "checkout master",
+      "status --porcelain",
+      "merge --ff-only origin/master",
+      "merge-base --is-ancestor origin/master mo/issue-82",
+      "merge --squash mo/issue-82",
+      "commit -m SignalR realtime push (#82) -m mo/issue-82 into master",
+      "rev-parse HEAD",
+      "push origin master",
+    ])
+    expect(landingCalls(calls)).toEqual(landingSeen)
+
     expect(output).toMatchObject({
       kind: "publish",
       status: "completed",
+      source: "mo/issue-82",
+      target: "master",
+      workDir: WORKSPACE_PATH,
+      landedCommit: "abc123",
+      pushed: true,
+      failureKind: null,
+    })
+    expect(output).not.toHaveProperty("resolveAttempts")
+  })
+
+  it("StaleLocalTarget_FastForwardsToRemoteBeforeSquashAndPush", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    const landingSeen: string[] = []
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      if (workDir === LANDING_PATH) landingSeen.push(command)
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
+          return ok("From https://example.com/repo.git\n * branch            master     -> FETCH_HEAD")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/master":
+          return ok("Updating local..remote\nFast-forward")
+        case "merge-base --is-ancestor origin/master mo/issue-82":
+          return ok("")
+        case "merge --squash mo/issue-82":
+          return ok("Squash commit -- not updating HEAD")
+        case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
+          return ok("[master abc123] SignalR realtime push (#82)")
+        case "rev-parse HEAD":
+          return ok("abc123\n")
+        case "push origin master":
+          return ok("To https://example.com/repo.git\n   remote-head-sha..abc123  master -> master")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await publishAction(context({
+      source: "mo/issue-82",
+      target: "master",
+      message: "Complete issue #82",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(landingSeen.indexOf("merge --ff-only origin/master")).toBeLessThan(landingSeen.indexOf("merge --squash mo/issue-82"))
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(output).toMatchObject({
+      kind: "publish",
       landedCommit: "abc123",
       pushed: true,
       failureKind: null,
     })
   })
 
-  it("SourceBehindRemoteTarget_StopsBeforeSquashAndReportsBaseMoved", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("stale-local-sha\n")
-        case "status --porcelain":
-          return ok("")
+  it("SourceBehindRemoteTarget_ReportsBaseMovedWithoutTouchingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
         case "fetch origin master":
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
         case "merge --ff-only origin/master":
-          return ok("Updating stale-local-sha..remote-head-sha\nFast-forward")
+          return ok("Updating local..remote\nFast-forward")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return fail("")
         case "reset --hard remote-head-sha":
           return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -173,9 +268,11 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("reset --hard remote-head-sha")
-    expect(calls).not.toContain("merge --squash mo/issue-82")
-    expect(calls).not.toContain("push origin master")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    // Rollback targets only the landing workspace.
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
+    expect(landingCalls(calls)).not.toContain("merge --squash mo/issue-82")
+    expect(landingCalls(calls)).not.toContain("push origin master")
     expect(output).toMatchObject({
       kind: "publish",
       status: "failed",
@@ -186,24 +283,35 @@ describe("mohist/publish", () => {
     expect(output.output).toContain("Re-run prepare")
   })
 
-  it("SquashConflicts_BaseMoved_ReportsBaseMovedFailureKindAndRestoresBase", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("SquashConflicts_BaseMoved_ReportsBaseMovedAndResetsLandingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/master":
+          return ok("Already up to date.")
+        case "merge-base --is-ancestor origin/master mo/issue-82":
+          return ok("")
         case "merge --squash mo/issue-82":
           return fail("CONFLICT (content): Merge conflict in specs/web-ui/spec.md")
         case "merge --abort":
           return ok("")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -215,32 +323,44 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("merge --abort")
-    expect(calls).toContain("reset --hard pre-publish-sha")
-    expect(calls).not.toContain("commit -m SignalR realtime push (#82) -m mo/issue-82 into master")
-    expect(calls).not.toContain("push origin master")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).toContain("merge --abort")
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
+    expect(landingCalls(calls)).not.toContain("commit -m SignalR realtime push (#82) -m mo/issue-82 into master")
+    expect(landingCalls(calls)).not.toContain("push origin master")
     expect(output).toMatchObject({
       kind: "publish",
       status: "failed",
       source: "mo/issue-82",
       target: "master",
-      workDir: "/repo",
+      workDir: WORKSPACE_PATH,
       landedCommit: null,
       pushed: false,
       failureKind: "base-moved",
     })
   })
 
-  it("PushRejectedNonFastForward_ReportsBaseMovedAndRestoresBase", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("PushRejectedNonFastForward_ReportsBaseMovedAndResetsLandingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/master":
+          return ok("Already up to date.")
+        case "merge-base --is-ancestor origin/master mo/issue-82":
+          return ok("")
         case "merge --squash mo/issue-82":
           return ok("Squash commit -- not updating HEAD")
         case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
@@ -249,10 +369,10 @@ describe("mohist/publish", () => {
           return ok("abc123\n")
         case "push origin master":
           return fail("To https://example.com/repo.git\n ! [rejected]        master -> master (non-fast-forward)\nerror: failed to push some refs")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -264,30 +384,44 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).not.toContain("merge --abort")
-    expect(calls).toContain("reset --hard pre-publish-sha")
-    expect(calls.indexOf("reset --hard pre-publish-sha")).toBeGreaterThan(calls.indexOf("push origin master"))
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).not.toContain("merge --abort")
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
+    expect(landingCalls(calls).indexOf("reset --hard remote-head-sha"))
+      .toBeGreaterThan(landingCalls(calls).indexOf("push origin master"))
     expect(output).toMatchObject({
       kind: "publish",
       status: "failed",
       source: "mo/issue-82",
       target: "master",
+      workDir: WORKSPACE_PATH,
       landedCommit: "abc123",
       pushed: false,
       failureKind: "base-moved",
     })
   })
 
-  it("PushFailsTransient_ReportsRetrySafeAndRestoresBase", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("PushFailsTransient_ReportsRetrySafeAndResetsLandingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/master":
+          return ok("Already up to date.")
+        case "merge-base --is-ancestor origin/master mo/issue-82":
+          return ok("")
         case "merge --squash mo/issue-82":
           return ok("Squash commit -- not updating HEAD")
         case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
@@ -296,10 +430,10 @@ describe("mohist/publish", () => {
           return ok("abc123\n")
         case "push origin master":
           return fail("fatal: unable to access: could not resolve host")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -311,7 +445,8 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("reset --hard pre-publish-sha")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
     expect(output).toMatchObject({
       kind: "publish",
       landedCommit: "abc123",
@@ -320,24 +455,35 @@ describe("mohist/publish", () => {
     })
   })
 
-  it("CommitFails_ReportsRetrySafeAndRestoresBase", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("CommitFails_ReportsRetrySafeAndResetsLandingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/master":
+          return ok("Already up to date.")
+        case "merge-base --is-ancestor origin/master mo/issue-82":
+          return ok("")
         case "merge --squash mo/issue-82":
           return ok("Squash commit -- not updating HEAD")
         case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
           return fail("error: unable to commit without author identity")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -349,7 +495,8 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("reset --hard pre-publish-sha")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
     expect(output).toMatchObject({
       kind: "publish",
       landedCommit: null,
@@ -358,18 +505,27 @@ describe("mohist/publish", () => {
     })
   })
 
-  it("DirtyWorkingTreeBeforePublish_ReportsRetrySafeWithoutAnyMergeOrPush", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
+  it("DirtyLandingWorkspace_ReportsRetrySafeWithoutSquashOrPush", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
+        case "checkout master":
+          return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok(" M packages/server/src/Server.cs\n")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
@@ -381,61 +537,31 @@ describe("mohist/publish", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).not.toContain("merge --squash mo/issue-82")
-    expect(calls).not.toContain("push origin master")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).not.toContain("merge --squash mo/issue-82")
+    expect(landingCalls(calls)).not.toContain("push origin master")
     expect(output).toMatchObject({
       kind: "publish",
       landedCommit: null,
       pushed: false,
       failureKind: "retry-safe",
     })
-    expect(output.output).toContain("dirty working tree")
+    expect(output.output).toContain("landing workspace")
   })
 
-  it("CheckoutFailsAfterDirtyTree_ReportsRetrySafeAndRestoresBase", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("CheckoutFails_AbortsRebaseOrMergeAndResetsLandingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
-        case "checkout master":
-          return fail("error: Your local changes to the following files would be overwritten by checkout:\n\tpackages/server/src/Server.cs\nPlease commit your changes or stash them before you switch branches.")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await publishAction(context({
-      source: "mo/issue-82",
-      target: "master",
-      message: "Complete issue #82",
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("reset --hard pre-publish-sha")
-    expect(calls).not.toContain("merge --squash mo/issue-82")
-    expect(calls).not.toContain("push origin master")
-    expect(output).toMatchObject({
-      kind: "publish",
-      landedCommit: null,
-      pushed: false,
-      failureKind: "retry-safe",
-    })
-  })
-
-  it("CheckoutFailsWithStaleRebaseMerge_AbortsRebaseNotMerge", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
-          return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return fail("error: pathspec 'master' did not match any file(s) known to git")
         case "rev-parse --git-path rebase-merge":
@@ -446,13 +572,13 @@ describe("mohist/publish", () => {
           return ok(".git/MERGE_HEAD\n")
         case "rebase --abort":
           return ok("")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
-    setDeliveryExistsCheckerForTest((path) => path === "/repo/.git/rebase-merge")
+    setDeliveryExistsCheckerForTest((path) => path === `${LANDING_PATH}/.git/rebase-merge`)
 
     const result = await publishAction(context({
       source: "mo/issue-82",
@@ -461,19 +587,25 @@ describe("mohist/publish", () => {
     }))
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("rebase --abort")
-    expect(calls).not.toContain("merge --abort")
-    expect(calls).toContain("reset --hard pre-publish-sha")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).toContain("rebase --abort")
+    expect(landingCalls(calls)).not.toContain("merge --abort")
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
   })
 
-  it("CheckoutFailsWithPendingMerge_AbortsMergeAndRestoresBase", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("CheckoutFailsWithPendingMerge_AbortsMergeAndResetsLandingWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return fail("error: Your local changes would be overwritten")
         case "rev-parse --git-path rebase-merge":
@@ -484,13 +616,13 @@ describe("mohist/publish", () => {
           return ok(".git/MERGE_HEAD\n")
         case "merge --abort":
           return ok("")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
+        case "reset --hard remote-head-sha":
+          return ok("HEAD is now at remote-head-sha")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
-    setDeliveryExistsCheckerForTest((path) => path === "/repo/.git/MERGE_HEAD")
+    setDeliveryExistsCheckerForTest((path) => path === `${LANDING_PATH}/.git/MERGE_HEAD`)
 
     const result = await publishAction(context({
       source: "mo/issue-82",
@@ -499,141 +631,35 @@ describe("mohist/publish", () => {
     }))
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("merge --abort")
-    expect(calls).not.toContain("rebase --abort")
-    expect(calls).toContain("reset --hard pre-publish-sha")
-  })
-
-  it("PushRejectedAsNonFastForward_StandardGitShape_ClassifiesAsBaseMoved", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
-          return ok("")
-        case "checkout master":
-          return ok("Switched to branch 'master'")
-        case "merge --squash mo/issue-82":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
-          return ok("[master abc123] SignalR realtime push (#82)")
-        case "rev-parse HEAD":
-          return ok("abc123\n")
-        case "push origin master":
-          return fail("To https://example.com/repo.git\n ! [rejected]        master -> master (non-fast-forward)\nerror: failed to push some refs")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await publishAction(context({
-      source: "mo/issue-82",
-      target: "master",
-      message: "Complete issue #82",
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("reset --hard pre-publish-sha")
-    expect(output).toMatchObject({
-      kind: "publish",
-      landedCommit: "abc123",
-      pushed: false,
-      failureKind: "base-moved",
-    })
-  })
-
-  it("PushRejectedTransientAuthError_DoesNotMisclassifyAsBaseMoved", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
-          return ok("")
-        case "checkout master":
-          return ok("Switched to branch 'master'")
-        case "merge --squash mo/issue-82":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
-          return ok("[master abc123] SignalR realtime push (#82)")
-        case "rev-parse HEAD":
-          return ok("abc123\n")
-        case "push origin master":
-          return fail("fatal: could not read Username for 'https://example.com': terminal prompts disabled\nfatal: Authentication failed for 'https://example.com/repo.git/'")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await publishAction(context({
-      source: "mo/issue-82",
-      target: "master",
-      message: "Complete issue #82",
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("reset --hard pre-publish-sha")
-    expect(output).toMatchObject({
-      kind: "publish",
-      landedCommit: "abc123",
-      pushed: false,
-      failureKind: "retry-safe",
-    })
-  })
-
-  it("DirtyWorkingTree_ReportsRetrySafeAndIncludesDiscardedFilesInOutput", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
-          return ok(" M packages/server/src/Server.cs\n?? notes.txt\n")
-        case "reset --hard pre-publish-sha":
-          return ok("HEAD is now at pre-publish-sha")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await publishAction(context({
-      source: "mo/issue-82",
-      target: "master",
-      message: "Complete issue #82",
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).not.toContain("merge --squash mo/issue-82")
-    expect(calls).not.toContain("push origin master")
-    expect(output).toMatchObject({
-      kind: "publish",
-      landedCommit: null,
-      pushed: false,
-      failureKind: "retry-safe",
-    })
-    expect(output.output).toContain("Destructive 'git reset --hard pre-publish-sha'")
-    expect(output.output).toContain("M packages/server/src/Server.cs")
-    expect(output.output).toContain("?? notes.txt")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingCalls(calls)).toContain("merge --abort")
+    expect(landingCalls(calls)).not.toContain("rebase --abort")
+    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
   })
 
   it("ReadsTargetBranchFromProjectVariables_WhenTargetUnset", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse main":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    const landingSeen: string[] = []
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      if (workDir === LANDING_PATH) landingSeen.push(command)
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin main":
           return ok("")
+        case "rev-parse origin/main":
+          return ok("remote-head-sha\n")
         case "checkout main":
           return ok("Switched to branch 'main'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/main":
+          return ok("Already up to date.")
+        case "merge-base --is-ancestor origin/main mo/issue-82":
+          return ok("")
         case "merge --squash mo/issue-82":
           return ok("Squash commit -- not updating HEAD")
         case "commit -m SignalR realtime push (#82) -m mo/issue-82 into main":
@@ -641,21 +667,22 @@ describe("mohist/publish", () => {
         case "rev-parse HEAD":
           return ok("def456\n")
         case "push origin main":
-          return ok("To https://example.com/repo.git\n   pre-publish-sha..def456  main -> main")
+          return ok("To https://example.com/repo.git\n   remote-head-sha..def456  main -> main")
         default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
+          return fail(`unexpected git call: ${command}`)
       }
     })
 
     const result = await publishAction(context(
       { source: "mo/issue-82", message: "Complete issue #82" },
-      { project: { path: "/repo", baseBranch: "main" } },
+      { project: { baseBranch: "main" }, repository: { gitUrl: "https://example.com/repo.git", baseBranch: "main", name: "master" } },
     ))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(calls).toContain("checkout main")
-    expect(calls).toContain("push origin main")
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(landingSeen).toContain("checkout main")
+    expect(landingSeen).toContain("push origin main")
     expect(output).toMatchObject({
       kind: "publish",
       target: "main",
@@ -664,16 +691,27 @@ describe("mohist/publish", () => {
     })
   })
 
-  it("Publish_SeesPreparedRefFromSharedWorktreeRefs", async () => {
-    const calls = installGit(async (workDir, args) => {
-      expect(workDir).toBe("/repo")
-      switch (args.join(" ")) {
-        case "rev-parse master":
-          return ok("pre-publish-sha\n")
-        case "status --porcelain":
+  it("WorkspaceBranchInvariant_NeverInvokesBaseBranchOpsInWorkflowWorkspace", async () => {
+    const { calls } = installGitAndLanding(async () => fail("unexpected"))
+
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      const command = args.join(" ")
+      calls.push({ workDir, args: [...args] })
+      switch (command) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
+        case "fetch origin master":
           return ok("")
+        case "rev-parse origin/master":
+          return ok("remote-head-sha\n")
         case "checkout master":
           return ok("Switched to branch 'master'")
+        case "status --porcelain":
+          return ok("")
+        case "merge --ff-only origin/master":
+          return ok("Already up to date.")
+        case "merge-base --is-ancestor origin/master mo/issue-82":
+          return ok("")
         case "merge --squash mo/issue-82":
           return ok("Squash commit -- not updating HEAD")
         case "commit -m SignalR realtime push (#82) -m mo/issue-82 into master":
@@ -681,10 +719,45 @@ describe("mohist/publish", () => {
         case "rev-parse HEAD":
           return ok("abc123\n")
         case "push origin master":
-          return ok("To https://example.com/repo.git\n   pre-publish-sha..abc123  master -> master")
+          return ok("To https://example.com/repo.git\n   remote-head-sha..abc123  master -> master")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await publishAction(context({
+      source: "mo/issue-82",
+      target: "master",
+      message: "Complete issue #82",
+    }))
+
+    const workspaceCmdSet = new Set(workspaceCalls(calls))
+    // The workflow workspace must NOT see any base-branch mutating
+    // operation. The only operation against the workflow workspace is
+    // the read-only source-anchor resolution; everything else lives in
+    // the landing workspace.
+    for (const forbidden of ["checkout master", "merge --squash mo/issue-82", "commit -m SignalR realtime push (#82) -m mo/issue-82 into master", "push origin master"]) {
+      expect(workspaceCmdSet.has(forbidden)).toBe(false)
+    }
+  })
+
+  it("LandingWorkspaceCreationFails_ReportsRetrySafeAndDoesNotMutateWorkspace", async () => {
+    const calls: WorkspaceCall[] = []
+    setDeliveryGitRunnerForTest(async (workDir, args) => {
+      calls.push({ workDir, args: [...args] })
+      switch (args.join(" ")) {
+        case "rev-parse mo/issue-82":
+          return ok("source-sha\n")
         default:
           return fail(`unexpected git call: ${args.join(" ")}`)
       }
+    })
+    setDeliveryWorkspaceManagerForTest({
+      createLandingWorkspace: async () => { throw new Error("boom: clone failed") },
+      disposeLandingWorkspace: async (target) => {
+        const path = typeof target === "string" ? target : target.path
+        return { path, disposed: true }
+      },
     })
 
     const result = await publishAction(context({
@@ -692,36 +765,17 @@ describe("mohist/publish", () => {
       target: "master",
       message: "Complete issue #82",
     }))
+    const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("success")
-    expect(calls).toContain("merge --squash mo/issue-82")
+    expect(result.status).toBe("failure")
+    // Only the read-only rev-parse should have hit the workflow workspace.
+    expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
+    expect(output).toMatchObject({
+      kind: "publish",
+      landedCommit: null,
+      pushed: false,
+      failureKind: "retry-safe",
+    })
+    expect(output.output).toContain("landing workspace")
   })
 })
-
-function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
-  return {
-    workflowRunId: "workflow-1",
-    workId: "integrate:publish.1",
-    workType: "task",
-    stage: "integrate",
-    title: "Publish changes",
-    uses: "mohist/publish",
-    with: withOverrides,
-    variables: {
-      project: { path: "/repo" },
-      issue: { title: "SignalR realtime push", number: 82 },
-      ...variables,
-    },
-    workDir: "/fake/worktree",
-    issueNumber: 82,
-    signal: new AbortController().signal,
-  }
-}
-
-function ok(stdout: string) {
-  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
-}
-
-function fail(stderr: string) {
-  return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
-}

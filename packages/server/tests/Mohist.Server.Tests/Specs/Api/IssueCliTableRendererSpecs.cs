@@ -345,6 +345,7 @@ public class IssueCliTableRendererSpecs
         new object[] { DeliveryFailureGuidance.Conflict, "Conflict needs attention", "Conflicts could not be resolved automatically." },
         new object[] { DeliveryFailureGuidance.BaseMoved, "Base branch moved", "Prepare the branch again, then publish." },
         new object[] { DeliveryFailureGuidance.RetrySafe, "Transient failure", "Retry the task" },
+        new object[] { DeliveryFailureGuidance.BranchInvariantViolation, "Runner / action branch-invariant violation", "runner or action bug" },
     };
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -367,6 +368,8 @@ public class IssueCliTableRendererSpecs
     [InlineData("Prepare failed (conflict): CONFLICT in foo.ts", DeliveryFailureGuidance.Conflict, "Conflict needs attention")]
     [InlineData("Publish failed (base-moved): non-fast-forward", DeliveryFailureGuidance.BaseMoved, "Base branch moved")]
     [InlineData("Prepare failed (retry-safe): network reset", DeliveryFailureGuidance.RetrySafe, "Transient failure")]
+    [InlineData("Prepare failed (branch-invariant-violation): wrong branch", DeliveryFailureGuidance.BranchInvariantViolation, "Runner / action branch-invariant violation")]
+    [InlineData("branch-invariant violation at start boundary for Prepare branch: expected branch 'mohist/run-wr-1', observed 'master'", DeliveryFailureGuidance.BranchInvariantViolation, "Runner / action branch-invariant violation")]
     public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_ExtractsKind(
         string message, string expectedKind, string expectedLabel)
     {
@@ -396,6 +399,131 @@ public class IssueCliTableRendererSpecs
         var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
 
         Assert.Equal(kind, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_ExtractsBranchInvariantViolationKind()
+    {
+        var output = JsonNode.Parse("""
+            {
+              "kind": "prepare",
+              "status": "failed",
+              "failureKind": "branch-invariant-violation",
+              "boundary": "start",
+              "expectedBranch": "mohist/run-wr-1",
+              "observedBranch": "master"
+            }
+            """);
+
+        var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
+
+        Assert.Equal(DeliveryFailureGuidance.BranchInvariantViolation, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_RecursesIntoBranchStabilityEvidence()
+    {
+        var output = JsonNode.Parse("""
+            {
+              "branchStability": [
+                { "kind": "branch-stability", "boundary": "start", "expectedBranch": "mohist/run-wr-1", "observedBranch": "mohist/run-wr-1" },
+                { "kind": "branch-invariant-violation", "boundary": "end", "expectedBranch": "mohist/run-wr-1", "observedBranch": "master" }
+              ]
+            }
+            """);
+
+        var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
+
+        Assert.Equal(DeliveryFailureGuidance.BranchInvariantViolation, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveBranchEvidence_FromRunnerOutput()
+    {
+        var output = JsonNode.Parse("""
+            {
+              "kind": "branch-invariant-violation",
+              "boundary": "start",
+              "expectedBranch": "mohist/run-wr-1",
+              "observedBranch": "master"
+            }
+            """);
+
+        var evidence = DeliveryFailureGuidance.ResolveBranchEvidence(message: null, output: output);
+
+        Assert.NotNull(evidence);
+        Assert.Equal("mohist/run-wr-1", evidence!.ExpectedBranch);
+        Assert.Equal("master", evidence.ObservedBranch);
+        Assert.Equal("start", evidence.Boundary);
+        Assert.Null(evidence.ObservedRef);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveBranchEvidence_FromRunnerMessage()
+    {
+        var message =
+            "branch-invariant violation at end boundary for Publish changes: expected branch 'mohist/run-wr-1', observed 'master'";
+
+        var evidence = DeliveryFailureGuidance.ResolveBranchEvidence(message, output: null);
+
+        Assert.NotNull(evidence);
+        Assert.Equal("mohist/run-wr-1", evidence!.ExpectedBranch);
+        Assert.Equal("master", evidence.ObservedBranch);
+        Assert.Equal("end", evidence.Boundary);
+        Assert.Null(evidence.ObservedRef);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveBranchEvidence_DetachedHeadFromMessage()
+    {
+        var message =
+            "branch-invariant violation at start boundary for Prepare branch: expected branch 'mohist/run-wr-1', observed detached at abc123";
+
+        var evidence = DeliveryFailureGuidance.ResolveBranchEvidence(message, output: null);
+
+        Assert.NotNull(evidence);
+        Assert.Equal("mohist/run-wr-1", evidence!.ExpectedBranch);
+        Assert.Equal(string.Empty, evidence.ObservedBranch);
+        Assert.Equal("start", evidence.Boundary);
+        Assert.Equal("abc123", evidence.ObservedRef);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveBranchEvidence_ReturnsNullForUnrelatedFailure()
+    {
+        var evidence = DeliveryFailureGuidance.ResolveBranchEvidence(
+            "Prepare failed (conflict): CONFLICT in foo.ts",
+            output: null);
+
+        Assert.Null(evidence);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_DoesNotMistakeOtherFailuresForBranchInvariantViolation()
+    {
+        var (kind, _) = DeliveryFailureGuidance.Resolve(
+            "Prepare failed (dirty-worktree): staged changes left behind",
+            output: null);
+        Assert.Null(kind);
+
+        var (conflict, _) = DeliveryFailureGuidance.Resolve(
+            "Prepare failed (provider-failure): network reset",
+            output: null);
+        Assert.Null(conflict);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -531,6 +659,119 @@ public class IssueCliTableRendererSpecs
 
         var text = output.ToString();
         Assert.DoesNotContain("delivery failure:", text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RenderTable_WorkflowStatus_SurfacesBranchInvariantViolationWithEvidenceFromMessage()
+    {
+        // The runner emits a plain-text message containing "branch-invariant violation"
+        // and the expected/observed branch names. The CLI must surface it as a runner/action
+        // bug with the evidence block and must NOT collapse it into a generic dirty-worktree,
+        // conflict, base-moved, retry-safe, or provider failure.
+        var failureMessage =
+            "branch-invariant violation at start boundary for Prepare branch: expected branch 'mohist/run-wr-1', observed 'master'";
+        var data = JsonNode.Parse($$"""
+            {
+              "issueId": "iss_150",
+              "issueNumber": 150,
+              "title": "Keep workflow execution on the run branch",
+              "stage": "integrate",
+              "runtimeStatus": "failed",
+              "workflowRunId": "wr_150",
+              "workflow": {
+                "workflowRunId": "wr_150",
+                "status": "failed",
+                "currentStage": "integrate",
+                "failure": {
+                  "reason": "TaskFailed",
+                  "stage": "integrate",
+                  "taskId": "integrate:prepare",
+                  "message": "{{failureMessage}}"
+                },
+                "stages": [
+                  { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
+                ]
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowStatus);
+
+        var text = output.ToString();
+        Assert.Contains("delivery failure:", text);
+        Assert.Contains(DeliveryFailureGuidance.BranchInvariantViolation, text);
+        Assert.Contains("next action:", text);
+        Assert.Contains("Runner / action branch-invariant violation", text);
+        Assert.Contains("attribution: runner/action (not issue work)", text);
+        Assert.Contains("boundary:   start", text);
+        Assert.Contains("expected:   mohist/run-wr-1", text);
+        Assert.Contains("observed:   master", text);
+        // The new kind must NOT be confused with other delivery failure kinds.
+        Assert.DoesNotContain("Conflict needs attention", text);
+        Assert.DoesNotContain("Base branch moved", text);
+        Assert.DoesNotContain("Transient failure", text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RenderTable_WorkflowStatus_SurfacesBranchInvariantViolationDetachedHead()
+    {
+        // A detached HEAD at a boundary is itself a branch-invariant violation.
+        // The renderer must surface it with the (detached at <ref>) shape instead
+        // of an observed branch name.
+        var failureMessage =
+            "branch-invariant violation at end boundary for Publish changes: expected branch 'mohist/run-wr-1', observed detached at abc123";
+        var data = JsonNode.Parse($$"""
+            {
+              "issueId": "iss_150",
+              "issueNumber": 150,
+              "title": "Keep workflow execution on the run branch",
+              "stage": "integrate",
+              "runtimeStatus": "failed",
+              "workflowRunId": "wr_150",
+              "workflow": {
+                "workflowRunId": "wr_150",
+                "status": "failed",
+                "currentStage": "integrate",
+                "failure": {
+                  "reason": "TaskFailed",
+                  "stage": "integrate",
+                  "taskId": "integrate:publish",
+                  "message": "{{failureMessage}}"
+                },
+                "stages": [
+                  { "stage": "integrate", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
+                ]
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowStatus);
+
+        var text = output.ToString();
+        Assert.Contains(DeliveryFailureGuidance.BranchInvariantViolation, text);
+        Assert.Contains("boundary:   end", text);
+        Assert.Contains("expected:   mohist/run-wr-1", text);
+        Assert.Contains("observed:   (detached at abc123)", text);
     }
 
     private static string InvokeTruncate(string value, int softCap)
