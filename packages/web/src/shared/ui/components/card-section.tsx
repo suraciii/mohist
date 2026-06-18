@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 import { cn } from '@/shared/lib/utils'
 
 export type CardSectionTone =
@@ -9,12 +9,11 @@ export type CardSectionTone =
   | 'blue'
   | 'green'
 
-interface CardSectionProps {
+interface CardSectionProps extends ComponentPropsWithoutRef<'section'> {
   title?: string
   icon?: ReactNode
   children: ReactNode
   tone?: CardSectionTone
-  className?: string
   /** Override default heading element (e.g. for sub-sections in System). */
   titleAs?: 'h2' | 'h3' | 'h4'
 }
@@ -44,9 +43,10 @@ export function CardSection({
   tone = 'default',
   className,
   titleAs: TitleAs = 'h2',
+  ...sectionProps
 }: CardSectionProps) {
   return (
-    <section className={cn('rounded-lg border p-4', toneWrapper[tone], className)}>
+    <section {...sectionProps} className={cn('rounded-lg border p-4', toneWrapper[tone], className)}>
       {title && (
         <TitleAs
           className={cn(

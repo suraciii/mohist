@@ -39,6 +39,7 @@ export interface ModelSelectProps {
   onClear?: () => void
   allowClear?: boolean
   size?: 'default' | 'compact'
+  'aria-labelledby'?: string
 }
 
 function normalizeModels(models: SelectableModel[] | string[]): SelectableModel[] {
@@ -57,7 +58,7 @@ function normalizeModels(models: SelectableModel[] | string[]): SelectableModel[
   return models as SelectableModel[]
 }
 
-export function ModelSelect({ value, placeholder, models, onChange, onClear, allowClear, size = 'default' }: ModelSelectProps) {
+export function ModelSelect({ value, placeholder, models, onChange, onClear, allowClear, size = 'default', 'aria-labelledby': ariaLabelledby }: ModelSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
@@ -167,6 +168,7 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
           render={
             <Button
               variant="outline"
+              aria-labelledby={ariaLabelledby}
               className={`flex-1 justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
                 open
                   ? 'border-blue-500 bg-blue-50 text-blue-700'

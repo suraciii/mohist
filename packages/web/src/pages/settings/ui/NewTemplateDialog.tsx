@@ -82,8 +82,9 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
         </DialogDescription>
         <div className="space-y-2">
           <div>
-            <label className="block text-xs font-medium text-muted-foreground">Key</label>
+            <label htmlFor="new-template-key" className="block text-xs font-medium text-muted-foreground">Key</label>
             <Input
+              id="new-template-key"
               value={key}
               onChange={(e) => {
                 setKey(e.target.value)
@@ -91,7 +92,7 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
               }}
               data-testid="new-template-key"
               placeholder="deploy-checklist"
-              className="h-8 text-sm font-mono"
+              className="min-h-[48px] text-sm font-mono"
             />
             {keyTouched && (
               <div
@@ -107,18 +108,20 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
             )}
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted-foreground">Display Name</label>
+            <label htmlFor="new-template-displayname" className="block text-xs font-medium text-muted-foreground">Display Name</label>
             <Input
+              id="new-template-displayname"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               data-testid="new-template-displayname"
               placeholder="Deploy Checklist"
-              className="h-8 text-sm"
+              className="min-h-[48px] text-sm"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted-foreground">Body</label>
+            <label htmlFor="new-template-body" className="block text-xs font-medium text-muted-foreground">Body</label>
             <textarea
+              id="new-template-body"
               value={body}
               onChange={(e) => setBody(e.target.value)}
               data-testid="new-template-body"
@@ -127,7 +130,7 @@ export function NewTemplateDialog({ open, projectId, onClose }: Props) {
             />
           </div>
           {error && (
-            <p data-testid="new-template-error" className="text-xs text-red-600">
+            <p data-testid="new-template-error" className="text-xs text-red-700">
               {error}
             </p>
           )}

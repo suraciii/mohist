@@ -87,7 +87,7 @@ export function RepositoriesSection({ projectId }: Props) {
                     )}
                   </div>
                   <div
-                    className="mt-0.5 text-xs text-muted-foreground truncate"
+                    className="mt-0.5 text-xs text-foreground/85 truncate"
                     data-testid={`repository-giturl-${repo.name}`}
                   >
                     {repo.gitUrl}
@@ -95,7 +95,7 @@ export function RepositoriesSection({ projectId }: Props) {
                   </div>
                   {repo.baseBranch !== 'main' && (
                     <div
-                      className="mt-0.5 text-xs text-muted-foreground"
+                      className="mt-0.5 text-xs text-foreground/85"
                       data-testid={`repository-basebranch-${repo.name}`}
                     >
                       base branch: {repo.baseBranch}
@@ -108,7 +108,7 @@ export function RepositoriesSection({ projectId }: Props) {
                       variant="ghost"
                       size="sm"
                       onClick={() => setDefault.mutate({ projectId, repoName: repo.name })}
-                      className="text-xs h-7"
+                      className="min-h-11 px-3 py-2 text-xs"
                       data-testid={`repository-set-default-${repo.name}`}
                     >
                       Set default
@@ -119,7 +119,7 @@ export function RepositoriesSection({ projectId }: Props) {
                       variant="ghost"
                       size="sm"
                       onClick={() => removeRepo.mutate({ projectId, repoName: repo.name })}
-                      className="text-xs h-7 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      className="min-h-11 px-3 py-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-50"
                       data-testid={`repository-remove-${repo.name}`}
                     >
                       Remove
@@ -133,13 +133,13 @@ export function RepositoriesSection({ projectId }: Props) {
         {(hasRepositories || showForm) && (
           <CardSection
             title="Add Repository"
-            titleAs="h4"
+            titleAs="h3"
             className="p-3"
             data-testid="repository-add-form"
           >
             <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="min-w-0">
                   <Label className="text-xs" htmlFor="repository-add-name">Name</Label>
                   <Input
                     ref={nameInputRef}
@@ -147,30 +147,30 @@ export function RepositoriesSection({ projectId }: Props) {
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder="e.g. frontend"
-                    className="h-8 text-sm"
+                    className="min-h-11 text-sm"
                     data-testid="repository-add-name"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <Label className="text-xs" htmlFor="repository-add-branch">Base Branch</Label>
                   <Input
                     id="repository-add-branch"
                     value={newBranch}
                     onChange={(e) => setNewBranch(e.target.value)}
                     placeholder="main"
-                    className="h-8 text-sm"
+                    className="min-h-11 text-sm"
                     data-testid="repository-add-branch"
                   />
                 </div>
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label className="text-xs" htmlFor="repository-add-giturl">Git URL</Label>
                 <Input
                   id="repository-add-giturl"
                   value={newGitUrl}
                   onChange={(e) => setNewGitUrl(e.target.value)}
                   placeholder="https://github.com/org/repo.git"
-                  className="h-8 text-sm"
+                  className="min-h-11 text-sm"
                   data-testid="repository-add-giturl"
                 />
               </div>

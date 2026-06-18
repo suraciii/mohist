@@ -19,7 +19,7 @@ const SOURCE_LABELS: Record<ProjectTemplate['source'], { label: string; tooltip:
   system: {
     label: 'system',
     tooltip: 'System template (read-only). Use Override to customize it for this project.',
-    classes: 'bg-muted text-muted-foreground border border-border',
+    classes: 'bg-muted text-foreground border border-border',
   },
   'project-override': {
     label: 'projectⓘ',
@@ -32,6 +32,8 @@ const SOURCE_LABELS: Record<ProjectTemplate['source'], { label: string; tooltip:
     classes: 'bg-sky-50 text-sky-800 border border-sky-200',
   },
 }
+
+const templateActionClassName = 'min-h-[44px] px-3 py-2 text-xs'
 
 function SourceLabel({ source }: { source: ProjectTemplate['source'] }) {
   const meta = SOURCE_LABELS[source]
@@ -147,7 +149,7 @@ function TemplateRow({
           </div>
           <div className="text-sm font-medium text-foreground">{template.displayName}</div>
           {template.description && (
-            <p className="text-xs text-muted-foreground line-clamp-2">{template.description}</p>
+            <p className="text-xs text-foreground/85 line-clamp-2">{template.description}</p>
           )}
           <TagChips tags={template.tags} />
         </div>
@@ -155,8 +157,9 @@ function TemplateRow({
           {isSystem && (
             <Button
               variant="outline"
-              size="xs"
+              size="sm"
               onClick={() => open('override')}
+              className={templateActionClassName}
               data-testid={`template-override-${template.key}`}
             >
               Override
@@ -165,8 +168,9 @@ function TemplateRow({
           {isProject && (
             <Button
               variant="outline"
-              size="xs"
+              size="sm"
               onClick={() => open('edit')}
+              className={templateActionClassName}
               data-testid={`template-edit-${template.key}`}
             >
               Edit
@@ -174,8 +178,9 @@ function TemplateRow({
           )}
           <Button
             variant="ghost"
-            size="xs"
+            size="sm"
             onClick={() => open('preview')}
+            className={templateActionClassName}
             data-testid={`template-preview-${template.key}`}
           >
             Preview
@@ -183,9 +188,10 @@ function TemplateRow({
           {isOverridden && (
             <Button
               variant="ghost"
-              size="xs"
+              size="sm"
               onClick={() => onReset(template.key)}
               disabled={isResetPending}
+              className={templateActionClassName}
               data-testid={`template-reset-${template.key}`}
             >
               Reset
@@ -194,11 +200,11 @@ function TemplateRow({
           {isProject && (
             <Button
               variant="ghost"
-              size="xs"
+              size="sm"
               onClick={() => onReset(template.key)}
               disabled={isResetPending}
               data-testid={`template-delete-${template.key}`}
-              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              className={`${templateActionClassName} text-red-700 hover:text-red-800 hover:bg-red-50`}
             >
               Delete
             </Button>
@@ -251,6 +257,7 @@ export function TemplatesSection() {
           size="sm"
           onClick={() => setNewDialogOpen(true)}
           data-testid="template-new-button"
+          className={templateActionClassName}
         >
           <PlusIcon />
           New Template
@@ -264,7 +271,7 @@ export function TemplatesSection() {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by key, name, tag, or description"
           data-testid="template-search"
-          className="h-8 pl-7 text-sm"
+          className="min-h-11 pl-7 text-sm"
         />
       </div>
 

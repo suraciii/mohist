@@ -86,6 +86,7 @@ export function SettingsPage() {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
+        <h1 className="sr-only">Settings</h1>
         <Tabs
           value={section}
           onValueChange={(value) => navigate(toProjectPath(`/settings/${value}`))}

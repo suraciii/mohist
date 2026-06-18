@@ -206,20 +206,20 @@ export function SystemSettingsSection() {
 
   return (
     <SettingsSection title="System">
-      <CardSection title="Logging">
+      <CardSection title="Logging" titleAs="h3">
         {logLevelError ? (
           <p className="text-xs text-muted-foreground">
             {logLevelErrorValue instanceof Error ? logLevelErrorValue.message : 'Log level unavailable'}
           </p>
         ) : (
           <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-muted-foreground">Log Level</label>
+            <label id="system-log-level-label" className="block text-xs font-medium text-muted-foreground">Log Level</label>
             <Select
               value={currentLevel ?? undefined}
               onValueChange={(value) => value && handleLogLevelChange(value)}
               disabled={saving || !currentLevel}
             >
-              <SelectTrigger className="w-full max-w-xs">
+              <SelectTrigger aria-labelledby="system-log-level-label" className="w-full max-w-xs">
                 <SelectValue placeholder="Select log level" />
               </SelectTrigger>
               <SelectContent>
@@ -235,7 +235,7 @@ export function SystemSettingsSection() {
         )}
 
         {logError && (
-          <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+          <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
             {logError}
           </div>
         )}
@@ -257,6 +257,7 @@ export function SystemSettingsSection() {
         <>
           <CardSection
             title="Identity"
+            titleAs="h3"
             tone={superseded ? 'blue' : 'default'}
           >
             <InfoRow label="Running version">{formatValue(systemInfo.running.version)}</InfoRow>
@@ -275,7 +276,7 @@ export function SystemSettingsSection() {
             )}
           </CardSection>
 
-          <CardSection title="Source" tone={systemInfo.source.dirty ? 'amber' : 'default'}>
+          <CardSection title="Source" titleAs="h3" tone={systemInfo.source.dirty ? 'amber' : 'default'}>
             <InfoRow label="Path">{formatValue(systemInfo.source.path)}</InfoRow>
             <InfoRow label="Branch">{formatValue(systemInfo.source.branch)}</InfoRow>
             <InfoRow label="HEAD">
@@ -286,7 +287,7 @@ export function SystemSettingsSection() {
             <InfoRow label="Tree state">{systemInfo.source.dirty ? 'dirty' : 'clean'}</InfoRow>
           </CardSection>
 
-          <CardSection title="Install">
+          <CardSection title="Install" titleAs="h3">
             <InfoRow label="Mode">{formatValue(systemInfo.install.mode)}</InfoRow>
             <InfoRow label="Detail">{formatValue(systemInfo.install.reason)}</InfoRow>
             <InfoRow label="Service manager">{formatValue(systemInfo.install.serviceManager)}</InfoRow>
@@ -297,6 +298,7 @@ export function SystemSettingsSection() {
           {systemInfo.install.mode === 'local-source' && (
             <CardSection
               title="Update"
+              titleAs="h3"
               tone={
                 superseded
                   ? 'blue'
@@ -375,12 +377,12 @@ export function SystemSettingsSection() {
           )}
 
           {systemInfo.install.mode !== 'local-source' && (
-            <CardSection title="Update">
+            <CardSection title="Update" titleAs="h3">
               <p className="text-xs text-muted-foreground">Web update is unsupported for this deployment.</p>
             </CardSection>
           )}
 
-          <CardSection title="Services">
+          <CardSection title="Services" titleAs="h3">
             <InfoRow label="Server">
               <span className="inline-flex items-center gap-2">
                 {formatValue(systemInfo.services.server)} <StatusBadge status={systemInfo.services.server} />
@@ -393,7 +395,7 @@ export function SystemSettingsSection() {
             </InfoRow>
           </CardSection>
 
-          <CardSection title="Paths">
+          <CardSection title="Paths" titleAs="h3">
             <InfoRow label="Database">{systemInfo.paths.db ?? '—'}</InfoRow>
             <InfoRow label="Config">{systemInfo.paths.config ?? '—'}</InfoRow>
             <InfoRow label="Opencode">{systemInfo.paths.opencode ?? '—'}</InfoRow>

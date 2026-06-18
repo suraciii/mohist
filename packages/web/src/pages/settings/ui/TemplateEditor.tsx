@@ -143,6 +143,8 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
   const upsert = useUpsertProjectTemplateOverride(projectId)
   const preview = usePreviewProjectTemplate(projectId, target.template.key)
   const extract = useExtractVariables()
+  const { mutate: previewTemplate } = preview
+  const { mutate: extractVariables, data: extractData } = extract
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -160,9 +162,9 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
     if (parsed.value === null) {
       return
     }
-    preview.mutate({ variables: parsed.value })
-    extract.mutate({ body: debouncedBody })
-  }, [debouncedBody, debouncedVariablesText, preview, extract])
+    previewTemplate({ variables: parsed.value })
+    extractVariables({ body: debouncedBody })
+  }, [debouncedBody, debouncedVariablesText, previewTemplate, extractVariables])
 
   function update<K extends keyof FormSnapshot>(key: K, value: FormSnapshot[K]) {
     setSnapshot((s) => ({ ...s, [key]: value }))
@@ -187,13 +189,13 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
   }
 
   const variables = useMemo<PreviewVariable[]>(() => {
-    const list = extract.data?.variables ?? []
+    const list = extractData?.variables ?? []
     const parsed = parseVariablesJson(previewVariablesText)
     if (parsed.value === null) {
       return list.map((name) => ({ name, available: false }))
     }
     return list.map((name) => ({ name, available: lookupPath(parsed.value, name) }))
-  }, [extract.data, previewVariablesText])
+  }, [extractData, previewVariablesText])
 
   const parsedVariables = parseVariablesJson(previewVariablesText)
   const variablesValid = parsedVariables.error === null
@@ -211,9 +213,10 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
         </h4>
         <Button
           variant="ghost"
-          size="icon-xs"
+          size="icon"
           onClick={onClose}
           aria-label="Close editor"
+          className="min-h-[48px] min-w-[48px]"
           data-testid="template-editor-close"
         >
           <XIcon />
@@ -235,7 +238,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
               readOnly
               disabled
               data-testid="template-editor-key"
-              className="h-8 text-sm font-mono"
+              className="min-h-[48px] text-sm font-mono"
             />
           </div>
           <div>
@@ -251,7 +254,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
               onChange={(e) => update('displayName', e.target.value)}
               disabled={isReadOnly}
               data-testid="template-editor-displayname"
-              className="h-8 text-sm"
+              className="min-h-[48px] text-sm"
             />
           </div>
           <div>
@@ -267,7 +270,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
               onChange={(e) => update('description', e.target.value)}
               disabled={isReadOnly}
               data-testid="template-editor-description"
-              className="h-8 text-sm"
+              className="min-h-[48px] text-sm"
             />
           </div>
           <div>
@@ -283,7 +286,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
               onChange={(e) => update('tagsText', e.target.value)}
               disabled={isReadOnly}
               data-testid="template-editor-tags"
-              className="h-8 text-sm"
+              className="min-h-[48px] text-sm"
             />
           </div>
           <div>
@@ -300,7 +303,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
               disabled={isReadOnly}
               data-testid="template-editor-stage"
               placeholder="plan, build, ..."
-              className="h-8 text-sm"
+              className="min-h-[48px] text-sm"
             />
           </div>
           <div>
@@ -340,7 +343,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
             {!variablesValid && parsedVariables.error && (
               <p
                 data-testid="template-editor-preview-vars-error"
-                className="mt-1 text-[11px] text-red-600"
+                className="mt-1 text-[11px] text-red-700"
               >
                 {parsedVariables.error}
               </p>
@@ -369,7 +372,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
               ) : preview.isError ? (
                 <span
                   data-testid="template-editor-preview-error"
-                  className="text-red-600"
+                  className="text-red-700"
                 >
                   Preview failed: {(preview.error as Error).message}
                 </span>
@@ -428,6 +431,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
           variant="ghost"
           size="sm"
           onClick={onClose}
+          className="min-h-[44px] px-3 py-2"
           data-testid="template-editor-cancel"
         >
           Cancel
@@ -437,6 +441,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
             variant="outline"
             size="sm"
             onClick={handleReset}
+            className="min-h-[44px] px-3 py-2"
             data-testid="template-editor-reset"
           >
             <RotateCcwIcon />
@@ -448,6 +453,7 @@ export function TemplateEditor({ projectId, target, onClose }: TemplateEditorPro
             size="sm"
             disabled={!canSave}
             onClick={handleSave}
+            className="min-h-[44px] px-3 py-2"
             data-testid="template-editor-save"
           >
             <SaveIcon />
