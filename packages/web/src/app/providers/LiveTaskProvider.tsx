@@ -9,7 +9,7 @@ import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useConnectionState, useEventsConnection } from '../../shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
-import { useRuntimeToast, RuntimeToastHost } from '../../shared/ui/toast'
+import { useRuntimeToast } from '../../shared/ui/toast'
 
 /**
  * Compile-time guard: every name the switch can route (i.e. every key of
@@ -653,10 +653,8 @@ export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
   const { projectId } = useProject()
   const state = useLiveEvents(projectId)
   return (
-    <RuntimeToastHost>
-      <LiveTaskContext.Provider value={state}>
-        {children}
-      </LiveTaskContext.Provider>
-    </RuntimeToastHost>
+    <LiveTaskContext.Provider value={state}>
+      {children}
+    </LiveTaskContext.Provider>
   )
 }

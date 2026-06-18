@@ -16,6 +16,7 @@ import { LogsPage } from '../pages/logs/ui/LogsPage'
 import { ArchivedPage } from '../pages/archived/ui/ArchivedPage'
 import { ProjectGuard, MobileBottomNav, FAB } from '../widgets/app-shell'
 import { Toaster } from 'sonner'
+import { RuntimeToastHost } from '../shared/ui/toast'
 import { HomePage } from '../pages/home/ui/HomePage'
 import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
@@ -114,11 +115,13 @@ function isProjectRoot(pathname: string) {
 export default function App() {
   return (
     <ProjectProvider>
-      <LiveTaskProvider>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </LiveTaskProvider>
+      <RuntimeToastHost>
+        <LiveTaskProvider>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </LiveTaskProvider>
+      </RuntimeToastHost>
     </ProjectProvider>
   )
 }
