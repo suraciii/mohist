@@ -80,19 +80,47 @@ public static class RunnerRoutes
                 work.Issue?.IssueId,
                 work.Issue?.IssueNumber,
                 work.Artifacts,
-                work.Outputs));
+                work.Outputs,
+                work.OwnerKind,
+                work.AgentJobId));
         });
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
         {
-            if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
-                return ApiResults.BadRequest("workflowRunId is required");
+            var ownerKind = string.IsNullOrWhiteSpace(req.OwnerKind)
+                ? WorkDispatchOwnerKinds.Workflow
+                : req.OwnerKind.Trim().ToLowerInvariant();
+            if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(req.AgentJobId))
+                    return ApiResults.BadRequest("agentJobId is required when ownerKind is 'agent-job'");
+            }
+            else if (string.Equals(ownerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
+                    return ApiResults.BadRequest("workflowRunId is required when ownerKind is 'workflow'");
+            }
+            else
+            {
+                return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
+            }
 
             var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.CapturedOutputs);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var report = await runner.ReportResultAsync(req.WorkflowRunId, req.WorkId, result);
+            var dispatch = new WorkDispatch(
+                WorkflowRunId: req.WorkflowRunId ?? string.Empty,
+                WorkId: req.WorkId,
+                OwnerKind: ownerKind,
+                AgentJobId: req.AgentJobId);
+            var report = await runner.ReportResultAsync(dispatch, req.WorkId, result);
 
-            return Results.Ok(new RunnerReportResponse(report.WorkflowRunId, report.WorkflowStatus, report.Tracked, report.Reason));
+            return Results.Ok(new RunnerReportResponse(
+                report.WorkflowRunId,
+                report.WorkflowStatus,
+                report.Tracked,
+                report.Reason,
+                report.OwnerKind,
+                report.OwnerId));
         });
 
         group.MapGet("/sessions/{projectId}/{workflowRunId}/{sessionName}", async (
@@ -195,8 +223,25 @@ public static class RunnerRoutes
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null, string? BuildGitHash = null);
 public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null, string? BuildGitHash = null);
-public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null, string[]? ArtifactUploadIds = null, Dictionary<string, JsonElement>? CapturedOutputs = null);
-public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus, bool Tracked, string? Reason = null);
+public record RunnerReportRequest(
+    string WorkId,
+    string Status,
+    string? WorkflowRunId = null,
+    string? ProjectId = null,
+    string? Message = null,
+    string? Output = null,
+    int? ExitCode = null,
+    string[]? ArtifactUploadIds = null,
+    Dictionary<string, JsonElement>? CapturedOutputs = null,
+    string? OwnerKind = null,
+    string? AgentJobId = null);
+public record RunnerReportResponse(
+    string WorkflowRunId,
+    string? WorkflowStatus,
+    bool Tracked,
+    string? Reason = null,
+    string? OwnerKind = null,
+    string? OwnerId = null);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
 public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null);
 public record AgentSessionOpenRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
@@ -216,4 +261,6 @@ public record WorkDispatchResponse(
     string? IssueId = null,
     int? IssueNumber = null,
     string? Artifacts = null,
-    string? Outputs = null);
+    string? Outputs = null,
+    string? OwnerKind = null,
+    string? AgentJobId = null);

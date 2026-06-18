@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
@@ -215,6 +216,43 @@ public class WorkflowArtifactUploadRouteSpecs
             $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
             form);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task AgentJobUploadEndpoint_AcceptsMultipartForRunningJob()
+    {
+        var jobId = $"agent-job-upload-{Guid.NewGuid():N}";
+        var workId = $"agent-work-{Guid.NewGuid():N}";
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.AssignRunnerAsync("runner-agent-upload", workId);
+
+        var path = "review.md";
+        var payload = Encoding.UTF8.GetBytes("agent artifact content");
+        using var form = BuildMultipart(path, payload, "text/markdown", "sha256:agent", payload.LongLength);
+
+        using var response = await _fixture.Client.PostAsync(
+            $"/api/agent-jobs/{jobId}/work/{workId}/artifact-uploads",
+            form);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = json.GetProperty("data");
+        var uploadId = data.GetProperty("uploadId").GetString()!;
+        Assert.StartsWith("artup_", uploadId);
+        Assert.Equal(jobId, data.GetProperty("workflowRunId").GetString());
+        Assert.Equal(workId, data.GetProperty("workId").GetString());
+        Assert.Equal(workId, data.GetProperty("taskRunId").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var pending = await db.WorkflowArtifactPendingUploads
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UploadId == uploadId);
+        Assert.NotNull(pending);
+        Assert.Equal(jobId, pending!.WorkflowRunId);
+        Assert.Equal(workId, pending.WorkId);
     }
 
     /// <summary>

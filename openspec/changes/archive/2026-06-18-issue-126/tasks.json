@@ -1,0 +1,86 @@
+{
+  "project": "issue-126 Standalone Agent Jobs: first-class agent execution independent of workflow",
+  "description": "Open the Runner coordination layer with an additive WorkDispatch owner-kind dimension (workflow | agent-job) so that a standalone AgentJobGrain can own its lifecycle (pending → running → completed/failed), dispatch directly via RunnerRegistry (bypassing WorkflowBacklogGrain), receive ReportResult, and be exercised end-to-end through a minimal validation HTTP API. The workflow coordination path must remain byte-equivalent for owner-kind = workflow.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Open Runner coordination layer for WorkDispatch owner-kind (workflow arm unchanged)",
+      "spec": "specs/agent-job/spec.md#Requirement: WorkDispatch carries owner-kind dimension; specs/agent-job/spec.md#Requirement: Runner accepts work from either owner identity; specs/agent-job/spec.md#Requirement: IsWorkRunnableAsync routes by owner-kind; specs/agent-job/spec.md#Requirement: ReportResultAsync routes by owner-kind; specs/agent-job/spec.md#Requirement: Workflow coordination path behavior is preserved",
+      "description": "Extend the C# WorkDispatch record with an OwnerKind field (\"workflow\" | \"agent-job\", default \"workflow\") and an optional AgentJobId field using new [Id(n)] serializer slots so the existing workflow wire format remains decodable. Introduce the IAgentJobGrain interface as the routing contract (GetIsWorkRunnableAsync / ReportResultAsync / GetCurrentWorkIdAsync-equivalent surface) — interface only, no implementation in this task. In RunnerGrain, extract the existing workflow body of AssignWorkAsync validation, IsWorkRunnableAsync, and ReportResultAsync verbatim into private helpers and add a switch on work.OwnerKind at each of the three weld points; the workflow arm calls the verbatim helper, the agent-job arm calls IAgentJobGrain. The agent-job arm shares the existing _works map and ActiveWorkflowCount slot accounting. Workflow behavior must stay byte-identical.",
+      "acceptanceCriteria": [
+        "IRunnerGrain.cs WorkDispatch record has OwnerKind (default \"workflow\") and AgentJobId (default null) fields with fresh [Id(n)] slots; existing field ids and order are unchanged",
+        "IAgentJobGrain.cs is added under packages/server/src/Mohist.Server/Agent/Jobs/ declaring the routing-surface methods that RunnerGrain's agent-job arm calls (at minimum: a runnable/cancellation check, ReportResultAsync(runnerId, workId, result), and a current-work query if needed)",
+        "RunnerGrain.AssignWorkAsync accepts a dispatch with owner-kind=agent-job and a non-empty AgentJobId (no WorkflowRunId) and returns Assigned; rejects when the owner identity for the declared kind or WorkId is missing (invalid-work)",
+        "RunnerGrain.IsWorkRunnableAsync branches by OwnerKind: workflow arm calls IWorkflowGrain (GetClaimedRunnerIdAsync + GetRunStatusAsync + GetCurrentWorkIdAsync) with the exact pre-change rule; agent-job arm calls IAgentJobGrain",
+        "RunnerGrain.ReportResultAsync branches by OwnerKind: workflow arm calls IWorkflowGrain.ReportResultAsync + GetRunStatusAsync and returns a byte-equivalent RunnerWorkReportResult; agent-job arm calls IAgentJobGrain.ReportResultAsync and never touches IWorkflowGrain",
+        "Agent-job work shares the existing _works map and MaxWorkflowSlots / ActiveWorkflowCount slot accounting",
+        "Unit tests cover the agent-job arm of all three weld points using a fake IAgentJobGrain (accepted dispatch without WorkflowRunId, runnable routes to the job grain, result routes to the job grain, missing-owner rejected)",
+        "Unit tests assert the workflow arm is unchanged for the same inputs (claim check, status check, current-work-id check; report result + run status readback)",
+        "Workflow regression suite (workflow-run, workflow-engine, ralph-task-execution specs) passes without modification",
+        "A serialization round-trip test decodes a pre-change WorkDispatch payload (no OwnerKind/AgentJobId fields) into the new record and verifies OwnerKind defaults to \"workflow\" and AgentJobId to null"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Runner/Grains/IRunnerGrain.cs (extended WorkDispatch), packages/server/src/Mohist.Server/Agent/Jobs/IAgentJobGrain.cs (new interface), packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs (owner-kind branching at the three weld points); new owner-kind routing + serialization tests under packages/server/tests/Mohist.Server.Tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design Decisions 1, 2, 4, 7. The workflow arm must be extracted verbatim into private helpers (IsWorkRunnableForWorkflowAsync / ReportResultForWorkflowAsync / AssignWorkValidationForWorkflowAsync) so the agent-job arm is the only new code path and regression risk is bounded. IAgentJobGrain is introduced here only as the routing contract; its implementation is T-002. Runner TS types are intentionally NOT changed (Decision 7): the server is the only owner-aware boundary."
+    },
+    {
+      "id": "T-002",
+      "title": "Implement AgentJobGrain lifecycle, result ownership, direct RunnerRegistry dispatch, and silo wiring",
+      "spec": "specs/agent-job/spec.md#Requirement: AgentJobGrain owns lifecycle and result; specs/agent-job/spec.md#Requirement: Agent jobs dispatch directly via RunnerRegistry",
+      "description": "Implement AgentJobGrain satisfying the IAgentJobGrain interface from T-001 and wire it into the Orleans silo as part of the same deliverable slice. The grain owns an in-memory pending → running → completed/failed lifecycle (no [PersistentState], not [Reentrant]). On activation/submit it queries IRunnerRegistryGrain.ListEligibleRunnersAsync(projectId), selects an online runner with a free slot (via IRunnerGrain.GetRuntimeStateAsync), and calls runner.AssignWorkAsync with a WorkDispatch whose OwnerKind=agent-job and AgentJobId is set, transitioning the job pending → running on acceptance. When no slot is available it retries on an exponential backoff (1s → 60s cap) up to a total bound (default 10 min), then fails with runner-unavailable. It accepts the runner's ReportResultAsync as the authoritative terminal result, rejects reports against terminal jobs, and applies a grain-level job timeout (default 10 min) that fails the job if no report arrives. WorkflowBacklogGrain is never called. The grain must be registered in the Orleans silo so GrainFactory.GetGrain<IAgentJobGrain>(key) resolves an active activation, its constructor dependencies resolve from DI, and backoff/timeout defaults come from a single configuration knob.",
+      "acceptanceCriteria": [
+        "packages/server/src/Mohist.Server/Agent/Jobs/AgentJobGrain.cs implements IAgentJobGrain with in-memory state and is neither [Reentrant] nor [PersistentState]",
+        "Submitting/activating a job transitions it pending → running when a runner accepts AssignWorkAsync, recording the runner id",
+        "A successful WorkResult via ReportResultAsync transitions the job to completed and stores status, message, output, and artifacts as the owned terminal result",
+        "A failed WorkResult transitions the job to failed and stores the failure evidence as the owned terminal result",
+        "ReportResultAsync against an already completed/failed job is rejected and the prior terminal result is preserved",
+        "Dispatch queries IRunnerRegistryGrain.ListEligibleRunnersAsync and calls IRunnerGrain.AssignWorkAsync directly with OwnerKind=agent-job and AgentJobId set; the dispatch WorkDispatch carries prompt/model/workspace via uses/with/variables as the generic execution layer expects",
+        "When zero runners have a free slot, the job stays pending and retries on an exponential backoff (1s → 60s cap) until a configured total bound; reaching the bound transitions the job to failed with a runner-unavailable reason",
+        "AgentJobGrain never calls any IWorkflowBacklogGrain method (asserted in tests)",
+        "A grain-level job timeout (default 10 min, configurable) transitions a running job to failed with a report-timeout reason if no result arrives",
+        "AgentJobGrain is registered in the Orleans silo configuration so GrainFactory.GetGrain<IAgentJobGrain>(key) resolves an active activation, and its constructor dependencies (IRunnerRegistryGrain via GrainFactory, ILogger<AgentJobGrain>, config for backoff/timeout bounds) resolve from the silo DI container",
+        "Backoff and job-timeout defaults are sourced from a single configuration knob (documented defaults: backoff 1s→60s cap, total bound 10 min, job timeout 10 min) so they can be tuned without code change",
+        "Existing silo startup and workflow grain registrations are unchanged (no workflow regression)",
+        "Unit tests cover: pending→running on dispatch, running→completed on success, running→failed on failure, terminal rejection of further reports, backoff retry when no slot is available, bound-exceeded failure, backlog bypass, job-timeout failure, and grain resolution from the silo"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Agent/Jobs/AgentJobGrain.cs (new), Orleans silo + DI registration for AgentJobGrain, configuration knob for backoff/timeout bounds; AgentJobGrain lifecycle + dispatch + timeout + wiring tests under packages/server/tests/Mohist.Server.Tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Design Decisions 3, 4, 5 plus the backoff/timeout mitigations from the Risks section. Silo wiring + DI registration + the config knob are included here (not split out) because a grain implementation is not a deliverable functional slice until it is reachable from the silo and its operational bounds are configurable. Slot accounting is shared with workflow runs via MaxWorkflowSlots (Decision 4) — no separate budget. State is in-memory only; loss on silo restart is an accepted v1 trade-off (Decision 5). Keep the grain non-reentrant so the backoff timer and ReportResult cannot race on the lifecycle fields."
+    },
+    {
+      "id": "T-003",
+      "title": "Add minimal end-to-end validation HTTP API for agent jobs",
+      "spec": "specs/agent-job/spec.md#Requirement: Minimal end-to-end validation API; specs/agent-job/spec.md#Requirement: WorkspaceManager accepts standalone agent-job work",
+      "description": "Add packages/server/src/Mohist.Server/Agent/Jobs/AgentJobController.cs exposing a single POST endpoint that accepts { prompt, model, workspace }, creates an AgentJobGrain with a generated key, populates the dispatch variables with workspace.path (so WorkspaceManager.ensure takes its existing short-circuit branch) and the prompt/model, awaits the job's terminal result, and returns { status, message, output, artifacts }. The request is bounded by a timeout that produces a structured failed result rather than an opaque 500. Missing required fields are rejected before job creation. The endpoint is validation-only: no auth, no polling, no read-model.",
+      "acceptanceCriteria": [
+        "POST to the new endpoint with { prompt, model, workspace } creates an AgentJobGrain, dispatches it through the engine, awaits terminal state, and returns the job's status/message/output/artifacts",
+        "The dispatch variables carry workspace.path so the runner's WorkspaceManager.ensure uses the existing early-return branch (workspace.ts:32-36) — no workspace.ts code change is required (Design Decision 8)",
+        "A job that reaches failed returns a structured failure response (status, message, reason) distinguishing job failure from request-handling error",
+        "A request missing the prompt field is rejected with a clear validation error and no AgentJobGrain is created",
+        "A request that exceeds the await timeout returns a structured timeout result instead of an opaque 500",
+        "No changes to packages/runner/src/runtime/workspace.ts are required for the agent-job path (verified by an end-to-end test that supplies only workspace.path)",
+        "End-to-end test exercises the full path: HTTP POST → AgentJobGrain → RunnerRegistry dispatch → runner AssignWorkAsync (owner-kind=agent-job) → generic execution layer → ReportResultAsync → IAgentJobGrain → HTTP response",
+        "Existing HTTP API surface (http-api spec) is unchanged"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Agent/Jobs/AgentJobController.cs (new endpoint) and route registration; end-to-end validation API tests under packages/server/tests/Mohist.Server.Tests",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Design Decision 6 (blocking validation API). Decision 8 means workspace.ts intentionally stays unchanged — the endpoint must always populate variables.workspace.path so the existing short-circuit branch is taken. Authority/auth is an explicit non-goal; add a code comment noting the endpoint is validation-only and must not be exposed on a production edge as-is."
+    }
+  ]
+}

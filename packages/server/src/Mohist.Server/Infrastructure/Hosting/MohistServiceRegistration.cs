@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Project.Services;
@@ -110,8 +111,10 @@ public static class MohistServiceRegistration
         services.AddSingleton<IWorkflowArtifactStorage, FileSystemWorkflowArtifactStorage>();
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
         services.AddScoped<WorkflowArtifactUploadService>();
+        services.AddScoped<AgentJobArtifactUploadService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
+        services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<RunnerConnectionTracker>();

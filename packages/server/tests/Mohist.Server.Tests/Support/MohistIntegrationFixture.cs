@@ -2,11 +2,14 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services.SignalR;
@@ -100,6 +103,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:RunnerRoot"] = _runnerRoot,
                 ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
                 ["Mohist:ArtifactStorage:Root"] = _artifactStorageRoot,
+                ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
+                ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
+                ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
+                ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
             });
         });
 
@@ -124,6 +131,12 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 provider.GetRequiredService<IEnvironmentVariableProvider>(),
                 provider.GetRequiredService<ILogger<ConfigService>>(),
                 _configPath));
+
+            services.RemoveAll<IDbContextFactory<MohistDbContext>>();
+            services.AddDbContextFactory<MohistDbContext>(options =>
+                options
+                    .UseSqlite(_connectionString)
+                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
         });
     }
 

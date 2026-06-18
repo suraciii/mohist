@@ -33,23 +33,28 @@ export class ServerConnection {
   }
 
   async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
-    const response = await fetch(this.url("report"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workflowRunId: work.workflowRunId,
-        workId: work.workId,
-        projectId: work.projectId,
-        status: result.status,
-        message: result.message,
-        output: result.output,
-        exitCode: result.exitCode,
-        artifactUploadIds: result.artifactUploadIds ?? null,
-        capturedOutputs: result.capturedOutputs ?? null,
-        cleanupAttempts: result.cleanupAttempts ?? null,
-      }),
-      signal,
-    })
+    const ownerKind = work.ownerKind?.trim().toLowerCase()
+    const body: Record<string, unknown> = {
+      workId: work.workId,
+      projectId: work.projectId,
+      status: result.status,
+      message: result.message,
+      output: result.output,
+      exitCode: result.exitCode,
+      artifactUploadIds: result.artifactUploadIds ?? null,
+      capturedOutputs: result.capturedOutputs ?? null,
+      cleanupAttempts: result.cleanupAttempts ?? null,
+    }
+    if (ownerKind) {
+      body.ownerKind = ownerKind
+    }
+    if (work.agentJobId) {
+      body.agentJobId = work.agentJobId
+    }
+    if (ownerKind !== "agent-job") {
+      body.workflowRunId = work.workflowRunId
+    }
+    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
     try {
       return await response.json() as Record<string, unknown>
@@ -70,10 +75,11 @@ export class ServerConnection {
    * part.
    */
   async uploadArtifact(
-    workflowRunId: string,
+    ownerId: string,
     workId: string,
     upload: ArtifactUploadRequest,
     signal: AbortSignal,
+    ownerKind = "workflow",
   ): Promise<ArtifactUploadResponse> {
     const form = new FormData()
     form.set("path", upload.path)
@@ -84,7 +90,7 @@ export class ServerConnection {
     view.set(upload.content)
     const blob = new Blob([view], { type: upload.contentType ?? "application/octet-stream" })
     form.set("content", blob, upload.filename ?? "artifact")
-    const response = await fetch(this.artifactUrl(workflowRunId, workId), {
+    const response = await fetch(this.artifactUrl(ownerId, workId, ownerKind), {
       method: "POST",
       body: form,
       signal,
@@ -113,7 +119,7 @@ export class ServerConnection {
     const data = readObject(payload, ["data"]) ?? payload ?? {}
     return {
       uploadId: readString(data, ["uploadId"]) ?? "",
-      workflowRunId: readString(data, ["workflowRunId"]) ?? workflowRunId,
+      workflowRunId: readString(data, ["workflowRunId"]) ?? ownerId,
       workId: readString(data, ["workId"]) ?? workId,
       taskRunId: readString(data, ["taskRunId"]) ?? null,
       path: readString(data, ["path"]) ?? upload.path,
@@ -126,8 +132,12 @@ export class ServerConnection {
     }
   }
 
-  private artifactUrl(workflowRunId: string, workId: string) {
-    return `${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
+  private artifactUrl(ownerId: string, workId: string, ownerKind: string) {
+    if (ownerKind === "agent-job") {
+      return `${this.options.serverUrl.replace(/\/$/, "")}/api/agent-jobs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
+    }
+
+    return `${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
   }
 
   async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<WorkflowAgentSession | null> {
@@ -191,6 +201,8 @@ function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
     issueNumber: dispatch.issueNumber ?? undefined,
     artifacts: parseObject(dispatch.artifacts),
     outputs: parseTaskOutputs(dispatch.outputs),
+    ownerKind: dispatch.ownerKind ?? undefined,
+    agentJobId: dispatch.agentJobId ?? undefined,
   }
 }
 

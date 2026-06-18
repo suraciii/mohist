@@ -20,6 +20,8 @@ export interface WorkDispatchResponse {
   issueNumber?: number | null
   artifacts?: string | null
   outputs?: string | null
+  ownerKind?: string | null
+  agentJobId?: string | null
 }
 
 export interface WorkItem {
@@ -35,6 +37,8 @@ export interface WorkItem {
   issueNumber?: number | null
   artifacts?: JsonObject | null
   outputs?: TaskOutputDefinition[] | null
+  ownerKind?: string | null
+  agentJobId?: string | null
 }
 
 export interface WorkItemResult {

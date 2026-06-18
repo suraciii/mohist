@@ -43,55 +43,82 @@ public static class WorkflowArtifactUploadRoutes
                 WorkflowArtifactUploadService uploadService,
                 CancellationToken cancellationToken) =>
             {
-                if (!request.HasFormContentType)
-                    return ApiResults.BadRequest("multipart/form-data is required");
+                var parsed = await ParseUploadRequestAsync(request, workflowRunId, workId, cancellationToken);
+                if (parsed.Result is not null)
+                    return parsed.Result;
 
-                IFormCollection form;
-                try
-                {
-                    form = await request.ReadFormAsync(cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    return ApiResults.BadRequest($"Invalid multipart body: {ex.Message}");
-                }
+                var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
+                return ToApiResult(result);
+            });
 
-                var path = form[MultipartFieldPath].ToString();
-                if (string.IsNullOrWhiteSpace(path))
-                    return ApiResults.BadRequest($"'{MultipartFieldPath}' field is required");
+        app.MapPost(
+            "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-uploads",
+            async (
+                HttpRequest request,
+                string agentJobId,
+                string workId,
+                AgentJobArtifactUploadService uploadService,
+                CancellationToken cancellationToken) =>
+            {
+                var parsed = await ParseUploadRequestAsync(request, agentJobId, workId, cancellationToken);
+                if (parsed.Result is not null)
+                    return parsed.Result;
 
-                var contentType = form[MultipartFieldContentType].ToString();
-                if (string.IsNullOrWhiteSpace(contentType)) contentType = null;
-
-                var contentHash = form[MultipartFieldContentHash].ToString();
-                if (string.IsNullOrWhiteSpace(contentHash)) contentHash = null;
-
-                var sizeRaw = form[MultipartFieldSize].ToString();
-                if (!TryParseSize(sizeRaw, out var size))
-                    return ApiResults.BadRequest(
-                        $"'{MultipartFieldSize}' must be a non-negative integer (got '{sizeRaw}')");
-
-                var file = form.Files.GetFile(MultipartFieldContent);
-                if (file is null)
-                    return ApiResults.BadRequest($"'{MultipartFieldContent}' file part is required");
-
-                await using var content = file.OpenReadStream();
-                var uploadRequest = new WorkflowArtifactUploadRequest
-                {
-                    WorkflowRunId = workflowRunId,
-                    WorkId = workId,
-                    Path = path,
-                    ContentType = contentType ?? file.ContentType,
-                    ContentHash = contentHash,
-                    Size = size,
-                    OpenContent = () => file.OpenReadStream(),
-                };
-
-                var result = await uploadService.UploadAsync(uploadRequest, cancellationToken);
+                var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
                 return ToApiResult(result);
             });
 
         return app;
+    }
+
+    private static async Task<ParsedUploadRequest> ParseUploadRequestAsync(
+        HttpRequest request,
+        string ownerId,
+        string workId,
+        CancellationToken cancellationToken)
+    {
+        if (!request.HasFormContentType)
+            return new ParsedUploadRequest(null, ApiResults.BadRequest("multipart/form-data is required"));
+
+        IFormCollection form;
+        try
+        {
+            form = await request.ReadFormAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new ParsedUploadRequest(null, ApiResults.BadRequest($"Invalid multipart body: {ex.Message}"));
+        }
+
+        var path = form[MultipartFieldPath].ToString();
+        if (string.IsNullOrWhiteSpace(path))
+            return new ParsedUploadRequest(null, ApiResults.BadRequest($"'{MultipartFieldPath}' field is required"));
+
+        var contentType = form[MultipartFieldContentType].ToString();
+        if (string.IsNullOrWhiteSpace(contentType)) contentType = null;
+
+        var contentHash = form[MultipartFieldContentHash].ToString();
+        if (string.IsNullOrWhiteSpace(contentHash)) contentHash = null;
+
+        var sizeRaw = form[MultipartFieldSize].ToString();
+        if (!TryParseSize(sizeRaw, out var size))
+            return new ParsedUploadRequest(null, ApiResults.BadRequest(
+                $"'{MultipartFieldSize}' must be a non-negative integer (got '{sizeRaw}')"));
+
+        var file = form.Files.GetFile(MultipartFieldContent);
+        if (file is null)
+            return new ParsedUploadRequest(null, ApiResults.BadRequest($"'{MultipartFieldContent}' file part is required"));
+
+        return new ParsedUploadRequest(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = ownerId,
+            WorkId = workId,
+            Path = path,
+            ContentType = contentType ?? file.ContentType,
+            ContentHash = contentHash,
+            Size = size,
+            OpenContent = () => file.OpenReadStream(),
+        }, null);
     }
 
     private static IResult ToApiResult(WorkflowArtifactUploadResult result) => result.Kind switch
@@ -137,4 +164,6 @@ public static class WorkflowArtifactUploadRoutes
         if (string.IsNullOrWhiteSpace(raw)) return false;
         return long.TryParse(raw, out size) && size >= 0;
     }
+
+    private sealed record ParsedUploadRequest(WorkflowArtifactUploadRequest? Request, IResult? Result);
 }

@@ -12,7 +12,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     [AlwaysInterleave]
     Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work);
     Task<WorkDispatch?> PollAsync();
-    Task<RunnerWorkReportResult> ReportResultAsync(string workflowRunId, string workId, WorkResult result);
+    Task<RunnerWorkReportResult> ReportResultAsync(WorkDispatch work, string workId, WorkResult result);
     Task<bool> IsAvailableAsync();
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
@@ -41,17 +41,28 @@ public record RunnerInfo(
 
 [GenerateSerializer]
 public record WorkDispatch(
-    string WorkflowRunId,
-    string WorkId,
-    string? Uses = null,
-    string? With = null,
-    string? Variables = null,
-    string WorkType = "task",
-    string? Stage = null,
-    string? Title = null,
-    WorkIssueRef? Issue = null,
-    string? Artifacts = null,
-    string? Outputs = null);
+    [property: Id(0)] string WorkflowRunId,
+    [property: Id(1)] string WorkId,
+    [property: Id(2)] string? Uses = null,
+    [property: Id(3)] string? With = null,
+    [property: Id(4)] string? Variables = null,
+    [property: Id(5)] string WorkType = "task",
+    [property: Id(6)] string? Stage = null,
+    [property: Id(7)] string? Title = null,
+    [property: Id(8)] WorkIssueRef? Issue = null,
+    [property: Id(9)] string? Artifacts = null,
+    [property: Id(10)] string? Outputs = null,
+    [property: Id(11)] string OwnerKind = WorkDispatchOwnerKinds.Workflow,
+    [property: Id(12)] string? AgentJobId = null)
+{
+    public WorkDispatch() : this(string.Empty, string.Empty) { }
+}
+
+public static class WorkDispatchOwnerKinds
+{
+    public const string Workflow = "workflow";
+    public const string AgentJob = "agent-job";
+}
 
 [GenerateSerializer]
 public record WorkIssueRef(
@@ -84,7 +95,9 @@ public sealed record RunnerWorkReportResult(
     [property: Id(0)] string WorkflowRunId,
     [property: Id(1)] string? WorkflowStatus,
     [property: Id(2)] bool Tracked,
-    [property: Id(3)] string? Reason = null);
+    [property: Id(3)] string? Reason = null,
+    [property: Id(4)] string? OwnerKind = null,
+    [property: Id(5)] string? OwnerId = null);
 
 public enum RunnerStatus { Online, Offline }
 

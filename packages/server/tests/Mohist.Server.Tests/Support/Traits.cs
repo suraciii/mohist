@@ -45,6 +45,7 @@ public static class Traits
         public const string Project = "Project";
         public const string Epic = "Epic";
         public const string Runner = "Runner";
+        public const string Agent = "Agent";
         public const string AgentSession = "AgentSession";
         public const string Skills = "Skills";
         public const string System = "System";

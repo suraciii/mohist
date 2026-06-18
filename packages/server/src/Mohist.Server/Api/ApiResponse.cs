@@ -15,5 +15,5 @@ public static class ApiResults
 
     public static IResult Conflict(string error, string? code = null, object? details = null) => Fail(error, 409, code ?? "conflict", details);
 
-    public static IResult BadRequest(string error, string? code = null) => Fail(error, 400, code ?? "bad_request");
+    public static IResult BadRequest(string error, string? code = null, object? details = null) => Fail(error, 400, code ?? "bad_request", details);
 }
