@@ -185,6 +185,9 @@ public static partial class WorkflowRunExtensions
             foreach (var stageCheck in stage.Checks)
             {
                 stageCheck.Status = StageCheckStatus.Pending;
+                stageCheck.DispatchWorkId = null;
+                stageCheck.DispatchRunnerId = null;
+                stageCheck.DispatchedAt = null;
                 stageCheck.Message = null;
                 stageCheck.Output = null;
             }

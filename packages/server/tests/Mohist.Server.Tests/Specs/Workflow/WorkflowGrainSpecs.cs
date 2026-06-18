@@ -279,6 +279,13 @@ public abstract class WorkflowGrainSpecs
         await ReportChecksAsync(runnerId, checksWork, results.ToArray());
     }
 
+    protected async Task<WorkflowRun> LoadRunAsync(string workflowId)
+    {
+        var store = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IWorkflowRunStore>();
+        return await store.LoadAsync(workflowId) ?? throw new InvalidOperationException($"Workflow run '{workflowId}' was not found");
+    }
+
     protected static WorkflowDefinition SingleStage(
         List<TaskDefinition>? tasks = null,
         List<CheckDefinition>? checks = null,

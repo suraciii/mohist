@@ -156,7 +156,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task ActiveLease_PreservesOwnership_BlocksDuplicateDispatch()
+    public async Task ActiveTask_PreservesOwnership_BlocksDuplicateDispatch()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -174,7 +174,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task ActiveLease_DifferentRunnerPoll_DoesNotOverwriteExistingLease()
+    public async Task ActiveTask_DifferentRunnerPoll_DoesNotOverwriteExistingWork()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
 
@@ -195,7 +195,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task ActiveLease_SameOwnerPoll_DoesNotCreateDuplicateAssignment()
+    public async Task ActiveTask_SameOwnerPoll_DoesNotCreateDuplicateAssignment()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
 
@@ -216,7 +216,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowTaskStarted_IsRecordedAfterMatchingLeaseIsPersisted()
+    public async Task WorkflowTaskStarted_IsRecordedAfterRunningTaskIsPersisted()
     {
         await StartWorkflowAsync(SingleStage(checks: []));
 

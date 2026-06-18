@@ -29,6 +29,9 @@ public sealed class StageCheck
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
     public StageCheckStatus Status { get; set; }
+    public string? DispatchWorkId { get; set; }
+    public string? DispatchRunnerId { get; set; }
+    public DateTimeOffset? DispatchedAt { get; set; }
     public int RepairCount { get; set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }

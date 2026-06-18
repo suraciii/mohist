@@ -15,6 +15,7 @@ public union WorkflowEvent(
     StageApprovalRequested,
     StageApprovalResolved,
     FeedbackRequested,
+    TaskStarted,
     TaskCompleted,
     TaskFailed,
     CheckPassed,
@@ -41,6 +42,7 @@ public sealed record StageApprovalResolved(string Stage, ApprovalResult Result, 
 
 public sealed record FeedbackRequested(string Stage, string FeedbackId, string? Reason = null);
 
+public sealed record TaskStarted(string Stage, string TaskId, string RunnerId);
 public sealed record TaskCompleted(string Stage, string TaskId);
 public sealed record TaskFailed(string Stage, string TaskId, string? Message);
 
