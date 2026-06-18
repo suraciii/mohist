@@ -1,0 +1,217 @@
+using Mohist.Server.Tests.Support;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs.Agent.Api;
+
+[Collection("MohistIntegration")]
+public class AgentDefinitionApiSpecs
+{
+    private readonly HttpClient _client;
+
+    public AgentDefinitionApiSpecs(MohistIntegrationFixture fixture)
+    {
+        _client = fixture.Client;
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Create_ReturnsCreatedActiveAgent()
+    {
+        var project = await CreateProjectAsync("agent-create");
+
+        using var response = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", NewAgent("reviewer"));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.ReadDataAsync<AgentDto>();
+        Assert.StartsWith("agent_", created.Id);
+        Assert.Equal(project.Id, created.ProjectId);
+        Assert.Equal("reviewer", created.Name);
+        Assert.Equal("active", created.Status);
+        Assert.NotEqual(default, DateTimeOffset.Parse(created.CreatedAt));
+        Assert.NotEqual(default, DateTimeOffset.Parse(created.UpdatedAt));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Create_RequiresResolvedProjectAndRejectsDuplicateName()
+    {
+        var project = await CreateProjectAsync("agent-create-conflict");
+        await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("same"));
+
+        using var missingProject = await _client.PostAsJsonAsync($"/api/projects/{Guid.NewGuid():N}/agents", NewAgent("orphan"));
+        using var duplicate = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", NewAgent("same"));
+        var list = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{project.Id}/agents?all=true");
+
+        Assert.Equal(HttpStatusCode.NotFound, missingProject.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Single(list);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task List_FiltersByStatusAndProject()
+    {
+        var firstProject = await CreateProjectAsync("agent-list-a");
+        var secondProject = await CreateProjectAsync("agent-list-b");
+        var active = await _client.PostDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents", NewAgent("active-agent"));
+        var archived = await _client.PostDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents", NewAgent("archived-agent"));
+        await _client.PostDataAsync<AgentDto>($"/api/projects/{secondProject.Id}/agents", NewAgent("other-project"));
+        await _client.DeleteAsync($"/api/projects/{firstProject.Id}/agents/{archived.Id}");
+
+        var defaultList = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{firstProject.Id}/agents");
+        var allList = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{firstProject.Id}/agents?all=true");
+        var archivedList = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{firstProject.Id}/agents?status=archived");
+
+        Assert.Equal([active.Id], defaultList.Select(agent => agent.Id).ToArray());
+        Assert.Contains(allList, agent => agent.Id == active.Id);
+        Assert.Contains(allList, agent => agent.Id == archived.Id);
+        Assert.DoesNotContain(allList, agent => agent.Name == "other-project");
+        var onlyArchived = Assert.Single(archivedList);
+        Assert.Equal(archived.Id, onlyArchived.Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Show_ReturnsArchivedByIdAndRejectsUnknownOrCrossProject()
+    {
+        var firstProject = await CreateProjectAsync("agent-show-a");
+        var secondProject = await CreateProjectAsync("agent-show-b");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents", NewAgent("show-me"));
+        await _client.DeleteAsync($"/api/projects/{firstProject.Id}/agents/{created.Id}");
+
+        var shown = await _client.GetDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents/{created.Id}");
+        using var unknown = await _client.GetAsync($"/api/projects/{firstProject.Id}/agents/agent_{Guid.NewGuid():N}");
+        using var crossProject = await _client.GetAsync($"/api/projects/{secondProject.Id}/agents/{created.Id}");
+
+        Assert.Equal("archived", shown.Status);
+        Assert.Equal(created.Id, shown.Id);
+        Assert.False(string.IsNullOrWhiteSpace(shown.CreatedAt));
+        Assert.False(string.IsNullOrWhiteSpace(shown.UpdatedAt));
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Patch_UpdatesMutableFieldsAndRejectsImmutableUnknownAndRenameConflict()
+    {
+        var project = await CreateProjectAsync("agent-patch");
+        var first = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("first"));
+        var second = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("second"));
+        var before = DateTimeOffset.Parse(first.UpdatedAt);
+        await Task.Delay(15);
+
+        var patched = await _client.PatchDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{first.Id}", new
+        {
+            name = "first-renamed",
+            description = "after",
+            instructions = "new instructions",
+            agentConfig = new { type = "opencode", model = "openai/gpt-5.5" },
+            skills = new[] { "review", "debug" },
+            maxConcurrentRuns = 3
+        });
+        using var immutable = await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/agents/{first.Id}", new { id = "agent_nope" });
+        using var conflict = await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/agents/{first.Id}", new { name = second.Name });
+        using var unknown = await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/agents/agent_{Guid.NewGuid():N}", new { name = "missing" });
+        var afterConflict = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{first.Id}");
+
+        Assert.Equal("first-renamed", patched.Name);
+        Assert.Equal("after", patched.Description);
+        Assert.Equal("new instructions", patched.Instructions);
+        Assert.Equal(["review", "debug"], patched.Skills);
+        Assert.Equal(3, patched.MaxConcurrentRuns);
+        Assert.Equal("opencode", patched.AgentConfig!.Value.GetProperty("type").GetString());
+        Assert.True(DateTimeOffset.Parse(patched.UpdatedAt) > before);
+        Assert.Equal(HttpStatusCode.BadRequest, immutable.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal("first-renamed", afterConflict.Name);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Patch_ClearsExplicitNullOptionalFields()
+    {
+        var project = await CreateProjectAsync("agent-patch-clear");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("clear-me"));
+
+        var patched = await _client.PatchDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}", new
+        {
+            description = (string?)null,
+            agentConfig = (object?)null,
+            skills = (string[]?)null,
+            maxConcurrentRuns = (int?)null
+        });
+
+        Assert.Equal(string.Empty, patched.Description);
+        Assert.Null(patched.AgentConfig);
+        Assert.Empty(patched.Skills);
+        Assert.Null(patched.MaxConcurrentRuns);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task Delete_ArchivesAndKeepsNameOccupiedWithProjectIsolation()
+    {
+        var firstProject = await CreateProjectAsync("agent-delete-a");
+        var secondProject = await CreateProjectAsync("agent-delete-b");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents", NewAgent("delete-me"));
+        var before = DateTimeOffset.Parse(created.UpdatedAt);
+        await Task.Delay(15);
+
+        using var crossProject = await _client.DeleteAsync($"/api/projects/{secondProject.Id}/agents/{created.Id}");
+        var archived = await DeleteDataAsync<AgentDto>($"/api/projects/{firstProject.Id}/agents/{created.Id}");
+        using var recreate = await _client.PostAsJsonAsync($"/api/projects/{firstProject.Id}/agents", NewAgent("delete-me"));
+        using var unknown = await _client.DeleteAsync($"/api/projects/{firstProject.Id}/agents/agent_{Guid.NewGuid():N}");
+
+        Assert.Equal(HttpStatusCode.NotFound, crossProject.StatusCode);
+        Assert.Equal("archived", archived.Status);
+        Assert.True(DateTimeOffset.Parse(archived.UpdatedAt) > before);
+        Assert.Equal(HttpStatusCode.Conflict, recreate.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
+        await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"{prefix}-{Guid.NewGuid():N}" });
+
+    private static object NewAgent(string name) => new
+    {
+        name,
+        description = "agent description",
+        instructions = $"instructions for {name}",
+        agentConfig = new { type = "opencode" },
+        skills = new[] { "coding" },
+        maxConcurrentRuns = 1
+    };
+
+    private async Task<T> DeleteDataAsync<T>(string path)
+    {
+        using var response = await _client.DeleteAsync(path);
+        response.EnsureSuccessStatusCode();
+        return await response.ReadDataAsync<T>();
+    }
+
+    private sealed record ProjectDto(string Id);
+    private sealed record AgentDto(
+        string Id,
+        string ProjectId,
+        string Name,
+        string Description,
+        string Instructions,
+        JsonElement? AgentConfig,
+        string[] Skills,
+        int? MaxConcurrentRuns,
+        string Status,
+        string CreatedAt,
+        string UpdatedAt);
+}

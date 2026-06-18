@@ -7,6 +7,8 @@ using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -59,6 +61,7 @@ public static class MohistServiceRegistration
             options.UseSqlite(connectionString));
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
+        services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
@@ -68,6 +71,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IssueRepositoryResolver>();
         services.AddScoped<IssueIdentityResolver>();
         services.AddScoped<IssueQuerier>();
+        services.AddScoped<AgentQuerier>();
         services.AddScoped<EpicQuerier>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<PromptTemplateEngine>();
