@@ -9,6 +9,8 @@ import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
+const STAGE_OVERRIDES_ID = 'settings-stage-model-overrides'
+const DEFAULT_MODEL_LABEL_ID = 'settings-default-model-label'
 
 export function AiSettingsSection() {
   const { isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
@@ -68,7 +70,7 @@ export function AiSettingsSection() {
         <CardSection>
           <div className="space-y-1.5">
             <div className="flex items-baseline justify-between gap-2">
-              <label className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
+              <label id={DEFAULT_MODEL_LABEL_ID} className="block text-xs font-medium text-muted-foreground">Default Coder Agent Model</label>
               <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
             </div>
             <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
@@ -77,6 +79,7 @@ export function AiSettingsSection() {
               placeholder="Opencode default"
               models={coderModels}
               onChange={handleSetOpencodeModel}
+              aria-labelledby={DEFAULT_MODEL_LABEL_ID}
             />
           </div>
         </CardSection>
@@ -88,20 +91,22 @@ export function AiSettingsSection() {
         <Button
           variant="ghost"
           onClick={() => setStageOverridesOpen(!stageOverridesOpen)}
+          aria-expanded={stageOverridesOpen}
+          aria-controls={STAGE_OVERRIDES_ID}
           className="flex items-center gap-2 w-full text-left justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
         >
           <ChevronRightIcon
-            className={`h-4 w-4 text-muted-foreground/70 transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`}
+            className={`h-4 w-4 text-muted-foreground transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`}
           />
           <span className="text-sm font-medium text-foreground">Stage Model Overrides</span>
-          <span className="text-xs text-muted-foreground/70 ml-1">Advanced</span>
+          <span className="text-xs text-muted-foreground ml-1">Advanced</span>
         </Button>
 
         {stageOverridesOpen && (
-          <div className="mt-4 space-y-3 pl-6">
+          <div id={STAGE_OVERRIDES_ID} className="mt-4 space-y-3 pl-6">
             {STAGES.map((stage) => (
               <div key={stage} className="space-y-1">
-                <label className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
+                <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
                 <ModelSelect
                   value={localStageModels[stage] ?? null}
                   placeholder="Default"
@@ -109,6 +114,7 @@ export function AiSettingsSection() {
                   onChange={(modelId) => handleSetStageModel(stage, modelId)}
                   onClear={() => handleClearStageModel(stage)}
                   allowClear={!!localStageModels[stage]}
+                  aria-labelledby={`settings-stage-model-${stage}-label`}
                 />
               </div>
             ))}

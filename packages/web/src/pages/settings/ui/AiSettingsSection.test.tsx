@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const useOpencodeRuntimeMock = vi.fn()
@@ -80,5 +81,47 @@ describe('AiSettingsSection', () => {
     renderSection()
 
     expect(screen.getByRole('button', { name: /Stage Model Overrides/i })).toBeInTheDocument()
+  })
+
+  it('exposes and updates the Stage Model Overrides disclosure state', async () => {
+    arrangeLoaded()
+    const user = userEvent.setup()
+    renderSection()
+
+    const button = screen.getByRole('button', { name: /Stage Model Overrides/i })
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(button).toHaveAttribute('aria-controls', 'settings-stage-model-overrides')
+    expect(document.getElementById('settings-stage-model-overrides')).not.toBeInTheDocument()
+
+    await user.keyboard('[Tab]')
+    await user.keyboard('[Tab]')
+    expect(button).toHaveFocus()
+    await user.keyboard('[Enter]')
+
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(document.getElementById('settings-stage-model-overrides')).toBeInTheDocument()
+
+    await user.keyboard(' ')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(document.getElementById('settings-stage-model-overrides')).not.toBeInTheDocument()
+  })
+
+  it('moves focus into ModelSelect search and supports Escape and arrow keys', async () => {
+    arrangeLoaded()
+    const user = userEvent.setup()
+    renderSection()
+
+    const defaultModelButton = screen.getByRole('button', { name: /Default Coder Agent Model/i })
+    await user.click(defaultModelButton)
+
+    const searchInput = await screen.findByPlaceholderText('Search models...')
+    expect(searchInput).toHaveFocus()
+
+    await user.keyboard('[ArrowDown]')
+    expect(screen.getByRole('button', { name: /gemini-2/i })).toHaveClass('bg-blue-50')
+
+    await user.keyboard('[Escape]')
+    expect(screen.queryByPlaceholderText('Search models...')).not.toBeInTheDocument()
+    expect(defaultModelButton).toHaveFocus()
   })
 })

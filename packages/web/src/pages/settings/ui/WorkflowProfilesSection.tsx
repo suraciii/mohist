@@ -60,7 +60,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
 
   if (isError || !profile) {
     return (
-      <div className="text-sm text-red-600">Failed to load profile.</div>
+      <div className="text-sm text-red-700">Failed to load profile.</div>
     )
   }
 
@@ -70,20 +70,20 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
         <button
           onClick={onBack}
           data-testid="workflow-profile-back"
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors mb-2 inline-flex items-center gap-1"
+          className="mb-2 inline-flex min-h-11 items-center gap-1 px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeftIcon className="w-3 h-3" />
           All profiles
         </button>
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-medium text-foreground">{profile.displayName}</h4>
+          <h3 className="text-sm font-medium text-foreground">{profile.displayName}</h3>
           {profile.isDefault && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
               Default
             </span>
           )}
         </div>
-        <p className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{profile.id}</p>
+        <p className="text-[10px] text-muted-foreground mt-1 font-mono">{profile.id}</p>
         <p
           data-testid="workflow-profile-description"
           className="text-sm text-foreground mt-3 leading-relaxed whitespace-pre-line"
@@ -92,7 +92,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
         </p>
       </div>
 
-      <CardSection title="Stages" titleAs="h4" className="py-1">
+      <CardSection title="Stages" titleAs="h3" className="py-1">
         <div>
           {profile.stages.map((s) => (
             <StageSummary key={s.stage} stage={s} />
@@ -100,7 +100,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
         </div>
       </CardSection>
 
-      <CardSection title="Shared Stage Definition (YAML)" titleAs="h4">
+      <CardSection title="Shared Stage Definition (YAML)" titleAs="h3">
         <p className="text-[11px] text-muted-foreground mb-3">
           quick-fix and experiment reuse these stages from mohist/default; only the metadata above differs.
         </p>

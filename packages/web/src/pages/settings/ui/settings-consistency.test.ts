@@ -40,7 +40,7 @@ describe('settings visual consistency contract', () => {
   })
 
   it('keeps page-title styling owned by SettingsSection', () => {
-    const locallyStyledPageTitle = /<h3\s+className="text-sm font-medium text-foreground"/
+    const locallyStyledPageTitle = /<h2\s+className="text-sm font-medium text-foreground"/
     const pageSectionFiles = settingsSourceFiles.filter((file) =>
       /(?:AgentSettingsSection|AiSettingsSection|RepositoriesSection|SystemSettingsSection|TemplatesSection|WorkflowProfilesSection)\.tsx$/.test(file),
     )

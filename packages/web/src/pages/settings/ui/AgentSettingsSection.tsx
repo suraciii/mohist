@@ -171,6 +171,7 @@ function TimeoutDiagram({ session, stage, task }: { session: number; stage: numb
 }
 
 function InputField({
+  id,
   label,
   unit,
   description,
@@ -180,6 +181,7 @@ function InputField({
   disabledReason,
   onChange,
 }: {
+  id: string
   label: string
   unit: string
   description?: string
@@ -191,11 +193,12 @@ function InputField({
 }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs font-medium text-muted-foreground">
+      <label htmlFor={id} className="block text-xs font-medium text-muted-foreground">
         {description ? <Tooltip content={description}>{label}</Tooltip> : label}
       </label>
       <div className="flex items-center gap-2">
         <Input
+          id={id}
           type="number"
           value={value}
           disabled={disabled}
@@ -210,7 +213,7 @@ function InputField({
       {disabled && disabledReason && (
         <p className="text-xs text-muted-foreground">{disabledReason}</p>
       )}
-      {!disabled && error && <p className="text-xs text-red-600">{error}</p>}
+      {!disabled && error && <p className="text-xs text-red-700">{error}</p>}
     </div>
   )
 }
@@ -319,6 +322,7 @@ export function AgentSettingsSection() {
   const renderField = (field: FieldDef) => (
     <InputField
       key={field.key}
+      id={`agent-runtime-${field.key}`}
       label={field.label}
       unit={field.unit}
       description={field.description}
@@ -388,7 +392,7 @@ export function AgentSettingsSection() {
       description="Configure how Mohist schedules external coder agent sessions."
     >
       <div className="space-y-4">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeouts</h4>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeouts</h3>
         <TimeoutDiagram
           session={localValues.timeout}
           stage={localValues.stageTimeout}
@@ -402,7 +406,7 @@ export function AgentSettingsSection() {
       <hr className="border" />
 
       <div className="space-y-4">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Concurrency</h4>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Concurrency</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {FIELDS.filter((field) => field.group === 'concurrency').map(renderField)}
         </div>
@@ -411,7 +415,7 @@ export function AgentSettingsSection() {
       <hr className="border" />
 
       <div className="space-y-4">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recovery</h4>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recovery</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {FIELDS.filter((field) => field.group === 'recovery').map(renderField)}
         </div>
@@ -440,13 +444,13 @@ export function AgentSettingsSection() {
       </div>
 
       {saveError && (
-        <p className="text-xs text-red-600">{saveError}</p>
+        <p className="text-xs text-red-700">{saveError}</p>
       )}
 
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-background rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
-            <h4 className="text-lg font-medium text-foreground mb-2">Reset Coder Agent Settings</h4>
+            <h3 className="text-lg font-medium text-foreground mb-2">Reset Coder Agent Settings</h3>
             <p className="text-sm text-muted-foreground mb-4">
               Reset all agent runtime settings to their default values?
             </p>
