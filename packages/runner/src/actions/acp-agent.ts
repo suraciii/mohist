@@ -685,7 +685,6 @@ function buildPromptLoaderContext(context: ActionContext): PromptLoaderContext {
     workId: context.workId,
     title: context.title ?? null,
     stage: context.stage ?? null,
-    issueNumber: context.issueNumber ?? null,
   }
 }
 

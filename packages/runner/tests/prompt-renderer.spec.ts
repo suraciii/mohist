@@ -275,7 +275,6 @@ describe("resolvePrompt - loader-backed prompts", () => {
       workId: "work-7",
       title: "Build task",
       stage: "build",
-      issueNumber: 59,
     }
 
     await resolvePrompt({
@@ -291,7 +290,6 @@ describe("resolvePrompt - loader-backed prompts", () => {
       workId: "work-7",
       title: "Build task",
       stage: "build",
-      issueNumber: 59,
     })
   })
 

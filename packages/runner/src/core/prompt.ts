@@ -19,7 +19,6 @@ export interface PromptLoaderContext {
   workId: string
   title?: string | null
   stage?: string | null
-  issueNumber?: number | null
 }
 
 export type PromptLoader = (ctx: PromptLoaderContext) => Promise<string | JsonObject>

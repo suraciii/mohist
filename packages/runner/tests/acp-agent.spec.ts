@@ -533,6 +533,31 @@ describe("mohist/acp-agent", () => {
     expect(sentText).not.toContain("## Task Prompt")
   })
 
+  it("StringPrompt_ActionDoesNotInjectIssueTitleOrBody", async () => {
+    const fixture = createFixture("basic")
+
+    const literal = "Resolve exactly this declared prompt."
+    const issueTitle = "Distinct issue title that must not reach prompt text"
+    const issueBody = "Distinct issue body that must not reach prompt text"
+    const result = await acpAgentAction(fixture.context({ prompt: literal }, undefined, {
+      issueNumber: 138,
+      variables: {
+        project: { path: "D:/fake/work" },
+        issue: {
+          number: 138,
+          title: issueTitle,
+          body: issueBody,
+        },
+      } as never,
+    }))
+
+    expect(result.status).toBe("success")
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(sentText).toBe(literal)
+    expect(sentText).not.toContain(issueTitle)
+    expect(sentText).not.toContain(issueBody)
+  })
+
   it("StringPromptContainingLiteralTemplateSyntax_IsNotTemplateRenderedBeforeMohistContextWrapper", async () => {
     const fixture = createFixture("basic")
 
@@ -610,7 +635,7 @@ describe("mohist/acp-agent", () => {
     ].join("\n"))
   })
 
-  it("UsesFormPrompt_LoaderReceivesContextWithWorkflowVariablesWorkDirWorkIdTitleStageAndIssueNumber", async () => {
+  it("UsesFormPrompt_LoaderReceivesContextWithWorkflowVariablesWorkDirWorkIdTitleAndStage", async () => {
     const fixture = createFixture("basic")
     const loader = vi.fn<PromptLoader>(async () => "ok")
     const registry = new PromptLoaderRegistry()
@@ -627,7 +652,6 @@ describe("mohist/acp-agent", () => {
       variables: variables as never,
       stage: "build",
       title: "Build task",
-      issueNumber: 59,
     }))
 
     expect(loader).toHaveBeenCalledTimes(1)
@@ -638,10 +662,9 @@ describe("mohist/acp-agent", () => {
     expect(received.workId).toBe("work-1")
     expect(received.title).toBe("Build task")
     expect(received.stage).toBe("build")
-    expect(received.issueNumber).toBe(59)
   })
 
-  it("UsesFormPrompt_LoaderReceivesContextWithNullTitleStageAndIssueNumberWhenAbsent", async () => {
+  it("UsesFormPrompt_LoaderReceivesContextWithNullTitleAndStageWhenAbsent", async () => {
     const fixture = createFixture("basic")
     const loader = vi.fn<PromptLoader>(async () => "ok")
     const registry = new PromptLoaderRegistry()
@@ -651,14 +674,12 @@ describe("mohist/acp-agent", () => {
     await acpAgentAction(fixture.context({ prompt: { uses: "fake/echo-loader" } }, new AbortController().signal, {
       title: null,
       stage: null,
-      issueNumber: null,
     }))
 
     expect(loader).toHaveBeenCalledTimes(1)
     const received = loader.mock.calls[0][0] as PromptLoaderContext
     expect(received.title).toBeNull()
     expect(received.stage).toBeNull()
-    expect(received.issueNumber).toBeNull()
   })
 
   it("MissingPrompt_ActionFailsWithoutSendingSynthesizedPrompt", async () => {

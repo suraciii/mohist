@@ -1,0 +1,30 @@
+{
+  "project": "mohist-local",
+  "description": "Make the 'no code path injects issue title/body into the resolved prompt' contract durable: remove the dead issue-identity input to prompt resolution and guard it with an action-level regression test.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Remove issue identity from the prompt-resolution path and guard it",
+      "spec": "specs/workflow-prompt-assembly/spec.md#resolved-prompts-carry-no-code-injected-issue-context",
+      "description": "Drop the unused `issueNumber` field from `PromptLoaderContext` and stop passing issue identity into prompt resolution in `buildPromptLoaderContext`. The only registered loader ignores it, so no prompt-resolution behavior changes; this just closes the last structural path by which issue identity could reach prompt assembly. Update the existing tests that pin this dead propagation, and add an action-level regression test asserting issue title/body are absent from the resolved prompt even when present in the run context.",
+      "acceptanceCriteria": [
+        "`PromptLoaderContext` in `packages/runner/src/core/prompt.ts` no longer declares the `issueNumber` field; `title?` and `stage?` remain.",
+        "`buildPromptLoaderContext` in `packages/runner/src/actions/acp-agent.ts` no longer sets `issueNumber` on the loader context.",
+        "`ActionContext.issueNumber` is unchanged and still flows to session-open metadata (`acp-agent.ts:707`, `:734`) and the session-event record (`acp-agent.ts:1355`) — these are not prompt text.",
+        "The two pinning tests in `packages/runner/tests/acp-agent.spec.ts` (`...TitleStageAndIssueNumber` at :613 and `...NullTitleStageAndIssueNumberWhenAbsent` at :644) are updated: `issueNumber` is dropped from the fixture context and from the `received` assertions, and the test names no longer mention IssueNumber.",
+        "`packages/runner/tests/prompt-renderer.spec.ts` `LoaderInvocation_ReceivesSpecWithMergedIntoBaseContextFields` (:265) no longer includes `issueNumber` in the constructed context or the `toEqual` expectation.",
+        "A new regression test in `packages/runner/tests/acp-agent.spec.ts` passes: given a fixture whose `variables` carry an `issue` object with a distinctive title and body and `issueNumber` is set, the resolved prompt text equals the declared prompt verbatim and contains neither the title nor the body.",
+        "The existing verbatim-passthrough and `## Mohist Issue Context` / `## Task Prompt` negative assertions (`acp-agent.spec.ts:523-534`) still pass.",
+        "`npm run typecheck -w packages/runner` passes with no references to a removed `PromptLoaderContext.issueNumber` field.",
+        "`npm test -w packages/runner` (vitest run) is green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `packages/runner/src/core/prompt.ts`, `packages/runner/src/actions/acp-agent.ts`, and `packages/runner/tests/acp-agent.spec.ts` + `packages/runner/tests/prompt-renderer.spec.ts`, with green runner typecheck and tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Scope is the runner package only. Built-in `.prompt` template bodies need no edits — all 14 already embed `mo issue show ... --project-id ...` (spec scenario 2 is satisfied by current state and enforced by review). Optional follow-up (deferred per design.md Open Questions, not part of this task): a server-side guard test under `packages/server/tests/Mohist.Server.Tests/` that scans `Prompts/builtins/*.prompt` and asserts each issue-aware template embeds `mo issue show`. Do not add it here — it would be a standalone test task and crosses into the C# project."
+    }
+  ]
+}
