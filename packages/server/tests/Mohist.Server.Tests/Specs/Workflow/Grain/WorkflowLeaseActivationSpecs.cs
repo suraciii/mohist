@@ -14,7 +14,7 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task PersistedLease_SurvivesActivation_AndRestoresOwnerFields()
+    public async Task RunningTask_SurvivesActivation_AndRestoresOwnerFields()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
 
@@ -22,11 +22,14 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
         var workflowId = _workflowId!;
 
         await DeactivateWorkflowAsync(workflowId);
+        await RegisterRunnerAsync(runnerId);
 
         workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
         Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
-        Assert.Equal(task.WorkId, await workflow.GetCurrentWorkIdAsync());
+        var snapshot = await GetQuerier().GetStatusAsync(workflowId);
+        var runningTask = snapshot!.Stages.Single().Tasks.Single();
+        Assert.Equal("running", runningTask.Status);
         var differentRunner = await workflow.AssignRunnerAsync("different-runner");
         Assert.Equal(WorkflowAssignmentStatus.Rejected, differentRunner.Status);
         Assert.Equal("already-assigned", differentRunner.Reason);

@@ -32,7 +32,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly HashSet<string> _announcedWaitingLocks = [];
     private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IWorkflowRunStore _runStore;
-    private readonly IPersistentState<WorkLease> _leaseState;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
     private readonly IWorkflowArtifactBindService _artifactBindService;
@@ -46,7 +45,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
-        [PersistentState("lease")] IPersistentState<WorkLease> leaseState,
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
         IWorkflowArtifactBindService artifactBindService,
@@ -54,7 +52,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
-        _leaseState = leaseState;
         _backlogs = backlogs;
         _profileManager = profileManager;
         _artifactBindService = artifactBindService;
@@ -68,8 +65,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         _run = await _runStore.LoadAsync(GrainKey);
 
-        _lastRunnerId = _run?.Claim?.RunnerId ?? _leaseState.State?.RunnerId;
+        _lastRunnerId = _run?.Claim?.RunnerId;
         await EnsureWorkHeartbeatAsync();
+        await RunCoreAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -227,7 +225,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         await ReleaseCurrentStageLocksAsync("retried");
-        await ClearAndDeleteLeaseAsync();
         var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
@@ -237,7 +234,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         EnsureRun();
         await ReleaseCurrentStageLocksAsync("rerun");
-        await ClearAndDeleteLeaseAsync();
         var events = _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
@@ -251,7 +247,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (string.IsNullOrWhiteSpace(task.Title))
             throw new InvalidOperationException("Runtime task requires title");
 
-        await ClearChecksLeaseAsync();
+        ClearDispatchedChecks();
         var with = ParseWith(task.With);
         var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
@@ -307,17 +303,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return;
         }
 
-        var activeLease = _leaseState?.State;
-        if (!string.IsNullOrWhiteSpace(activeLease?.WorkId))
-        {
-            if (!string.Equals(activeLease.RunnerId, runnerId, StringComparison.Ordinal))
-                return;
-
-            var restoredDispatch = RestoreDispatch(activeLease);
-            if (restoredDispatch is not null)
-                await AssignRunnerWorkAsync(runnerId, restoredDispatch);
+        if (await TryRecoverActiveWorkAsync(runnerId))
             return;
-        }
 
         var work = _run.NextWork();
         if (work is null)
@@ -331,12 +318,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return;
 
         await SaveRunAsync();
-        await SaveLeaseAsync();
         await AssignRunnerWorkAsync(runnerId, dispatch);
     }
 
     private async Task EnsureWorkHeartbeatAsync()
     {
+        if (await FailLostRunningTasksAsync())
+            return;
+
         if (IsRunnable())
         {
             _workHeartbeatReminder ??= await this.RegisterOrUpdateReminder(
@@ -379,7 +368,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run.CurrentStageId is null)
             throw new InvalidOperationException("Workflow has no current stage");
 
-        await ClearChecksLeaseAsync();
+        ClearDispatchedChecks();
 
         var current = _run.CurrentStage();
         if (!current.Initialized)
@@ -409,33 +398,33 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public async Task ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (_run is null || !_run.IsClaimedBy(runnerId)) return;
-        var lease = _leaseState?.State;
-        if (string.IsNullOrWhiteSpace(lease?.WorkId)
-            || !string.Equals(lease.WorkId, workId, StringComparison.Ordinal)
-            || !string.Equals(lease.RunnerId, runnerId, StringComparison.Ordinal))
-            return;
+        var activeTask = FindRunningTaskByWork(workId, runnerId);
+        var activeCheck = activeTask is null ? FindDispatchedCheckByWork(workId, runnerId) : null;
+        if (activeTask is null && activeCheck is null) return;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
-        var capturedWorkType = lease.WorkType;
-        var capturedLogicalId = lease.LogicalId;
-        var capturedWorkId = lease.WorkId;
-
-        await ClearAndDeleteLeaseAsync();
         IReadOnlyList<WorkflowEvent> events = [];
 
-        switch (capturedWorkType)
+        if (activeTask is not null)
         {
-            case "task":
-                events = await ProcessTaskResultAsync(result, capturedLogicalId, capturedWorkId);
-                break;
-            case "check":
-            case "checks":
-                events = await ProcessCheckResultAsync(result);
-                break;
+            events = await ProcessTaskResultAsync(result, activeTask.Id, workId);
+        }
+        else
+        {
+            ClearCheckDispatch(activeCheck!);
+            events = await ProcessCheckResultAsync(result);
         }
 
         await CommitAsync(events);
+    }
+
+    public async Task NotifyRunnerLostAsync(string runnerId)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId) || _run is null)
+            return;
+
+        await FailLostRunningTasksAsync(runnerId);
     }
 
     public Task DeactivateForTestAsync()
@@ -460,30 +449,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return Task.FromResult(_run?.Claim?.RunnerId ?? _lastRunnerId);
     }
 
-    public async Task<string?> GetCurrentWorkIdAsync()
+    public Task<string?> GetCurrentWorkIdAsync()
     {
-        return _leaseState?.State is { WorkId: not null and not "" } l ? l.WorkId : null;
+        return Task.FromResult(FindRunningTask()?.WorkId ?? FindDispatchedCheck()?.DispatchWorkId);
     }
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
         if (string.IsNullOrWhiteSpace(workId)) return Task.FromResult<WorkflowActiveWorkView?>(null);
-        var lease = _leaseState?.State;
-        if (lease is null
-            || string.IsNullOrWhiteSpace(lease.WorkId)
-            || !string.Equals(lease.WorkId, workId, StringComparison.Ordinal))
-        {
+        var activeTask = FindRunningTask();
+        var activeCheck = activeTask is null ? FindDispatchedCheck() : null;
+        if (!string.Equals(activeTask?.WorkId ?? activeCheck?.DispatchWorkId, workId, StringComparison.Ordinal))
             return Task.FromResult<WorkflowActiveWorkView?>(null);
-        }
 
         var projectId = GetProjectId();
         var issueId = GetIssueId();
+        var stage = _run?.CurrentStageId ?? string.Empty;
         return Task.FromResult<WorkflowActiveWorkView?>(new WorkflowActiveWorkView(
-            WorkId: lease.WorkId,
-            WorkType: lease.WorkType,
-            Stage: lease.Stage,
-            TaskRunId: lease.LogicalId,
-            Title: lease.Title,
+            WorkId: workId,
+            WorkType: activeTask is not null ? "task" : "checks",
+            Stage: stage,
+            TaskRunId: activeTask?.Id ?? $"checks-{stage}",
+            Title: activeTask?.Title ?? "Stage checks",
             ProjectId: string.IsNullOrWhiteSpace(projectId) ? null : projectId,
             IssueId: issueId));
     }
@@ -750,9 +737,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
-    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null)
+    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null)
     {
-        var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
+        var workId = workIdOverride ?? (workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}");
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
 
         if (workType == "task")
@@ -901,7 +888,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             Issue: issueRef,
             Artifacts: artifactsStr,
             Outputs: outputsStr);
-        _leaseState.State = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
+        if (workType == "task")
+        {
+            var currentTask = _run!.CurrentStage().Tasks.FirstOrDefault(t => t.Id == logicalId);
+            if (currentTask?.Status != TaskRunStatus.Running)
+            {
+                var events = _run!.StartTask(workId, runnerId);
+                await SaveRunAsync(events);
+                foreach (var e in events)
+                    await On(e);
+            }
+        }
+        else
+        {
+            foreach (var check in _run!.CurrentStage().Checks.Where(c => c.Status == StageCheckStatus.Pending))
+            {
+                check.DispatchWorkId = workId;
+                check.DispatchRunnerId = runnerId;
+                check.DispatchedAt = DateTimeOffset.UtcNow;
+            }
+            await SaveRunAsync();
+        }
         _lastRunnerId = runnerId;
         return dispatch;
     }
@@ -1093,22 +1100,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return new WorkIssueRef(projectId, issueId, num);
     }
 
-    private WorkDispatch? RestoreDispatch(WorkLease lease)
-    {
-        if (lease.Dispatch is not null)
-            return lease.Dispatch;
-
-        if (string.IsNullOrWhiteSpace(lease.WorkId))
-            return null;
-
-        return new WorkDispatch(
-            WorkflowRunId: GrainKey,
-            WorkId: lease.WorkId,
-            WorkType: lease.WorkType,
-            Stage: lease.Stage,
-            Title: lease.Title);
-    }
-
     private async Task AssignRunnerWorkAsync(string runnerId, WorkDispatch dispatch)
     {
         var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
@@ -1120,6 +1111,136 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
+    private async Task<bool> TryRecoverActiveWorkAsync(string runnerId)
+    {
+        var runningTask = FindRunningTask();
+        if (runningTask is not null)
+        {
+            if (!string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
+                return true;
+
+            var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
+            if (!await runner.IsAvailableAsync())
+            {
+                var events = _run!.FailTaskForRunnerLost();
+                await CommitAsync(events);
+                return false;
+            }
+
+            var dispatch = await PrepareWorkAsync(WorkflowWork.Task(
+                _run!.CurrentStage().Id,
+                runningTask.Id,
+                runningTask.Title,
+                runningTask.Uses,
+                runningTask.WithInput,
+                runningTask.Artifacts,
+                runningTask.Outputs), runnerId);
+            if (dispatch is not null)
+                await AssignRunnerWorkAsync(runnerId, dispatch);
+            return true;
+        }
+
+        var dispatchedCheck = FindDispatchedCheck();
+        if (dispatchedCheck is null)
+            return false;
+
+        if (!string.Equals(dispatchedCheck.DispatchRunnerId, runnerId, StringComparison.Ordinal))
+            return true;
+
+        var checkRunner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
+        if (!await checkRunner.IsAvailableAsync())
+        {
+            ClearDispatchedChecks();
+            await SaveRunAsync();
+            return false;
+        }
+
+        var stage = _run!.CurrentStage();
+        var pendingChecks = stage.Checks
+            .Where(c => c.Status == StageCheckStatus.Pending)
+            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
+            .ToList();
+        var work = WorkflowWork.Checks(stage.Id, pendingChecks);
+        var checksData = (WorkflowWork.ChecksData)work.Data;
+        var checksPayload = checksData.Items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
+        {
+            ["name"] = JsonSerializer.SerializeToElement(i.Name),
+            ["title"] = JsonSerializer.SerializeToElement(i.Title),
+            ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
+            ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
+        }).ToList();
+        var checkDispatch = await MakeDispatchAsync(
+            stage.Id,
+            $"checks-{stage.Id}",
+            "checks",
+            "Stage checks",
+            uses: null,
+            with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
+            runnerId,
+            workIdOverride: dispatchedCheck.DispatchWorkId);
+        await AssignRunnerWorkAsync(runnerId, checkDispatch);
+        return true;
+    }
+
+    private TaskRun? FindRunningTask()
+        => _run?.CurrentStage().Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Running);
+
+    private async Task<bool> FailLostRunningTasksAsync(string? runnerId = null)
+    {
+        if (_run?.CurrentStageId is null)
+            return false;
+
+        var runningTask = FindRunningTask();
+        if (runningTask is null || string.IsNullOrWhiteSpace(runningTask.RunnerId))
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(runnerId)
+            && !string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(runnerId))
+        {
+            var runner = GrainFactory.GetGrain<IRunnerGrain>(runningTask.RunnerId);
+            if (await runner.IsAvailableAsync())
+                return false;
+        }
+
+        var events = _run.FailTaskForRunnerLost();
+        await CommitAsync(events);
+        return events.Count > 0;
+    }
+
+    private TaskRun? FindRunningTaskByWork(string workId, string runnerId)
+        => _run?.CurrentStage().Tasks.FirstOrDefault(t =>
+            t.Status == TaskRunStatus.Running
+            && string.Equals(t.WorkId, workId, StringComparison.Ordinal)
+            && string.Equals(t.RunnerId, runnerId, StringComparison.Ordinal));
+
+    private StageCheck? FindDispatchedCheck()
+        => _run?.CurrentStage().Checks.FirstOrDefault(c =>
+            c.Status == StageCheckStatus.Pending
+            && !string.IsNullOrWhiteSpace(c.DispatchWorkId));
+
+    private StageCheck? FindDispatchedCheckByWork(string workId, string runnerId)
+        => _run?.CurrentStage().Checks.FirstOrDefault(c =>
+            c.Status == StageCheckStatus.Pending
+            && string.Equals(c.DispatchWorkId, workId, StringComparison.Ordinal)
+            && string.Equals(c.DispatchRunnerId, runnerId, StringComparison.Ordinal));
+
+    private static void ClearCheckDispatch(StageCheck check)
+    {
+        check.DispatchWorkId = null;
+        check.DispatchRunnerId = null;
+        check.DispatchedAt = null;
+    }
+
+    private void ClearDispatchedChecks()
+    {
+        if (_run?.CurrentStageId is null) return;
+        foreach (var check in _run.CurrentStage().Checks)
+            ClearCheckDispatch(check);
+    }
+
     private static int TaskAttempt(string taskRunId)
     {
         var lastDot = taskRunId.LastIndexOf('.');
@@ -1128,25 +1249,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             : 1;
     }
 
-    private async Task ClearAndDeleteLeaseAsync()
-    {
-        if (_leaseState is null) return;
-        _leaseState.State = null!;
-        await _leaseState.WriteStateAsync();
-    }
-
-    private async Task ClearChecksLeaseAsync()
-    {
-        if (_leaseState?.State is { WorkId: not null, WorkType: "check" or "checks" })
-            await ClearAndDeleteLeaseAsync();
-    }
-
     private async Task ClearExecutableStateAsync(string reason)
     {
         await ReleaseCurrentStageLocksAsync(reason);
+        ClearDispatchedChecks();
 
-        if (_leaseState?.State is { WorkId: not null and not "" })
-            await ClearAndDeleteLeaseAsync();
+        var runningTask = FindRunningTask();
+        if (runningTask is not null)
+        {
+            var events = _run!.FailTaskForStopped(reason);
+            await SaveRunAsync(events);
+            foreach (var e in events)
+                await On(e);
+            return;
+        }
+
+        await SaveRunAsync();
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskResultAsync(WorkResult result, string taskRunId, string workId)
@@ -1351,6 +1469,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (repairTasks is null)
             return null;
 
+        ClearDispatchedChecks();
         return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
     }
 
@@ -1475,6 +1594,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             StageApprovalRequested => DisableWorkHeartbeatAsync(),
             StageApprovalResolved x => OnApprovalResolvedAsync(x),
             FeedbackRequested => EnsureWorkHeartbeatAsync(),
+            TaskStarted => EnsureWorkHeartbeatAsync(),
             TaskCompleted => EnsureWorkHeartbeatAsync(),
             TaskFailed => EnsureWorkHeartbeatAsync(),
             CheckPassed => EnsureWorkHeartbeatAsync(),
@@ -1585,8 +1705,4 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
-    private Task SaveLeaseAsync() =>
-        _leaseState.State is not null
-            ? _leaseState.WriteStateAsync()
-            : Task.CompletedTask;
 }

@@ -1,0 +1,89 @@
+{
+  "project": "mohist-local",
+  "description": "Complete task lifecycle with Running state, timestamps, TaskStarted event, WorkLease elimination, and runner-lost recovery",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add task lifecycle domain model — Running state, timestamps, TaskStarted event, and StageCheck dispatch fields",
+      "spec": "specs/workflow-run/spec.md#task-lifecycle-transitions-through-running-on-dispatch",
+      "description": "Add the domain model capabilities for complete task lifecycle: TaskRun gains StartedAt/FinishedAt/RunnerId/WorkId fields and transitions through Running via new StartTask/CompleteTask/FailTask/FailTaskForRunnerLost methods in WorkflowRun.Task.cs. StageCheck gains DispatchWorkId/DispatchRunnerId/DispatchedAt. Add TaskStarted to the WorkflowEvent union and wire it into WorkflowEventSerializer (BusType, FromData, Unwrap). This task is purely additive — WorkflowGrain continues using WorkLease unchanged; the new domain methods are tested directly via unit tests.",
+      "acceptanceCriteria": [
+        "TaskRun has nullable StartedAt, FinishedAt (DateTimeOffset?), RunnerId, WorkId (string?) properties",
+        "StageCheck has nullable DispatchWorkId, DispatchRunnerId (string?), DispatchedAt (DateTimeOffset?) properties",
+        "StartTask(workId, runnerId) transitions Pending→Running, sets StartedAt/WorkId/RunnerId, emits TaskStarted event",
+        "CompleteTask() sets FinishedAt before transitioning to Completed",
+        "FailTask() sets FinishedAt before transitioning to Failed",
+        "FailTaskForRunnerLost() transitions Running→Failed with reason 'runner-lost', sets FinishedAt, emits TaskFailed+StageFailed+WorkflowRunFailed",
+        "TaskStarted(Stage, TaskId, RunnerId) is a member of the WorkflowEvent union",
+        "WorkflowEventSerializer.BusType maps TaskStarted to EventCatalog.ReverseDns.TaskStarted",
+        "WorkflowEventSerializer.FromData and Unwrap handle TaskStarted",
+        "Unit tests verify StartTask transition, timestamp population, TaskStarted emission, and FailTaskForRunnerLost event sequence",
+        "Unit tests verify StageCheck dispatch metadata set/clear",
+        "Existing tests pass; system compiles with WorkflowGrain still using WorkLease"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated TaskRun.cs, WorkflowRun.Task.cs, StageCheck.cs, WorkflowEvent.cs, WorkflowEventSerializer.cs with domain unit tests under Specs/Workflow/Domain/",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Do NOT remove WorkLease from Shared.cs or modify WorkflowGrain in this task. The domain model is additive and must coexist with the existing WorkLease path so the system stays compilable."
+    },
+    {
+      "id": "T-002",
+      "title": "Eliminate WorkLease — WorkflowGrain uses TaskRun as single source of truth for in-flight dispatch",
+      "spec": "specs/workflow-run/spec.md#taskrun-is-the-single-source-of-truth-for-in-flight-dispatch",
+      "description": "Remove the WorkLease persistent state from WorkflowGrain entirely and rewire all dispatch, result-matching, reactivation-recovery, and read paths to use TaskRun (Status==Running, WorkId, RunnerId) and StageCheck (DispatchWorkId, DispatchRunnerId) fields. RunCoreAsync scans for Running tasks / dispatched checks instead of reading _leaseState. MakeDispatchAsync calls StartTask or sets check dispatch metadata instead of writing the lease. ReportResultAsync matches incoming workId against the Running task's WorkId. GetCurrentWorkIdAsync and GetActiveWorkAsync read from TaskRun/StageCheck. Remove SaveLeaseAsync, ClearAndDeleteLeaseAsync, ClearChecksLeaseAsync, RestoreDispatch. Remove WorkLease record from Shared.cs and the [PersistentState(\"lease\")] constructor parameter.",
+      "acceptanceCriteria": [
+        "No references to _leaseState, WorkLease, SaveLeaseAsync, ClearAndDeleteLeaseAsync, ClearChecksLeaseAsync, or RestoreDispatch remain in WorkflowGrain.cs",
+        "WorkLease record is removed from Shared.cs",
+        "WorkflowGrain constructor no longer takes [PersistentState(\"lease\")] parameter",
+        "RunCoreAsync detects in-flight work by scanning for Running TaskRun or StageCheck with DispatchWorkId set, not by reading a lease",
+        "Reactivation recovery: if a Running task's runner is alive, re-assigns via PrepareWorkAsync; if offline, fails as runner-lost",
+        "Reactivation recovery: dispatched checks with offline runner are cleared and re-queued",
+        "MakeDispatchAsync calls run.StartTask(workId, runnerId) for tasks; sets DispatchWorkId/DispatchRunnerId/DispatchedAt for checks",
+        "ReportResultAsync matches incoming workId against Running task's WorkId and RunnerId; unmatched results are ignored",
+        "GetCurrentWorkIdAsync returns Running task's WorkId or dispatched check's DispatchWorkId",
+        "GetActiveWorkAsync reconstructs WorkflowActiveWorkView from TaskRun/StageCheck state",
+        "WorkflowLeaseActivationSpecs updated to verify Running task survives activation instead of lease",
+        "Existing HappyPathSpecs, RetryAndRerunSpecs, FeedbackDispatchSpecs, DispatchAndLoadingSpecs, and CheckRetrySpecs pass without modification (or with minimal adaptation to new state model)",
+        "Full workflow grain test suite passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Refactored WorkflowGrain.cs, Shared.cs with updated grain integration tests under Specs/Workflow/Grain/",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This is the highest-risk task — it rewrites the core dispatch/result/recovery flow. WorkLease was a separate Orleans persistent state with its own write path; removing it eliminates the dual-write consistency problem. For task workId: deterministic (= taskRunId), so PrepareWorkAsync regeneration on reactivation produces the same id. For check workId: non-deterministic (Guid-based), so reuse stored DispatchWorkId as override to MakeDispatchAsync. The On(WorkflowEvent) handler needs TaskStarted => EnsureWorkHeartbeatAsync()."
+    },
+    {
+      "id": "T-003",
+      "title": "Add runner-lost recovery — HandleTimeoutAsync notification and heartbeat safety net",
+      "spec": "specs/orphaned-task-recovery/spec.md#runner-heartbeat-timeout-notifies-affected-workflows",
+      "description": "Close the runner-lost gap with two complementary paths. Primary: RunnerGrain.HandleTimeoutAsync (and UnregisterAsync) collect distinct WorkflowRunIds from tracked work and call IWorkflowGrain.NotifyRunnerLostAsync(runnerId) on each before clearing _works and going offline. Safety net: the workflow heartbeat (EnsureWorkHeartbeatAsync) checks RunnerGrain.IsAvailableAsync for each Running task's runner and fails orphans as runner-lost. NotifyRunnerLostAsync scans the current stage for Running tasks with matching RunnerId and fails them via FailTaskForRunnerLost. Notifications are best-effort (try/catch per workflow, log and continue).",
+      "acceptanceCriteria": [
+        "IWorkflowGrain has Task NotifyRunnerLostAsync(string runnerId) method",
+        "WorkflowGrain.NotifyRunnerLostAsync fails Running tasks with matching RunnerId as runner-lost; idempotent (no-op if no match)",
+        "RunnerGrain.HandleTimeoutAsync notifies each affected WorkflowGrain before clearing _works and going offline",
+        "RunnerGrain.UnregisterAsync applies the same notification pattern for graceful shutdown",
+        "Notification is scoped to WorkDispatchOwnerKinds.Workflow (AgentJob work excluded per non-goals)",
+        "Notification failures are best-effort: one workflow's throw does not block notification to others",
+        "Heartbeat safety net: EnsureWorkHeartbeatAsync calls RunnerGrain.IsAvailableAsync for Running tasks; offline runner → task failed as runner-lost",
+        "Online runner preserves Running tasks on heartbeat check",
+        "Non-running tasks (Pending, Completed, Failed) are not affected by runner-loss notification or heartbeat check",
+        "Integration tests verify: runner death → Running task transitions to Failed(runner-lost) via notification path",
+        "Integration tests verify: heartbeat safety net catches orphaned Running task when notification is lost",
+        "Integration tests verify: partial notification failure does not block other workflows",
+        "Existing workflow behavior preserved (dispatch, result, retry, rerun, feedback loop)"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated IWorkflowGrain.cs, WorkflowGrain.cs (NotifyRunnerLostAsync + heartbeat check), RunnerGrain.cs (HandleTimeoutAsync + UnregisterAsync) with integration tests",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "The EventCatalog.ReverseDns.RunnerDisconnected constant already exists for potential future bus-level use, but this task uses direct grain-to-grain calls. The heartbeat mechanism itself (reminder registration, interval) is unchanged — only what it inspects expands to include runner-liveness checks."
+    }
+  ]
+}

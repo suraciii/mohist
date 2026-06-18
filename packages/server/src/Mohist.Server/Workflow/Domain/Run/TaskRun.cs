@@ -15,6 +15,10 @@ public sealed class TaskRun
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
     public TaskRunStatus Status { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public string? RunnerId { get; set; }
+    public string? WorkId { get; set; }
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public List<TaskOutputDefinition>? Outputs { get; init; }

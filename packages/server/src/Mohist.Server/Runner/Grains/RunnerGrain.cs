@@ -84,6 +84,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
 
+        await NotifyTrackedWorkflowRunnersLostAsync();
         _status = RunnerStatus.Offline;
         _info = null;
         _works.Clear();
@@ -337,10 +338,47 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task HandleTimeoutAsync()
     {
+        await NotifyTrackedWorkflowRunnersLostAsync();
         _works.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
+    }
+
+    private async Task NotifyTrackedWorkflowRunnersLostAsync()
+        => await NotifyTrackedWorkflowRunnersLostAsync(
+            _works.Values.Select(w => w.Dispatch),
+            RunnerId,
+            workflowRunId => GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId).NotifyRunnerLostAsync(RunnerId),
+            (ex, workflowRunId) => _log.LogWarning(ex,
+                "Runner {RunnerId} failed to notify workflow {WorkflowRunId} about lost work",
+                RunnerId,
+                workflowRunId));
+
+    internal static async Task NotifyTrackedWorkflowRunnersLostAsync(
+        IEnumerable<WorkDispatch> trackedWork,
+        string runnerId,
+        Func<string, Task> notifyWorkflowAsync,
+        Action<Exception, string> logFailure)
+    {
+        var workflowRunIds = trackedWork
+            .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow)
+            .Select(w => w.WorkflowRunId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var workflowRunId in workflowRunIds)
+        {
+            try
+            {
+                await notifyWorkflowAsync(workflowRunId);
+            }
+            catch (Exception ex)
+            {
+                logFailure(ex, workflowRunId);
+            }
+        }
     }
 
     private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;
