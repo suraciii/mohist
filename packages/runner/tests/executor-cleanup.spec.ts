@@ -594,9 +594,12 @@ describe("WorkExecutor clean worktree invariant", () => {
     // git binary, permission error), the executor must fail the task
     // with structured evidence rather than silently treat the worktree
     // as clean. Only the "not a git repository" stderr is treated as
-    // the legitimate plain-tmpdir case.
+    // the legitimate plain-tmpdir case. The branch-stability check runs
+    // first, so a corrupted worktree now surfaces as a
+    // branch-invariant-violation with a probe-failure detail rather
+    // than a dirty-worktree failure.
     setExecutorGitRunnerForTest(async (_workDir, args) => {
-      if (args[0] === "rev-parse" && args[1] === "--is-inside-work-tree") {
+      if (args[0] === "rev-parse" && args[1] === "--abbrev-ref" && args[2] === "HEAD") {
         return {
           success: false,
           stdout: "",
@@ -611,17 +614,18 @@ describe("WorkExecutor clean worktree invariant", () => {
     const result = await executor.execute(buildWork(), new AbortController().signal)
 
     expect(result.status).toBe("failed")
-    expect(result.cleanupAttempts).toBe(0)
-    expect(result.message).toMatch(/worktree probe failed/)
+    expect(result.cleanupAttempts).toBeUndefined()
+    expect(result.message).toMatch(/branch-invariant violation at start boundary/)
+    expect(result.message).toMatch(/probe failed/)
     expect(result.output).toBeDefined()
     const evidence = JSON.parse(result.output ?? "{}")
     expect(evidence).toMatchObject({
-      kind: "dirty-worktree",
-      staged: [],
-      unstaged: [],
-      untracked: [],
-      cleanupAttempts: 0,
+      kind: "branch-invariant-violation",
+      boundary: "start",
+      expectedBranch: "main",
+      observedBranch: "",
     })
+    expect(evidence.detail).toMatch(/probe failed/)
   })
 
   it("cleanupReplacesLoaderSpecPromptWithLiteralCleanupString", async () => {

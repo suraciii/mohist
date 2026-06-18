@@ -34,10 +34,19 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
   const isFailed = task.status === 'failed'
   const isInProgress = isRunning && task.status === 'running'
   const isDeliveryTask = isDeliveryFailureTask(task)
+  const taskReason = typeof task.reason === 'string' ? task.reason : null
+  const outputResolution = resolveDeliveryFailureFromOutput(task.output)
+  const messageResolution = resolveDeliveryFailureFromMessage(taskReason)
   const deliveryGuidance = isFailed && isDeliveryTask
-    ? (resolveDeliveryFailureFromOutput(task.output).guidance
-      ?? resolveDeliveryFailureFromMessage(typeof task.reason === 'string' ? task.reason : null).guidance)
+    ? (outputResolution.guidance ?? messageResolution.guidance)
     : null
+  const branchEvidence =
+    (outputResolution.failureKind === 'branch-invariant-violation'
+      ? outputResolution.evidence
+      : null) ??
+    (messageResolution.failureKind === 'branch-invariant-violation'
+      ? messageResolution.evidence
+      : null)
 
   return (
     <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border'} overflow-hidden`}>
@@ -73,12 +82,52 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
             <p className="text-xs text-amber-600">{task.reason}</p>
           )}
           {deliveryGuidance && (
-            <div className="rounded border border-red-200 bg-white px-2 py-1.5 text-xs text-red-700 space-y-0.5">
+            <div
+              className={`rounded border px-2 py-1.5 text-xs space-y-1 ${
+                deliveryGuidance.failureKind === 'branch-invariant-violation'
+                  ? 'border-purple-300 bg-purple-50 text-purple-800'
+                  : 'border-red-200 bg-white text-red-700'
+              }`}
+            >
               <div className="flex items-center gap-2 font-semibold">
                 <span className="text-[10px] uppercase tracking-wide opacity-80">Failure kind</span>
-                <span className="rounded bg-red-100 px-1.5 py-0.5 font-mono text-[11px]">{deliveryGuidance.failureKind}</span>
+                <span
+                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${
+                    deliveryGuidance.failureKind === 'branch-invariant-violation'
+                      ? 'bg-white/70'
+                      : 'bg-red-100'
+                  }`}
+                >
+                  {deliveryGuidance.failureKind}
+                </span>
                 <span>{deliveryGuidance.label}</span>
               </div>
+              {deliveryGuidance.failureKind === 'branch-invariant-violation' && (
+                <div className="rounded bg-white/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+                  <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
+                    Attribution: runner/action (not issue work)
+                  </div>
+                  {branchEvidence?.boundary && (
+                    <div>
+                      <span className="font-sans opacity-70">boundary:</span> {branchEvidence.boundary}
+                    </div>
+                  )}
+                  <div>
+                    <span className="font-sans opacity-70">expected:</span>{' '}
+                    <span className="text-green-700">{branchEvidence?.expectedBranch || '(unknown)'}</span>
+                  </div>
+                  <div>
+                    <span className="font-sans opacity-70">observed:</span>{' '}
+                    <span className="text-red-700">
+                      {branchEvidence?.observedBranch
+                        ? branchEvidence.observedBranch
+                        : branchEvidence?.observedRef
+                          ? `(detached at ${branchEvidence.observedRef})`
+                          : '(unknown)'}
+                    </span>
+                  </div>
+                </div>
+              )}
               <p className="leading-snug">{deliveryGuidance.nextAction}</p>
             </div>
           )}

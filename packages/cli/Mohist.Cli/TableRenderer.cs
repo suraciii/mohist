@@ -278,8 +278,9 @@ internal sealed class TableRenderer
         if (failureNode is not JsonObject failure) return;
         var message = StringOf(failure, "message");
         if (string.IsNullOrEmpty(message)) return;
+        var output = failure["output"] as JsonNode;
 
-        var (kind, guidance) = DeliveryFailureGuidance.Resolve(message, null);
+        var (kind, guidance, evidence) = DeliveryFailureGuidance.ResolveWithEvidence(message, output);
         if (kind is null || guidance is null) return;
 
         _out.WriteLine("");
@@ -287,6 +288,26 @@ internal sealed class TableRenderer
         _out.WriteLine($"  kind:       {kind}");
         _out.WriteLine($"  label:      {guidance.Value.Label}");
         _out.WriteLine($"  next action: {guidance.Value.NextAction}");
+        if (string.Equals(kind, DeliveryFailureGuidance.BranchInvariantViolation, StringComparison.OrdinalIgnoreCase) && evidence is not null)
+        {
+            _out.WriteLine($"  attribution: runner/action (not issue work)");
+            if (!string.IsNullOrEmpty(evidence.Boundary))
+            {
+                _out.WriteLine($"  boundary:   {evidence.Boundary}");
+            }
+            if (!string.IsNullOrEmpty(evidence.ExpectedBranch))
+            {
+                _out.WriteLine($"  expected:   {evidence.ExpectedBranch}");
+            }
+            if (!string.IsNullOrEmpty(evidence.ObservedBranch))
+            {
+                _out.WriteLine($"  observed:   {evidence.ObservedBranch}");
+            }
+            else if (!string.IsNullOrEmpty(evidence.ObservedRef))
+            {
+                _out.WriteLine($"  observed:   (detached at {evidence.ObservedRef})");
+            }
+        }
     }
 
     private void RenderSessions(JsonNode? data)

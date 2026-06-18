@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto"
+import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, WorkItem } from "../core/types.js"
@@ -7,6 +9,14 @@ export interface WorkspaceInfo {
   path: string
   branch?: string | null
   changeDir?: string | null
+}
+
+export interface LandingWorkspaceInfo {
+  path: string
+  runId: string
+  runBranch: string
+  baseBranch: string
+  gitUrl: string
 }
 
 export class WorkspaceManager {
@@ -43,10 +53,153 @@ export class WorkspaceManager {
     const marker = issueWorkspaceMarker(variables)
     await this.ensureFreshWorkspace(cachePath, workspacePath, effectiveBaseBranch, runBranch, gitUrl, marker, signal)
 
+    // Prune any landing workspaces left behind by a previous, possibly
+    // crashed, run. Each landing is runId-scoped (and uuid-disambiguated),
+    // so removing them cannot affect a different run and cannot reach into
+    // the workflow workspace's object store — landing clones are isolated
+    // `--shared` alternates clones of the workflow workspace.
+    await this.pruneLandingWorkspaces(variables, runId, signal)
+
     const changeDir = stringAt(variables, ["openspecChangeDir"])
     if (changeDir) await ensureDir(join(workspacePath, changeDir, "specs"))
     await writeText(markerPath(workspacePath), JSON.stringify(marker, null, 2))
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
+  }
+
+  // Materialize an isolated temporary landing workspace as a `git clone
+  // --shared` of the workflow workspace. The landing workspace is a fully
+  // independent repository that references the workflow workspace's
+  // object store via alternates (read-only), so removing the landing
+  // directory cannot delete or corrupt the workflow workspace's git
+  // objects, refs, or branch. The `origin` remote is reset to the
+  // configured repository gitUrl so push operations in the landing
+  // workspace target the real upstream.
+  async createLandingWorkspace(work: WorkItem, signal: AbortSignal): Promise<LandingWorkspaceInfo> {
+    const variables = work.variables ?? {}
+    const gitUrl = stringAt(variables, ["repository", "gitUrl"])
+    const baseBranch = stringAt(variables, ["repository", "baseBranch"])
+    if (!gitUrl) throw new Error("Landing workspace requires repository.gitUrl in variables.")
+    const effectiveBaseBranch = baseBranch ?? "main"
+    const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId ?? ""
+    const runBranch = runBranchName(runId)
+
+    const projectId = stringAt(variables, ["project", "id"]) ?? "project"
+    const projectName = stringAt(variables, ["project", "name"]) ?? projectId
+
+    const suppliedPath = stringAt(variables, ["workspace", "path"])
+    const workspacePath = suppliedPath
+      ? resolve(suppliedPath)
+      : issueWorkspacePath(this.runnerRoot, projectName, numberAt(variables, ["issue", "number"]) ?? 0)
+    if (!exists(workspacePath)) {
+      throw new Error(`Workflow workspace ${workspacePath} must exist before creating a landing workspace.`)
+    }
+
+    const landingPath = landingWorkspacePath(this.runnerRoot, projectName, runId)
+    await ensureDir(join(landingPath, ".."))
+    // `git clone --shared` defaults to --single-branch, which only
+    // materializes the branch that is checked out in the source. We need
+    // both the base branch and the per-run branch refs to be visible in
+    // the landing clone, so use --no-single-branch and then explicitly
+    // fetch all local refs from the workspace. This keeps the landing
+    // clone's object store shared with the workflow workspace via
+    // alternates (read-only), so removing the landing directory cannot
+    // affect the workflow workspace's refs or objects.
+    const result = await runCommand("git", ["clone", "--shared", "--no-single-branch", workspacePath, landingPath], ".", signal)
+    if (result.exitCode !== 0) {
+      // best-effort cleanup on failed clone
+      await deleteDirectory(landingPath)
+      throw new Error(`git clone --shared for landing workspace failed: ${result.stderr || result.stdout}`)
+    }
+
+    // The clone checks out the workspace's current branch (the run
+    // branch). `git fetch` refuses to update the currently checked-out
+    // branch, so detach HEAD first; we will leave the run branch
+    // ref alone (the clone already created it pointing at the right
+    // commit) and fetch the remaining local refs (base branch + any
+    // others) explicitly.
+    const detach = await runCommand("git", ["-C", landingPath, "checkout", "--detach", "HEAD"], landingPath, signal)
+    if (detach.exitCode !== 0) {
+      await deleteDirectory(landingPath)
+      throw new Error(`git checkout --detach HEAD in landing workspace failed: ${detach.stderr || detach.stdout}`)
+    }
+
+    // Pull all the workflow workspace's local refs (base branch + any
+    // other refs the workflow has produced, excluding the run branch
+    // which is already correct) into the landing clone so
+    // publish/preflight can read and base-branch-checkout against them
+    // without going back to the workflow workspace.
+    const fetchResult = await runCommand(
+      "git",
+      ["-C", landingPath, "fetch", "origin", "+refs/heads/*:refs/heads/*"],
+      landingPath,
+      signal,
+    )
+    if (fetchResult.exitCode !== 0) {
+      await deleteDirectory(landingPath)
+      throw new Error(`git fetch refs/heads/* in landing workspace failed: ${fetchResult.stderr || fetchResult.stdout}`)
+    }
+
+    // Reset origin to the configured remote gitUrl so push operations in
+    // the landing workspace target the real upstream, not the workflow
+    // workspace's local cache clone.
+    const setUrl = await runCommand("git", ["-C", landingPath, "remote", "set-url", "origin", gitUrl], landingPath, signal)
+    if (setUrl.exitCode !== 0) {
+      await deleteDirectory(landingPath)
+      throw new Error(`git remote set-url failed in landing workspace: ${setUrl.stderr || setUrl.stdout}`)
+    }
+
+    return { path: landingPath, runId, runBranch, baseBranch: effectiveBaseBranch, gitUrl }
+  }
+
+  // Best-effort disposal of an isolated landing workspace. The landing
+  // workspace is a `--shared` clone of the workflow workspace, so a
+  // recursive `rm` of the landing directory only removes the clone's own
+  // working tree, index, and ref files; the workflow workspace's object
+  // store (shared via alternates) is read-only and untouched. A failure
+  // here is reported via the returned `disposed: false` so callers can
+  // surface it without losing the landing path that needs follow-up.
+  async disposeLandingWorkspace(landing: LandingWorkspaceInfo | string, signal: AbortSignal): Promise<{ path: string, disposed: boolean, error?: string }> {
+    const path = typeof landing === "string" ? landing : landing.path
+    if (!exists(path)) return { path, disposed: true }
+    try {
+      await deleteDirectory(path)
+      return { path, disposed: true }
+    } catch (err) {
+      return { path, disposed: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  // Remove landing workspaces left behind by previous runs. Pruning is
+  // scoped to the project's landing directory and only removes entries
+  // that match the prior runId (or entries with the issue runId
+  // pattern), so a crash in one run cannot leak landing dirs that
+  // affect a concurrent or future run.
+  async pruneLandingWorkspaces(variables: JsonObject | undefined, runId: string | null | undefined, signal: AbortSignal): Promise<string[]> {
+    const projectId = stringAt(variables, ["project", "id"]) ?? "project"
+    const projectName = stringAt(variables, ["project", "name"]) ?? projectId
+    const landingRoot = landingRootPath(this.runnerRoot, projectName)
+    if (!exists(landingRoot)) return []
+
+    const safeRunId = landingSafeId(runId)
+    const removed: string[] = []
+    const entries = await readdir(landingRoot, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      // Landing dir naming: `<runId>-<uuid>`. Always remove dirs whose
+      // runId prefix matches the run we are now ensuring (a crashed
+      // run will not race with a single concurrent ensure of the same
+      // runId). The uuid disambiguates concurrent retries of the same
+      // runId and is preserved on creation.
+      if (!entry.name.startsWith(`${safeRunId}-`)) continue
+      const target = join(landingRoot, entry.name)
+      try {
+        await deleteDirectory(target)
+        removed.push(target)
+      } catch {
+        // best-effort; the next ensure will retry.
+      }
+    }
+    return removed
   }
 
   private async ensureCache(cachePath: string, gitUrl: string, signal: AbortSignal) {
@@ -130,6 +283,19 @@ export function runnerVariables() {
 
 function issueWorkspacePath(runnerRoot: string, projectName: string, issueNumber: number) {
   return resolve(join(runnerRoot, slug(projectName), "workspaces", `issue-${issueNumber}`))
+}
+
+function landingRootPath(runnerRoot: string, projectName: string) {
+  return resolve(join(runnerRoot, slug(projectName), "landing"))
+}
+
+function landingWorkspacePath(runnerRoot: string, projectName: string, runId: string) {
+  return resolve(join(landingRootPath(runnerRoot, projectName), `${landingSafeId(runId)}-${randomUUID()}`))
+}
+
+function landingSafeId(runId: string | null | undefined) {
+  const safe = (runId ?? "").replace(/[^A-Za-z0-9_-]/g, "")
+  return safe || "run"
 }
 
 function runBranchName(runId: string | null | undefined) {
