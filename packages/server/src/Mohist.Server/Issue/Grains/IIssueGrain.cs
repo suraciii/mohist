@@ -6,7 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false);
+    Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();
@@ -19,7 +19,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartReadiness> GetStartReadinessAsync();
-    Task<IssueCommentResult> AddCommentAsync(string body);
+    Task<IssueCommentResult> AddCommentAsync(string body, string[]? attachmentIds = null);
     Task DeactivateForTestAsync();
 }
 

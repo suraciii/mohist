@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
-import { IssueStatus, IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
-import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, WorkflowStage, type AttachmentInfo, type RecoveryProjection } from '../../../entities/issue'
+import { addComment, addPrerequisite, closeIssue, commentAttachmentContentPath, deleteComment, extractAttachmentIds, forceStopIssue, issueAttachmentContentPath, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
@@ -17,9 +17,9 @@ import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { Textarea } from '@/shared/ui/components/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
-import { MarkdownReader } from '@/shared/ui'
+import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 import { getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { getStageColors } from '../../../widgets/kanban-board/model/stage-colors'
 import { CardSection } from '@/shared/ui/components/card-section'
@@ -128,6 +128,17 @@ function formatStageName(stage: string | null | undefined): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
+}
+
+function attachmentFromMetadata(id: string, attachments: AttachmentInfo[] | undefined, url: string): MarkdownAttachment | null {
+  const attachment = attachments?.find((item) => item.id === id)
+  if (!attachment) return null
+  return {
+    url,
+    contentType: attachment.contentType || 'application/octet-stream',
+    fileName: attachment.fileName,
+    size: attachment.size,
+  }
 }
 
 function WorkflowYamlDialog({ workflowRunId }: { workflowRunId: string }) {
@@ -335,7 +346,7 @@ export function IssueDetailPage() {
   })
 
   const addCommentMutation = useMutation({
-    mutationFn: (body: string) => addComment(issueNumber, body, projectId),
+    mutationFn: (body: string) => addComment(issueNumber, body, projectId, extractAttachmentIds(body)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       setCommentText('')
@@ -384,6 +395,12 @@ export function IssueDetailPage() {
   const canRerunWorkflow = allowedActions.includes('rerun')
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  )
+  const issueProjectId = projectId ?? issue.projectId
+  const resolveIssueAttachment = (id: string) => attachmentFromMetadata(
+    id,
+    issue.attachments,
+    `/api${issueAttachmentContentPath(issueNumber, id, issueProjectId)}`,
   )
 
   return (
@@ -542,6 +559,7 @@ export function IssueDetailPage() {
                       mode="collapsible"
                       collapsedHeight={600}
                       baseHeadingLevel={2}
+                      resolveAttachment={resolveIssueAttachment}
                     />
                   </div>
               )}
@@ -647,6 +665,11 @@ export function IssueDetailPage() {
                             <MarkdownReader
                               content={comment.body}
                               baseHeadingLevel={3}
+                              resolveAttachment={(id) => attachmentFromMetadata(
+                                id,
+                                comment.attachments,
+                                `/api${commentAttachmentContentPath(issueNumber, comment.id, id, issueProjectId)}`,
+                              )}
                             />
                           </div>
                           <Button
@@ -675,9 +698,10 @@ export function IssueDetailPage() {
                 )}
 
                 <div className="mt-4 pt-3 border-t border-gray-100">
-                  <Textarea
+                  <AttachmentComposer
+                    projectId={issueProjectId}
                     value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
+                    onChange={setCommentText}
                     placeholder="Add a comment..."
                     rows={2}
                     className="resize-none"

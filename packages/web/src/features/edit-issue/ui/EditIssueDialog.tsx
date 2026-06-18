@@ -8,8 +8,8 @@ import {
 } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { Textarea } from '@/shared/ui/components/textarea'
-import { updateIssue, useLabels } from '../../../entities/issue'
+import { AttachmentComposer } from '@/shared/ui'
+import { extractAttachmentIds, updateIssue, useLabels } from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
@@ -45,10 +45,11 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
       return updateIssue(issue.number, {
         title,
         body: body || undefined,
+        attachmentIds: extractAttachmentIds(body),
         ...(add.length > 0 ? { addLabels: add } : {}),
         ...(remove.length > 0 ? { removeLabels: remove } : {}),
         priority,
-      })
+      }, issue.projectId)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -82,9 +83,10 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
 
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Description</label>
-            <Textarea
+            <AttachmentComposer
+              projectId={issue.projectId}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
               placeholder="Optional description"
               rows={4}
               className="resize-none"

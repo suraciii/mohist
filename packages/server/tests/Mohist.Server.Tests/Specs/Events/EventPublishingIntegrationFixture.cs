@@ -46,6 +46,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         // and our test's queries. Mirrors MohistIntegrationFixture.
         _keeper = new SqliteConnection(_connectionString);
         await _keeper.OpenAsync();
+        await _factory.EnsureSchemaAsync();
     }
 
     public async Task DisposeAsync()

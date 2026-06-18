@@ -18,7 +18,7 @@ export function getIssue(number: number, projectId?: string | null) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`))
 }
 
-export function createIssue(data: { title: string; body?: string; labels?: string[]; model?: string; agentConfig?: Record<string, unknown>; priority?: string; risk?: string | null; workflowProfileId?: string | null; projectId?: string; repositoryName?: string }) {
+export function createIssue(data: { title: string; body?: string; attachmentIds?: string[]; labels?: string[]; model?: string; agentConfig?: Record<string, unknown>; priority?: string; risk?: string | null; workflowProfileId?: string | null; projectId?: string; repositoryName?: string }) {
   const { projectId, ...body } = data
   return request<Issue>(projectApiPath(projectId, '/issues'), {
     method: 'POST',
@@ -26,7 +26,7 @@ export function createIssue(data: { title: string; body?: string; labels?: strin
   })
 }
 
-export function updateIssue(number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) {
+export function updateIssue(number: number, data: { title?: string; body?: string; attachmentIds?: string[]; addLabels?: string[]; removeLabels?: string[]; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`), {
     method: 'PATCH',
     body: JSON.stringify(data),
@@ -107,11 +107,23 @@ export function getFileContent(number: number, filePath: string, projectId?: str
   return request<{ base: string; head: string }>(projectApiPath(projectId, `/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`))
 }
 
-export function addComment(issueNumber: number, body: string, projectId?: string | null) {
+export function addComment(issueNumber: number, body: string, projectId?: string | null, attachmentIds?: string[]) {
   return request<Comment>(projectApiPath(projectId, `/issues/${issueNumber}/comments`), {
     method: 'POST',
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, ...(attachmentIds?.length ? { attachmentIds } : {}) }),
   })
+}
+
+export function issueAttachmentContentPath(issueNumber: number, attachmentId: string, projectId?: string | null) {
+  return projectApiPath(projectId, `/issues/${issueNumber}/attachments/${encodeURIComponent(attachmentId)}/content`)
+}
+
+export function commentAttachmentContentPath(issueNumber: number, commentId: string, attachmentId: string, projectId?: string | null) {
+  return projectApiPath(projectId, `/issues/${issueNumber}/comments/${encodeURIComponent(commentId)}/attachments/${encodeURIComponent(attachmentId)}/content`)
+}
+
+export function extractAttachmentIds(markdown: string) {
+  return Array.from(new Set(Array.from(markdown.matchAll(/\batt:([A-Za-z0-9_-]+)/g), (match) => match[1])))
 }
 
 export function deleteComment(issueNumber: number, commentId: string, projectId?: string | null) {

@@ -30,6 +30,13 @@ public static class ApiTestClient
         return await ReadDataAsync<T>(response);
     }
 
+    public static async Task<T> PostMultipartDataAsync<T>(this HttpClient client, string path, HttpContent body)
+    {
+        using var response = await client.PostAsync(path, body);
+        await EnsureSuccessWithBodyAsync(response);
+        return await ReadDataAsync<T>(response);
+    }
+
     /// <summary>
     /// Creates a project and immediately attaches a single default repository.
     /// Tests that need a project to be issue-startable use this helper instead

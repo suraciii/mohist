@@ -12,6 +12,7 @@ public static class MohistApiRegistration
         app.MapHealthRoutes();
         app.MapStatusRoutes();
         app.MapProjectRoutes();
+        app.MapAttachmentRoutes();
         app.MapIssueRoutes();
         app.MapWorkflowEventRoutes();
         app.MapWorkflowSessionRoutes();

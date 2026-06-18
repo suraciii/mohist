@@ -33,6 +33,7 @@ public class MohistDbContext : DbContext
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
     public DbSet<AgentSessionTranscriptPartRow> AgentSessionTranscriptParts { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
+    public DbSet<AttachmentRow> Attachments { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
@@ -157,6 +158,24 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Body).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
+        });
+
+        modelBuilder.Entity<AttachmentRow>(entity =>
+        {
+            entity.ToTable("Attachments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OwnerKind).HasMaxLength(16);
+            entity.Property(e => e.OwnerId).HasMaxLength(256);
+            entity.Property(e => e.OriginalFileName).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.ContentType).HasMaxLength(128);
+            entity.Property(e => e.StoragePath).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerId })
+                .HasDatabaseName("IX_Attachments_ProjectId_Owner");
+            entity.HasIndex(e => e.ExpiresAt)
+                .HasDatabaseName("IX_Attachments_ExpiresAt");
         });
 
         modelBuilder.Entity<IssuePrerequisiteRow>(entity =>

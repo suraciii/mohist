@@ -12,6 +12,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Issue.Services.Attachments;
 
 namespace Mohist.Server.Issue.Services;
 
@@ -55,6 +56,12 @@ public class IssueQuerier
         var issue = await LoadIssueAsync(db, projectId, number);
         if (issue is null) return null;
         return ToInfo(issue, project);
+    }
+
+    public async Task<Domain.Issue?> GetDomainAsync(string projectId, int number)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await LoadIssueAsync(db, projectId, number);
     }
 
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)
@@ -368,11 +375,36 @@ public class IssueQuerier
             .Where(c => c.ProjectId == projectId && numbers.Contains(c.IssueNumber))
             .ToListAsync();
         comments = comments.OrderBy(c => c.CreatedAt).ToList();
+
+        var commentIds = comments.Select(c => c.Id).ToArray();
+        var attachmentRows = await db.Attachments.AsNoTracking()
+            .Where(a => a.ProjectId == projectId
+                && a.OwnerKind != null
+                && a.OwnerId != null
+                && ((a.OwnerKind == AttachmentService.OwnerKindIssue && issueIds.Contains(a.OwnerId))
+                    || (a.OwnerKind == AttachmentService.OwnerKindComment && commentIds.Contains(a.OwnerId))))
+            .ToListAsync();
+
+        var issueAttachments = attachmentRows
+            .Where(a => a.OwnerKind == AttachmentService.OwnerKindIssue && a.OwnerId is not null)
+            .GroupBy(a => a.OwnerId!)
+            .ToDictionary(group => group.Key, group => group.Select(ToAttachmentInfo).ToArray());
+        var commentAttachments = attachmentRows
+            .Where(a => a.OwnerKind == AttachmentService.OwnerKindComment && a.OwnerId is not null)
+            .GroupBy(a => a.OwnerId!)
+            .ToDictionary(group => group.Key, group => group.Select(ToAttachmentInfo).ToArray());
+
+        foreach (var issue in issues)
+        {
+            if (issueAttachments.TryGetValue(issue.Id, out var attachments))
+                issue.Attachments = attachments;
+        }
+
         foreach (var group in comments.GroupBy(c => c.IssueNumber))
         {
             if (byNumber.TryGetValue(group.Key, out var issue))
             {
-                issue.Comments = group.Select(ToCommentDto).ToArray();
+                issue.Comments = group.Select(comment => ToCommentDto(comment, commentAttachments)).ToArray();
             }
         }
 
@@ -465,7 +497,23 @@ public class IssueQuerier
         (await EnrichAsync(db, [issue]))[0];
 
     public static IssueCommentDto ToCommentDto(IssueCommentRow comment) =>
-        new(comment.Id, comment.IssueId, comment.Body, comment.CreatedAt.ToString("o"));
+        ToCommentDto(comment, new Dictionary<string, AttachmentInfo[]>());
+
+    private static IssueCommentDto ToCommentDto(
+        IssueCommentRow comment,
+        IReadOnlyDictionary<string, AttachmentInfo[]> attachmentsByComment) =>
+        new(
+            comment.Id,
+            comment.IssueId,
+            comment.Body,
+            comment.CreatedAt.ToString("o"),
+            attachmentsByComment.TryGetValue(comment.Id, out var attachments) ? attachments : []);
+
+    private static AttachmentInfo ToAttachmentInfo(AttachmentRow row) => new(
+        row.Id,
+        row.OriginalFileName,
+        string.IsNullOrWhiteSpace(row.ContentType) ? "application/octet-stream" : row.ContentType,
+        row.Size);
 
     private static void ApplyIssueWorkflowVariables(IssueReadModel issue, string? variablesJson)
     {

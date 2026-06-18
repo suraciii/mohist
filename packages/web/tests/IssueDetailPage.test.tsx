@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
       isPending: false,
       error: null,
     },
+    uploads: [] as Array<{ id: string; fileName: string; contentType: string; size: number }>,
     workflowProfile: null as any,
     workflowProfileLoading: false,
     workflowProfileError: null as Error | null,
@@ -149,6 +150,7 @@ beforeEach(() => {
   mocks.workflowProfileRefetch = vi.fn()
   mocks.workflowProfileUpdateMutate = vi.fn()
   mocks.workflowProfileDeleteMutate = vi.fn()
+  mocks.uploads = []
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0 },
@@ -161,12 +163,45 @@ beforeEach(() => {
     return new StubResizeObserver(callback)
   })
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = resizeObserverSpy
+  let objectUrlCounter = 0
+  vi.stubGlobal('URL', {
+    ...URL,
+    createObjectURL: vi.fn(() => `blob:test-${++objectUrlCounter}`),
+    revokeObjectURL: vi.fn(),
+  })
+  class MockXMLHttpRequest {
+    upload = { onprogress: null as ((event: ProgressEvent) => void) | null }
+    status = 200
+    responseText = ''
+    onload: (() => void) | null = null
+    onerror: (() => void) | null = null
+    open = vi.fn()
+    send = vi.fn(() => {
+      const upload = mocks.uploads.shift() ?? { id: 'att_default', fileName: 'default.txt', contentType: 'text/plain', size: 12 }
+      this.responseText = JSON.stringify(upload)
+      this.upload.onprogress?.({ lengthComputable: true, loaded: upload.size, total: upload.size } as ProgressEvent)
+      this.onload?.()
+    })
+  }
+  vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest)
 })
 
 afterEach(() => {
   queryClient.clear()
   delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
+  vi.unstubAllGlobals()
 })
+
+function fileList(files: File[]) {
+  const list = files.reduce<Record<number, File>>((acc, file, index) => {
+    acc[index] = file
+    return acc
+  }, {})
+  return Object.assign(list, {
+    length: files.length,
+    item: (index: number) => files[index] ?? null,
+  }) as unknown as FileList
+}
 
 function renderWithQueryClient(ui: React.ReactElement) {
   return baseRender(
@@ -643,6 +678,102 @@ describe('IssueDetailPage Markdown rendering', () => {
         expect(screen.getByText('no retryable failed work')).toBeInTheDocument()
         expect(within(surface).getByTestId('runtime-action-rerun')).toBeInTheDocument()
       })
+    })
+  })
+
+  describe('attachment integration', () => {
+    it('uploads pasted files in the issue body editor and comment composer with independent state', async () => {
+      mocks.issue = makeIssue({ body: 'Issue body' })
+      mocks.uploads = [
+        { id: 'att_issue_image.png', fileName: 'issue-image.png', contentType: 'image/png', size: 1024 },
+        { id: 'att_comment_log.txt', fileName: 'comment-log.txt', contentType: 'text/plain', size: 2048 },
+      ]
+      renderWithQueryClient(<IssueDetailPage />)
+
+      fireEvent.click(await screen.findByTestId('edit-issue-button'))
+      const description = screen.getByPlaceholderText('Optional description')
+      fireEvent.paste(description, {
+        clipboardData: { files: fileList([new File(['image'], 'issue-image.png', { type: 'image/png' })]) },
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('issue-image.png')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('comment-log.txt')).not.toBeInTheDocument()
+
+      const comment = screen.getByPlaceholderText('Add a comment...')
+      fireEvent.paste(comment, {
+        clipboardData: { files: fileList([new File(['log'], 'comment-log.txt', { type: 'text/plain' })]) },
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('comment-log.txt')).toBeInTheDocument()
+      })
+      expect((description as HTMLTextAreaElement).value).toContain('![issue-image.png](att:att_issue_image.png)')
+      expect((comment as HTMLTextAreaElement).value).toContain('[comment-log.txt](att:att_comment_log.txt)')
+    })
+
+    it('uploads dropped files on both issue and comment composer surfaces', async () => {
+      mocks.issue = makeIssue({ body: 'Issue body' })
+      mocks.uploads = [
+        { id: 'att_issue_drop.txt', fileName: 'issue-drop.txt', contentType: 'text/plain', size: 30 },
+        { id: 'att_comment_drop.png', fileName: 'comment-drop.png', contentType: 'image/png', size: 40 },
+      ]
+      renderWithQueryClient(<IssueDetailPage />)
+
+      fireEvent.click(await screen.findByTestId('edit-issue-button'))
+      const description = screen.getByPlaceholderText('Optional description')
+      fireEvent.drop(description.closest('div')!, {
+        dataTransfer: { files: fileList([new File(['issue'], 'issue-drop.txt', { type: 'text/plain' })]) },
+      })
+
+      const comment = screen.getByPlaceholderText('Add a comment...')
+      fireEvent.drop(comment.closest('div')!, {
+        dataTransfer: { files: fileList([new File(['comment'], 'comment-drop.png', { type: 'image/png' })]) },
+      })
+
+      await waitFor(() => {
+        expect((description as HTMLTextAreaElement).value).toContain('[issue-drop.txt](att:att_issue_drop.txt)')
+        expect((comment as HTMLTextAreaElement).value).toContain('![comment-drop.png](att:att_comment_drop.png)')
+      })
+    })
+
+    it('renders issue and comment attachments through serving URLs with lightbox and file-card download names', async () => {
+      mocks.issue = makeIssue({
+        body: 'See ![screen](att:att_image_real) and [report](att:att_report_real)',
+        attachments: [
+          { id: 'att_image_real', fileName: 'screen.png', contentType: 'image/png', size: 1024 },
+          { id: 'att_report_real', fileName: 'report.pdf', contentType: 'application/pdf', size: 2048 },
+        ],
+        comments: [
+          {
+            id: 'comment-1',
+            issueId: 'issue-1',
+            body: 'Comment image ![comment](att:att_comment_image_real)',
+            createdAt: '2024-01-01T11:00:00.000Z',
+            attachments: [
+              { id: 'att_comment_image_real', fileName: 'comment-image.png', contentType: 'image/png', size: 512 },
+            ],
+          },
+        ],
+      })
+      renderWithQueryClient(<IssueDetailPage />)
+
+      const issueImage = await screen.findByRole('img', { name: 'screen' })
+      expect(issueImage).toHaveAttribute('src', '/api/projects/project-1/issues/1/attachments/att_image_real/content')
+      fireEvent.click(screen.getAllByTestId('markdown-attachment-image-trigger')[0])
+      expect(await screen.findByTestId('markdown-attachment-lightbox')).toBeInTheDocument()
+      fireEvent.click(screen.getByTestId('markdown-attachment-lightbox'))
+      await waitFor(() => expect(screen.queryByTestId('markdown-attachment-lightbox')).not.toBeInTheDocument())
+
+      const card = screen.getByTestId('markdown-attachment-file-card')
+      expect(card).toHaveAttribute('href', '/api/projects/project-1/issues/1/attachments/att_report_real/content')
+      expect(card).toHaveAttribute('download', 'report.pdf')
+      expect(card).toHaveTextContent('2.0 KB')
+      expect(screen.getByRole('img', { name: 'comment' })).toHaveAttribute(
+        'src',
+        '/api/projects/project-1/issues/1/comments/comment-1/attachments/att_comment_image_real/content',
+      )
     })
   })
 })

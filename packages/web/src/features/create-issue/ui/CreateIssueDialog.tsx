@@ -8,13 +8,13 @@ import {
 } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { Textarea } from '@/shared/ui/components/textarea'
+import { AttachmentComposer } from '@/shared/ui'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/shared/ui/components/popover'
-import { createIssue, useLabels } from '../../../entities/issue'
+import { createIssue, extractAttachmentIds, useLabels } from '../../../entities/issue'
 import { useAvailableModelIds, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useProject, useRepositories } from '../../../entities/project'
@@ -236,6 +236,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
       createIssue({
         title,
         body: body || undefined,
+        attachmentIds: extractAttachmentIds(body),
         labels: labels.length > 0 ? labels : undefined,
         ...(model ? { model } : {}),
         ...(projectId ? { projectId } : {}),
@@ -302,9 +303,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
 
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Description</label>
-            <Textarea
+            <AttachmentComposer
+              projectId={currentProject?.id ?? projectId ?? ''}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={setBody}
               placeholder="Optional description"
               rows={3}
               className="resize-none"

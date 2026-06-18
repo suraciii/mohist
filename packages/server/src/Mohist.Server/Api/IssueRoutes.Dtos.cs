@@ -14,7 +14,8 @@ public record CreateIssueRequest(
     string? WorkflowProfileId = null,
     string? RepositoryName = null,
     string? Risk = null,
-    bool? IsDraft = null);
+    bool? IsDraft = null,
+    string[]? AttachmentIds = null);
 
 public record UpdateIssueRequest(
     string? Title = null,
@@ -25,7 +26,8 @@ public record UpdateIssueRequest(
     Dictionary<string, object?>? AgentConfig = null,
     Dictionary<string, string>? StageModels = null,
     Dictionary<string, Dictionary<string, string>>? StageVariables = null,
-    bool? IsDraft = null);
+    bool? IsDraft = null,
+    string[]? AttachmentIds = null);
 
 public record CreateFeedbackRequest(string Stage, string Body);
 
@@ -39,7 +41,14 @@ public sealed record RuntimeTaskRequest(
 
 public record AddPrerequisiteRequest(int PrerequisiteNumber);
 
-public record AddCommentRequest(string Body);
+public record AddCommentRequest(string Body, string[]? AttachmentIds = null);
+
+public sealed record AttachmentUploadResponse(
+    string Id,
+    string FileName,
+    string? ContentType,
+    long Size,
+    string? ExpiresAt);
 
 public record IssueTemplateRequest(string? ProjectTemplateId = null, string? Yaml = null, string? Template = null);
 
