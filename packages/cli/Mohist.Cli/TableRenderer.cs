@@ -193,9 +193,12 @@ internal sealed class TableRenderer
         var currentStage = StringOf(workflow, "currentStage");
         var status = StringOf(workflow, "status");
         var stages = workflow?["stages"] as JsonArray;
+        var failure = workflow?["failure"] as JsonObject;
 
         _out.WriteLine($"current stage: {currentStage}");
         _out.WriteLine($"status:        {status}");
+
+        RenderDeliveryFailure(failure);
 
         if (stages is null)
             return;
@@ -224,6 +227,22 @@ internal sealed class TableRenderer
             });
         }
         WriteTable(headers, widths, cells);
+    }
+
+    private void RenderDeliveryFailure(JsonNode? failureNode)
+    {
+        if (failureNode is not JsonObject failure) return;
+        var message = StringOf(failure, "message");
+        if (string.IsNullOrEmpty(message)) return;
+
+        var (kind, guidance) = DeliveryFailureGuidance.Resolve(message, null);
+        if (kind is null || guidance is null) return;
+
+        _out.WriteLine("");
+        _out.WriteLine("delivery failure:");
+        _out.WriteLine($"  kind:       {kind}");
+        _out.WriteLine($"  label:      {guidance.Value.Label}");
+        _out.WriteLine($"  next action: {guidance.Value.NextAction}");
     }
 
     private void RenderSessions(JsonNode? data)

@@ -17,6 +17,11 @@ import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
 import { FeedbackHistory } from './FeedbackHistory'
 import type { WorkflowArtifactSummary } from '../../../entities/issue'
+import {
+  resolveDeliveryFailureFromOutput,
+  resolveDeliveryFailureFromMessage,
+  type DeliveryFailureKind,
+} from '../../../shared/lib/delivery-failure'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -428,7 +433,12 @@ function TaskItem({
   const hasRequiredFiles = (task.requiredFiles?.length ?? 0) > 0
   const artifactSummaries = task.artifactSummaries ?? []
   const hasArtifacts = artifactSummaries.length > 0
-  const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput
+  const isDeliveryTask = isDeliveryFailureTask(task)
+  const deliveryFailure = isFailed && isDeliveryTask
+    ? (resolveDeliveryFailureFromOutput(taskOutput).guidance
+      ?? resolveDeliveryFailureFromMessage(typeof task.reason === 'string' ? task.reason : null).guidance)
+    : null
+  const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
@@ -506,6 +516,13 @@ function TaskItem({
       {expanded && canExpand && (
         <div className="px-3 pb-2 border-t bg-muted">
           <div className="mt-2 space-y-2">
+            {deliveryFailure && (
+              <DeliveryFailureBanner
+                failureKind={deliveryFailure.failureKind}
+                label={deliveryFailure.label}
+                nextAction={deliveryFailure.nextAction}
+              />
+            )}
             {hasReason && (
               <div className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
                 {task.reason}
@@ -555,6 +572,40 @@ function TaskItem({
 function isScriptHealthCheck(check: StageCheckState): boolean {
   const output = check.output as { kind?: string } | undefined
   return check.checkName === 'health' || output?.kind === 'script'
+}
+
+function isDeliveryFailureTask(task: StageTaskState): boolean {
+  const uses = task.origin?.uses
+  if (typeof uses !== 'string') {
+    return typeof task.taskId === 'string' && (task.taskId.startsWith('integrate:prepare') || task.taskId.startsWith('integrate:publish'))
+  }
+  return uses === 'mohist/prepare' || uses === 'mohist/publish'
+}
+
+function DeliveryFailureBanner({
+  failureKind,
+  label,
+  nextAction,
+}: {
+  failureKind: DeliveryFailureKind
+  label: string
+  nextAction: string
+}) {
+  const colors: Record<DeliveryFailureKind, string> = {
+    conflict: 'border-red-300 bg-red-50 text-red-800',
+    'base-moved': 'border-amber-300 bg-amber-50 text-amber-800',
+    'retry-safe': 'border-blue-300 bg-blue-50 text-blue-800',
+  }
+  return (
+    <div className={`rounded-md border px-2.5 py-2 text-xs space-y-1 ${colors[failureKind]}`}>
+      <div className="flex items-center gap-2 font-semibold">
+        <span className="text-[10px] uppercase tracking-wide opacity-80">Failure kind</span>
+        <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px]">{failureKind}</span>
+        <span>{label}</span>
+      </div>
+      <p className="leading-snug">{nextAction}</p>
+    </div>
+  )
 }
 
 function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLabel?: string }) {
@@ -1110,6 +1161,8 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   let healthSummary = ''
   let healthLogExcerpt = ''
   let nextAction = 'Review the failure above and take action to resolve the issue.'
+  const deliveryGuidance = resolveDeliveryFailureFromMessage(blockedReason).guidance
+  let deliveryFailureLabel: string | null = null
 
   if (blockedReason) {
     if (blockedReason.includes('spec-sync') || blockedReason.includes('spec sync')) {
@@ -1118,6 +1171,12 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
     } else if (blockedReason.includes('archive')) {
       failingStep = 'Archive OpenSpec change'
       nextAction = 'Check disk space and permissions. Retry the archive step or return to Build.'
+    } else if (deliveryGuidance) {
+      failingStep = blockedReason.includes('Prepare') || blockedReason.includes('prepare')
+        ? 'Prepare branch'
+        : 'Publish changes'
+      deliveryFailureLabel = deliveryGuidance.label
+      nextAction = deliveryGuidance.nextAction
     } else if (blockedReason.includes('merge') || blockedReason.includes('Merge')) {
       failingStep = 'Merge to target branch'
       nextAction = 'Resolve any merge conflicts and return to Build for re-check.'
@@ -1137,6 +1196,13 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
         <div className="text-xs text-red-700">
           <span className="font-medium">Failing step:</span> {failingStep}
         </div>
+        {deliveryFailureLabel && deliveryGuidance && (
+          <div className="text-xs text-red-700">
+            <span className="font-medium">Failure kind:</span>{' '}
+            <span className="rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px] mr-1">{deliveryGuidance.failureKind}</span>
+            {deliveryFailureLabel}
+          </div>
+        )}
         {capabilityOrFiles && (
           <div className="text-xs text-red-700">
             <span className="font-medium">Affected:</span> {capabilityOrFiles}

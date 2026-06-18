@@ -1,4 +1,4 @@
-# OpenSpec Capability: merge-delivery
+## ADDED Requirements
 
 ### Requirement: Integrate delivery is prepare then publish
 

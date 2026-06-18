@@ -34,24 +34,30 @@ WorkflowRun SHALL be the current runtime state root and consistency boundary. `s
 
 ### Requirement: REQ-WR-005 Integrate runtime work is first-class WorkflowRun state
 
-Integrate stage progress SHALL be represented in WorkflowRun using standard task and check entities. The Integrate StageRun SHALL expose ordered tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge`, plus check `health:integrate`; merge delivery metadata and post-merge freeze state SHALL be persisted as WorkflowRun facts.
+Integrate stage progress SHALL be represented in WorkflowRun using standard task and check entities. The Integrate StageRun SHALL expose ordered tasks `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, and `integrate:publish`, plus check `health:integrate`; delivery metadata (prepared base, published commit, push ownership) and post-publish freeze state SHALL be persisted as WorkflowRun facts.
 
 #### Scenario: Integrate stage is seeded with visible work
 
 - **WHEN** an issue starts or resumes with an active WorkflowRun
-- **THEN** the Integrate StageRun SHALL contain pending tasks `integrate:spec-sync`, `integrate:archive-change`, and `integrate:merge` in execution order
+- **THEN** the Integrate StageRun SHALL contain pending tasks `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, and `integrate:publish` in execution order
 - **AND** it SHALL contain a pending check `health:integrate`
 
-#### Scenario: Integrate merge records delivery facts
+#### Scenario: Integrate prepare records reconciliation facts
 
-- **WHEN** `integrate:merge` completes successfully
-- **THEN** the task result SHALL record `targetBranch`, `baseSha`, `candidateHeadSha`, `landedSha`, `pushRemote`, `remoteRefAfterPush`, `pushAttempts`, and `rebased` when available
+- **WHEN** `integrate:prepare` completes successfully
+- **THEN** the task result SHALL record `targetBranch`, the base commit it prepared against, the prepared candidate head, and `rebased` when available
+- **AND** later Integrate work SHALL treat the issue branch as up to date with that base
+
+#### Scenario: Integrate publish records delivery facts and freezes
+
+- **WHEN** `integrate:publish` completes successfully
+- **THEN** the task result SHALL record `targetBranch`, `baseSha`, the landed commit sha, and that the change was pushed to the remote
 - **AND** the Integrate StageRun SHALL record a freeze point that prevents later automatic code-modifying tasks
 
-#### Scenario: Post-merge health failure is non-repairable
+#### Scenario: Post-publish health failure is non-repairable
 
-- **WHEN** `health:integrate` fails after `integrate:merge` has completed
-- **THEN** WorkflowRun SHALL fail with reason `post-merge-health-failed`
+- **WHEN** `health:integrate` fails after `integrate:publish` has completed
+- **THEN** WorkflowRun SHALL fail with reason `post-publish-health-failed`
 - **AND** it SHALL NOT schedule `fix-integrate-health` regardless of check failure policy configuration
 
 ### Requirement: Task completion persists clean-worktree verification evidence
@@ -456,9 +462,9 @@ WorkflowRun SHALL require the workflow to pass the final Integrate StageRun with
 - **THEN** WorkflowRun SHALL NOT report the run as passed
 
 #### Scenario: Missing Integrate delivery evidence blocks Done
-- **WHEN** Integrate lacks successful required TaskRun evidence, passed required CheckRun evidence, or delivery facts such as spec sync, archive, merge, or final health evidence required by the Integrate model
+- **WHEN** Integrate lacks successful required TaskRun evidence, passed required CheckRun evidence, or delivery facts such as spec sync, archive, prepare, publish, or final health evidence required by the Integrate model
 - **THEN** WorkflowRun SHALL block final completion with a clear reason
-- **AND** merge state alone SHALL NOT mark the workflow passed
+- **AND** delivery action state alone SHALL NOT mark the workflow passed
 
 ### Requirement: TaskRun references shared agent sessions without owning transcripts
 
@@ -615,4 +621,3 @@ Workflow runs SHALL preserve structured feedback evidence including the feedback
 - **WHEN** an `apply-feedback` task completes with a resolution summary
 - **THEN** the WorkflowRun SHALL record that the corresponding feedback has been resolved
 - **AND** the resolution summary and resolution task id SHALL be preserved
-
