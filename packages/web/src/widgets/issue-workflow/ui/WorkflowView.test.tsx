@@ -224,6 +224,7 @@ function mockRequestChangesMutation() {
 describe('WorkflowView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.innerWidth = 1280
     mockedApproveIssue.mockResolvedValue({
       issue: {} as Issue,
       context: null,
@@ -242,6 +243,27 @@ describe('WorkflowView', () => {
     expect(screen.getByText('runtime:coder-agent')).toBeInTheDocument()
     expect(screen.getByText('runtime:core/script')).toBeInTheDocument()
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
+  })
+
+  it('renders a scrollable stage stepper on mobile without clipping stage labels', async () => {
+    window.innerWidth = 390
+    mockedUseWorkflowTimeline.mockReturnValue({ data: makeTimeline() } as ReturnType<typeof useWorkflowTimeline>)
+
+    render(<WorkflowView issue={makeIssue()} />)
+
+    const stageBar = await screen.findByTestId('workflow-stage-bar-scrollable-stepper')
+    expect(stageBar).toHaveClass('overflow-x-auto', 'flex-nowrap')
+    expect(screen.queryByTestId('workflow-stage-bar')).not.toBeInTheDocument()
+
+    for (const label of ['Plan', 'Build', 'Check', 'Integrate', 'Done']) {
+      const stageButton = screen.getByRole('button', { name: new RegExp(label, 'i') })
+      expect(stageButton).toBeInTheDocument()
+      expect(stageButton).toHaveClass('min-w-32', 'shrink-0')
+      const labelNode = within(stageButton).getByText(label)
+      expect(labelNode).toBeInTheDocument()
+      expect(labelNode).toHaveClass('whitespace-nowrap')
+      expect(labelNode).not.toHaveClass('truncate')
+    }
   })
 
   it('does not request workflow timeline for backlog issues', () => {

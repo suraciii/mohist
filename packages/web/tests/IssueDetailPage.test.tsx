@@ -664,12 +664,16 @@ describe('IssueDetailPage workflow profile integration', () => {
   })
 
   function findDetailsCard() {
-    const heading = screen.getByText('Details', { selector: 'h2' })
+    return findCardByHeading('Details')
+  }
+
+  function findCardByHeading(name: string) {
+    const heading = screen.getByText(name, { selector: 'h2' })
     let current: HTMLElement | null = heading
     while (current && !(current.tagName === 'SECTION')) {
       current = current.parentElement
     }
-    if (!current) throw new Error('Details CardSection not found')
+    if (!current) throw new Error(`${name} CardSection not found`)
     return current
   }
 
@@ -718,7 +722,8 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(within(detailsCard).getByText('Project')).toBeInTheDocument()
     expect(within(detailsCard).getByText('Test Project')).toBeInTheDocument()
     expect(within(detailsCard).getByText('Repository')).toBeInTheDocument()
-    expect(within(detailsCard).getByText('main')).toBeInTheDocument()
+    expect(within(detailsCard).getByTestId('repository-name')).toHaveTextContent('main')
+    expect(within(detailsCard).getByTestId('repository-base-branch')).toHaveTextContent('main')
   })
 
   it('renders the Workflow Profile card as the single source of profile identity', async () => {
@@ -738,26 +743,62 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(within(profileCard).getByText('Inherited')).toBeInTheDocument()
   })
 
-  it('keeps the Coder Model and Per-stage overrides controls inside ACTIONS', async () => {
+  it('groups issue detail right rail panels by user intent', async () => {
     mocks.issue = makeIssue({
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
+      workflowRunId: 'run-123',
       workflowProfileId: 'mohist/default',
+      projectName: 'Test Project',
+      repository: { name: 'main', baseBranch: 'main' },
     })
     mocks.workflowProfile = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
-    const actionsHeading = await waitFor(() => screen.getByText('Actions', { selector: 'h2' }))
-    let actionsCard: HTMLElement | null = actionsHeading
-    while (actionsCard && actionsCard.tagName !== 'SECTION') {
-      actionsCard = actionsCard.parentElement
-    }
-    if (!actionsCard) throw new Error('Actions CardSection not found')
+    await waitFor(() => {
+      expect(screen.getByText('Details', { selector: 'h2' })).toBeInTheDocument()
+      expect(screen.getByText('Latest Artifacts', { selector: 'h3' })).toBeInTheDocument()
+      expect(screen.getByText('Runtime/Sessions', { selector: 'h2' })).toBeInTheDocument()
+      expect(screen.getByText('Configuration', { selector: 'h2' })).toBeInTheDocument()
+      expect(screen.getByText('Actions', { selector: 'h2' })).toBeInTheDocument()
+    })
 
-    expect(within(actionsCard).getByText('Coder Model')).toBeInTheDocument()
-    expect(within(actionsCard).getByText('Per-stage overrides')).toBeInTheDocument()
+    const runtimeSessionsCard = findCardByHeading('Runtime/Sessions')
+    expect(within(runtimeSessionsCard).getByText('Task Progress')).toBeInTheDocument()
+    expect(within(runtimeSessionsCard).getByText('Sessions')).toBeInTheDocument()
+
+    const configurationCard = findCardByHeading('Configuration')
+    expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()
+    expect(within(configurationCard).getByText('Per-stage overrides')).toBeInTheDocument()
+
+    const actionsCard = findCardByHeading('Actions')
+    expect(within(actionsCard).queryByText('Coder Model')).not.toBeInTheDocument()
+    expect(within(actionsCard).queryByText('Per-stage overrides')).not.toBeInTheDocument()
+  })
+
+  it('groups backlog prerequisite controls with configuration instead of a separate rail card', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'backlog',
+      workflowProfileId: 'mohist/default',
+      prerequisites: [
+        { number: 2, title: 'Prepare dependency', completed: false },
+      ],
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Configuration', { selector: 'h2' })).toBeInTheDocument()
+    })
+
+    const configurationCard = findCardByHeading('Configuration')
+    expect(within(configurationCard).getByTestId('prerequisite-configuration-controls')).toBeInTheDocument()
+    expect(within(configurationCard).getByText('Prerequisites')).toBeInTheDocument()
+    expect(screen.queryByText('Add Prerequisite', { selector: 'h2' })).not.toBeInTheDocument()
   })
 
   it('labels active run YAML as runtime output, not workflow profile configuration', async () => {

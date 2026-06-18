@@ -17,6 +17,7 @@ import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
 import { FeedbackHistory } from './FeedbackHistory'
 import type { WorkflowArtifactSummary } from '../../../entities/issue'
+import { useIsMobile } from '@/shared/hooks/use-mobile'
 import {
   resolveDeliveryFailureFromOutput,
   resolveDeliveryFailureFromMessage,
@@ -222,6 +223,7 @@ function StageBarCell({
   selected,
   readOnly,
   onClick,
+  isMobile,
 }: {
   stage: WorkflowStage
   status: string
@@ -229,22 +231,25 @@ function StageBarCell({
   selected: boolean
   readOnly: boolean
   onClick: () => void
+  isMobile: boolean
 }) {
   const bgColor = selected ? 'bg-muted border-gray-300' : 'bg-background border'
   const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1)
+  const layoutClass = isMobile ? 'min-w-32 shrink-0' : 'flex-1 min-w-0'
+  const labelClass = isMobile ? 'whitespace-nowrap' : 'truncate'
 
   return (
     <Button
       variant="ghost"
       onClick={onClick}
       disabled={readOnly && status === 'pending'}
-      className={`flex-1 min-w-0 rounded-lg border p-3 text-left transition-colors h-auto justify-start font-normal ${bgColor} ${
+      className={`${layoutClass} rounded-lg border p-3 text-left transition-colors h-auto justify-start font-normal ${bgColor} ${
         !readOnly && status !== 'pending' ? 'cursor-pointer hover:bg-muted' : ''
       } ${status === 'pending' && !selected ? 'opacity-60' : ''}`}
     >
       <div className="flex items-center gap-2 mb-1">
         <StageStatusIcon status={status} />
-        <span className="text-sm font-medium text-foreground truncate">{stageLabel}</span>
+        <span className={`text-sm font-medium text-foreground ${labelClass}`}>{stageLabel}</span>
       </div>
       {status === 'completed' && duration != null && (
         <span className="text-xs text-muted-foreground/70 ml-7">{formatDuration(duration)}</span>
@@ -271,8 +276,13 @@ function StageBar({
   readOnly: boolean
   runningDurations: Map<string, number>
 }) {
+  const isMobile = useIsMobile()
+
   return (
-    <div className="flex items-stretch gap-2" data-testid="workflow-stage-bar">
+    <div
+      className={`flex items-stretch gap-2 ${isMobile ? 'overflow-x-auto flex-nowrap pb-1' : ''}`}
+      data-testid={isMobile ? 'workflow-stage-bar-scrollable-stepper' : 'workflow-stage-bar'}
+    >
       {WORKFLOW_STAGES.map((stage, idx) => {
         const status = getStageStatus(stage, stageStateMap, issue)
         let duration = getStageDuration(stage, stageStateMap)
@@ -280,7 +290,7 @@ function StageBar({
           duration = runningDurations.get(stage)!
         }
         return (
-          <div key={stage} className="flex items-stretch flex-1 min-w-0">
+          <div key={stage} className={`flex items-stretch ${isMobile ? 'shrink-0' : 'flex-1 min-w-0'}`}>
             {idx > 0 && (
               <div className="flex items-center px-1">
                 <svg className="h-4 w-4 text-gray-300 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -299,6 +309,7 @@ function StageBar({
               selected={selectedStage === stage}
               readOnly={readOnly}
               onClick={() => onSelectStage(stage)}
+              isMobile={isMobile}
             />
           </div>
         )
