@@ -202,6 +202,23 @@ export async function runRebaseConflictResolver(
   return await runConflictResolver(context, conflictResolver, conflicts, baseBranch, attempt)
 }
 
+export async function runRebaseResolverFollowup(
+  context: ActionContext,
+  title: string,
+  with_: JsonObject,
+  workIdSuffix: string,
+): Promise<ActionResult> {
+  const resolverContext: ActionContext = {
+    ...context,
+    workId: `${context.workId}-${workIdSuffix}`,
+    workType: "task",
+    title,
+    with: with_,
+  }
+
+  return conflictResolverRunner(resolverContext)
+}
+
 export function combinedRebaseGitOutput(outputs: string[]) {
   return combinedGitOutput(outputs)
 }
