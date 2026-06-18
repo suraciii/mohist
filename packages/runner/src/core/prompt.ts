@@ -2,6 +2,14 @@ import type { JsonObject, JsonValue } from "./types.js"
 
 export type StructuredPrompt = JsonObject
 
+/**
+ * Authoritative workflow prompt assembly contract: text prompt specs are used
+ * verbatim, structured object specs render as XML through renderStructuredPrompt,
+ * and loader specs (`uses` + `with`) dispatch to a PromptLoader whose returned
+ * text or object is normalized by the same rule. Consumers that build prompts
+ * for LLM input must route through resolvePrompt and must not add markdown
+ * wrapping, prefixes, suffixes, or fallback prompt synthesis around its result.
+ */
 export type PromptSpec = string | StructuredPrompt
 
 export interface PromptLoaderContext {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
-import { acpAgentAction, buildPromptWithMohistContext, defaultCompactionConfig, resolveCompactionConfig, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
+import { acpAgentAction, defaultCompactionConfig, resolveCompactionConfig, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 import { AcpSessionManager, type SharedAcpConnection } from "../src/runtime/acp-connection.js"
 import { ServerConnection } from "../src/server/connection.js"
@@ -30,40 +30,6 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("success")
     expect(JSON.parse(result.output ?? "{}").acpSessionId).toBe("fake-session-1")
     expect(fixture.agent.calls.map((call) => call.event).filter((event) => ["initialize", "newSession", "prompt"].includes(event))).toEqual(["initialize", "newSession", "prompt"])
-  })
-
-  it("OpenSpecTaskWithoutPrompt_ActionBuildsPromptFromTaskFields", async () => {
-    const fixture = createFixture("basic")
-
-    const result = await acpAgentAction(fixture.context({
-      description: "Requeue runnable workflows on server startup.",
-      acceptanceCriteria: ["runner can claim recovered work"],
-      output: "packages/server/src/Mohist.Server/Workflow/Recovery",
-    }))
-
-    expect(result.status).toBe("success")
-    const prompt = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    expect(prompt).toContain("Implement this task: Build task")
-    expect(prompt).toContain("Requeue runnable workflows on server startup.")
-    expect(prompt).toContain("runner can claim recovered work")
-  })
-
-  it("IssueVariablesPresent_ActionPrependsIssueContextToPrompt", async () => {
-    const fixture = createFixture("basic")
-
-    const result = await acpAgentAction(fixture.context({ prompt: "create the proposal" }))
-
-    expect(result.status).toBe("success")
-    const prompt = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    expect(prompt).toContain("## Mohist Issue Context")
-    expect(prompt).toContain("Number: 7")
-    expect(prompt).toContain("Title: Document update smoke validation note")
-    expect(prompt).toContain("Body:\nAdd a short note that records the expected local post-update smoke validation path.")
-    expect(prompt).toContain("## Task Prompt\n\ncreate the proposal")
-  })
-
-  it("IssueVariablesMissing_PromptContextBuilderLeavesPromptUnchanged", () => {
-    expect(buildPromptWithMohistContext({ variables: {}, issueNumber: null }, "plain prompt")).toBe("plain prompt")
   })
 
   it("ModelConfigured_AcpSessionStarts_SetsSessionConfigModelBeforePrompt", async () => {
@@ -554,17 +520,17 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
   })
 
-  it("StringPrompt_ActionSendsPromptVerbatimBeforeMohistContextWrapper", async () => {
+  it("StringPrompt_ActionSendsPromptVerbatimWithoutMarkdownEnvelope", async () => {
     const fixture = createFixture("basic")
 
-    const literal = "Fix the build-stage health failure reported by `git diff --check`."
+    const literal = "Fix the build-stage health failure reported by `git diff --check`.\n\n## Keep this markdown verbatim"
     const result = await acpAgentAction(fixture.context({ prompt: literal }))
 
     expect(result.status).toBe("success")
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    expect(sentText).toContain("## Task Prompt")
-    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
-    expect(taskPromptSection).toBe(literal)
+    expect(sentText).toBe(literal)
+    expect(sentText).not.toContain("## Mohist Issue Context")
+    expect(sentText).not.toContain("## Task Prompt")
   })
 
   it("StringPromptContainingLiteralTemplateSyntax_IsNotTemplateRenderedBeforeMohistContextWrapper", async () => {
@@ -579,7 +545,7 @@ describe("mohist/acp-agent", () => {
     expect(sentText).not.toContain("prompts.xxx".replace("xxx", "build"))
   })
 
-  it("ObjectPrompt_ActionRendersThroughDefaultRendererBeforeMohistContextWrapper", async () => {
+  it("ObjectPrompt_ActionSendsRenderedXmlWithoutMarkdownEnvelope", async () => {
     const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
@@ -594,9 +560,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    expect(sentText).toContain("## Task Prompt")
-    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
-    expect(taskPromptSection).toBe([
+    expect(sentText).toBe([
       `<artifact id="build-task">`,
       ``,
       `  <task>Complete exactly one implementation task.</task>`,
@@ -605,6 +569,7 @@ describe("mohist/acp-agent", () => {
       ``,
       `</artifact>`,
     ].join("\n"))
+    expect(sentText).not.toContain("## Task Prompt")
   })
 
   it("UsesFormPrompt_ActionResolvesThroughRegisteredLoaderBeforeMohistContextWrapper", async () => {
@@ -621,8 +586,7 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("success")
     expect(loader).toHaveBeenCalledTimes(1)
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
-    expect(taskPromptSection).toBe("loader produced task prompt")
+    expect(sentText).toBe("loader produced task prompt")
   })
 
   it("UsesFormPrompt_LoaderReturningObject_IsRenderedThroughDefaultRenderer", async () => {
@@ -637,8 +601,7 @@ describe("mohist/acp-agent", () => {
 
     expect(result.status).toBe("success")
     const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
-    expect(taskPromptSection).toBe([
+    expect(sentText).toBe([
       `<artifact>`,
       ``,
       `  <task>rendered from loader</task>`,
@@ -698,7 +661,7 @@ describe("mohist/acp-agent", () => {
     expect(received.issueNumber).toBeNull()
   })
 
-  it("MissingPrompt_ActionStillUsesLegacyFallbackPrompt", async () => {
+  it("MissingPrompt_ActionFailsWithoutSendingSynthesizedPrompt", async () => {
     const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
@@ -706,11 +669,10 @@ describe("mohist/acp-agent", () => {
       acceptanceCriteria: ["runner can claim recovered work"],
     }))
 
-    expect(result.status).toBe("success")
-    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
-    expect(sentText).toContain("Implement this task: Build task")
-    expect(sentText).toContain("Requeue runnable workflows on server startup.")
-    expect(sentText).toContain("runner can claim recovered work")
+    expect(result.status).toBe("failure")
+    expect(result.message).toBe("ACP agent requires 'prompt'")
+    expect(fixture.agent.calls.find((entry) => entry.event === "prompt")).toBeUndefined()
+    expect(fixture.agent.calls.find((entry) => entry.event === "initialize")).toBeUndefined()
   })
 
   it("UnknownPromptLoader_ActionFailsWithClearErrorBeforeAnyAcpInteraction", async () => {

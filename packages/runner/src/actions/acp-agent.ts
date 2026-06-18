@@ -480,9 +480,12 @@ interface AcpPromptRunResult {
 type AcpPromptRunner = (prompt: string) => Promise<AcpPromptRunResult>
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
-  const resolved = await resolveActionPrompt(context)
-  if (resolved.error) return { status: "failure", message: resolved.error }
-  const prompt = buildPromptWithMohistContext(context, resolved.prompt)
+  let prompt: string | undefined
+  try {
+    prompt = await resolvePrompt(context.with?.prompt, buildPromptLoaderContext(context))
+  } catch (error) {
+    return { status: "failure", message: error instanceof Error ? error.message : String(error) }
+  }
   if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
 
   const result = await runAcpWorkflowAgentSession(context, prompt)
@@ -554,33 +557,6 @@ function appendAgentText(existing: string, addition: string): string {
   if (!addition) return existing
   const combined = existing ? `${existing}\n${addition}` : addition
   return combined.length > MAX_AGENT_TEXT_LENGTH ? truncateAgentText(combined) : combined
-}
-
-export function buildPromptWithMohistContext(context: Pick<ActionContext, "variables" | "issueNumber">, prompt?: string) {
-  if (!prompt) return prompt
-
-  const issue = objectInput(context.variables, "issue")
-  const title = promptContextField(issue, "title")
-  const body = promptContextField(issue, "body")
-  const number = promptContextField(issue, "number") ?? (context.issueNumber != null ? String(context.issueNumber) : undefined)
-  if (!number && !title?.trim() && !body?.trim()) return prompt
-
-  return [
-    "## Mohist Issue Context",
-    "This is the exact issue being implemented. Keep all artifacts and code changes aligned to this issue; do not substitute a different change.",
-    number ? `Number: ${number}` : "",
-    title?.trim() ? `Title: ${title.trim()}` : "",
-    body?.trim() ? `Body:\n${body.trim()}` : "",
-    "## Task Prompt",
-    prompt,
-  ].filter(Boolean).join("\n\n")
-}
-
-function promptContextField(value: JsonObject | undefined, key: string) {
-  const found = value?.[key]
-  if (typeof found === "string") return found
-  if (typeof found === "number" || typeof found === "boolean") return String(found)
-  return undefined
 }
 
 async function restoreAgentToolNoise(context: ActionContext) {
@@ -701,35 +677,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
-function buildFallbackPrompt(context: ActionContext) {
-  const title = context.title ?? stringInput(context.with, "title")
-  const description = stringInput(context.with, "description")
-  if (!title?.trim() && !description?.trim()) return undefined
-
-  const sections = [
-    title?.trim() ? `Implement this task: ${title.trim()}` : "Implement this task.",
-    description?.trim() ? `## Description\n${description.trim()}` : "",
-    valueSection("Acceptance Criteria", context.with?.acceptanceCriteria),
-    valueSection("Depends On", context.with?.dependsOn),
-    valueSection("Output", context.with?.output),
-    valueSection("Notes", context.with?.notes),
-    "Follow the repository conventions. Make the smallest complete change that satisfies the task, and run the relevant verification before reporting completion.",
-  ].filter(Boolean)
-  return sections.join("\n\n")
-}
-
-async function resolveActionPrompt(context: ActionContext): Promise<{ prompt?: string; error?: string }> {
-  const promptSpec = context.with?.["prompt"]
-  if (promptSpec === undefined || promptSpec === null) {
-    return { prompt: buildFallbackPrompt(context) }
-  }
-  try {
-    return { prompt: await resolvePrompt(promptSpec, buildPromptLoaderContext(context)) }
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) }
-  }
-}
-
 function buildPromptLoaderContext(context: ActionContext): PromptLoaderContext {
   return {
     with: {},
@@ -740,18 +687,6 @@ function buildPromptLoaderContext(context: ActionContext): PromptLoaderContext {
     stage: context.stage ?? null,
     issueNumber: context.issueNumber ?? null,
   }
-}
-
-function valueSection(title: string, value: unknown) {
-  if (value === undefined || value === null) return ""
-  if (Array.isArray(value) && value.length === 0) return ""
-  return `## ${title}\n${formatValue(value)}`
-}
-
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) return value.map((item) => `- ${String(item)}`).join("\n")
-  if (typeof value === "object") return JSON.stringify(value, null, 2)
-  return String(value)
 }
 
 async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
