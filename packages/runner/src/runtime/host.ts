@@ -199,6 +199,7 @@ export class RunnerHost {
         }
       } catch (error) {
         lastError = error
+        if (signal.aborted) return
         console.error("ephemeral ACP path failed for work", work.workId, error)
         await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
           await reportDrain("failed", String(error))
@@ -209,9 +210,11 @@ export class RunnerHost {
 
     try {
       lastResult = await this.workExecutor.execute(work, signal)
+      if (signal.aborted) return
       await this.connection.report(work, lastResult, signal)
     } catch (error) {
       lastError = error
+      if (signal.aborted) return
       console.error("executor failed for work", work.workId, error)
       await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
         await reportDrain("failed", String(error))
