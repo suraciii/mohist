@@ -1,8 +1,9 @@
+import { rm, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import type { ActionContext, ActionResult, JsonObject, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
-import { ensureDir } from "../system/process.js"
+import { ensureDir, runCommand } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { acpAgentAction } from "../actions/acp-agent.js"
@@ -20,6 +21,7 @@ import {
 
 export const AGENT_BACKED_USES = "mohist/acp-agent"
 const DEFAULT_MAX_CLEANUP_ATTEMPTS = 3
+const DEFAULT_STALE_INDEX_LOCK_MS = 60_000
 
 export type CleanupAgentAction = (context: ActionContext) => Promise<ActionResult>
 
@@ -30,9 +32,11 @@ type GitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promi
   exitCode: number
   combinedOutput: string
 }>
+type LockHolderProbe = (workDir: string, lockPath: string, signal: AbortSignal) => Promise<{ held: boolean; detail?: string }>
 
 let cleanupAgentAction: CleanupAgentAction = acpAgentAction
 let git: GitRunner = defaultGit
+let lockHolderProbe: LockHolderProbe = defaultLockHolderProbe
 
 export function setCleanupAgentActionForTest(handler: CleanupAgentAction | null) {
   cleanupAgentAction = handler ?? acpAgentAction
@@ -40,6 +44,10 @@ export function setCleanupAgentActionForTest(handler: CleanupAgentAction | null)
 
 export function setExecutorGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
+}
+
+export function setExecutorLockHolderProbeForTest(probe: LockHolderProbe | null) {
+  lockHolderProbe = probe ?? defaultLockHolderProbe
 }
 
 export function isAgentBackedTask(work: WorkItem): boolean {
@@ -146,6 +154,10 @@ export class WorkExecutor {
       }
       if (attempts >= maxCleanupAttempts) {
         return dirtyWorktreeFailure(result, snapshot, attempts)
+      }
+      const lockRecovery = await recoverStaleIndexLock(workDir, variables, signal)
+      if (lockRecovery.status === "blocked") {
+        return gitIndexLockFailure(result, snapshot, attempts, lockRecovery)
       }
       attempts += 1
       const cleanupResult = await this.runAgentCleanupAttempt(work, workDir, renderedWith, variables, snapshot, attempts, signal)
@@ -439,6 +451,94 @@ function resolveMaxCleanupAttempts(variables: JsonObject): number {
   return DEFAULT_MAX_CLEANUP_ATTEMPTS
 }
 
+function resolveStaleIndexLockMs(variables: JsonObject): number {
+  const candidate = variables["runner"]
+  if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+    const cleanup = (candidate as JsonObject)["cleanup"]
+    if (cleanup && typeof cleanup === "object" && !Array.isArray(cleanup)) {
+      const value = (cleanup as JsonObject)["staleIndexLockMs"]
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value)
+      if (typeof value === "string") {
+        const parsed = Number(value)
+        if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed)
+      }
+    }
+  }
+  return DEFAULT_STALE_INDEX_LOCK_MS
+}
+
+type GitIndexLockRecovery =
+  | { status: "ok"; cleared?: boolean; lockPath?: string; ageMs?: number }
+  | { status: "blocked"; reason: string; lockPath?: string; ageMs?: number }
+
+async function recoverStaleIndexLock(workDir: string, variables: JsonObject, signal: AbortSignal): Promise<GitIndexLockRecovery> {
+  const lockPathResult = await git(workDir, ["rev-parse", "--git-path", "index.lock"], signal)
+  if (!lockPathResult.success) {
+    return {
+      status: "blocked",
+      reason: `git index lock path probe failed: ${lockPathResult.combinedOutput || `exit ${lockPathResult.exitCode}`}`,
+    }
+  }
+
+  const rawLockPath = lockPathResult.stdout.trim()
+  if (!rawLockPath) {
+    return { status: "blocked", reason: "git index lock path probe returned an empty path" }
+  }
+
+  const lockPath = isAbsolute(rawLockPath) ? rawLockPath : resolve(workDir, rawLockPath)
+  let info: Awaited<ReturnType<typeof stat>>
+  try {
+    info = await stat(lockPath)
+  } catch (error) {
+    if (isNotFoundError(error)) return { status: "ok", lockPath }
+    return { status: "blocked", reason: `git index lock stat failed: ${errorMessage(error)}`, lockPath }
+  }
+
+  const ageMs = Math.max(0, Date.now() - info.mtimeMs)
+  const staleMs = resolveStaleIndexLockMs(variables)
+  if (ageMs < staleMs) {
+    return {
+      status: "blocked",
+      reason: `git index lock is fresh (${Math.floor(ageMs)}ms old, stale threshold ${staleMs}ms)`,
+      lockPath,
+      ageMs,
+    }
+  }
+
+  const holder = await lockHolderProbe(workDir, lockPath, signal)
+  if (holder.held) {
+    return {
+      status: "blocked",
+      reason: `git index lock is still held${holder.detail ? `: ${holder.detail}` : ""}`,
+      lockPath,
+      ageMs,
+    }
+  }
+
+  try {
+    await rm(lockPath, { force: true })
+  } catch (error) {
+    return { status: "blocked", reason: `failed to remove stale git index lock: ${errorMessage(error)}`, lockPath, ageMs }
+  }
+
+  return { status: "ok", cleared: true, lockPath, ageMs }
+}
+
+async function defaultLockHolderProbe(workDir: string, lockPath: string, signal: AbortSignal): Promise<{ held: boolean; detail?: string }> {
+  try {
+    const result = await runCommand("lsof", [lockPath], workDir, signal)
+    if (result.exitCode === 0) {
+      return { held: true, detail: result.stdout.trim().split(/\r?\n/).slice(0, 3).join("; ") }
+    }
+  } catch (error) {
+    // lsof is best-effort: if it is not installed or cannot run in the
+    // host environment, the age threshold still prevents deleting fresh
+    // locks while allowing stale lock recovery to make progress.
+    return { held: false, detail: errorMessage(error) }
+  }
+  return { held: false }
+}
+
 async function readWorktreeSnapshot(workDir: string, signal: AbortSignal): Promise<WorktreeSnapshot> {
   const inside = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
   if (!inside.success) {
@@ -597,6 +697,33 @@ function dirtyWorktreeFailure(
   }
 }
 
+function gitIndexLockFailure(
+  result: WorkItemResult,
+  snapshot: WorktreeSnapshot,
+  cleanupAttempts: number,
+  recovery: Extract<GitIndexLockRecovery, { status: "blocked" }>,
+): WorkItemResult {
+  const existingOutput = result.output ? safeParseJson(result.output) : null
+  const message = `${result.message?.trim() || "Task completed by action but Git index is locked"}; git index lock blocked cleanup: ${recovery.reason}`.slice(0, 4000)
+  return {
+    ...result,
+    status: "failed",
+    message,
+    output: JSON.stringify({
+      ...(existingOutput ?? {}),
+      kind: "git-index-lock",
+      lockPath: recovery.lockPath,
+      lockAgeMs: recovery.ageMs,
+      reason: recovery.reason,
+      staged: snapshot.staged,
+      unstaged: snapshot.unstaged,
+      untracked: snapshot.untracked,
+      cleanupAttempts,
+    }),
+    cleanupAttempts,
+  }
+}
+
 function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): string {
   const parts: string[] = []
   parts.push(`worktree dirty after ${evidence.cleanupAttempts} cleanup attempt(s)`)
@@ -647,4 +774,8 @@ function errorMessage(error: unknown): string {
     return String((error as { message: unknown }).message)
   }
   return String(error)
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "ENOENT")
 }
