@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import {
   BotIcon,
@@ -14,6 +14,7 @@ import { SystemSettingsSection } from './SystemSettingsSection'
 import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 import { RepositoriesSection } from './RepositoriesSection'
 import { TemplatesSection } from './TemplatesSection'
+import { OnboardingBanner } from './OnboardingBanner'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject, useProjectPath } from '../../../entities/project'
 import {
@@ -25,6 +26,7 @@ import {
 
 const VALID_SECTIONS = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]
+const ONBOARDING_DISMISSED_KEY = 'mohist:settings-onboarding-dismissed'
 
 const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
   { key: 'ai', label: 'Coder Agent', icon: <BotIcon /> },
@@ -66,8 +68,16 @@ export function SettingsPage() {
   const { section } = useParams<{ section: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => window.localStorage.getItem(ONBOARDING_DISMISSED_KEY) !== 'true',
+  )
 
   useDocumentTitle('Settings — Mohist')
+
+  function dismissOnboarding() {
+    window.localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true')
+    setShowOnboarding(false)
+  }
 
   if (!section || !isValidSection(section)) {
     return <Navigate to={toProjectPath('/settings/ai')} replace />
@@ -92,6 +102,9 @@ export function SettingsPage() {
           </TabsList>
           {SECTION_META.map((s) => (
             <TabsContent key={s.key} value={s.key} className="mt-2">
+              {s.key === 'ai' && showOnboarding ? (
+                <OnboardingBanner onDismiss={dismissOnboarding} />
+              ) : null}
               <SectionContent section={s.key} />
             </TabsContent>
           ))}

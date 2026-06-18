@@ -9,7 +9,7 @@ import {
   it,
 } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from './test-utils'
-import { WorkflowProfilesSection } from '../src/pages/settings/ui/WorkflowProfilesSection'
+import { DEFAULT_WORKFLOW_STAGES, WorkflowProfilesSection } from '../src/pages/settings/ui/WorkflowProfilesSection'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
@@ -48,14 +48,31 @@ const DEFAULT_DETAIL = {
   ],
 }
 
+const overflowByTestId = new Map<string, boolean>()
+
+Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+  configurable: true,
+  get() {
+    return 32
+  },
+})
+
+Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+  configurable: true,
+  get() {
+    if (!(this instanceof HTMLElement)) return 32
+    return overflowByTestId.get(this.dataset.testid ?? '') ? 64 : 32
+  },
+})
+
 const handlers = [
   http.get('/api/workflow-templates/system', () =>
     HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES }),
   ),
-  http.get('/api/workflow-templates/system/mohist%2Fdefault', () =>
+  http.get('/api/workflow-templates/system/mohist/default', () =>
     HttpResponse.json({ success: true, data: DEFAULT_DETAIL }),
   ),
-  http.get('/api/workflow-templates/system/mohist%2Fquick-fix', () =>
+  http.get('/api/workflow-templates/system/mohist/quick-fix', () =>
     HttpResponse.json({
       success: true,
       data: {
@@ -68,7 +85,7 @@ const handlers = [
       },
     }),
   ),
-  http.get('/api/workflow-templates/system/mohist%2Fexperiment', () =>
+  http.get('/api/workflow-templates/system/mohist/experiment', () =>
     HttpResponse.json({
       success: true,
       data: {
@@ -94,6 +111,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  overflowByTestId.clear()
   server.resetHandlers(...handlers)
 })
 
@@ -132,6 +150,14 @@ describe('WorkflowProfilesSection', () => {
 
       expect(within(defaultCard).getByText('mohist/default')).toBeInTheDocument()
       expect(within(quickFixCard).getByText('mohist/quick-fix')).toBeInTheDocument()
+
+      for (const profile of SYSTEM_TEMPLATES) {
+        const card = screen.getByTestId(`workflow-profile-${profile.id}`)
+        expect(within(card).getAllByLabelText('Workflow stages')).toHaveLength(1)
+        for (const stage of DEFAULT_WORKFLOW_STAGES) {
+          expect(within(card).getByText(stage)).toBeInTheDocument()
+        }
+      }
     })
 
     it('renders single-line descriptions without truncation or layout issues', async () => {
@@ -145,6 +171,47 @@ describe('WorkflowProfilesSection', () => {
       )
       expect(description.textContent).toBe('Short single-line description for test.')
       expect(description.className).toContain('whitespace-pre-line')
+      expect(screen.queryByText('Read more')).not.toBeInTheDocument()
+    })
+
+    it('keeps Read more as an independent keyboard action without opening detail', async () => {
+      overflowByTestId.set('workflow-profile-mohist/default-description', true)
+
+      render(<WorkflowProfilesSection />)
+
+      const defaultDescription = await waitFor(() =>
+        screen.getByTestId('workflow-profile-mohist/default-description'),
+      )
+      const readMore = screen.getByRole('button', { name: 'Read more' })
+
+      fireEvent.keyDown(readMore, { key: 'Enter' })
+      fireEvent.keyUp(readMore, { key: 'Enter' })
+      fireEvent.click(readMore)
+
+      expect(defaultDescription.className).not.toContain('line-clamp-2')
+      expect(screen.queryByTestId('workflow-profile-description')).not.toBeInTheDocument()
+      expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument()
+    })
+
+    it('shows Read more only for overflowing descriptions and expands the text', async () => {
+      overflowByTestId.set('workflow-profile-mohist/default-description', true)
+      overflowByTestId.set('workflow-profile-mohist/quick-fix-description', false)
+      overflowByTestId.set('workflow-profile-mohist/experiment-description', false)
+
+      render(<WorkflowProfilesSection />)
+
+      const defaultDescription = await waitFor(() =>
+        screen.getByTestId('workflow-profile-mohist/default-description'),
+      )
+
+      expect(screen.getByText('Read more')).toBeInTheDocument()
+      expect(defaultDescription.className).toContain('line-clamp-2')
+      expect(screen.queryAllByText('Read more')).toHaveLength(1)
+
+      fireEvent.click(screen.getByText('Read more'))
+
+      expect(defaultDescription.className).not.toContain('line-clamp-2')
+      expect(screen.queryByText('Read more')).not.toBeInTheDocument()
     })
   })
 
@@ -156,7 +223,11 @@ describe('WorkflowProfilesSection', () => {
         expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
       )
 
-      fireEvent.click(screen.getByTestId('workflow-profile-mohist/default'))
+      fireEvent.click(
+        within(screen.getByTestId('workflow-profile-mohist/default')).getByRole('button', {
+          name: 'View details',
+        }),
+      )
 
       const description = await waitFor(() =>
         screen.getByTestId('workflow-profile-description'),
@@ -179,7 +250,11 @@ describe('WorkflowProfilesSection', () => {
       await waitFor(() =>
         expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
       )
-      fireEvent.click(screen.getByTestId('workflow-profile-mohist/default'))
+      fireEvent.click(
+        within(screen.getByTestId('workflow-profile-mohist/default')).getByRole('button', {
+          name: 'View details',
+        }),
+      )
 
       await waitFor(() =>
         expect(screen.getByTestId('workflow-profile-description')).toBeInTheDocument(),
@@ -200,7 +275,11 @@ describe('WorkflowProfilesSection', () => {
       await waitFor(() =>
         expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
       )
-      fireEvent.click(screen.getByTestId('workflow-profile-mohist/default'))
+      fireEvent.click(
+        within(screen.getByTestId('workflow-profile-mohist/default')).getByRole('button', {
+          name: 'View details',
+        }),
+      )
 
       const backButton = await waitFor(() =>
         screen.getByTestId('workflow-profile-back'),

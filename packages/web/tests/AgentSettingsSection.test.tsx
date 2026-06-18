@@ -71,7 +71,8 @@ function createMockQueryClient() {
 }
 
 function getInputByLabel(label: string): HTMLInputElement {
-  const labelEl = screen.getByText(label, { selector: 'label' })
+  const labelEl = screen.getByText(label).closest('label')
+  if (!labelEl) throw new Error(`No label for ${label}`)
   const wrapper = labelEl.parentElement
   if (!wrapper) throw new Error(`No wrapper for label ${label}`)
   const input = wrapper.querySelector('input')
@@ -80,8 +81,7 @@ function getInputByLabel(label: string): HTMLInputElement {
 }
 
 function getNumberInputByLabel(label: string): HTMLInputElement {
-  const labelEls = screen.getAllByText(label)
-  const labelEl = labelEls[0]
+  const labelEl = screen.getByText(label).closest('label')
   if (!labelEl) throw new Error(`Label "${label}" not found`)
   const container = labelEl.parentElement
   if (!container) throw new Error(`Label "${label}" has no parent`)
@@ -199,8 +199,63 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     expect(pollInput.value).toBe('15')
     const maxConcurrentInput = getInputByLabel('Max Concurrent')
     expect(maxConcurrentInput.value).toBe('7')
-    const graceInput = getInputByLabel('Retry Budget')
+    const graceInput = getInputByLabel('Retry attempts')
     expect(graceInput.value).toBe('4')
+  })
+
+  it('renders runtime labels and units from field metadata', async () => {
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Retry attempts')).toBeInTheDocument()
+    })
+    expect(screen.getByText('times')).toBeInTheDocument()
+    expect(screen.getByText('Max Concurrent')).toBeInTheDocument()
+    expect(screen.getByText('sessions')).toBeInTheDocument()
+    expect(screen.queryByText('Retry Budget')).not.toBeInTheDocument()
+    expect(screen.queryByText('grace periods')).not.toBeInTheDocument()
+    expect(screen.queryByText('agents')).not.toBeInTheDocument()
+  })
+
+  it('shows runtime field descriptions on hover and focus', async () => {
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Max Concurrent')).toBeInTheDocument()
+    })
+
+    fireEvent.mouseEnter(screen.getByText('Max Concurrent'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      'Upper bound constrained by runner capacity shown in the sidebar (active/max); excess tasks queue.',
+    )
+    fireEvent.mouseLeave(screen.getByText('Max Concurrent'))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+
+    fireEvent.focus(screen.getByText('Poll Interval'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Shorter = more realtime but higher CPU/network.')
+    fireEvent.blur(screen.getByText('Poll Interval'))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('keeps timeout field descriptions unchanged and available through tooltips', async () => {
+    renderSection()
+
+    await waitFor(() => {
+      expect(screen.getByText('Session Timeout')).toBeInTheDocument()
+    })
+
+    fireEvent.focus(screen.getByText('Session Timeout'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      'Maximum total time an external coder agent session can run.',
+    )
+    fireEvent.blur(screen.getByText('Session Timeout'))
+
+    fireEvent.focus(screen.getByText('Stage Timeout'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Maximum time a single workflow stage can take.')
+    fireEvent.blur(screen.getByText('Stage Timeout'))
+
+    fireEvent.focus(screen.getByText('Task Timeout'))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Maximum time a single task within a stage can take.')
   })
 
   it('persists changed supported fields through the config API and reflects the updated value', async () => {
@@ -270,7 +325,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
       expect(screen.getByText('Session Timeout')).toBeInTheDocument()
     })
 
-    const graceInput = getInputByLabel('Retry Budget')
+    const graceInput = getInputByLabel('Retry attempts')
     expect(graceInput).toBeDisabled()
     const pollInput = getInputByLabel('Poll Interval')
     expect(pollInput).toBeDisabled()
