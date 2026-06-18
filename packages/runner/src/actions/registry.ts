@@ -270,17 +270,18 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
   const message = stringInput(context.with, "message") ?? `Complete issue #${context.issueNumber ?? ""}`.trim()
   const remote = stringInput(context.with, "remote") ?? "origin"
   const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
+  const remoteTarget = `${remote}/${target}`
 
   const prePublish = await git(workDir, ["rev-parse", target], context.signal)
   if (!prePublish.success) {
     return publishOutput(false, source, target, workDir, null, false, prePublish.combinedOutput, "retry-safe", prePublish.exitCode)
   }
-  const prePublishSha = prePublish.stdout.trim()
+  let restoreSha = prePublish.stdout.trim()
 
   const status = await git(workDir, ["status", "--porcelain"], context.signal)
   if (status.success && status.stdout.trim()) {
     const dirty = status.stdout.trim()
-    await git(workDir, ["reset", "--hard", prePublishSha], context.signal)
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
     return publishOutput(
       false,
       source,
@@ -288,10 +289,20 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
       workDir,
       null,
       false,
-      `Publish aborted: target branch '${target}' had a dirty working tree. Destructive 'git reset --hard ${prePublishSha}' was used to restore the workspace. Untracked or user-modified files that were discarded:\n${dirty}`,
+      `Publish aborted: target branch '${target}' had a dirty working tree. Destructive 'git reset --hard ${restoreSha}' was used to restore the workspace. Untracked or user-modified files that were discarded:\n${dirty}`,
       "retry-safe",
       status.exitCode,
     )
+  }
+
+  const fetch = await git(workDir, ["fetch", remote, target], context.signal)
+  if (!fetch.success) {
+    return publishOutput(false, source, target, workDir, null, false, fetch.combinedOutput, "retry-safe", fetch.exitCode)
+  }
+
+  const remoteHead = await git(workDir, ["rev-parse", remoteTarget], context.signal)
+  if (!remoteHead.success) {
+    return publishOutput(false, source, target, workDir, null, false, remoteHead.combinedOutput, "retry-safe", remoteHead.exitCode)
   }
 
   const checkout = await git(workDir, ["checkout", target], context.signal)
@@ -307,21 +318,45 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
     } else if (mergeHead.success && pathExists(resolveGitDirPath(workDir, mergeHead.stdout.trim()))) {
       await git(workDir, ["merge", "--abort"], context.signal)
     }
-    await git(workDir, ["reset", "--hard", prePublishSha], context.signal)
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
     return publishOutput(false, source, target, workDir, null, false, checkout.combinedOutput, "retry-safe", checkout.exitCode)
+  }
+
+  const fastForward = await git(workDir, ["merge", "--ff-only", remoteTarget], context.signal)
+  if (!fastForward.success) {
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    return publishOutput(false, source, target, workDir, null, false, fastForward.combinedOutput, "base-moved", fastForward.exitCode)
+  }
+
+  restoreSha = remoteHead.stdout.trim()
+
+  const sourceContainsTarget = await git(workDir, ["merge-base", "--is-ancestor", remoteTarget, source], context.signal)
+  if (!sourceContainsTarget.success) {
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
+    return publishOutput(
+      false,
+      source,
+      target,
+      workDir,
+      null,
+      false,
+      `Publish aborted: source '${source}' is not prepared against latest '${remoteTarget}'. Re-run prepare before publishing.`,
+      "base-moved",
+      sourceContainsTarget.exitCode,
+    )
   }
 
   const squash = await git(workDir, ["merge", "--squash", source], context.signal)
   if (!squash.success) {
     await git(workDir, ["merge", "--abort"], context.signal)
-    await git(workDir, ["reset", "--hard", prePublishSha], context.signal)
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
     return publishOutput(false, source, target, workDir, null, false, squash.combinedOutput, "base-moved", squash.exitCode)
   }
 
   const commitMessage = buildPublishCommitMessage(message, workDir, source, target, context)
   const commit = await git(workDir, ["commit", ...commitMessage], context.signal)
   if (!commit.success) {
-    await git(workDir, ["reset", "--hard", prePublishSha], context.signal)
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
     return publishOutput(false, source, target, workDir, null, false, commit.combinedOutput, "retry-safe", commit.exitCode)
   }
 
@@ -330,7 +365,7 @@ export async function publishAction(context: ActionContext): Promise<ActionResul
 
   const push = await git(workDir, ["push", remote, target], context.signal)
   if (!push.success) {
-    await git(workDir, ["reset", "--hard", prePublishSha], context.signal)
+    await git(workDir, ["reset", "--hard", restoreSha], context.signal)
     const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
     return publishOutput(false, source, target, workDir, landedCommit, false, push.combinedOutput, failureKind, push.exitCode)
   }
