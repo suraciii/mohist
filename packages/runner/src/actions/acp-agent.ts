@@ -905,6 +905,7 @@ function createSharedPromptRunner(options: {
   getActivityCount(): number
   getWorkActivityCount(): number
   exitFailure?: Promise<never>
+  acpProcess?: AcpProcessHandle
 }): AcpPromptRunner {
   return async (prompt) => {
     const beforeText = options.getAgentText()
@@ -918,6 +919,7 @@ function createSharedPromptRunner(options: {
       livenessState: options.liveness,
       waitForData: (version) => waitForData(options.dataWaiters, () => options.liveness.dataVersion !== version),
       exitFailure: options.exitFailure,
+      acpProcess: options.acpProcess,
     })
     const activityCount = options.getActivityCount() - beforeActivity
     const workActivityCount = options.getWorkActivityCount() - beforeWorkActivity
