@@ -57,75 +57,26 @@ export type TranscriptEnvelope = unknown
 
 export type TranscriptCallback = (envelope: TranscriptEnvelope) => void
 
-export function useEventsConnection(
-  projectId: string | null,
-  onEvent: EventCallback,
-  onTranscriptEvent?: TranscriptCallback,
-): void {
-  const callbackRef = useRef(onEvent)
-  callbackRef.current = onEvent
-  const transcriptCallbackRef = useRef(onTranscriptEvent)
-  transcriptCallbackRef.current = onTranscriptEvent
-
-  useEffect(() => {
-    if (!projectId) return
-
-    const connection = createEventsConnection(projectId)
-    connection.on('OnEvent', (eventName: string, data: unknown) => {
-      callbackRef.current(eventName, data)
-    })
-    connection.on(TRANSCRIPT_EVENT, (envelope: TranscriptEnvelope) => {
-      const handler = transcriptCallbackRef.current
-      if (handler) {
-        handler(envelope)
-      }
-    })
-    connection.onreconnected(() => {
-      void applySubscription(connection)
-    })
-
-    connection
-      .start()
-      .then(() => {
-        void applySubscription(connection)
-      })
-      .catch((err: unknown) => {
-        console.error('[EventsHub] Connection failed:', err)
-      })
-
-    return () => {
-      connection.stop().catch(() => {})
-    }
-  }, [projectId])
-}
-
-export interface UseConnectionStateOptions {
+export interface UseEventsConnectionOptions {
   /**
-   * When true, the hook also pushes a runtime toast on every state
-   * transition (connecting → connected, connected → reconnecting, etc.).
-   * Defaults to true so the routing contract is met without callers having
-   * to opt in. The toast is also mirrored through the `RuntimeToastHost`
-   * `onNotice` sink so any subscribing Activity surface can persist it.
+   * When true, the hook pushes a runtime toast on every state transition
+   * (connecting → connected, connected → reconnecting, etc.). Defaults to
+   * true so transport notices surface without callers opting in.
    */
   publishToasts?: boolean
 }
 
-interface ToastPushInput {
-  tone: RuntimeToastTone
-  title: string
-  body?: string
-  testId: string
-}
-
-export interface ConnectionStateNotice extends ToastPushInput {
-  status: ConnectionStatus
-}
-
-export function useConnectionState(
+export function useEventsConnection(
   projectId: string | null,
-  options: UseConnectionStateOptions = {},
+  onEvent: EventCallback,
+  onTranscriptEvent?: TranscriptCallback,
+  options: UseEventsConnectionOptions = {},
 ): ConnectionStatus {
   const { publishToasts = true } = options
+  const callbackRef = useRef(onEvent)
+  callbackRef.current = onEvent
+  const transcriptCallbackRef = useRef(onTranscriptEvent)
+  transcriptCallbackRef.current = onTranscriptEvent
   const toastCtx = useContext(RuntimeToastContext)
   const toastCtxRef = useRef(toastCtx)
   toastCtxRef.current = toastCtx
@@ -137,6 +88,7 @@ export function useConnectionState(
       setStatus('disconnected')
       return
     }
+
     const connection = createEventsConnection(projectId)
 
     const handleState = (next: ConnectionStatus) => {
@@ -148,16 +100,22 @@ export function useConnectionState(
       }
     }
 
-    const initial = mapHubState(connection.state)
-    handleState(initial)
+    connection.on('OnEvent', (eventName: string, data: unknown) => {
+      callbackRef.current(eventName, data)
+    })
+    connection.on(TRANSCRIPT_EVENT, (envelope: TranscriptEnvelope) => {
+      const handler = transcriptCallbackRef.current
+      if (handler) handler(envelope)
+    })
 
-    const onReconnecting = () => handleState('reconnecting')
-    const onReconnected = () => handleState('connected')
-    const onClose = () => handleState('disconnected')
+    connection.onreconnecting(() => handleState('reconnecting'))
+    connection.onreconnected(() => {
+      handleState('connected')
+      void applySubscription(connection)
+    })
+    connection.onclose(() => handleState('disconnected'))
 
-    connection.onreconnecting(onReconnecting)
-    connection.onreconnected(onReconnected)
-    connection.onclose(onClose)
+    handleState(mapHubState(connection.state))
 
     connection
       .start()
@@ -179,6 +137,13 @@ export function useConnectionState(
   }, [projectId, publishToasts])
 
   return status
+}
+
+interface ToastPushInput {
+  tone: RuntimeToastTone
+  title: string
+  body?: string
+  testId: string
 }
 
 export function buildNoticeForStatus(status: ConnectionStatus): ToastPushInput {

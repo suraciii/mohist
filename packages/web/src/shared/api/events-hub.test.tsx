@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../entities/project'
-import { useConnectionState } from './events-hub'
+import { useEventsConnection } from './events-hub'
 import { RuntimeToastHost, useRuntimeToast } from '../ui/toast'
 import { HubConnectionBuilder } from '@microsoft/signalr'
 
@@ -85,7 +85,7 @@ function makeFakeConnection(): FakeConnection {
 }
 
 function StateProbe({ projectId, onState }: { projectId: string | null; onState: (s: string) => void }) {
-  const state = useConnectionState(projectId, { publishToasts: false })
+  const state = useEventsConnection(projectId, () => {}, undefined, { publishToasts: false })
   onState(state)
   return <div data-testid="state-probe" data-state={state}>{state}</div>
 }
@@ -119,7 +119,7 @@ function renderWithHost(ui: React.ReactNode) {
   )
 }
 
-describe('useConnectionState', () => {
+describe('useEventsConnection state tracking', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     fakeConnections.length = 0

@@ -7,7 +7,7 @@ import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
-import { useConnectionState, useEventsConnection } from '../../shared/api/events-hub'
+import { useEventsConnection } from '../../shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { useRuntimeToast } from '../../shared/ui/toast'
 
@@ -351,7 +351,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
   // Subscribe to SignalR connection transitions so transport notices are
   // routed to the toast host / Activity surface instead of any inline issue
   // content. The hook itself owns publishing.
-  useConnectionState(projectId)
   useRunnerDropNotice()
 
   useEffect(() => {
