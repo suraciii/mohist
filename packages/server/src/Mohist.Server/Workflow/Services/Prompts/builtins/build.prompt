@@ -24,6 +24,9 @@ Read the context files before implementing:
 - `${{ openspecChangeDir }}/design.md`
 - `${{ openspecChangeDir }}/tasks.json`
 - relevant specs under `${{ openspecChangeDir }}/specs/`
+- `${{ openspecChangeDir }}/progress.txt` if it exists — prior tasks' recorded
+  decisions, gotchas, and established patterns. Read the `## Codebase Patterns`
+  section first.
 </dependencies>
 
 <instruction>
@@ -63,8 +66,39 @@ Write or update tests as part of this task. Every task must include relevant tes
 All acceptance criteria must pass before reporting completion.
 </verification>
 
+<progress_report>
+Build tasks run sequentially, each in a fresh session with no memory of prior
+tasks. `${{ openspecChangeDir }}/progress.txt` carries what prior tasks learned
+forward. Keep it current so later tasks don't repeat mistakes or miss
+established patterns.
+
+When you finish your task, update `${{ openspecChangeDir }}/progress.txt`:
+
+1. **Codebase Patterns (top section, edited in place).** If you discovered a
+   broadly reusable convention, API shape, or project-specific gotcha, add it
+   under `## Codebase Patterns`. Keep this section consolidated, general, and
+   high-signal — future tasks read it first.
+
+2. **Per-task entry (append at the bottom).** Add a new section using the id
+   and title of the task you just completed:
+
+   ## Task <task-id>: <title>
+   - What was implemented
+   - Files changed
+   - **Learnings for future tasks:**
+     - Decisions made
+     - Gotchas discovered
+     - Patterns / API shapes established
+     - Cross-task invariants
+   ---
+
+If the file does not yet exist, create it with a `## Codebase Patterns` heading
+followed by your task entry.
+</progress_report>
+
 <completion>
-When done, stage and commit your changes.
+When done, stage and commit your changes, including your
+`${{ openspecChangeDir }}/progress.txt` entry.
 The commit message should start with the task ID.
 </completion>
 
