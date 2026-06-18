@@ -191,8 +191,28 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
     return prepareOutput(false, baseBranch, null, null, [], 0, initialStatus.combinedOutput, "retry-safe", initialStatus.exitCode)
   }
   if (initialStatus.stdout.trim()) {
+    if (isOnlyUntracked(initialStatus.stdout)) {
+      const clean = await cleanUntrackedWorktree(context, initialStatus.stdout, "Prepare auto-cleaned untracked files before rebase:")
+      if (clean.ok) {
+        return await prepareAfterInitialClean(context, baseBranch, remote, maxRetries, conflictResolver ?? null, clean.output)
+      }
+      return prepareDirtyOutput(baseBranch, null, null, [], 0, clean.output, "Prepare aborted: worktree is dirty before rebase. Commit or clean the workspace before retrying.")
+    }
     return prepareDirtyOutput(baseBranch, null, null, [], 0, initialStatus.stdout, "Prepare aborted: worktree is dirty before rebase. Commit or clean the workspace before retrying.")
   }
+
+  return await prepareAfterInitialClean(context, baseBranch, remote, maxRetries, conflictResolver ?? null, "")
+}
+
+async function prepareAfterInitialClean(
+  context: ActionContext,
+  baseBranch: string,
+  remote: string,
+  maxRetries: number,
+  conflictResolver: JsonObject | null,
+  initialOutput: string,
+): Promise<ActionResult> {
+  const workDir = context.workDir
 
   const fetch = await git(workDir, ["fetch", remote, baseBranch], context.signal)
   if (!fetch.success) {
@@ -210,18 +230,19 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
   const beforeSha = before.success ? before.stdout.trim() : null
 
   const rebaseResult = await git(workDir, ["rebase", baseRef], context.signal)
+  const rebaseOutput = [initialOutput, rebaseResult.combinedOutput].filter(Boolean).join("\n\n")
   if (rebaseResult.success) {
     const after = await git(workDir, ["rev-parse", "HEAD"], context.signal)
     const preparedHeadSha = after.success ? after.stdout.trim() : null
-    const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseResult.combinedOutput)
+    const clean = await prepareCleanWorktreeResult(context, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseOutput)
     if (clean) return clean
-    return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseResult.combinedOutput, undefined)
+    return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, [], 0, rebaseOutput, undefined)
   }
 
   let conflicts = await rebaseConflictFiles(context)
   if (conflicts.length === 0) {
     await git(workDir, ["rebase", "--abort"], context.signal)
-    return prepareOutput(false, baseBranch, preparedBaseSha, null, [], 0, rebaseResult.combinedOutput, "retry-safe", rebaseResult.exitCode)
+    return prepareOutput(false, baseBranch, preparedBaseSha, null, [], 0, rebaseOutput, "retry-safe", rebaseResult.exitCode)
   }
 
   if (!conflictResolver) {
@@ -230,7 +251,7 @@ export async function prepareAction(context: ActionContext): Promise<ActionResul
   }
 
   const allConflicts: string[][] = [conflicts]
-  const gitOutputs: string[] = [rebaseResult.combinedOutput]
+  const gitOutputs: string[] = [initialOutput, rebaseResult.combinedOutput].filter(Boolean)
   let attempts = 0
 
   while (attempts < maxRetries) {
@@ -274,8 +295,44 @@ async function prepareCleanWorktreeResult(
     return prepareOutput(false, baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, status.combinedOutput, "retry-safe", status.exitCode)
   }
   if (!status.stdout.trim()) return null
+  if (isOnlyUntracked(status.stdout)) {
+    const cleaned = await cleanUntrackedWorktree(context, status.stdout, "Prepare auto-cleaned untracked files left after rebase:")
+    const output = [
+      gitOutput,
+      cleaned.output,
+    ].filter(Boolean).join("\n\n")
+    if (!cleaned.ok) {
+      return prepareOutput(false, baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, "retry-safe", cleaned.exitCode)
+    }
+    return prepareOutput(true, baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, undefined)
+  }
   const output = [gitOutput, "Prepare left a dirty worktree after rebase:", status.stdout.trim()].filter(Boolean).join("\n\n")
   return prepareDirtyOutput(baseBranch, preparedBaseSha, preparedHeadSha, conflicts, resolveAttempts, output, "Prepare failed: worktree remained dirty after rebase.")
+}
+
+function isOnlyUntracked(status: string) {
+  const lines = status.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every((line) => line.startsWith("?? "))
+}
+
+async function cleanUntrackedWorktree(context: ActionContext, status: string, label: string) {
+  const dirty = status.trim()
+  const clean = await git(context.workDir, ["clean", "-fd"], context.signal)
+  const recheck = clean.success
+    ? await git(context.workDir, ["status", "--porcelain"], context.signal)
+    : clean
+  const recheckDirty = recheck.stdout.trim()
+  const output = [
+    label,
+    dirty,
+    clean.combinedOutput,
+    recheckDirty ? `Worktree remained dirty after auto-clean:\n${recheckDirty}` : "",
+  ].filter(Boolean).join("\n\n")
+  return {
+    ok: clean.success && recheck.success && !recheckDirty,
+    output,
+    exitCode: clean.success ? recheck.exitCode : clean.exitCode,
+  }
 }
 
 function prepareOutput(
