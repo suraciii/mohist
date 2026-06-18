@@ -710,3 +710,16 @@ export interface IssueWorkflowProfileYamlResponse {
   updatedAt: string
   templateSource?: 'system' | 'project' | 'custom'
 }
+
+export interface StoredCloudEventDto {
+  id: number
+  eventId: string
+  source: string
+  type: string
+  specVersion: string
+  subject: string | null
+  time: string
+  dataContentType: string | null
+  data: unknown
+  extensions: Record<string, string>
+}

@@ -1,0 +1,38 @@
+import { CATEGORY_STYLES, type TimelineCategory } from '../model/types'
+
+interface CategoryFilterProps {
+  selected: Set<TimelineCategory>
+  onToggle: (category: TimelineCategory) => void
+  counts: Record<TimelineCategory, number>
+}
+
+export function CategoryFilter({ selected, onToggle, counts }: CategoryFilterProps) {
+  const categories = Object.keys(CATEGORY_STYLES) as TimelineCategory[]
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="category-filter">
+      {categories.map((category) => {
+        const active = selected.has(category)
+        const style = CATEGORY_STYLES[category]
+        const count = counts[category] ?? 0
+        return (
+          <button
+            key={category}
+            type="button"
+            onClick={() => onToggle(category)}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors ${
+              active
+                ? `${style.bg} ${style.text} ${style.border}`
+                : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+            }`}
+            data-testid={`category-filter-${category}`}
+          >
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${style.dot}`} />
+            {style.label}
+            <span className="tabular-nums text-[10px] opacity-80">{count}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}

@@ -11,6 +11,7 @@ import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel } from '../../../widgets/issue-workflow'
+import { EventTimelinePanel } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -603,6 +604,12 @@ export function IssueDetailPage() {
                   </p>
                 </div>
               )}
+
+              <EventTimelinePanel
+                issueNumber={issueNumber}
+                issueId={issue?.id}
+                workflowStatus={issue?.workflowStatus}
+              />
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">

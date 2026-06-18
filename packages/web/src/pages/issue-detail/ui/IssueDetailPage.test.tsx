@@ -34,8 +34,15 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
     useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
     useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
+    useIssueEvents: () => ({ data: undefined, isLoading: false }),
   }
 })
+
+vi.mock('../../../widgets/issue-event-timeline', () => ({
+  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null }) => (
+    <div data-testid="event-timeline-panel-mock" data-issue-number={props.issueNumber} data-issue-id={props.issueId ?? ''} data-workflow-status={props.workflowStatus ?? ''} />
+  )),
+}))
 
 vi.mock('../../../entities/agent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/agent')>()
@@ -168,6 +175,33 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
     await waitFor(() => expect(screen.getByTestId('primary-epic-label')).toBeTruthy())
     const label = screen.getByTestId('primary-epic-number')
     expect(label).toHaveTextContent('#epic-leg')
+  })
+
+  it('renders the event timeline panel between diff/commits and comments', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseIssueDiff.mockReturnValue({
+      data: {
+        available: true,
+        files: [],
+        summary: { filesChanged: 0, commits: 0, additions: 0, deletions: 0 },
+      },
+    })
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('event-timeline-panel-mock')).toBeTruthy())
+    const panel = screen.getByTestId('event-timeline-panel-mock')
+    expect(panel).toHaveAttribute('data-issue-number', '14')
+    expect(panel).toHaveAttribute('data-issue-id', 'issue-14')
+    expect(panel).toHaveAttribute('data-workflow-status', 'running')
   })
 })
 
