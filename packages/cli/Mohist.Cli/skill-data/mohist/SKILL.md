@@ -215,6 +215,22 @@ Constraint: **an issue belongs to at most one primary epic.** Linking an issue
 already in another epic fails with `DUPLICATE_EPIC_MEMBERSHIP`. Both args accept
 id or number.
 
+### Setting issue prerequisites (execution order)
+
+When an epic's issues have a start order (issue B requires issue A first), record
+it as prerequisites so the epic can advance one issue at a time without false
+starts:
+
+```bash
+# CLI does not yet have a prerequisite command — use the API:
+curl -X POST http://localhost:3456/api/projects/<project>/issues/<B>/prerequisites \
+  -H "Content-Type: application/json" \
+  -d '{"prerequisiteNumber": <A-number>}'
+```
+
+A starts first; B becomes start-blocked ("waiting for #A") until A is delivered,
+then B is free to start. Prefer fewer prerequisites — only real data/scaffold/invariant dependencies.
+
 ### Lifecycle: done vs close
 
 - `mo epic done <id>` — marks the milestone shipped. Requires **all** linked

@@ -79,19 +79,34 @@ Apply these rules **in this priority order** — a higher rule always overrides 
 
 Then decide whether the split issues form an **epic**:
 
-- If they share **one milestone goal** (a single product outcome that ties them together) → produce an **epic + one PRD per issue**. The epic description captures the milestone (Goal / Background / Non-goals / Scope); each child issue gets its own three-voice PRD scoped to its context + concern. State inter-issue dependencies (which blocks which).
+- If they share **one milestone goal** (a single product outcome that ties them together) → produce an **epic + one PRD per issue**. The epic description captures the milestone (Goal / Background / Non-goals / Scope); each child issue gets its own three-voice PRD scoped to its context + concern.
 - If they are independent (no shared milestone) → produce **several standalone issue PRDs**, no epic.
 
 If no rule triggers a split → single issue; proceed to Converge with one PRD.
 
-**Gate:** Can you name, for each proposed issue, exactly one bounded context and one concern? If any issue still bundles two contexts or two concerns, split again. If you propose an epic, can you state its milestone goal in one sentence? If not, the issues may not belong together.
+#### Dependency order (whenever there are 2+ issues)
+
+Splitting is not enough — the work advances one issue at a time, so work out the order. For each pair of issues ask: **can B start without A done?** A blocks B when:
+
+- A defines a **data contract or model** B consumes (B needs A's shape to exist first).
+- A provides **scaffolding** B mounts into (e.g. a route/page before the zones that fill it).
+- A changes a **shared invariant** B relies on (A must land first so B builds on truth).
+
+Produce as part of the output:
+
+- A **dependency list**: "issue X requires issue Y" for each real dependency.
+- A **suggested start order**: which issue(s) can start now, which wait, and which can run in parallel (no dependency between them).
+
+Prefer fewer dependencies — if two issues seem tightly coupled, re-check whether they are really one issue, or whether the split seam is wrong. But do not invent fake independence: if B genuinely needs A's contract, say so. The `mohist` skill turns this list into issue prerequisites at creation time, so the epic can advance issue-by-issue without false starts.
+
+**Gate:** Can you name, for each proposed issue, exactly one bounded context and one concern? If any issue still bundles two contexts or two concerns, split again. If you propose an epic, can you state its milestone goal in one sentence? For 2+ issues, is the dependency order stated — including which can run in parallel?
 
 ### 5. Converge
 
 Branch on the scope decision:
 
 - **Single issue:** assemble the three voices into one PRD using `references/issue-body-template.md`.
-- **Epic + issues:** write the epic description (Goal / Background / Non-goals / Scope — shape in the `mohist` skill's `references/epic-templates.md`), then one PRD per child issue using `references/issue-body-template.md`, each scoped to its own context + concern.
+- **Epic + issues:** write the epic description (Goal / Background / Non-goals / Scope — shape in the `mohist` skill's `references/epic-templates.md`), then one PRD per child issue using `references/issue-body-template.md`, each scoped to its own context + concern. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
 
 The PRD content is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the `mohist` skill's job at creation time.
 
