@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -36,6 +37,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
     public DbSet<IssueRow> Issues { get; set; } = null!;
+    public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
@@ -200,6 +202,22 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => e.WorkflowRunId);
+        });
+
+        modelBuilder.Entity<AgentRow>(entity =>
+        {
+            entity.ToTable("Agents");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256);
+            entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
+            entity.Property(e => e.Name)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.name'), json_extract(State, '$.Name'))", stored: true);
+            entity.Property(e => e.Status)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))", stored: true);
+            entity.HasIndex(e => new { e.ProjectId, e.Name }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.Status });
         });
 
         modelBuilder.Entity<IssueEventRow>(entity =>

@@ -25,6 +25,7 @@ public static class MohistApiRegistration
         app.MapFsRoutes();
         app.MapWorkspaceRoutes();
         app.MapEpicRoutes();
+        app.MapAgentDefinitionRoutes();
         app.MapAgentRoutes();
         app.MapAgentJobRoutes();
         app.MapRunnerRoutes();

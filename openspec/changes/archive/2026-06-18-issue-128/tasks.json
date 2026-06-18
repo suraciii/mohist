@@ -1,0 +1,77 @@
+{
+  "project": "mohist-local",
+  "description": "Project-scoped Agent aggregate with CRUD: backend grain + persistence, HTTP API, and mo agent CLI.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Agent aggregate, AgentGrain, and persistence with EF migration",
+      "spec": "specs/agent-definitions/spec.md",
+      "description": "Implement the Agent domain entity (id, projectId, name, description, instructions, agentConfig, skills, maxConcurrentRuns, status, createdAt, updatedAt; no execution/workflow fields), IAgentGrain/AgentGrain using a project-scoped key `projectId:agentId` mirroring EpicGrain (IStateStore<Agent> + OnActivateAsync load), AgentStore, AgentRow + MohistDbContext registration (JSON State + computed ProjectId/Name/Status columns + UNIQUE(ProjectId,Name) index mirroring IssueRow), AgentQuerier/AgentInfo, and the AddAgentsTable EF migration. Register IStateStore<Agent> in MohistServiceRegistration.cs.",
+      "acceptanceCriteria": [
+        "Agent entity carries id, projectId, name, description, instructions, agentConfig, skills, maxConcurrentRuns, status, createdAt, updatedAt and contains no workflow-stage, run, worktree, or branch fields",
+        "AgentGrain key encodes projectId:agentId (via a new GrainKey.Agent helper) and loads state via IStateStore<Agent> on activation; two agents with the same agentId in different projects activate as distinct grains",
+        "Grain methods cover create/show/update/archive and reject duplicate names project-wide including archived rows (name-conflict error); rename applies the same uniqueness check",
+        "Soft delete (archive) sets status=archived and never removes the row; an archived name remains permanently occupied (create with that name still fails)",
+        "instructions stored byte-identical verbatim with no template rendering; agentConfig stored as opaque JSON (well-formed JSON validated only); BuildAgentConfig, IssueVariableBuilder, and IssueInfo.AgentConfig remain untouched",
+        "skills and maxConcurrentRuns persisted as declarative metadata with no runner-side consumption or enforcement in this layer",
+        "Agents table created via EF migration with a UNIQUE(ProjectId, Name) composite index and no foreign key to Issues",
+        "`dotnet ef database update` applies the migration and `dotnet ef database update <previous>` rolls it back cleanly, leaving Issues and all other tables unchanged",
+        "Grain unit tests cover create/show/update/archive/name-uniqueness (including archived-name-occupied) paths",
+        "dotnet build and the server test suite pass with the new aggregate"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Agent entity, IAgentGrain/AgentGrain, AgentStore, AgentRow + DbContext config, AgentQuerier/AgentInfo, AddAgentsTable migration, IStateStore<Agent> DI registration, and grain unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Mirror EpicGrain.cs for the project-scoped key parsing and IssueStore.cs/IssueRow.cs for the JSON-blob + computed-column persistence. Per design D1, D2, D3, D6, D7, D8."
+    },
+    {
+      "id": "T-002",
+      "title": "HTTP API /api/projects/{projectRef}/agents CRUD route group",
+      "spec": "specs/http-api/spec.md",
+      "description": "Add AgentDefinitionRoutes mounted at /api/projects/{projectRef}/agents (plural, to avoid clashing with the existing singular /agent runtime route) using ProjectResolutionEndpointFilter and GetResolvedProject(). Implement POST/GET/GET{id}/PATCH/DELETE handlers with request/response DTOs, status filtering (default active, ?all=true, ?status=archived), name-conflict-to-409 mapping via the SQLite unique constraint violation, immutable-field rejection, and cross-project 404 isolation. Mount via a new MapAgentDefinitionRoutes() call in MohistApiRegistration.cs.",
+      "acceptanceCriteria": [
+        "POST /api/projects/{projectRef}/agents creates an active Agent and returns 201 with the created record incl. generated id, createdAt, updatedAt",
+        "POST returns 400 when project context is missing and 409 on a duplicate name (active or archived) with no Agent created",
+        "GET /api/projects/{projectRef}/agents defaults to status=active, supports ?all=true (active+archived) and ?status=archived, and is project-scoped (no cross-project leakage)",
+        "GET /api/projects/{projectRef}/agents/{id} returns the full record incl. createdAt/updatedAt, reads archived Agents by id, and returns 404 for unknown or cross-project ids",
+        "PATCH /api/projects/{projectRef}/agents/{id} updates mutable fields (name, description, instructions, agentConfig, skills, maxConcurrentRuns), refreshes updatedAt, rejects changes to createdAt/id/projectId, returns 409 on a rename conflict, and 404 for unknown ids",
+        "DELETE /api/projects/{projectRef}/agents/{id} soft-archives (status=archived), refreshes updatedAt, does not remove the row; the name stays occupied (subsequent create with that name returns 409); 404 for unknown or cross-project ids",
+        "HTTP integration tests cover each endpoint and the 409/404 paths, including archived-name-occupied after DELETE",
+        "dotnet build and the API test suite pass"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentDefinitionRoutes (+ DTOs), MapAgentDefinitionRoutes mount in MohistApiRegistration.cs, and HTTP integration tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use plural /agents under the project group (design D4). Treat the UNIQUE(ProjectId,Name) DB index as the authoritative uniqueness guard and map its violation to 409 (design D7). agentConfig is validated as well-formed JSON only (design D5)."
+    },
+    {
+      "id": "T-003",
+      "title": "mo agent CLI command group (create/list/show/update/delete)",
+      "spec": "specs/cli-interface/spec.md",
+      "description": "Add MohistCliCommands.Agent.cs registering a top-level `mo agent` command group with create/list/show/update/delete subcommands using System.CommandLine and the shared MohistCliApi.Print*Async. Reuse BodyInputResolver for --instructions (literal / @file / --instructions-stdin). Support --all and --status filters on list, name-or-id resolution on show/update/delete (client-side via the list/show endpoint), and clear 409-conflict / 404-not-found error surfacing. Register via root.Subcommands.Add(AgentCommands.Build(api)) in MohistCliCommands.cs.",
+      "acceptanceCriteria": [
+        "`mo agent --help` lists create, list, show, update, delete subcommands; all subcommands require the server and surface 'Server is not running' with non-zero exit when unavailable",
+        "`mo agent create` requires --name and --instructions, accepts optional --description / --agent-config <json|@file> / --skills <csv> / --max-concurrent-runs <int>, accepts --instructions as literal / @file / --instructions-stdin, prints the agent id on success, surfaces 409 name conflict clearly, and exits 1 on missing required fields",
+        "`mo agent list` defaults to active Agents, `--all` includes archived, and `--status <value>` filters to a single status",
+        "`mo agent show <name-or-id>` resolves name or id, prints the full record incl. createdAt/updatedAt, and exits non-zero with a clear not-found error for unknown Agents",
+        "`mo agent update <name-or-id>` supports --name (subject to uniqueness, surfacing 409 on conflict), --description, --instructions, --agent-config, --skills, --max-concurrent-runs, and reflects the refreshed updatedAt",
+        "`mo agent delete <name-or-id>` soft-archives and states the Agent was archived; the deleted name cannot be reused (create fails with conflict)",
+        "CLI tests cover each subcommand and the conflict/not-found error surfacing",
+        "dotnet build and the CLI test suite pass"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "MohistCliCommands.Agent.cs, registration in MohistCliCommands.cs, and CLI tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Mirror MohistCliCommands.Issue.cs structure (design D9). Reuse BodyInputResolver verbatim for --instructions; it is already body-agnostic."
+    }
+  ]
+}

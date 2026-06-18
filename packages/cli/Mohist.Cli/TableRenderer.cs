@@ -49,6 +49,12 @@ internal sealed class TableRenderer
             case MohistCliApi.TableShape.FeedbackShow:
                 RenderFeedbackShow(data);
                 break;
+            case MohistCliApi.TableShape.AgentList:
+                RenderAgentList(data);
+                break;
+            case MohistCliApi.TableShape.AgentShow:
+                RenderAgentShow(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;
@@ -400,6 +406,51 @@ internal sealed class TableRenderer
             _out.WriteLine($"body:");
         if (!string.IsNullOrEmpty(body))
             WriteBody(body);
+    }
+
+    private void RenderAgentList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        var headers = new[] { "id", "name", "status", "updatedAt" };
+        var widths = new[] { IdSoftCap, 24, 12, 24 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            cells.Add(new[]
+            {
+                Truncate(StringOf(row, "id"), IdSoftCap),
+                Truncate(StringOf(row, "name"), 24),
+                Truncate(StringOf(row, "status"), 12),
+                Truncate(StringOf(row, "updatedAt"), 24),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private void RenderAgentShow(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var skills = data["skills"] as JsonArray;
+        var skillText = skills is null ? "" : string.Join(",", skills.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
+
+        _out.WriteLine($"id:                  {StringOf(data, "id")}");
+        _out.WriteLine($"name:                {StringOf(data, "name")}");
+        _out.WriteLine($"status:              {StringOf(data, "status")}");
+        _out.WriteLine($"description:         {Truncate(StringOf(data, "description"), TitleSoftCap)}");
+        _out.WriteLine($"max concurrent runs: {NumberOf(data, "maxConcurrentRuns")}");
+        _out.WriteLine($"skills:              {skillText}");
+        _out.WriteLine($"createdAt:           {Truncate(StringOf(data, "createdAt"), TitleSoftCap)}");
+        _out.WriteLine($"updatedAt:           {Truncate(StringOf(data, "updatedAt"), TitleSoftCap)}");
+        var instructions = StringOf(data, "instructions");
+        if (!string.IsNullOrEmpty(instructions))
+            _out.WriteLine($"instructions:        {Truncate(instructions, BodySoftCap)}");
     }
 
     private void WriteBody(string body)

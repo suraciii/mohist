@@ -65,7 +65,7 @@ public class CliProjectCommandSpecs
         var executor = new FakeCommandExecutor();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "list"], output, error, fileSystem, executor);
+            http, ["project", "list", "--output", "table"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var lines = output.ToString().TrimEnd().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);

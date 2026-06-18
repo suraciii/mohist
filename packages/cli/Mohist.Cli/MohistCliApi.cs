@@ -194,6 +194,8 @@ internal sealed class MohistCliApi
         RepoList,
         FeedbackList,
         FeedbackShow,
+        AgentList,
+        AgentShow,
     }
 
     internal static TableShape ParseTableShape(string? shape)
