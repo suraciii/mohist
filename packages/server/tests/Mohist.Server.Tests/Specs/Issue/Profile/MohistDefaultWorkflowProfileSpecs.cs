@@ -133,7 +133,7 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.DoesNotContain("integrate:merge", integrateIds);
         Assert.Equal("mohist/prepare", prepare.Uses);
         var prepareWithJson = JsonSerializer.Serialize(prepare.With);
-        Assert.Contains("${{ project.baseBranch }}", prepareWithJson);
+        Assert.Contains("${{ repository.baseBranch }}", prepareWithJson);
         Assert.Contains("\"conflictResolver\"", prepareWithJson);
         Assert.Contains("Resolve prepare conflicts", prepareWithJson);
         Assert.Equal("mohist/publish", publish.Uses);

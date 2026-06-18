@@ -272,7 +272,7 @@ stages:
         title: Prepare branch
         uses: mohist/prepare
         with:
-          baseBranch: ${{ project.baseBranch }}
+          baseBranch: ${{ repository.baseBranch }}
           conflictResolver:
             title: Resolve prepare conflicts
             with:
