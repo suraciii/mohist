@@ -1,0 +1,6 @@
+export { EventTimelinePanel } from './ui/EventTimelinePanel'
+export { classifyEvent } from './model/classify'
+export { classifySource } from './model/source-tag'
+export { describeEvent } from './model/describe'
+export { useEventTimeline } from './useEventTimeline'
+export type { TimelineCategory, TimelineEntry, TimelineSource } from './model/types'

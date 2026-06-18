@@ -1,5 +1,5 @@
 import { request, ApiError, projectApiPath } from '../../../shared/api/client'
-import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { ApprovalFeedback, CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, StoredCloudEventDto, WorkflowArtifact, WorkflowArtifactDirectory, WorkflowArtifactDirectoryEntry, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
 
 export interface IssueWorkflowVariables {
   vars?: Record<string, unknown> | null
@@ -89,6 +89,10 @@ export function getIssueFeedback(number: number, feedbackId: string, projectId?:
 
 export function getIssueDiff(number: number, projectId?: string | null) {
   return request<IssueDiffResponse>(projectApiPath(projectId, `/issues/${number}/diff`))
+}
+
+export function getIssueEvents(number: number, projectId?: string | null) {
+  return request<StoredCloudEventDto[]>(projectApiPath(projectId, `/issues/${number}/events`))
 }
 
 export function getIssueCommits(number: number, projectId?: string | null) {

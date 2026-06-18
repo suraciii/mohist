@@ -5,6 +5,7 @@ import type { EventName, EventMap, Issue, LiveTaskState, RebaseConflictState } f
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS, useAgentStatus } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
+import { dispatchTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
@@ -188,7 +189,7 @@ function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payloa
   }
 }
 
-export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope }
+export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, buildTimelineLiveEvent }
 
 
 function getCurrentIssueNumber(): number | null {
@@ -280,6 +281,38 @@ function notifyApprovalRequestedToast(
 function readIssueNumber(parsed: Record<string, unknown>): number | null {
   const issueNumber = parsed.issueNumber ?? parsed.issueNo ?? parsed.number
   return typeof issueNumber === 'number' ? issueNumber : null
+}
+
+function readTimelineEventId(rawData: unknown): string | null {
+  if (!rawData || typeof rawData !== 'object') return null
+  const candidate = rawData as Record<string, unknown>
+  const id = candidate.id ?? candidate.eventId
+  return typeof id === 'string' && id ? id : null
+}
+
+function readTimelineTime(rawData: unknown, parsed: Record<string, unknown>): string | null {
+  if (rawData && typeof rawData === 'object') {
+    const candidate = rawData as Record<string, unknown>
+    const t = candidate.time ?? candidate.Time
+    if (typeof t === 'string' && t) return t
+  }
+  const fallback = parsed.time ?? parsed.createdAt ?? parsed.createdAtUtc ?? parsed.timestamp
+  return typeof fallback === 'string' && fallback ? fallback : null
+}
+
+function buildTimelineLiveEvent(
+  eventName: string,
+  rawData: unknown,
+  parsed: Record<string, unknown>,
+): TimelineLiveEvent {
+  return {
+    issueNumber: readIssueNumber(parsed),
+    issueId: typeof parsed.issueId === 'string' ? parsed.issueId : null,
+    type: eventName,
+    time: readTimelineTime(rawData, parsed),
+    eventId: readTimelineEventId(rawData),
+    payload: parsed,
+  }
 }
 
 function readOutcome(parsed: Record<string, unknown>): string | null {
@@ -621,6 +654,9 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             break
           }
         }
+
+        const timelineEvent = buildTimelineLiveEvent(eventName, rawData, parsed)
+        dispatchTimelineEvent(timelineEvent)
       } catch {
         // ignore malformed events
       }

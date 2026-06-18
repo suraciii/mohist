@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import type { ApprovalFeedback, IssueWorkflowProfileYamlResponse } from '../model/types'
 import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams } from './client'
-import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, unarchiveIssue, updateIssueWorkflowProfileYaml, requestChangesIssue } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssueWorkflowProfileYaml } from './client'
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
   const { projectId } = useProject()
@@ -53,6 +53,15 @@ export function useIssueDiff(number: number) {
     queryKey: ['issues', number, projectId, 'diff'],
     queryFn: () => getIssueDiff(number, projectId),
     enabled: number > 0 && !!projectId,
+  })
+}
+
+export function useIssueEvents(number: number, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: ['issue-events', number, projectId],
+    queryFn: () => getIssueEvents(number, projectId),
+    enabled: enabled && number > 0 && !!projectId,
   })
 }
 
