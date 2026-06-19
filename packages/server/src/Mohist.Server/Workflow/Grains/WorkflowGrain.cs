@@ -41,41 +41,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IWorkflowRunStore _runStore;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
+    private readonly WorkflowDispatchBuilder _dispatchBuilder;
+    private readonly WorkflowSessionHealthService _sessionHealth;
     private readonly IWorkflowArtifactBindService _artifactBindService;
-    private readonly AgentSessionQuery _agentSessionQuery;
     private readonly IRunnerWorkspaceClient _workspaceClient;
     private readonly ILogger<WorkflowGrain> _log;
-
-    private readonly record struct SessionContextUsage(double? Percent, string? SessionId)
-    {
-        public static readonly SessionContextUsage None = new(null, null);
-    }
-
-    private sealed record WorkDispatchRequest(
-        string Stage,
-        string LogicalId,
-        string WorkType,
-        string Title,
-        string? Uses,
-        Dictionary<string, JsonElement?>? With,
-        TaskArtifactCapture? Artifacts = null,
-        List<TaskOutputDefinition>? Outputs = null,
-        string? WorkIdOverride = null);
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         IWorkflowBacklogDirectory backlogs,
         WorkflowProfileManager profileManager,
+        WorkflowDispatchBuilder dispatchBuilder,
+        WorkflowSessionHealthService sessionHealth,
         IWorkflowArtifactBindService artifactBindService,
-        AgentSessionQuery agentSessionQuery,
         IRunnerWorkspaceClient workspaceClient,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
         _backlogs = backlogs;
         _profileManager = profileManager;
+        _dispatchBuilder = dispatchBuilder;
+        _sessionHealth = sessionHealth;
         _artifactBindService = artifactBindService;
-        _agentSessionQuery = agentSessionQuery;
         _workspaceClient = workspaceClient;
         _log = log;
     }
@@ -207,20 +194,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var failure = _run.Failure;
         var failedTaskId = failure?.TaskId;
         var stageId = _run.CurrentStageId;
-        var usage = await ResolveSessionContextUsageAsync(failedTaskId, stageId, ct: default);
-        var verdict = WorkflowSessionHealthGate.Evaluate(usage.Percent);
-        if (verdict == HealthVerdict.Block)
-        {
-            await ApplyContextExhaustionBlockAsync(failedTaskId, usage.Percent, stageId);
-            return;
-        }
 
-        if (verdict == HealthVerdict.Warn)
-        {
-            _log.LogWarning(
-                "Workflow {Id} retry proceeding with elevated session context usage {Percent:0.##}% (task={TaskId}, stage={Stage}, sessionId={SessionId})",
-                GrainKey, usage.Percent ?? 0d, failedTaskId ?? "(none)", stageId ?? "(none)", usage.SessionId ?? "(unknown)");
-        }
+        await _sessionHealth.CheckAndEnforceAsync(
+            failedTaskId, stageId, GrainKey, _run,
+            events => CommitAsync(events), "retry", default);
 
         // If a previous attempt was blocked by context exhaustion, the user
         // may have recovered the session (via compact/reset) by now. The gate
@@ -257,7 +234,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (string.IsNullOrWhiteSpace(task.Title))
             throw new InvalidOperationException("Runtime task requires title");
 
-        ClearDispatchedChecks();
+        _run.CurrentStage().ClearDispatchedChecks();
         var with = WorkflowDispatchHelpers.ParseWith(task.With);
         var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
@@ -431,7 +408,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run.CurrentStageId is null)
             throw new InvalidOperationException("Workflow has no current stage");
 
-        ClearDispatchedChecks();
+        _run.CurrentStage().ClearDispatchedChecks();
 
         var current = _run.CurrentStage();
         if (!current.Initialized)
@@ -461,8 +438,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public async Task ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (_run is null || !_run.IsClaimedBy(runnerId)) return;
-        var activeTask = FindRunningTaskByWork(workId, runnerId);
-        var activeCheck = activeTask is null ? FindDispatchedCheckByWork(workId, runnerId) : null;
+        var stage = _run.CurrentStage();
+        var activeTask = stage.FindRunningTaskByWork(workId, runnerId);
+        var activeCheck = activeTask is null ? stage.FindDispatchedCheckByWork(workId, runnerId) : null;
         if (activeTask is null && activeCheck is null) return;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
@@ -475,7 +453,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
         else
         {
-            ClearCheckDispatch(activeCheck!);
+            activeCheck!.ClearDispatch();
             events = await ProcessCheckResultAsync(result);
         }
 
@@ -514,14 +492,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public Task<string?> GetCurrentWorkIdAsync()
     {
-        return Task.FromResult(FindRunningTask()?.WorkId ?? FindDispatchedCheck()?.DispatchWorkId);
+        var stage = _run?.CurrentStage();
+        return Task.FromResult(stage?.RunningTask?.WorkId ?? stage?.DispatchedCheck?.DispatchWorkId);
     }
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
         if (string.IsNullOrWhiteSpace(workId)) return Task.FromResult<WorkflowActiveWorkView?>(null);
-        var activeTask = FindRunningTask();
-        var activeCheck = activeTask is null ? FindDispatchedCheck() : null;
+        var currentStage = _run?.CurrentStage();
+        var activeTask = currentStage?.RunningTask;
+        var activeCheck = activeTask is null ? currentStage?.DispatchedCheck : null;
         if (!string.Equals(activeTask?.WorkId ?? activeCheck?.DispatchWorkId, workId, StringComparison.Ordinal))
             return Task.FromResult<WorkflowActiveWorkView?>(null);
 
@@ -586,75 +566,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private int? ResolveIssueNumber() =>
         int.TryParse(GetIssueNumber(), out var number) ? number : null;
-
-    private async Task<SessionContextUsage> ResolveSessionContextUsageAsync(
-        string? taskId,
-        string? stage,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(taskId) || string.IsNullOrWhiteSpace(stage))
-        {
-            return SessionContextUsage.None;
-        }
-
-        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [AgentSessionQueryMetadataKeys.WorkflowRunId] = GrainKey,
-            [AgentSessionQueryMetadataKeys.WorkId] = taskId,
-            [AgentSessionQueryMetadataKeys.Stage] = stage,
-        };
-
-        AgentSessionRecord? record;
-        try
-        {
-            record = await _agentSessionQuery.FirstByLabelsAsync(labels, ct: ct);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Workflow {Id} session lookup for task {TaskId} stage {Stage} failed; treating as healthy",
-                GrainKey, taskId, stage);
-            return SessionContextUsage.None;
-        }
-
-        if (record is null) return SessionContextUsage.None;
-
-        try
-        {
-            var info = await GrainFactory.GetGrain<IAgentSessionGrain>(record.Session.Id).GetAsync();
-            if (info is null) return SessionContextUsage.None;
-            var percent = AgentSessionJsonHelper.ContextUsagePercent(info.ContextWindowUsed, info.ContextWindowSize);
-            return new SessionContextUsage(percent, record.Session.Id);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "Workflow {Id} session grain lookup for {SessionId} failed; treating as healthy",
-                GrainKey, record.Session.Id);
-            return SessionContextUsage.None;
-        }
-    }
-
-    private async Task ApplyContextExhaustionBlockAsync(
-        string? taskId,
-        double? contextUsagePercent,
-        string? stage,
-        string? sessionId = null,
-        string context = "retry")
-    {
-        EnsureRun();
-        var blockingEvents = _run.BlockStageWithContextExhaustion(taskId, contextUsagePercent, sessionId);
-        _log.LogWarning(
-            "Workflow {Id} {Context} blocked: session context at {Percent:0.##}% (task={TaskId}, stage={Stage}, sessionId={SessionId})",
-            GrainKey, context, contextUsagePercent ?? 0d, taskId ?? "(none)", stage ?? "(none)", sessionId ?? "(unknown)");
-        await CommitAsync(blockingEvents);
-
-        throw new WorkflowSessionContextExhaustedException(
-            WorkflowSessionHealthGate.BuildBlockingMessage(contextUsagePercent),
-            contextUsagePercent,
-            stage,
-            taskId);
-    }
 
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
     {
@@ -757,7 +668,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<WorkDispatch> MakeDispatchAsync(WorkDispatchRequest req, string runnerId, bool markRunning = true)
     {
-        var dispatch = await BuildDispatchAsync(req, runnerId);
+        if (req.WorkType == "task")
+        {
+            var workId = req.WorkIdOverride ?? req.LogicalId;
+            await _sessionHealth.CheckAndEnforceAsync(
+                workId, req.Stage, GrainKey, _run!,
+                events => CommitAsync(events), "dispatch", default);
+        }
+
+        var dispatch = await _dispatchBuilder.BuildAsync(req, GrainKey, _run!);
+
         if (!markRunning) return dispatch;
         if (req.WorkType == "task")
         {
@@ -790,181 +710,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         string runnerId,
         bool markRunning = true,
         string? workIdOverride = null)
-    {
-        var checksPayload = items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
-        {
-            ["name"] = JsonSerializer.SerializeToElement(i.Name),
-            ["title"] = JsonSerializer.SerializeToElement(i.Title),
-            ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
-            ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
-        }).ToList();
-
-        return MakeDispatchAsync(new WorkDispatchRequest(
-            stage, $"checks-{stage}", "checks", "Stage checks",
-            Uses: null,
-            With: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
-            WorkIdOverride: workIdOverride), runnerId, markRunning);
-    }
-
-    private async Task<WorkDispatch> BuildDispatchAsync(WorkDispatchRequest req, string runnerId)
-    {
-        var workId = req.WorkIdOverride ?? (req.WorkType == "task" ? req.LogicalId : $"{req.LogicalId}:{Guid.NewGuid():N}");
-        var attempt = req.WorkType == "task" ? WorkflowDispatchHelpers.TaskAttempt(req.LogicalId) : 1;
-
-        if (req.WorkType == "task")
-        {
-            var usage = await ResolveSessionContextUsageAsync(workId, req.Stage, ct: default);
-            var verdict = WorkflowSessionHealthGate.Evaluate(usage.Percent);
-            if (verdict == HealthVerdict.Block)
-            {
-                await ApplyContextExhaustionBlockAsync(workId, usage.Percent, req.Stage, usage.SessionId, "dispatch");
-            }
-            else if (verdict == HealthVerdict.Warn)
-            {
-                _log.LogWarning(
-                    "Workflow {Id} dispatching task {WorkId} with elevated session context usage {Percent:0.##}% (sessionId={SessionId})",
-                    GrainKey, workId, usage.Percent ?? 0d, usage.SessionId ?? "(unknown)");
-            }
-        }
-
-        var (payload, effectiveVarsJson, resolved) = await BuildDispatchPayload(req, workId, attempt);
-
-        var prompts = await _profileManager.LoadPromptsAsync(GrainKey);
-        if (prompts.Count > 0)
-        {
-            var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
-            foreach (var p in prompts)
-                promptsMap[p.Key] = p.Body;
-            payload["prompts"] = JsonSerializer.SerializeToElement(promptsMap, WorkflowVariableJson.Options);
-        }
-
-        var variables = JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
-        var withStr = ResolveDispatchWith(effectiveVarsJson, resolved, req.With, req.Stage, workId);
-
-        return new WorkDispatch(
-            WorkflowRunId: GrainKey,
-            WorkId: workId,
-            Uses: req.Uses,
-            With: withStr,
-            Variables: variables,
-            WorkType: req.WorkType,
-            Stage: req.Stage,
-            Title: req.Title,
-            Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
-            Artifacts: req.Artifacts is not null && !req.Artifacts.IsEmpty ? JSON.Serialize(req.Artifacts) : null,
-            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JsonSerializer.Serialize(req.Outputs) : null);
-    }
-
-    private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
-        BuildDispatchPayload(WorkDispatchRequest req, string workId, int attempt)
-    {
-        var template = await _profileManager.LoadTemplateAsync(GrainKey);
-        var independent = await _profileManager.LoadVariablesAsync(GrainKey);
-        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
-        var resolved = VariableBundle.Patch(embedded, independent);
-
-        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, req.Stage)
-            ?? JsonSerializer.Deserialize<JsonElement>("{}");
-
-        if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in effectiveVarsJson.EnumerateObject())
-                payload[property.Name] = property.Value.Clone();
-        }
-
-        payload["vars"] = effectiveVarsJson;
-        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = GrainKey }, WorkflowVariableJson.Options);
-        payload["stage"] = JsonSerializer.SerializeToElement(new { name = req.Stage }, WorkflowVariableJson.Options);
-        payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = req.WorkType, title = req.Title, attempt }, WorkflowVariableJson.Options);
-
-        if (_run?.RuntimeVariables is { Count: > 0 })
-            payload = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
-
-        if (req.WorkType == "task" && _run is not null)
-        {
-            var stageRun = _run.Stages.FirstOrDefault(s => s.Id == req.Stage);
-            var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == req.LogicalId);
-            if (task?.CausedByFeedbackId is { } feedbackId)
-            {
-                var feedback = _run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
-                if (feedback is not null)
-                {
-                    payload["approvalFeedback"] = JsonSerializer.SerializeToElement(new
-                    {
-                        id = feedback.Id,
-                        stage = feedback.Stage,
-                        createdAt = feedback.CreatedAt.ToString("O"),
-                        summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
-                        command = WorkflowRunExtensions.BuildFeedbackShowCommand(ResolveIssueNumber(), feedback.Id, GetProjectId()),
-                    }, WorkflowVariableJson.Options);
-                }
-            }
-        }
-
-        return (payload, effectiveVarsJson, resolved);
-    }
-
-    private string? ResolveDispatchWith(
-        JsonElement effectiveVarsJson,
-        VariableBundle resolved,
-        Dictionary<string, JsonElement?>? with,
-        string stage,
-        string workId)
-    {
-        var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
-            ? new VariableBundle(effectiveVarsJson)
-            : VariableBundle.Empty;
-
-        var dispatchWith = with is not null
-            ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
-            : null;
-        dispatchWith = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, dispatchWith);
-
-        if ((dispatchWith is null || !dispatchWith.ContainsKey("agent"))
-            && effectiveVarsJson.ValueKind == JsonValueKind.Object
-            && effectiveVarsJson.TryGetProperty("agent", out var effectiveAgentEl)
-            && effectiveAgentEl.ValueKind == JsonValueKind.Object)
-        {
-            dispatchWith ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-            dispatchWith["agent"] = effectiveAgentEl.Clone();
-        }
-
-        var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
-        LogDispatchAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved);
-        return withStr;
-    }
-
-    private void LogDispatchAgentDiagnostics(
-        string stage,
-        string workId,
-        Dictionary<string, JsonElement?>? dispatchWith,
-        JsonElement effectiveVarsJson,
-        VariableBundle resolved)
-    {
-        var withModel = WorkflowDispatchHelpers.TryReadNestedString(dispatchWith, "agent", "model");
-        var varsModel = WorkflowDispatchHelpers.TryReadNestedString(effectiveVarsJson, "agent", "model");
-        var stageModel = WorkflowDispatchHelpers.TryReadStageAgentModel(resolved, stage);
-        var source = !string.IsNullOrWhiteSpace(withModel)
-            ? "with.agent.model"
-            : !string.IsNullOrWhiteSpace(varsModel)
-                ? "vars.agent.model"
-                : !string.IsNullOrWhiteSpace(stageModel.Value)
-                    ? "stage.vars.agent.model"
-                    : "none";
-
-        _log.LogInformation(
-            "Workflow {WorkflowId} dispatch {WorkId} stage={Stage} agent model diagnostics: with={WithModel}, vars={VarsModel}, stageOverride={StageModel}, source={Source}",
-            GrainKey,
-            workId,
-            stage,
-            withModel ?? "(null)",
-            varsModel ?? "(null)",
-            stageModel.Present
-                ? stageModel.Value ?? "(null override)"
-                : "(missing)",
-            source);
-    }
+        => MakeDispatchAsync(
+            WorkflowDispatchBuilder.BuildChecksRequest(stage, items, workIdOverride),
+            runnerId,
+            markRunning);
 
     private async Task AssignRunnerWorkAsync(string runnerId, WorkDispatch dispatch)
     {
@@ -979,7 +728,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<bool> TryRecoverActiveWorkAsync(string runnerId)
     {
-        var runningTask = FindRunningTask();
+        var currentStage = _run!.CurrentStage();
+        var runningTask = currentStage.RunningTask;
         if (runningTask is not null)
         {
             if (!string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
@@ -994,7 +744,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             }
 
             var dispatch = await PrepareWorkAsync(WorkflowWork.Task(
-                _run!.CurrentStage().Id,
+                currentStage.Id,
                 runningTask.Id,
                 runningTask.Title,
                 runningTask.Uses,
@@ -1006,7 +756,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return true;
         }
 
-        var dispatchedCheck = FindDispatchedCheck();
+        var dispatchedCheck = currentStage.DispatchedCheck;
         if (dispatchedCheck is null)
             return false;
 
@@ -1016,33 +766,29 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var checkRunner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
         if (!await checkRunner.IsAvailableAsync())
         {
-            ClearDispatchedChecks();
+            currentStage.ClearDispatchedChecks();
             await SaveRunAsync();
             return false;
         }
 
-        var stage = _run!.CurrentStage();
-        var pendingChecks = stage.Checks
+        var pendingChecks = currentStage.Checks
             .Where(c => c.Status == StageCheckStatus.Pending)
             .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
             .ToList();
         var checkDispatch = await MakeChecksDispatchAsync(
-            stage.Id, pendingChecks, runnerId,
+            currentStage.Id, pendingChecks, runnerId,
             markRunning: false,
             workIdOverride: dispatchedCheck.DispatchWorkId);
         await AssignRunnerWorkAsync(runnerId, checkDispatch);
         return true;
     }
 
-    private TaskRun? FindRunningTask()
-        => _run?.CurrentStage().Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Running);
-
     private async Task<bool> FailLostRunningTasksAsync(string? runnerId = null)
     {
         if (_run?.CurrentStageId is null)
             return false;
 
-        var runningTask = FindRunningTask();
+        var runningTask = _run.CurrentStage().RunningTask;
         if (runningTask is null || string.IsNullOrWhiteSpace(runningTask.RunnerId))
             return false;
 
@@ -1062,43 +808,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return events.Count > 0;
     }
 
-    private TaskRun? FindRunningTaskByWork(string workId, string runnerId)
-        => _run?.CurrentStage().Tasks.FirstOrDefault(t =>
-            t.Status == TaskRunStatus.Running
-            && string.Equals(t.WorkId, workId, StringComparison.Ordinal)
-            && string.Equals(t.RunnerId, runnerId, StringComparison.Ordinal));
-
-    private StageCheck? FindDispatchedCheck()
-        => _run?.CurrentStage().Checks.FirstOrDefault(c =>
-            c.Status == StageCheckStatus.Pending
-            && !string.IsNullOrWhiteSpace(c.DispatchWorkId));
-
-    private StageCheck? FindDispatchedCheckByWork(string workId, string runnerId)
-        => _run?.CurrentStage().Checks.FirstOrDefault(c =>
-            c.Status == StageCheckStatus.Pending
-            && string.Equals(c.DispatchWorkId, workId, StringComparison.Ordinal)
-            && string.Equals(c.DispatchRunnerId, runnerId, StringComparison.Ordinal));
-
-    private static void ClearCheckDispatch(StageCheck check)
-    {
-        check.DispatchWorkId = null;
-        check.DispatchRunnerId = null;
-        check.DispatchedAt = null;
-    }
-
-    private void ClearDispatchedChecks()
-    {
-        if (_run?.CurrentStageId is null) return;
-        foreach (var check in _run.CurrentStage().Checks)
-            ClearCheckDispatch(check);
-    }
-
     private async Task ClearExecutableStateAsync(string reason)
     {
         await ReleaseCurrentStageLocksAsync(reason);
-        ClearDispatchedChecks();
+        if (_run?.CurrentStageId is not null)
+            _run.CurrentStage().ClearDispatchedChecks();
 
-        var runningTask = FindRunningTask();
+        var runningTask = _run?.CurrentStage().RunningTask;
         if (runningTask is not null)
         {
             var events = _run!.FailTaskForStopped(reason);
@@ -1264,7 +980,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (repairCount >= repair.Limit) return null;
         }
 
-        return BuildRepairTasks(checkName, repair, result);
+        return _run!.BuildRepairTasks(checkName, repair, result);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>?> TryScheduleRequestedCheckRepairAsync()
@@ -1282,34 +998,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (repairTasks is null)
             return null;
 
-        ClearDispatchedChecks();
+        _run!.CurrentStage().ClearDispatchedChecks();
         return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
-    }
-
-    private IReadOnlyList<TaskDefinition> BuildRepairTasks(string checkName, CheckFailureRepair repair, CheckResult? result = null)
-    {
-        var tasks = new List<TaskDefinition> { BuildRepairTask(checkName, repair.Task, result) };
-        if (repair.VerifyTask is not null)
-            tasks.Add(repair.VerifyTask);
-        return tasks;
-    }
-
-    private TaskDefinition BuildRepairTask(string checkName, TaskDefinition repairTask, CheckResult? result = null)
-    {
-        JsonElement? resultJson = result is null
-            ? null
-            : JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
-        var repairWith = repairTask.With is not null
-            ? new Dictionary<string, JsonElement?>(repairTask.With)
-            : new Dictionary<string, JsonElement?>();
-        if (resultJson is not null && !string.Equals(checkName, "review-passed", StringComparison.Ordinal))
-            repairWith["failedCheckResult"] = resultJson;
-
-        return new TaskDefinition(
-            $"{repairTask.Id}:{_run!.GetRepairCount(checkName) + 1}",
-            repairTask.Title,
-            repairTask.Uses,
-            repairWith);
     }
 
     [MemberNotNull(nameof(_run))]
