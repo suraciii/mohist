@@ -5,7 +5,7 @@ import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
 import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, type Issue } from '../../../entities/issue'
+import { IssueStatus, deriveAttentionItems, type Issue } from '../../../entities/issue'
 import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
@@ -25,7 +25,6 @@ import {
 import { deriveLabelPairsFromIssues, formatLabelToken } from '../../../entities/issue/model/labels'
 import { useProjectPath } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
-import { deriveAttentionItems } from '../model/homepage-attention'
 import { getStageColors } from '../model/stage-colors'
 
 interface Props {

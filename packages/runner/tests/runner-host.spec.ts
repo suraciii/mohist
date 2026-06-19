@@ -28,16 +28,6 @@ vi.mock("../src/runtime/opencode-models.js", () => ({
   discoverOpencodeModels: vi.fn(async () => ["openai/gpt-5.5"]),
 }))
 
-vi.mock("../src/runtime/acp-connection.js", () => ({
-  AcpSessionManager: class {
-    close() {}
-  },
-  createSharedAcpConnection: vi.fn(async () => ({
-    async resume() { return null },
-    async shutdown() {},
-  })),
-}))
-
 describe("RunnerHost", () => {
   it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
     vi.clearAllMocks()
