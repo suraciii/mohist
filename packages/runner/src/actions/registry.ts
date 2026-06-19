@@ -640,7 +640,10 @@ async function publishInLandingWorkspace(
   }
   let restoreSha = remoteHead.stdout.trim()
 
-  const checkout = await git(landingDir, ["checkout", target], signal)
+  // The landing clone can carry stale local target refs from an older
+  // workflow workspace. Anchor the disposable landing branch directly to
+  // the fetched remote target before creating the squash commit.
+  const checkout = await git(landingDir, ["checkout", "-B", target, remoteTarget], signal)
   if (!checkout.success) {
     const rebaseMerge = await git(landingDir, ["rev-parse", "--git-path", "rebase-merge"], signal)
     const rebaseApply = await git(landingDir, ["rev-parse", "--git-path", "rebase-apply"], signal)
@@ -673,14 +676,6 @@ async function publishInLandingWorkspace(
       status.exitCode,
     )
   }
-
-  const fastForward = await git(landingDir, ["merge", "--ff-only", remoteTarget], signal)
-  if (!fastForward.success) {
-    await git(landingDir, ["reset", "--hard", restoreSha], signal)
-    return publishOutput(false, source, target, workDir, null, false, fastForward.combinedOutput, "base-moved", fastForward.exitCode)
-  }
-
-  restoreSha = remoteHead.stdout.trim()
 
   const sourceContainsTarget = await git(landingDir, ["merge-base", "--is-ancestor", remoteTarget, source], signal)
   if (!sourceContainsTarget.success) {
