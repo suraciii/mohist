@@ -265,7 +265,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             throw new InvalidOperationException("Runtime task requires title");
 
         ClearDispatchedChecks();
-        var with = ParseWith(task.With);
+        var with = WorkflowDispatchHelpers.ParseWith(task.With);
         var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
         var stage = _run.CurrentStageId ?? "unknown";
@@ -452,7 +452,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (string.IsNullOrWhiteSpace(t.Title))
                 throw new InvalidOperationException("Task title is required");
 
-            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, ParseWith(t.With)));
+            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With)));
         }
 
         var events = _run.InsertRuntimeTasksAfter(tasksToInsert);
@@ -839,7 +839,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private async Task<WorkDispatch> BuildDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null)
     {
         var workId = workIdOverride ?? (workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}");
-        var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
+        var attempt = workType == "task" ? WorkflowDispatchHelpers.TaskAttempt(logicalId) : 1;
 
         if (workType == "task")
         {
@@ -865,22 +865,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
 
-        var effectiveVarsJson = resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object
-            ? resolved.Vars.Value
-            : JsonSerializer.Deserialize<JsonElement>("{}");
-
-        // Apply resolved stage-scoped vars. Nulls in a stage override mean "inherit"
-        // for dispatch-time variables; the persistent profile still keeps null as
-        // the user's cleared override.
-        if (resolved.Stages is not null
-            && !string.IsNullOrWhiteSpace(stage)
-            && resolved.Stages.TryGetValue(stage, out var stageVars)
-            && stageVars.Vars.HasValue
-            && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
-        {
-            var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
-            effectiveVarsJson = DeepMergeSkippingNulls(effectiveVarsJson, stageOverlay) ?? stageOverlay;
-        }
+        var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, stage)
+            ?? JsonSerializer.Deserialize<JsonElement>("{}");
 
         // Spread vars to payload top level (preserves opaque user context like "custom: { answer: 42 }")
         if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
@@ -899,7 +885,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         // is available in ${{ }} templates and overrides lower-precedence sources.
         if (_run?.RuntimeVariables is { Count: > 0 })
         {
-            payload = MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
+            payload = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
         }
 
         // Inject minimal approvalFeedback context when dispatching a feedback task.
@@ -965,7 +951,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         LogDispatchAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved);
 
         // --- 4. Extract issueRef from context (issue/project from _variables.Json) ---
-        WorkIssueRef? issueRef = BuildIssueRef(payload);
+        WorkIssueRef? issueRef = WorkflowDispatchHelpers.BuildIssueRef(payload);
 
         var artifactsStr = artifacts is not null && !artifacts.IsEmpty
             ? JSON.Serialize(artifacts)
@@ -989,103 +975,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             Outputs: outputsStr);
     }
 
-    private static JsonElement? DeepMergeSkippingNulls(JsonElement? @base, JsonElement? overlay)
-    {
-        if (!overlay.HasValue) return @base;
-        if (overlay.Value.ValueKind == JsonValueKind.Null) return @base;
-        if (!@base.HasValue) return overlay.Value.Clone();
-
-        if (@base.Value.ValueKind != JsonValueKind.Object)
-            return overlay.Value.Clone();
-        if (overlay.Value.ValueKind != JsonValueKind.Object)
-            return overlay.Value.Clone();
-
-        using var baseDoc = JsonDocument.Parse(@base.Value.GetRawText());
-        using var overlayDoc = JsonDocument.Parse(overlay.Value.GetRawText());
-        var merged = MergeObjectsSkippingNulls(baseDoc.RootElement, overlayDoc.RootElement);
-        return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(merged, WorkflowVariableJson.Options));
-    }
-
-    private static Dictionary<string, object?> MergeObjectsSkippingNulls(JsonElement @base, JsonElement overlay)
-    {
-        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var property in @base.EnumerateObject())
-            result[property.Name] = JsonElementToObject(property.Value);
-
-        foreach (var property in overlay.EnumerateObject())
-        {
-            if (property.Value.ValueKind == JsonValueKind.Null)
-                continue;
-
-            if (property.Value.ValueKind == JsonValueKind.Object
-                && @base.TryGetProperty(property.Name, out var existing)
-                && existing.ValueKind == JsonValueKind.Object)
-            {
-                result[property.Name] = MergeObjectsSkippingNulls(existing, property.Value);
-                continue;
-            }
-
-            result[property.Name] = JsonElementToObject(property.Value);
-        }
-
-        return result;
-    }
-
-    private static object? JsonElementToObject(JsonElement element) => element.ValueKind switch
-    {
-        JsonValueKind.Object => element.EnumerateObject().ToDictionary(p => p.Name, p => JsonElementToObject(p.Value), StringComparer.Ordinal),
-        JsonValueKind.Array => element.EnumerateArray().Select(JsonElementToObject).ToArray(),
-        JsonValueKind.String => element.GetString(),
-        JsonValueKind.Number when element.TryGetInt64(out var l) => l,
-        JsonValueKind.Number when element.TryGetDouble(out var d) => d,
-        JsonValueKind.True => true,
-        JsonValueKind.False => false,
-        JsonValueKind.Null => null,
-        _ => element.GetRawText(),
-    };
-
-    private static JsonElement BuildRuntimeVariablesElement(IReadOnlyDictionary<string, JsonElement> runtimeVariables)
-    {
-        var root = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var (key, value) in runtimeVariables)
-        {
-            var segments = key.Split('.');
-            var current = root;
-            for (var i = 0; i < segments.Length - 1; i++)
-            {
-                if (!current.TryGetValue(segments[i], out var existing) || existing is not Dictionary<string, object?> dict)
-                {
-                    dict = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    current[segments[i]] = dict;
-                }
-                current = dict;
-            }
-            current[segments[^1]] = JsonElementToObject(value.Clone());
-        }
-        return JsonSerializer.SerializeToElement(root, WorkflowVariableJson.Options);
-    }
-
-    private static Dictionary<string, JsonElement?> JsonElementToDictionary(JsonElement element)
-    {
-        var result = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (element.ValueKind != JsonValueKind.Object)
-            return result;
-
-        foreach (var property in element.EnumerateObject())
-            result[property.Name] = property.Value.Clone();
-        return result;
-    }
-
-    internal static Dictionary<string, JsonElement?> MergeRuntimeVariablesIntoPayload(
-        Dictionary<string, JsonElement?> payload,
-        IReadOnlyDictionary<string, JsonElement> runtimeVariables)
-    {
-        var runtimeElement = BuildRuntimeVariablesElement(runtimeVariables);
-        var payloadElement = JsonSerializer.SerializeToElement(payload, WorkflowVariableJson.Options);
-        var merged = DeepMergeSkippingNulls(payloadElement, runtimeElement) ?? payloadElement;
-        return JsonElementToDictionary(merged);
-    }
-
     private void LogDispatchAgentDiagnostics(
         string stage,
         string workId,
@@ -1093,9 +982,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         JsonElement effectiveVarsJson,
         VariableBundle resolved)
     {
-        var withModel = TryReadNestedString(dispatchWith, "agent", "model");
-        var varsModel = TryReadNestedString(effectiveVarsJson, "agent", "model");
-        var stageModel = TryReadStageAgentModel(resolved, stage);
+        var withModel = WorkflowDispatchHelpers.TryReadNestedString(dispatchWith, "agent", "model");
+        var varsModel = WorkflowDispatchHelpers.TryReadNestedString(effectiveVarsJson, "agent", "model");
+        var stageModel = WorkflowDispatchHelpers.TryReadStageAgentModel(resolved, stage);
         var source = !string.IsNullOrWhiteSpace(withModel)
             ? "with.agent.model"
             : !string.IsNullOrWhiteSpace(varsModel)
@@ -1115,65 +1004,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 ? stageModel.Value ?? "(null override)"
                 : "(missing)",
             source);
-    }
-
-    private static string? TryReadNestedString(Dictionary<string, JsonElement?>? values, string key, string nestedKey)
-    {
-        if (values is null || !values.TryGetValue(key, out var value) || !value.HasValue)
-            return null;
-        return TryReadNestedString(value.Value, nestedKey);
-    }
-
-    private static string? TryReadNestedString(JsonElement value, string key, string nestedKey)
-    {
-        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(key, out var nested))
-            return null;
-        return TryReadNestedString(nested, nestedKey);
-    }
-
-    private static string? TryReadNestedString(JsonElement value, string key)
-    {
-        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(key, out var nested))
-            return null;
-        return nested.ValueKind == JsonValueKind.String ? nested.GetString() : null;
-    }
-
-    private static (bool Present, string? Value) TryReadStageAgentModel(VariableBundle resolved, string stage)
-    {
-        if (resolved.Stages is null || !resolved.Stages.TryGetValue(stage, out var stageVars) || !stageVars.Vars.HasValue)
-            return (false, null);
-
-        var vars = stageVars.Vars.Value;
-        if (vars.ValueKind != JsonValueKind.Object
-            || !vars.TryGetProperty("agent", out var agent)
-            || agent.ValueKind != JsonValueKind.Object
-            || !agent.TryGetProperty("model", out var model))
-            return (false, null);
-
-        return model.ValueKind == JsonValueKind.String
-            ? (true, model.GetString())
-            : (true, null);
-    }
-
-    private static WorkIssueRef? BuildIssueRef(Dictionary<string, JsonElement?> payload)
-    {
-        if (!payload.TryGetValue("project", out var projectEl) || !projectEl.HasValue) return null;
-        if (!payload.TryGetValue("issue", out var issueEl) || !issueEl.HasValue) return null;
-        if (projectEl.Value.ValueKind != JsonValueKind.Object) return null;
-        if (issueEl.Value.ValueKind != JsonValueKind.Object) return null;
-
-        if (!projectEl.Value.TryGetProperty("id", out var projectIdEl)) return null;
-        if (!issueEl.Value.TryGetProperty("id", out var issueIdEl)) return null;
-        if (!issueEl.Value.TryGetProperty("number", out var numberEl)) return null;
-
-        var projectId = projectIdEl.ValueKind == JsonValueKind.String ? projectIdEl.GetString() : projectIdEl.GetRawText();
-        var issueId = issueIdEl.ValueKind == JsonValueKind.String ? issueIdEl.GetString() : issueIdEl.GetRawText();
-        var numberStr = numberEl.ValueKind == JsonValueKind.Number ? numberEl.GetRawText() : numberEl.GetString();
-
-        if (projectId is null || issueId is null || !int.TryParse(numberStr, out var num))
-            return null;
-
-        return new WorkIssueRef(projectId, issueId, num);
     }
 
     private async Task AssignRunnerWorkAsync(string runnerId, WorkDispatch dispatch)
@@ -1317,14 +1147,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             ClearCheckDispatch(check);
     }
 
-    private static int TaskAttempt(string taskRunId)
-    {
-        var lastDot = taskRunId.LastIndexOf('.');
-        return lastDot >= 0 && int.TryParse(taskRunId[(lastDot + 1)..], out var attempt)
-            ? attempt
-            : 1;
-    }
-
     private async Task ClearExecutableStateAsync(string reason)
     {
         await ReleaseCurrentStageLocksAsync(reason);
@@ -1379,7 +1201,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         if (result.Status == "completed")
         {
-            CaptureTaskOutputs(run, currentTask, result.CapturedOutputs);
+            WorkflowDispatchHelpers.CaptureTaskOutputs(run, currentTask, result.CapturedOutputs);
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
                 var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, result.Output);
@@ -1398,22 +1220,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         return events;
-    }
-
-    internal static void CaptureTaskOutputs(WorkflowRun run, TaskRun? task, Dictionary<string, JsonElement>? capturedOutputs)
-    {
-        if (task is null || capturedOutputs is null || capturedOutputs.Count == 0)
-            return;
-
-        var declaredNames = task.Outputs?.Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
-        if (declaredNames is null || declaredNames.Count == 0)
-            return;
-
-        var validated = capturedOutputs
-            .Where(kv => declaredNames.Contains(kv.Key))
-            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-
-        run.CaptureTaskOutputs(task.DefinitionId, validated);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>?> BindArtifactUploadsAsync(
@@ -1454,39 +1260,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<JsonElement?> ResolveBindVariablesAsync()
     {
-        // Mirror the variable resolution path used at dispatch time
-        // (MakeDispatchAsync) so the bind service sees the same
-        // resolved variables the runner used. Stage-scoped vars from
-        // the current stage overlay on top of the workflow-level
-        // vars.
         var template = await _profileManager.LoadTemplateAsync(GrainKey);
         var independent = await _profileManager.LoadVariablesAsync(GrainKey);
         var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
         var resolved = VariableBundle.Patch(embedded, independent);
 
-        if (!resolved.Vars.HasValue && resolved.Stages is null) return null;
-
-        JsonElement effective = resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object
-            ? resolved.Vars.Value
-            : JsonSerializer.Deserialize<JsonElement>("{}");
-
-        var currentStage = _run?.CurrentStageId;
-        if (currentStage is not null
-            && resolved.Stages is not null
-            && resolved.Stages.TryGetValue(currentStage, out var stageVars)
-            && stageVars.Vars.HasValue
-            && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
-        {
-            var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
-            effective = VariableBundle.DeepMerge(effective, stageOverlay) ?? stageOverlay;
-        }
-
-        return effective;
+        return WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, _run?.CurrentStageId);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>> ProcessCheckResultAsync(WorkResult result)
     {
-        var checkResults = ParseCheckResults(result.Output);
+        var checkResults = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
         if (checkResults.Count == 0)
             return [];
 
@@ -1583,63 +1367,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             repairWith);
     }
 
-    private static List<CheckResult> ParseCheckResults(string? output)
-    {
-        if (string.IsNullOrWhiteSpace(output)) return [];
-
-        try
-        {
-            using var doc = JsonDocument.Parse(output);
-            var root = doc.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Array)
-                return root.EnumerateArray().Select(ParseSingleCheckResult).Where(r => r is not null).Cast<CheckResult>().ToList();
-
-            var single = ParseSingleCheckResult(root);
-            return single is not null ? [single] : [];
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static CheckResult? ParseSingleCheckResult(JsonElement element)
-    {
-        var name = element.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
-        if (string.IsNullOrWhiteSpace(name)) return null;
-
-        var status = element.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "fail" : "fail";
-        var message = element.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : null;
-        JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp.Clone() : null;
-
-        return new CheckResult(name!, status, message, output);
-    }
-
     [MemberNotNull(nameof(_run))]
     private void EnsureRun()
     {
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
-    }
-
-    private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
-        with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
-
-    private static Dictionary<string, Dictionary<string, string>>? BuildStageVariablesFromDefinition(WorkflowDefinition definition)
-    {
-        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var stage in definition.Stages)
-        {
-            if (stage.Variables is null || stage.Variables.Count == 0) continue;
-            result[stage.Stage] = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["vars"] = JsonSerializer.Serialize(
-                    stage.Variables.ToDictionary(kv => kv.Key, kv => kv.Value.HasValue ? JsonSerializer.Deserialize<object?>(kv.Value.Value.GetRawText(), WorkflowVariableJson.Options) : null),
-                    WorkflowVariableJson.Options)
-            };
-        }
-        return result.Count == 0 ? null : result;
     }
 
     private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, CancellationToken ct = default)

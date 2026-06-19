@@ -23,7 +23,7 @@ public class TaskOutputCaptureSpecs
             ["changeDir"] = JsonSerializer.SerializeToElement("openspec/changes/issue-97")
         };
 
-        WorkflowGrain.CaptureTaskOutputs(run, task, captured);
+        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, captured);
 
         Assert.Equal(2, run.RuntimeVariables.Count);
         Assert.Equal("issue-97", run.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
@@ -44,7 +44,7 @@ public class TaskOutputCaptureSpecs
             ["undeclared"] = JsonSerializer.SerializeToElement("ignored")
         };
 
-        WorkflowGrain.CaptureTaskOutputs(run, task, captured);
+        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, captured);
 
         Assert.Single(run.RuntimeVariables);
         Assert.Equal("issue-97", run.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
@@ -60,7 +60,7 @@ public class TaskOutputCaptureSpecs
             ["openspecName"] = JsonSerializer.SerializeToElement("issue-97")
         };
 
-        WorkflowGrain.CaptureTaskOutputs(run, null, captured);
+        WorkflowDispatchHelpers.CaptureTaskOutputs(run, null, captured);
 
         Assert.Empty(run.RuntimeVariables);
     }
@@ -75,7 +75,7 @@ public class TaskOutputCaptureSpecs
             ["openspecName"] = JsonSerializer.SerializeToElement("issue-97")
         };
 
-        WorkflowGrain.CaptureTaskOutputs(run, task, captured);
+        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, captured);
 
         Assert.Empty(run.RuntimeVariables);
     }
@@ -89,8 +89,8 @@ public class TaskOutputCaptureSpecs
             new TaskOutputDefinition("openspecName", "output.openspecName")
         ]);
 
-        WorkflowGrain.CaptureTaskOutputs(run, task, null);
-        WorkflowGrain.CaptureTaskOutputs(run, task, []);
+        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, null);
+        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, []);
 
         Assert.Empty(run.RuntimeVariables);
     }
