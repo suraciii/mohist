@@ -82,11 +82,13 @@ public static class MohistServiceRegistration
         services.AddScoped<IssueWorkflowProfileRegistry>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionQuery>();
+        services.AddScoped<WorkflowSessionHealthService>();
         services.AddScoped<AgentSessionQuerier>();
         services.AddScoped<AgentSessionResolver>();
         services.AddScoped<WorkflowActivityQuerier>();
         services.AddScoped<WorkflowQuerier>();
         services.AddScoped<WorkflowProfileManager>();
+        services.AddScoped<WorkflowDispatchBuilder>();
         services.AddScoped<ProjectWorkflowProfileManager>();
         services.AddScoped<IssueWorkflowProfileManager>();
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();

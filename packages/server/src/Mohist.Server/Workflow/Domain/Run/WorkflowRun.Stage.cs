@@ -76,6 +76,32 @@ public static partial class WorkflowRunExtensions
 
     extension(StageRun stage)
     {
+        public TaskRun? RunningTask =>
+            stage.Tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Running);
+
+        public TaskRun? FindRunningTaskByWork(string workId, string runnerId) =>
+            stage.Tasks.FirstOrDefault(t =>
+                t.Status == TaskRunStatus.Running
+                && string.Equals(t.WorkId, workId, StringComparison.Ordinal)
+                && string.Equals(t.RunnerId, runnerId, StringComparison.Ordinal));
+
+        public StageCheck? DispatchedCheck =>
+            stage.Checks.FirstOrDefault(c =>
+                c.Status == StageCheckStatus.Pending
+                && !string.IsNullOrWhiteSpace(c.DispatchWorkId));
+
+        public StageCheck? FindDispatchedCheckByWork(string workId, string runnerId) =>
+            stage.Checks.FirstOrDefault(c =>
+                c.Status == StageCheckStatus.Pending
+                && string.Equals(c.DispatchWorkId, workId, StringComparison.Ordinal)
+                && string.Equals(c.DispatchRunnerId, runnerId, StringComparison.Ordinal));
+
+        public void ClearDispatchedChecks()
+        {
+            foreach (var check in stage.Checks)
+                check.ClearDispatch();
+        }
+
         internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
 
         /// <summary>
@@ -185,9 +211,7 @@ public static partial class WorkflowRunExtensions
             foreach (var stageCheck in stage.Checks)
             {
                 stageCheck.Status = StageCheckStatus.Pending;
-                stageCheck.DispatchWorkId = null;
-                stageCheck.DispatchRunnerId = null;
-                stageCheck.DispatchedAt = null;
+                stageCheck.ClearDispatch();
                 stageCheck.Message = null;
                 stageCheck.Output = null;
             }

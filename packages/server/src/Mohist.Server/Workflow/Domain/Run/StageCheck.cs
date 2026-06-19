@@ -35,4 +35,11 @@ public sealed class StageCheck
     public int RepairCount { get; set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }
+
+    public void ClearDispatch()
+    {
+        DispatchWorkId = null;
+        DispatchRunnerId = null;
+        DispatchedAt = null;
+    }
 }

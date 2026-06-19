@@ -59,7 +59,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            ClearDispatch(check);
+            check.ClearDispatch();
             check.Status = StageCheckStatus.Passed;
             check.Message = result.Message;
             check.Output = result.Output;
@@ -75,7 +75,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            ClearDispatch(check);
+            check.ClearDispatch();
             check.Status = StageCheckStatus.Failed;
             check.Message = result.Message;
             check.Output = result.Output;
@@ -99,19 +99,41 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            ClearDispatch(check);
+            check.ClearDispatch();
             check.Status = StageCheckStatus.Pending;
             check.Message = result.Message;
             check.Output = result.Output;
             return [new CheckPending(current.Id, check.Name, result.Message)];
         }
 
+        public IReadOnlyList<TaskDefinition> BuildRepairTasks(
+            string checkName,
+            CheckFailureRepair repair,
+            CheckResult? result = null)
+        {
+            var tasks = new List<TaskDefinition> { BuildRepairTask(run, checkName, repair.Task, result) };
+            if (repair.VerifyTask is not null)
+                tasks.Add(repair.VerifyTask);
+            return tasks;
+        }
     }
 
-    private static void ClearDispatch(StageCheck check)
+    private static TaskDefinition BuildRepairTask(
+        WorkflowRun run, string checkName, TaskDefinition repairTask, CheckResult? result)
     {
-        check.DispatchWorkId = null;
-        check.DispatchRunnerId = null;
-        check.DispatchedAt = null;
+        JsonElement? resultJson = result is null
+            ? null
+            : JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
+        var repairWith = repairTask.With is not null
+            ? new Dictionary<string, JsonElement?>(repairTask.With)
+            : new Dictionary<string, JsonElement?>();
+        if (resultJson is not null && !string.Equals(checkName, "review-passed", StringComparison.Ordinal))
+            repairWith["failedCheckResult"] = resultJson;
+
+        return new TaskDefinition(
+            $"{repairTask.Id}:{run.GetRepairCount(checkName) + 1}",
+            repairTask.Title,
+            repairTask.Uses,
+            repairWith);
     }
 }
