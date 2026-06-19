@@ -53,6 +53,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         public static readonly SessionContextUsage None = new(null, null);
     }
 
+    private sealed record WorkDispatchRequest(
+        string Stage,
+        string LogicalId,
+        string WorkType,
+        string Title,
+        string? Uses,
+        Dictionary<string, JsonElement?>? With,
+        TaskArtifactCapture? Artifacts = null,
+        List<TaskOutputDefinition>? Outputs = null,
+        string? WorkIdOverride = null);
+
     public WorkflowGrain(
         IWorkflowRunStore runStore,
         IWorkflowBacklogDirectory backlogs,
@@ -762,7 +773,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 var taskWith = t.With is not null
                     ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
                     : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
-                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId, t.Artifacts, t.Outputs, markRunning: markRunning);
+                return await MakeDispatchAsync(new WorkDispatchRequest(
+                    work.Stage, t.Id, "task", t.Title, t.Uses, taskWith,
+                    t.Artifacts, t.Outputs), runnerId, markRunning);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -773,13 +786,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
-    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null, bool markRunning = true)
+    private async Task<WorkDispatch> MakeDispatchAsync(WorkDispatchRequest req, string runnerId, bool markRunning = true)
     {
-        var dispatch = await BuildDispatchAsync(stage, logicalId, workType, title, uses, with, runnerId, artifacts, outputs, workIdOverride);
+        var dispatch = await BuildDispatchAsync(req, runnerId);
         if (!markRunning) return dispatch;
-        if (workType == "task")
+        if (req.WorkType == "task")
         {
-            var currentTask = _run!.CurrentStage().Tasks.FirstOrDefault(t => t.Id == logicalId);
+            var currentTask = _run!.CurrentStage().Tasks.FirstOrDefault(t => t.Id == req.LogicalId);
             if (currentTask?.Status != TaskRunStatus.Running)
             {
                 var events = _run!.StartTask(dispatch.WorkId, runnerId);
@@ -788,7 +801,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                     await On(e);
             }
         }
-        else if (workType == "checks")
+        else if (req.WorkType == "checks")
         {
             foreach (var check in _run!.CurrentStage().Checks.Where(c => c.Status == StageCheckStatus.Pending))
             {
@@ -817,30 +830,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
         }).ToList();
 
-        return MakeDispatchAsync(
-            stage,
-            $"checks-{stage}",
-            "checks",
-            "Stage checks",
-            uses: null,
-            with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
-            runnerId,
-            markRunning: markRunning,
-            workIdOverride: workIdOverride);
+        return MakeDispatchAsync(new WorkDispatchRequest(
+            stage, $"checks-{stage}", "checks", "Stage checks",
+            Uses: null,
+            With: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
+            WorkIdOverride: workIdOverride), runnerId, markRunning);
     }
 
-    private async Task<WorkDispatch> BuildDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null)
+    private async Task<WorkDispatch> BuildDispatchAsync(WorkDispatchRequest req, string runnerId)
     {
-        var workId = workIdOverride ?? (workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}");
-        var attempt = workType == "task" ? WorkflowDispatchHelpers.TaskAttempt(logicalId) : 1;
+        var workId = req.WorkIdOverride ?? (req.WorkType == "task" ? req.LogicalId : $"{req.LogicalId}:{Guid.NewGuid():N}");
+        var attempt = req.WorkType == "task" ? WorkflowDispatchHelpers.TaskAttempt(req.LogicalId) : 1;
 
-        if (workType == "task")
+        if (req.WorkType == "task")
         {
-            var usage = await ResolveSessionContextUsageAsync(workId, stage, ct: default);
+            var usage = await ResolveSessionContextUsageAsync(workId, req.Stage, ct: default);
             var verdict = WorkflowSessionHealthGate.Evaluate(usage.Percent);
             if (verdict == HealthVerdict.Block)
             {
-                await ApplyContextExhaustionBlockAsync(workId, usage.Percent, stage, usage.SessionId, "dispatch");
+                await ApplyContextExhaustionBlockAsync(workId, usage.Percent, req.Stage, usage.SessionId, "dispatch");
             }
             else if (verdict == HealthVerdict.Warn)
             {
@@ -850,65 +858,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             }
         }
 
-        // --- 1. Load template + independent vars from manager (per design/workflow-template-variables.md) ---
-        var template = await _profileManager.LoadTemplateAsync(GrainKey);
-        var independent = await _profileManager.LoadVariablesAsync(GrainKey);
-        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
-        var resolved = VariableBundle.Patch(embedded, independent);
+        var (payload, effectiveVarsJson, resolved) = await BuildDispatchPayload(req, workId, attempt);
 
-        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-
-        var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, stage)
-            ?? JsonSerializer.Deserialize<JsonElement>("{}");
-
-        // Spread vars to payload top level (preserves opaque user context like "custom: { answer: 42 }")
-        if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in effectiveVarsJson.EnumerateObject())
-                payload[property.Name] = property.Value.Clone();
-        }
-
-        // Inject dispatch scope (workflow/stage/work override any same-named user vars)
-        payload["vars"] = effectiveVarsJson;
-        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = GrainKey }, WorkflowVariableJson.Options);
-        payload["stage"] = JsonSerializer.SerializeToElement(new { name = stage }, WorkflowVariableJson.Options);
-        payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = workType, title, attempt }, WorkflowVariableJson.Options);
-
-        // Merge runtime task outputs after dispatch scope so tasks.<id>.outputs.<name>
-        // is available in ${{ }} templates and overrides lower-precedence sources.
-        if (_run?.RuntimeVariables is { Count: > 0 })
-        {
-            payload = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
-        }
-
-        // Inject minimal approvalFeedback context when dispatching a feedback task.
-        // Detection is by the dispatching task's CausedByFeedbackId (set when the
-        // apply-feedback runtime task was scheduled by RequestChanges).
-        if (workType == "task" && _run is not null)
-        {
-            var stageRun = _run.Stages.FirstOrDefault(s => s.Id == stage);
-            var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == logicalId);
-            if (task?.CausedByFeedbackId is { } feedbackId)
-            {
-                var feedback = _run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
-                if (feedback is not null)
-                {
-                    var issueNumber = ResolveIssueNumber();
-                    var projectId = GetProjectId();
-                    var feedbackObj = new
-                    {
-                        id = feedback.Id,
-                        stage = feedback.Stage,
-                        createdAt = feedback.CreatedAt.ToString("O"),
-                        summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
-                        command = WorkflowRunExtensions.BuildFeedbackShowCommand(issueNumber, feedback.Id, projectId),
-                    };
-                    payload["approvalFeedback"] = JsonSerializer.SerializeToElement(feedbackObj, WorkflowVariableJson.Options);
-                }
-            }
-        }
-
-        // --- 2. Load prompts from profile (independent from vars, same priority chain) ---
         var prompts = await _profileManager.LoadPromptsAsync(GrainKey);
         if (prompts.Count > 0)
         {
@@ -919,8 +870,79 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         var variables = JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
+        var withStr = ResolveDispatchWith(effectiveVarsJson, resolved, req.With, req.Stage, workId);
 
-        // --- 3. Expand task.with (replaces the old ApplyStageAgentDefault) ---
+        return new WorkDispatch(
+            WorkflowRunId: GrainKey,
+            WorkId: workId,
+            Uses: req.Uses,
+            With: withStr,
+            Variables: variables,
+            WorkType: req.WorkType,
+            Stage: req.Stage,
+            Title: req.Title,
+            Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
+            Artifacts: req.Artifacts is not null && !req.Artifacts.IsEmpty ? JSON.Serialize(req.Artifacts) : null,
+            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JsonSerializer.Serialize(req.Outputs) : null);
+    }
+
+    private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
+        BuildDispatchPayload(WorkDispatchRequest req, string workId, int attempt)
+    {
+        var template = await _profileManager.LoadTemplateAsync(GrainKey);
+        var independent = await _profileManager.LoadVariablesAsync(GrainKey);
+        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
+        var resolved = VariableBundle.Patch(embedded, independent);
+
+        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, req.Stage)
+            ?? JsonSerializer.Deserialize<JsonElement>("{}");
+
+        if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in effectiveVarsJson.EnumerateObject())
+                payload[property.Name] = property.Value.Clone();
+        }
+
+        payload["vars"] = effectiveVarsJson;
+        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = GrainKey }, WorkflowVariableJson.Options);
+        payload["stage"] = JsonSerializer.SerializeToElement(new { name = req.Stage }, WorkflowVariableJson.Options);
+        payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = req.WorkType, title = req.Title, attempt }, WorkflowVariableJson.Options);
+
+        if (_run?.RuntimeVariables is { Count: > 0 })
+            payload = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, _run.RuntimeVariables);
+
+        if (req.WorkType == "task" && _run is not null)
+        {
+            var stageRun = _run.Stages.FirstOrDefault(s => s.Id == req.Stage);
+            var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == req.LogicalId);
+            if (task?.CausedByFeedbackId is { } feedbackId)
+            {
+                var feedback = _run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
+                if (feedback is not null)
+                {
+                    payload["approvalFeedback"] = JsonSerializer.SerializeToElement(new
+                    {
+                        id = feedback.Id,
+                        stage = feedback.Stage,
+                        createdAt = feedback.CreatedAt.ToString("O"),
+                        summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
+                        command = WorkflowRunExtensions.BuildFeedbackShowCommand(ResolveIssueNumber(), feedback.Id, GetProjectId()),
+                    }, WorkflowVariableJson.Options);
+                }
+            }
+        }
+
+        return (payload, effectiveVarsJson, resolved);
+    }
+
+    private string? ResolveDispatchWith(
+        JsonElement effectiveVarsJson,
+        VariableBundle resolved,
+        Dictionary<string, JsonElement?>? with,
+        string stage,
+        string workId)
+    {
         var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
             ? new VariableBundle(effectiveVarsJson)
             : VariableBundle.Empty;
@@ -930,7 +952,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             : null;
         dispatchWith = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, dispatchWith);
 
-        // --- 4. Inject default agent when task.with has no agent key ---
         if ((dispatchWith is null || !dispatchWith.ContainsKey("agent"))
             && effectiveVarsJson.ValueKind == JsonValueKind.Object
             && effectiveVarsJson.TryGetProperty("agent", out var effectiveAgentEl)
@@ -942,30 +963,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
         LogDispatchAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved);
-
-        // --- 4. Extract issueRef from context (issue/project from _variables.Json) ---
-        WorkIssueRef? issueRef = WorkflowDispatchHelpers.BuildIssueRef(payload);
-
-        var artifactsStr = artifacts is not null && !artifacts.IsEmpty
-            ? JSON.Serialize(artifacts)
-            : null;
-
-        var outputsStr = outputs is not null && outputs.Count > 0
-            ? JsonSerializer.Serialize(outputs)
-            : null;
-
-        return new WorkDispatch(
-            WorkflowRunId: GrainKey,
-            WorkId: workId,
-            Uses: uses,
-            With: withStr,
-            Variables: variables,
-            WorkType: workType,
-            Stage: stage,
-            Title: title,
-            Issue: issueRef,
-            Artifacts: artifactsStr,
-            Outputs: outputsStr);
+        return withStr;
     }
 
     private void LogDispatchAgentDiagnostics(
