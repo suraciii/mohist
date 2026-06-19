@@ -249,3 +249,7 @@ https://github.com/<your-org>/mohist/issues
 - Health / status / blockedReason
 - Logs 关键片段
 - 复现步骤
+
+---
+
+对应源码：跨域；恢复逻辑见 `Issue/`、`Workflow/`（health / interrupted / blocked 处理）。

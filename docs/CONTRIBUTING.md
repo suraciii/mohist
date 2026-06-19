@@ -142,6 +142,16 @@ feat: add pause/resume functionality for issues
 4. **文档**: 更新相关文档
 5. **Breaking Changes**: 标注破坏性变更
 
+## 文档贡献
+
+改文档前，先读 [`README.md`](./README.md) 的"写作约束"。提 review 前自查：
+
+- [ ] 每条事实陈述都能在源码里找到对应
+- [ ] 代码里没有的功能不写（即使 UI / 数据库字段 / handler 接口有暗示）
+- [ ] 所有 shell / CLI 示例可以独立复制运行
+- [ ] 术语和 [`README.md`](./README.md) 一致
+- [ ] 所有链接指向的页面存在（没有死链）
+
 ## Debug
 
 ### 服务器日志

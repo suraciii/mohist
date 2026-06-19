@@ -6,7 +6,7 @@
 
 | 工具 | 版本 | 检查命令 |
 |---|---|---|
-| .NET SDK | 10.0+ | `dotnet --version` |
+| .NET SDK | 11.0+ | `dotnet --version` |
 | Node.js | 18+ | `node --version` |
 | npm | 9+ | `npm --version` |
 | opencode CLI | 任意 | `opencode --version` |
@@ -159,3 +159,7 @@ Integrate 完成后，issue 进入 Done。这时：
 - [Issue 管理](issues.md) — 学会 prerequisites、comments、force stop、retry 等
 - [用 Epic 规划](epics.md) — 把零散 issue 组织成产品路线
 - [Workflow Profile](workflow-profiles.md) — 改造 workflow 适配你的工作风格
+
+---
+
+对应源码：仓库根 `package.json`、`global.json`、`Directory.Build.props`。

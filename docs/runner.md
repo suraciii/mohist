@@ -139,3 +139,7 @@ Runner 行为可通过环境变量或 config 文件调（看 `mo runner start --
 ## Self-host 场景
 
 Runner 长跑（不像 dev:runner 那样前台），看 [Self-host 部署](self-host.md)。
+
+---
+
+对应源码：`packages/runner/`、`packages/server/src/Mohist.Server/Runner/`。

@@ -190,3 +190,7 @@ Web UI 在移动端有基本适配（看板有移动布局），但当前不是�
 - Settings 在移动端不友好
 
 需要严肃的移动端工作流，等 PWA + push notification 完工。
+
+---
+
+对应源码：`packages/web/`。
