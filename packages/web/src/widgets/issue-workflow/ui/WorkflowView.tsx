@@ -1,14 +1,12 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { MessageSquareIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { approveIssue, resumeIssue, startIssue, getFileContent, useRequestChangesIssue } from '../../../entities/issue'
-import { onAgentEvent } from '../../../entities/agent'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
-import type { AgentDetailEventMap } from '../../../entities/agent'
 import { useWorkflowTimeline } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { ArtifactContentViewer } from './ArtifactContentViewer'
@@ -267,14 +265,12 @@ function StageBar({
   selectedStage,
   onSelectStage,
   readOnly,
-  runningDurations,
 }: {
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
   selectedStage: WorkflowStage
   onSelectStage: (stage: WorkflowStage) => void
   readOnly: boolean
-  runningDurations: Map<string, number>
 }) {
   const isMobile = useIsMobile()
 
@@ -285,10 +281,7 @@ function StageBar({
     >
       {WORKFLOW_STAGES.map((stage, idx) => {
         const status = getStageStatus(stage, stageStateMap, issue)
-        let duration = getStageDuration(stage, stageStateMap)
-        if (status === 'running' && runningDurations.has(stage)) {
-          duration = runningDurations.get(stage)!
-        }
+        const duration = getStageDuration(stage, stageStateMap)
         return (
           <div key={stage} className={`flex items-stretch ${isMobile ? 'shrink-0' : 'flex-1 min-w-0'}`}>
             {idx > 0 && (
@@ -427,12 +420,10 @@ function TaskItem({
   task,
   issueNumber,
   readOnly,
-  liveElapsed,
 }: {
   task: StageTaskState
   issueNumber: number
   readOnly: boolean
-  liveElapsed?: number | null
 }) {
   const [expanded, setExpanded] = useState(false)
   const [selectedArtifact, setSelectedArtifact] = useState<WorkflowArtifactSummary | null>(null)
@@ -476,7 +467,7 @@ function TaskItem({
   const duration =
     task.status === 'completed' || task.status === 'failed'
       ? task.duration
-      : liveElapsed
+      : undefined
 
   const hasReason = task.reason != null
   const originLabel = formatOriginLabel(task.origin)
@@ -964,13 +955,11 @@ function StepList({
   stageStateMap,
   issue,
   readOnly,
-  liveElapsedByTask,
 }: {
   stage: WorkflowStage
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
   readOnly: boolean
-  liveElapsedByTask: Map<string, number>
 }) {
   const stageState = stageStateMap.get(stage)
   const taskResults: StageTaskState[] = stageState?.tasks ?? []
@@ -999,7 +988,6 @@ function StepList({
                   task={task}
                   issueNumber={issue.number}
                   readOnly={readOnly}
-                  liveElapsed={liveElapsedByTask.get(task.taskId)}
                 />
               ))
             ) : (
@@ -1405,78 +1393,6 @@ export function WorkflowView({ issue }: { issue: Issue }) {
     setSelectedStage(getDefaultStage())
   }, [getDefaultStage])
 
-  const [runningTaskStarts, setRunningTaskStarts] = useState<Map<string, number>>(new Map())
-  const [liveElapsed, setLiveElapsed] = useState<Map<string, number>>(new Map())
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    const off = onAgentEvent('stage_task_update', (evt: AgentDetailEventMap['stage_task_update']) => {
-      if (evt.issueId !== issue.id) return
-      if (evt.status === 'started') {
-        setRunningTaskStarts((prev) => {
-          const next = new Map(prev)
-          next.set(evt.taskId, Date.now())
-          return next
-        })
-      } else if (evt.status === 'completed' || evt.status === 'failed') {
-        setRunningTaskStarts((prev) => {
-          const next = new Map(prev)
-          next.delete(evt.taskId)
-          return next
-        })
-        setLiveElapsed((prev) => {
-          const next = new Map(prev)
-          next.delete(evt.taskId)
-          return next
-        })
-      }
-    })
-    return off
-  }, [issue.id])
-
-  useEffect(() => {
-    if (runningTaskStarts.size === 0) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-      return
-    }
-    if (intervalRef.current) return
-
-    intervalRef.current = setInterval(() => {
-      setLiveElapsed((prev) => {
-        const next = new Map(prev)
-        const now = Date.now()
-        for (const [taskId, start] of runningTaskStarts) {
-          next.set(taskId, now - start)
-        }
-        return next
-      })
-    }, 500)
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
-  }, [runningTaskStarts])
-
-  const runningDurations = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const [taskId, elapsed] of liveElapsed) {
-      for (const [stageKey, ss] of stageStateMap) {
-        if (ss.tasks.some(t => t.taskId === taskId)) {
-          const existing = map.get(stageKey) ?? 0
-          map.set(stageKey, existing + elapsed)
-          break
-        }
-      }
-    }
-    return map
-  }, [liveElapsed, stageStateMap])
-
   const handleSelectStage = useCallback(
     (stage: WorkflowStage) => {
       if (readOnly) return
@@ -1493,7 +1409,6 @@ export function WorkflowView({ issue }: { issue: Issue }) {
         selectedStage={selectedStage}
         onSelectStage={handleSelectStage}
         readOnly={readOnly}
-        runningDurations={runningDurations}
       />
 
       {(isBacklog || issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
@@ -1506,7 +1421,6 @@ export function WorkflowView({ issue }: { issue: Issue }) {
           stageStateMap={stageStateMap}
           issue={issue}
           readOnly={readOnly}
-          liveElapsedByTask={liveElapsed}
         />
       )}
 

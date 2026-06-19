@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { EventName, EventMap, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
+import type { EventName, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS, useAgentStatus } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
@@ -16,9 +16,9 @@ import { useRuntimeToast } from '../../shared/ui/toast'
  * Compile-time guard: every name the switch can route (i.e. every key of
  * `EventMap`) must be in the canonical subscription set. The reverse-DNS
  * names are added to `EventMap` in `entities/issue/@x/events.ts` and the
- * `EVENT_TYPES` constant is the union of legacy + reverse-DNS names. If a
- * new switch arm is added without adding its event type to `EVENT_TYPES`,
- * the assignment below will fail to typecheck.
+ * `EVENT_TYPES` constant is the union of agent-detail, transcript, and
+ * reverse-DNS names. If a new switch arm is added without adding its event
+ * type to `EVENT_TYPES`, the assignment below will fail to typecheck.
  *
  * Note: the check uses `[T] extends [never]` rather than `T extends never`
  * because TypeScript collapses `Exclude<..., string[]>` to `never` even
@@ -465,7 +465,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
         }
 
         switch (eventName as EventName) {
-          case 'stage_changed':
           case REVERSE_DNS_EVENT_TYPES.StageStarted:
           case REVERSE_DNS_EVENT_TYPES.StageCompleted:
           case REVERSE_DNS_EVENT_TYPES.StageFailed: {
@@ -473,14 +472,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
               break
             }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'comment_added': {
-            const { issueId } = parsed as EventMap['comment_added']
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            if (issueId) {
-              queryClient.invalidateQueries({ queryKey: ['issues', 'detail', issueId] })
-            }
             break
           }
           case REVERSE_DNS_EVENT_TYPES.IssueCreated:
@@ -504,10 +495,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             }
             break
           }
-          case 'agent_started':
-          case 'agent_completed':
-          case 'agent_paused':
-          case 'agent_error':
           case REVERSE_DNS_EVENT_TYPES.WorkflowRunStarted:
           case REVERSE_DNS_EVENT_TYPES.WorkflowRunResumed:
           case REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused:
@@ -525,30 +512,17 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            if (
-              eventName === 'agent_paused' ||
-              eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused
-            ) {
-              const evt = parsed as EventMap['agent_paused']
+            if (eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunPaused) {
+              const evt = parsed as { issueId: string }
               notifyRunLifecycleToast(queryClient, viewedIssueRef.current, evt.issueId, 'pause')
-            } else if (
-              eventName === 'agent_error' ||
-              eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed
-            ) {
-              const evt = parsed as EventMap['agent_error']
+            } else if (eventName === REVERSE_DNS_EVENT_TYPES.WorkflowRunFailed) {
+              const evt = parsed as { issueId: string }
               notifyRunLifecycleToast(queryClient, viewedIssueRef.current, evt.issueId, 'error')
             }
             break
           }
-          case 'agent_blocked': {
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-            break
-          }
-          case 'approval_requested':
           case REVERSE_DNS_EVENT_TYPES.StageApprovalRequested: {
-            const evt = parsed as EventMap['approval_requested'] & { issueNumber?: number }
+            const evt = parsed as { issueId: string; projectId: string; issueNumber?: number }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             notifyApprovalRequestedToast(queryClient, viewedIssueRef.current, evt)
@@ -557,130 +531,6 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           case REVERSE_DNS_EVENT_TYPES.StageApprovalResolved: {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-            break
-          }
-          case 'merge_queued':
-          case 'merge_started':
-          case 'merge_completed':
-          case 'merge_failed': {
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            if (eventName === 'merge_completed') {
-              const d = parsed as EventMap['merge_completed']
-              toast.success(`Issue #${d.issueNumber} merged successfully`)
-            } else if (eventName === 'merge_failed') {
-              const d = parsed as EventMap['merge_failed']
-              toast.error(`Merge failed for Issue #${d.issueNumber}`)
-            }
-            break
-          }
-          case 'rebase_started': {
-            const d = parsed as EventMap['rebase_started']
-            dispatchRebaseEvent({ type: 'rebase_started', issueNumber: d.issueNumber })
-            break
-          }
-          case 'rebase_progress': {
-            const d = parsed as EventMap['rebase_progress']
-            dispatchRebaseEvent({
-              type: 'rebase_progress',
-              issueNumber: d.issueNumber,
-              step: d.step,
-            })
-            break
-          }
-          case 'rebase_completed': {
-            const d = parsed as EventMap['rebase_completed']
-            setRebaseConflict(null)
-            dispatchRebaseEvent({
-              type: 'rebase_completed',
-              issueNumber: d.issueNumber,
-              rebased: d.rebased,
-            })
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'rebase_conflict': {
-            const d = parsed as EventMap['rebase_conflict']
-            if (d.status === 'resolving' || d.status === 'failed') {
-              setRebaseConflict({ issueNumber: d.issueNumber, conflicts: d.conflicts, status: d.status, error: d.error })
-            } else {
-              setRebaseConflict(null)
-            }
-            dispatchRebaseEvent({
-              type: 'rebase_conflict',
-              issueNumber: d.issueNumber,
-              conflicts: d.conflicts,
-              status: d.status,
-              error: d.error,
-            })
-            if (d.status === 'failed') {
-              toast.error(`Rebase conflict on Issue #${d.issueNumber}`)
-            }
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'agent_conflict_resolution_started': {
-            const d = parsed as EventMap['agent_conflict_resolution_started']
-            setRebaseConflict((prev) =>
-              prev && prev.issueNumber === d.issueNumber
-                ? { ...prev, status: 'resolving' }
-                : prev,
-            )
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'agent_conflict_resolution_completed': {
-            const d = parsed as EventMap['agent_conflict_resolution_completed']
-            setRebaseConflict((prev) =>
-              prev && prev.issueNumber === d.issueNumber
-                ? { ...prev, status: 'resolving' }
-                : prev,
-            )
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'agent_conflict_resolution_failed': {
-            const d = parsed as EventMap['agent_conflict_resolution_failed']
-            setRebaseConflict((prev) =>
-              prev && prev.issueNumber === d.issueNumber
-                ? { ...prev, status: 'failed', error: d.error }
-                : prev,
-            )
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'check_started':
-          case 'check_update':
-          case 'check_suite_status_changed': {
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            break
-          }
-          case 'stage_task_update': {
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
-            break
-          }
-          case 'base_drift_detected':
-          case 'rebase_opportunity': {
-            const d = parsed as EventMap['base_drift_detected'] | EventMap['rebase_opportunity']
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            if ('issueNumber' in d && d.issueNumber) {
-              queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber] })
-            }
-            if (eventName === 'base_drift_detected') {
-              const driftEvt = d as EventMap['base_drift_detected']
-              if (driftEvt.decision === 'needs-attention') {
-                toast.warning(`Issue #${driftEvt.issueNumber} needs attention before continuing`)
-              }
-            }
-            break
-          }
-          case 'user_attention_requested': {
-            const d = parsed as EventMap['user_attention_requested']
-            queryClient.invalidateQueries({ queryKey: ['issues'] })
-            if (d.issueNumber) {
-              queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber] })
-              toast.info(`Issue #${d.issueNumber}: ${d.reason}`)
-            }
             break
           }
         }

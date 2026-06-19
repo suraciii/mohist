@@ -3,9 +3,7 @@ import { AGENT_DETAIL_EVENTS } from '../src/entities/agent'
 import type { EventName } from '../src/entities/issue'
 import {
   EVENT_TYPES,
-  LEGACY_ISSUE_EVENT_TYPES,
   LEGACY_AGENT_DETAIL_EVENT_TYPES,
-  LEGACY_EVENT_TYPES,
   TRANSCRIPT_EVENT_TYPES,
   REVERSE_DNS_EVENT_TYPES,
   CanonicalEventType,
@@ -14,12 +12,6 @@ import {
 describe('canonical event types', () => {
   it('EVENT_TYPES is a non-empty list', () => {
     expect(EVENT_TYPES.length).toBeGreaterThan(0)
-  })
-
-  it('includes every legacy snake_case name from EventName', () => {
-    for (const name of LEGACY_ISSUE_EVENT_TYPES) {
-      expect(EVENT_TYPES).toContain(name)
-    }
   })
 
   it('includes every legacy snake_case name from AGENT_DETAIL_EVENTS', () => {
@@ -97,16 +89,6 @@ describe('canonical event types', () => {
     expect(REVERSE_DNS_EVENT_TYPES.AgentSessionRuntimeBound).toBe('com.mohist.agent-session.runtime-bound')
   })
 
-  it('every legacy event is in LEGACY_EVENT_TYPES', () => {
-    const legacySet = new Set<string>(LEGACY_EVENT_TYPES)
-    for (const name of LEGACY_ISSUE_EVENT_TYPES) {
-      expect(legacySet.has(name)).toBe(true)
-    }
-    for (const name of LEGACY_AGENT_DETAIL_EVENT_TYPES) {
-      expect(legacySet.has(name)).toBe(true)
-    }
-  })
-
   it('AGENT_DETAIL_EVENTS matches the legacy agent-detail set plus transcript types and reverse-DNS agent-session names', () => {
     const expected = new Set<string>([
       ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
@@ -127,13 +109,12 @@ describe('canonical event types', () => {
   })
 
   it('the type alias CanonicalEventType is exhaustive at the type level', () => {
-    const sample: CanonicalEventType = 'stage_changed'
+    const sample: CanonicalEventType = REVERSE_DNS_EVENT_TYPES.StageStarted
     expect(EVENT_TYPES).toContain(sample)
   })
 
   it('EventName (union) is consistent with EVENT_TYPES (runtime list)', () => {
     const eventNameValues: readonly EventName[] = [
-      ...LEGACY_ISSUE_EVENT_TYPES,
       ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
       REVERSE_DNS_EVENT_TYPES.StageStarted,
       REVERSE_DNS_EVENT_TYPES.StageCompleted,

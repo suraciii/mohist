@@ -10,21 +10,13 @@ public static class EventCatalog
     /// <summary>
     /// All registered CloudEvents <c>type</c> values. New events must be added here
     /// AND must have a producer that calls <c>bus.Emit</c> with that exact type string.
-    /// Includes legacy domain names, generic session runtime event names, and
-    /// reverse-DNS names. Generic session runtime event names are listed here for
-    /// subscription discovery, but they flow through the dedicated transcript
-    /// SignalR channel instead of the domain EventBridge path.
+    /// Generic session runtime event names are listed here for subscription discovery,
+    /// but they flow through the dedicated transcript SignalR channel instead of the
+    /// domain EventBridge path.
     /// </summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
-        // === Legacy domain names kept for existing Web/domain consumers ===
-        "stage_changed",
-        "comment_added",
-        "agent_started",
-        "agent_completed",
-        "agent_paused",
-        "agent_error",
-        "approval_requested",
+        // === Agent-detail / transcript vocabulary (legacy agent-detail names) ===
         "tool_call",
         "agent_text_chunk",
         "main_tool_call",
@@ -51,35 +43,6 @@ public static class EventCatalog
         "compaction",
         "compaction_event",
         "context_health_update",
-        // === Remaining workflow/integration legacy names ===
-        "merge_queued",
-        "merge_started",
-        "merge_completed",
-        "merge_failed",
-        "merge_blocked",
-        "rebase_started",
-        "rebase_progress",
-        "rebase_completed",
-        "rebase_conflict",
-        "agent_conflict_resolution_started",
-        "agent_conflict_resolution_completed",
-        "agent_conflict_resolution_failed",
-        "agent_blocked",
-        "check_started",
-        "check_update",
-        "check_suite_status_changed",
-        "stage_task_update",
-        "integration_started",
-        "integration_step_updated",
-        "integration_completed",
-        "integration_failed",
-        "integration_preflight_refreshed",
-        "base_drift_detected",
-        "rebase_opportunity",
-        "user_attention_requested",
-        "schedule_triggered",
-        "schedule_completed",
-        "schedule_failed",
         // === Reverse-DNS names (com.mohist.*) — preferred for new emits ===
         ReverseDns.WorkflowRunStarted,
         ReverseDns.WorkflowRunResumed,

@@ -88,10 +88,6 @@ export type AgentDetailEventMap = {
   coder_session_failed: { issueId: string; projectId: string; coderSessionId: string; reason?: string }
   coder_session_cancelled: { issueId: string; projectId: string; coderSessionId: string; reason?: string }
   coder_session_status_changed: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; status: string; lastDataAt?: string | null; probeSentAt?: string | null; probeDeadlineAt?: string | null; failureReason?: string | null }
-  agent_paused: { issueId: string; projectId: string }
-  check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
-  check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
-  stage_task_update: { issueId: string; projectId: string; stage: string; taskId: string; taskTitle: string; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt: number; artifacts: string[] }
   'session.closed': SessionRuntimeBase & { status: 'completed' | 'failed' | 'cancelled' | string; failureReason?: string | null; failureCategory?: string | null; exitCode?: number | null }
   'usage.updated': {
     acpSessionId?: string

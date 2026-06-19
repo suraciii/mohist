@@ -61,39 +61,6 @@ export const TRANSCRIPT_EVENT_TYPES = [
 
 export type TranscriptEventType = (typeof TRANSCRIPT_EVENT_TYPES)[number]
 
-export const LEGACY_ISSUE_EVENT_TYPES = [
-  'stage_changed',
-  'comment_added',
-  'agent_started',
-  'agent_completed',
-  'agent_paused',
-  'agent_error',
-  'agent_blocked',
-  'approval_requested',
-  'merge_queued',
-  'merge_started',
-  'merge_completed',
-  'merge_failed',
-  'rebase_started',
-  'rebase_progress',
-  'rebase_completed',
-  'rebase_conflict',
-  'agent_conflict_resolution_started',
-  'agent_conflict_resolution_completed',
-  'agent_conflict_resolution_failed',
-  'check_started',
-  'check_update',
-  'check_suite_status_changed',
-  'integration_started',
-  'integration_step_updated',
-  'integration_completed',
-  'integration_failed',
-  'base_drift_detected',
-  'rebase_opportunity',
-  'user_attention_requested',
-  'stage_task_update',
-] as const
-
 export const LEGACY_AGENT_DETAIL_EVENT_TYPES = [
   'agent_text_chunk',
   'main_tool_call',
@@ -111,13 +78,8 @@ export const LEGACY_AGENT_DETAIL_EVENT_TYPES = [
   'plan_round_complete',
 ] as const
 
-export const LEGACY_EVENT_TYPES = [
-  ...LEGACY_ISSUE_EVENT_TYPES,
-  ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
-] as const
-
 export const EVENT_TYPES = [
-  ...LEGACY_EVENT_TYPES,
+  ...LEGACY_AGENT_DETAIL_EVENT_TYPES,
   ...TRANSCRIPT_EVENT_TYPES,
   ...Object.values(REVERSE_DNS_EVENT_TYPES),
 ] as const
