@@ -295,28 +295,17 @@ public class WorkflowArtifactUploadRouteSpecs
             projectId,
         });
 
-        try
-        {
-            var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
-            var issueStatus = await issueGrain.GetWorkflowStatusAsync();
-            var workflowRunId = issueStatus!.WorkflowRunId!;
-            Assert.False(string.IsNullOrEmpty(workflowRunId));
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
+        var workflowRunId = issueStatus!.WorkflowRunId!;
+        Assert.False(string.IsNullOrEmpty(workflowRunId));
 
-            var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-            await workflow.AssignRunnerAsync(runnerId);
-            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        await workflow.AssignRunnerAsync(runnerId);
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
-            // Poll until the runner has an active work item, then read the workId.
-            WorkDispatch? work = null;
-            for (var i = 0; i < 100 && work is null; i++)
-            {
-                work = await runner.PollAsync();
-                if (work is null) await Task.Delay(20);
-            }
-            Assert.NotNull(work);
-            return (workflowRunId, work!.WorkId);
-        }
-        finally
+        WorkDispatch? work = null;
+        for (var i = 0; i < 100 && work is null; i++)
         {
             // NOTE: the runner is intentionally left registered for the life of
             // the work item. Unregistering here would notify the workflow of a
@@ -324,6 +313,10 @@ public class WorkflowArtifactUploadRouteSpecs
             // tear down the active work item before the caller can upload. The
             // runner uses a per-test unique id, so leaving it registered does
             // not leak across tests.
+            work = await runner.PollAsync();
+            if (work is null) await Task.Delay(20);
         }
+        Assert.NotNull(work);
+        return (workflowRunId, work!.WorkId);
     }
 }

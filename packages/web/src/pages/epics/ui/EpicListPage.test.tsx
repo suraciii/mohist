@@ -408,6 +408,14 @@ describe('EpicListPage basic actions', () => {
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     )
   })
+
+  it('navigates to epic detail from a list card', () => {
+    renderPage()
+
+    fireEvent.click(screen.getByText('Active Epic'))
+
+    expect(mockNavigate).toHaveBeenCalledWith('/epics/epic-active')
+  })
 })
 
 describe('EpicListPage numbered display', () => {

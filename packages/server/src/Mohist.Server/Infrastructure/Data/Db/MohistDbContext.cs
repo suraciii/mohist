@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Data.Label;
 using Mohist.Server.Project.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
@@ -50,6 +51,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicCounterRow> EpicCounters { get; set; } = null!;
     public DbSet<WorkflowArtifactRow> WorkflowArtifacts { get; set; } = null!;
     public DbSet<WorkflowArtifactPendingUploadRow> WorkflowArtifactPendingUploads { get; set; } = null!;
+    public DbSet<LabelDefinitionRow> LabelDefinitions { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -430,6 +432,20 @@ public class MohistDbContext : DbContext
             // TTL cleanup walks by expiry.
             entity.HasIndex(e => e.ExpiresAt)
                 .HasDatabaseName("IX_WorkflowArtifactPendingUploads_ExpiresAt");
+        });
+
+        modelBuilder.Entity<LabelDefinitionRow>(entity =>
+        {
+            entity.ToTable("LabelDefinitions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Key).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.SupportedValuesJson).IsRequired().HasDefaultValue("[]");
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.Key }).IsUnique();
         });
     }
 

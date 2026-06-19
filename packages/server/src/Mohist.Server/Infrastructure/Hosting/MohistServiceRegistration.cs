@@ -32,6 +32,7 @@ using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Label.Services;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -74,6 +75,8 @@ public static class MohistServiceRegistration
         services.AddScoped<IssueQuerier>();
         services.AddScoped<AgentQuerier>();
         services.AddScoped<EpicQuerier>();
+        services.AddSingleton<SystemLabelDefinitions>();
+        services.AddScoped<LabelCatalogService>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();

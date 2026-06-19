@@ -162,10 +162,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         // run as non-runnable and does not re-dispatch checks while we are
         // abandoning in-flight work.
         var events = _run.Stop();
+
         await ClearExecutableStateAsync(reason ?? "stopped");
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
-        await CommitAsync(events, reason);
+        await CommitAsync([new WorkflowRunStopped()], reason);
     }
 
     public async Task ApproveAsync()
