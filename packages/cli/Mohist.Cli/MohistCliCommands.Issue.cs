@@ -188,11 +188,12 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 var (effectiveBody, effectiveWorkflow, effectiveRisk) =
                     ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
 
-var labelMap = new Dictionary<string, string>(StringComparer.Ordinal);
+                Dictionary<string, string>? labelMap = null;
                 foreach (var entry in labelParse.Entries)
                 {
-                    if (entry.IsSet)
-                        labelMap[entry.Key] = entry.Value!;
+                    if (!entry.IsSet) continue;
+                    labelMap ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                    labelMap[entry.Key] = entry.Value!;
                 }
 
                 var result = await api.PostAndReadAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
