@@ -41,6 +41,7 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
+      '**/.{idea,git,cache,output,temp}/**',
       'tests/a11y/**',
     ],
   },

@@ -67,6 +67,9 @@ internal sealed class TableRenderer
             case MohistCliApi.TableShape.EpicUnlink:
                 RenderEpicMembership(data, "Unlinked");
                 break;
+            case MohistCliApi.TableShape.LabelList:
+                RenderLabelList(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;
@@ -625,6 +628,42 @@ internal sealed class TableRenderer
             _out.WriteLine($"{verb} issue {issueId} {(verb == "Linked" ? "to" : "from")} epic {epicId}");
         else
             _out.WriteLine("OK");
+    }
+
+    private void RenderLabelList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No label definitions");
+            return;
+        }
+
+        var headers = new[] { "key", "description", "origin" };
+        var widths = new[] { 16, TitleSoftCap, 8 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            var key = StringOf(row, "key");
+            var description = StringOf(row, "description");
+            var origin = StringOf(row, "origin");
+            var supportedValues = row?["supportedValues"] as JsonArray;
+            if (supportedValues is not null && supportedValues.Count > 0)
+            {
+                var values = string.Join(",", supportedValues.Select(v => v?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
+                if (!string.IsNullOrEmpty(values))
+                    description = $"{description} [{values}]";
+            }
+            cells.Add(new[]
+            {
+                Truncate(key, 16),
+                Truncate(description, TitleSoftCap),
+                Truncate(origin, 8),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
     }
 
     private void WriteBody(string body)

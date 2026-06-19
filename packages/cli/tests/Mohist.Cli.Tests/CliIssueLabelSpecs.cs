@@ -392,7 +392,7 @@ public class CliIssueLabelSpecs
     }
 
     [Fact]
-    public async Task LabelList_HitsLabelsEndpoint()
+    public async Task LabelList_HitsCatalogEndpoint()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
 
@@ -402,17 +402,33 @@ public class CliIssueLabelSpecs
         Assert.Equal(0, exitCode);
         var req = handler.Requests.Last();
         Assert.Equal(HttpMethod.Get, req.Method);
-        Assert.Equal("/api/projects/proj_abc/labels", req.RequestUri?.PathAndQuery);
+        Assert.Equal("/api/projects/proj_abc/labels/catalog", req.RequestUri?.PathAndQuery);
     }
 
     [Fact]
-    public async Task LabelList_Table_RendersSortedKeys()
+    public async Task LabelList_Table_RendersDefinitions()
     {
         var (handler, http, output, error, fs, executor) = CreateHarness();
         handler.SetResponder(async (_, _) => RecordingHttpHandler.Json(new
         {
             success = true,
-            data = new[] { "stream", "module", "kind" },
+            data = new[]
+            {
+                new
+                {
+                    key = "module",
+                    description = "Classifies the subsystem",
+                    origin = "User",
+                    supportedValues = (string[]?)new[] { "auth", "ui" },
+                },
+                new
+                {
+                    key = "refactor",
+                    description = "Technical refactoring that does not change observable behavior",
+                    origin = "System",
+                    supportedValues = (string[]?)null,
+                },
+            },
         }));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -420,10 +436,14 @@ public class CliIssueLabelSpecs
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
-        Assert.Contains("label key", text);
+        Assert.Contains("key", text);
+        Assert.Contains("description", text);
+        Assert.Contains("origin", text);
         Assert.Contains("module", text);
-        Assert.Contains("stream", text);
-        Assert.Contains("kind", text);
+        Assert.Contains("Classifies the subsystem", text);
+        Assert.Contains("refactor", text);
+        Assert.Contains("User", text);
+        Assert.Contains("System", text);
     }
 
     [Fact]

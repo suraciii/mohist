@@ -2,6 +2,14 @@ namespace Mohist.Cli;
 
 internal sealed class SkillAssetService
 {
+    private static readonly IReadOnlyList<BuiltInSkillDefinition> BuiltIns =
+    [
+        new("mohist", "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。"),
+        new("mohist-explore", "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 \"提炼需求\"、\"写 PRD\"、\"沉淀 issue\"、\"需求文档\"、\"探索\"、\"完善 issue\"。"),
+    ];
+
+    internal static IReadOnlyList<string> BuiltInSkillNames =>
+        BuiltIns.Select(skill => skill.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
     private readonly IFileSystem _fileSystem;
     private readonly SkillAssetRootResolution _resolution;
     private readonly string? _assetRoot;
@@ -225,6 +233,8 @@ internal sealed class SkillAssetService
 
     private sealed record DiscoveredSkill(string Name, string Description, string Directory);
 }
+
+internal sealed record BuiltInSkillDefinition(string Name, string Description);
 
 internal sealed record BuiltInSkillMetadata(string Name, string Description);
 

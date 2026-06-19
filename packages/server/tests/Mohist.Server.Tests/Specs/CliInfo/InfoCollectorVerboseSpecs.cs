@@ -22,7 +22,7 @@ public class InfoCollectorVerboseSpecs
             Directory.CreateDirectory(Path.Combine(assetRoot, "mohist"));
             File.WriteAllText(
                 Path.Combine(assetRoot, "mohist", "SKILL.md"),
-                "---\nname: mohist\ndescription: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。\n---\n");
+                "---\nname: mohist\ndescription: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。\n---\n");
             var skills = new SkillAssetService(RealFileSystem.Instance, assetRoot);
             var result = skills.GetSkill("mohist", includeSupplementaryFiles: false);
             Assert.True(result.Found, "GetSkill should succeed; actual error: " + result.Error);
@@ -47,7 +47,7 @@ public class InfoCollectorVerboseSpecs
             Directory.CreateDirectory(Path.Combine(assetRoot, "mohist"));
             File.WriteAllText(
                 Path.Combine(assetRoot, "mohist", "SKILL.md"),
-                "---\nname: mohist\ndescription: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。\n---\n");
+                "---\nname: mohist\ndescription: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。\n---\n");
 
             var skills = new SkillAssetService(RealFileSystem.Instance, assetRoot);
             var collector = new InfoCollector(
@@ -80,7 +80,7 @@ public class InfoCollectorVerboseSpecs
         {
             var skillBody = new Dictionary<string, string>
             {
-                ["mohist"] = "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。",
+                ["mohist"] = "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。",
                 ["mohist-explore"] = "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 \"提炼需求\"、\"写 PRD\"、\"沉淀 issue\"、\"需求文档\"、\"探索\"、\"完善 issue\"。",
             };
             foreach (var name in skillBody.Keys)

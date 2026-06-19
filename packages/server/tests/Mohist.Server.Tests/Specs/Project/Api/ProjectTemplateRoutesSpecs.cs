@@ -77,6 +77,7 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("# Project proposal body", rows["proposal"].Body);
         Assert.Equal("system", rows["build"].Source);
         Assert.DoesNotContain("tags: [build]", rows["build"].Body);
+        Assert.False(rows["build"].Body!.StartsWith("---\n", StringComparison.Ordinal));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -1,0 +1,71 @@
+{
+  "project": "mohist-local",
+  "description": "Project-scoped, advisory label definition catalog with system seed (refactor), user CRUD via API, and mo label list/add/remove CLI commands.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server label catalog: storage, service, and system seed",
+      "spec": "specs/label-catalog/spec.md#Label catalog stores project-scoped label definitions",
+      "description": "Add the project-scoped label catalog storage and service on the server. Implement a LabelDefinitionRow entity + DbContext configuration + EF migration (user rows only, unique (ProjectId, Key) index, JSON supportedValues column), a SystemLabelDefinitions provider holding the virtual refactor seed (origin=system), and a LabelCatalogService that merges system+user definitions at read time and performs user CRUD with key validation, duplicate/system-key collision (409), and immutability enforcement. Wire LabelCatalogService into DI alongside EpicQuerier in MohistServiceRegistration.",
+      "acceptanceCriteria": [
+        "LabelDefinitionRow is configured in MohistDbContext.OnModelCreating with HasKey(Id) and a unique index on (ProjectId, Key); a new EF migration creates the LabelDefinitions table and applies cleanly against a fresh database.",
+        "SystemLabelDefinitions exposes the refactor seed with origin=system and a description stating refactor is for changes that do not alter observable behavior.",
+        "LabelCatalogService.ListAsync(projectId) returns system definitions merged with persisted user definitions, each with key/description/origin and supportedValues when present; system definitions appear for a project that has no user rows.",
+        "Create of a user definition with a system key or an existing user key is rejected (duplicate); an invalid key (e.g. uppercase), empty description, or empty supported value is rejected and not persisted; a successful create persists origin=user.",
+        "Update/Delete targeting a system key is rejected (immutable); Delete on a missing user key is idempotent (no error); Delete on an existing user key removes it.",
+        "Catalog is project-scoped: a user definition in project A is not returned for project B.",
+        "Catalog operations do not touch Issue labels and invoke no AI/agent (verified by unit tests asserting Issue label maps are unchanged after catalog create/update/delete).",
+        "Unit tests cover merge/seed, validation, duplicate/system-key collision, immutability, idempotent delete, and project scoping; `dotnet test packages/server/tests/Mohist.Server.Tests` passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "LabelDefinitionRow + DbContext config + migration; SystemLabelDefinitions provider; LabelCatalogService; DI registration in MohistServiceRegistration; passing unit tests in Mohist.Server.Tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design Decisions 1-3 and 6: virtual system seeds (no Origin column; origin derived), direct DbContext service (no Orleans grain), no data migration. Keep the refactor seed's supportedValues omitted. Do not change the Issue aggregate or the existing distinct-keys label endpoint."
+    },
+    {
+      "id": "T-002",
+      "title": "Label catalog HTTP API endpoints",
+      "spec": "specs/http-api/spec.md#Label catalog API exposes project definitions",
+      "description": "Expose the catalog over HTTP by extending the existing label route group in LabelsRoutes.cs. Add GET/POST /api/projects/{projectRef}/labels/catalog and PATCH/DELETE /api/projects/{projectRef}/labels/catalog/{key} (resolved via the existing ProjectResolutionEndpointFilter), delegating to LabelCatalogService and mapping validation failures to 400, duplicate/system-key/immutability to 409, create to 201, and delete to 204. Leave the existing GET /api/projects/{projectRef}/labels distinct-keys endpoint unchanged.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{projectRef}/labels/catalog returns all definitions (system + user) with key/description/origin and supportedValues when present; a project with no user definitions still returns the refactor system definition.",
+        "POST .../labels/catalog with { key, description, supportedValues? } returns 201 and the created entry with origin=user; duplicate key returns 409; POST with a reserved system key (e.g. refactor) returns 409 and leaves the system definition unchanged; invalid key or empty description returns 400 and does not persist.",
+        "PATCH .../labels/catalog/{key} updates an existing user definition's description and/or supportedValues; PATCH on a missing user key returns 404 and creates no entry; PATCH on a system key returns 409 and leaves it unchanged.",
+        "DELETE .../labels/catalog/{key} on a user key returns 204 and removes it; DELETE on a system key returns 409; DELETE on a missing key returns 204 (idempotent).",
+        "The pre-existing GET /api/projects/{projectRef}/labels distinct-keys endpoint is unchanged (IssueLabelsApiSpecs continue to pass).",
+        "Integration tests (e.g. LabelCatalogApiSpecs) assert read, create, update, delete, duplicate 409, invalid 400, system-immutability 409, idempotent delete, and project scoping; `dotnet test packages/server/tests/Mohist.Server.Tests` passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended LabelsRoutes.cs with /labels/catalog endpoints; LabelCatalog DTOs; passing API integration tests in Mohist.Server.Tests/Specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Per design Decision 4: catalog endpoints hang off the existing route group; distinct-keys endpoint stays as-is (pure ADDED delta, no existing requirement modified)."
+    },
+    {
+      "id": "T-003",
+      "title": "mo label list/add/remove CLI commands",
+      "spec": "specs/cli-interface/spec.md#mo label list surfaces the label catalog",
+      "description": "Update the CLI label command group in MohistCliCommands.Label.cs so `mo label list` prints the catalog (system + user: key/description/origin, supportedValues when present) in the existing table and JSON output modes, and add `mo label add <key> --description <text> [--supported-values a,b,c]` and `mo label remove <key>` subcommands that call the new /labels/catalog endpoints. add creates origin=user; both add and remove reject attempts targeting a system key with a clear error.",
+      "acceptanceCriteria": [
+        "`mo label list` against a project with the refactor seed and a user definition lists both, each row showing key, description, and origin; a project with no user definitions still lists refactor.",
+        "`mo label list --output json` emits valid JSON containing each definition's key, description, origin, and supportedValues when present.",
+        "`mo label add module --description <text> --supported-values auth,ui` creates a user-origin definition (visible in a subsequent `mo label list`).",
+        "`mo label remove <key>` removes an existing user definition; removing a missing key succeeds with no error.",
+        "`mo label remove refactor` (and `mo label add refactor`) fails with a clear error stating system definitions are immutable and leaves refactor unchanged.",
+        "CLI command specs (e.g. CliLabelCatalogSpecs) cover list (table/json), add, remove, idempotent remove, and system-key rejection; `dotnet test packages/cli/tests/Mohist.Cli.Tests` passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated MohistCliCommands.Label.cs (list + add + remove); passing CLI specs in Mohist.Cli.Tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Per design Decision 5: list switches from distinct-keys to catalog (distinct-keys remains reachable via the API); add/remove hit the HTTP endpoints. Confirm flag names --description/--supported-values against existing CLI conventions during implementation; behavior is fixed by the spec."
+    }
+  ]
+}

@@ -38,6 +38,29 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
 }
 
 /**
+ * Map transcript event names to the legacy detail-event names that UI surfaces
+ * (timeline, activity, session transcript) subscribe to. The producer emits the
+ * canonical transcript names (`message.delta`, `reasoning.delta`,
+ * `tool_call.*`); consumers still listen for the legacy `coder_*` detail
+ * names, so we translate here. Names without a translation (e.g.
+ * `session.input`, `session.closed`) pass through unchanged.
+ */
+function routeTranscriptEventName(name: string): string {
+  switch (name) {
+    case 'message.delta':
+      return 'coder_text_chunk'
+    case 'reasoning.delta':
+      return 'coder_thought_chunk'
+    case 'tool_call.started':
+    case 'tool_call.updated':
+    case 'tool_call.completed':
+      return 'coder_tool_call'
+    default:
+      return name
+  }
+}
+
+/**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
  * 1.0.2 envelope; the Web reads {@link payload} for the original event body
  * and {@link extensions} for routing metadata (projectid, workflowrunid,
@@ -193,22 +216,7 @@ function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payloa
   }
 }
 
-function routeTranscriptEventName(name: string): string {
-  switch (name) {
-    case 'message.delta':
-      return 'coder_text_chunk'
-    case 'reasoning.delta':
-      return 'coder_thought_chunk'
-    case 'tool_call.started':
-    case 'tool_call.updated':
-    case 'tool_call.completed':
-      return 'coder_tool_call'
-    default:
-      return name
-  }
-}
-
-export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, buildTimelineLiveEvent }
+export const __testing__ = { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName, buildTimelineLiveEvent }
 
 
 function getCurrentIssueNumber(): number | null {

@@ -259,7 +259,7 @@ describe('CoderSessionItem type contract', () => {
 })
 
 describe('useCoderSessions live event handling', () => {
-  it('applies agent_usage_update to matching session', async () => {
+  it('applies usage update to matching session', async () => {
     const sessions = [makeSession({ id: 'session-1', status: 'running' })]
     apiMocks.getCoderSessions.mockResolvedValue(sessions)
 
@@ -298,7 +298,7 @@ describe('useCoderSessions live event handling', () => {
     })
   })
 
-  it('ignores agent_usage_update for unknown session', async () => {
+  it('ignores usage update for unknown session', async () => {
     const sessions = [makeSession({ id: 'session-1', status: 'running' })]
     apiMocks.getCoderSessions.mockResolvedValue(sessions)
 

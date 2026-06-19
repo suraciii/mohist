@@ -27,10 +27,15 @@ function matchingFiles(files: string[], pattern: RegExp): string[] {
 describe('settings visual consistency contract', () => {
   const settingsSourceFiles = collectSourceFiles(settingsDir)
 
-  it('does not use forbidden settings text color tokens', () => {
+it('does not use forbidden settings text color tokens', () => {
     const hardcodedGrayToken = ['text', 'gray', ''].join('-')
-    const foregroundOpacityToken = ['text-foreground', '(?:8|75|80)'].join('\\/')
-    const forbiddenTextTokens = new RegExp(`${hardcodedGrayToken}|${foregroundOpacityToken}`)
+    // Forbid opacity-based foreground tokens that fall below the contrast
+    // floor used by Settings (>= 4.5:1). The accessibility-tuned `/85` value
+    // introduced for section descriptions in PR #118 meets that target and is
+    // allowed; the older `/8`, `/75`, and `/80` values are forbidden. Word
+    // boundaries keep `/85` from tripping the `/8` branch.
+    const foregroundOpacityToken = /text-foreground\/(?:8|75|80)\b/
+    const forbiddenTextTokens = new RegExp(`${hardcodedGrayToken}|${foregroundOpacityToken.source}`)
 
     expect(matchingFiles(settingsSourceFiles, forbiddenTextTokens)).toEqual([])
   })
