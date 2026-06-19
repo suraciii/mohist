@@ -20,6 +20,7 @@ public static class MohistApiRegistration
         app.MapConfigRoutes();
         app.MapSystemRoutes();
         app.MapTemplateRoutes();
+        app.MapIssueTemplateRoutes();
         app.MapOpencodeRoutes();
         app.MapLabelsRoutes();
         app.MapLogsRoutes();

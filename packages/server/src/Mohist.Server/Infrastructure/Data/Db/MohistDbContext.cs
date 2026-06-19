@@ -52,6 +52,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowArtifactRow> WorkflowArtifacts { get; set; } = null!;
     public DbSet<WorkflowArtifactPendingUploadRow> WorkflowArtifactPendingUploads { get; set; } = null!;
     public DbSet<LabelDefinitionRow> LabelDefinitions { get; set; } = null!;
+    public DbSet<ProjectIssueTemplateRow> ProjectIssueTemplates { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -324,6 +325,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.DefaultTemplateId).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
+            entity.Property(e => e.DisableDefaultIssueTemplate).IsRequired().HasDefaultValue(false);
             entity.Property(e => e.Prompts)
                 .HasConversion(
                     v => JSON.Serialize(v),
@@ -339,6 +341,16 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => new { e.ProjectId, e.TemplateId });
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.TemplateId).HasMaxLength(256);
+            entity.Property(e => e.Template).IsRequired();
+            entity.HasIndex(e => e.ProjectId);
+        });
+
+        modelBuilder.Entity<ProjectIssueTemplateRow>(entity =>
+        {
+            entity.ToTable("ProjectIssueTemplates");
+            entity.HasKey(e => new { e.ProjectId, e.Name });
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.Name).HasMaxLength(256);
             entity.Property(e => e.Template).IsRequired();
             entity.HasIndex(e => e.ProjectId);
         });

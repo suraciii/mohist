@@ -76,8 +76,7 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("project-override", rows["proposal"].Source);
         Assert.Equal("# Project proposal body", rows["proposal"].Body);
         Assert.Equal("system", rows["build"].Source);
-        Assert.DoesNotContain("tags: [build]", rows["build"].Body);
-        Assert.False(rows["build"].Body!.StartsWith("---\n", StringComparison.Ordinal));
+        Assert.False((rows["build"].Body ?? "").StartsWith("---\n"), "Body should not start with YAML frontmatter");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Services;
 
@@ -42,6 +43,9 @@ public class IssueWorkflowProfileRegistry
     public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.DefaultId));
 
     public bool Exists(string? id) => !string.IsNullOrWhiteSpace(id) && _profiles.ContainsKey(id);
+
+    public bool Matches(string profileId, string? context) =>
+        SuitableForMatcher.Matches(Get(profileId).SuitableFor, context);
 
     private static WorkflowProfileInfo ToInfo(IIssueWorkflowProfile profile) =>
         new(profile.Id, profile.DisplayName, profile.Description, profile.IsDefault);

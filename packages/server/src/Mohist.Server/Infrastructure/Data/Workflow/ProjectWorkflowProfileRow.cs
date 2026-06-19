@@ -23,5 +23,10 @@ public class ProjectWorkflowProfile
     /// </summary>
     public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 是否禁用了内置默认 issue 模板 mohist/default。
+    /// </summary>
+    public bool DisableDefaultIssueTemplate { get; set; }
+
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

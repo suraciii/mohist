@@ -1,0 +1,88 @@
+{
+  "project": "mohist",
+  "description": "Establish the issue template system (schema + built-in default + project storage) mirrored on the workflow profile model, with list/get API, mo issue template CLI, and a Web UI template selector that prefills the issue body skeleton.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server foundation: issue-template domain model, built-in mohist/default, registry, and project storage",
+      "spec": "specs/issue-template/spec.md#issue-template-schema-frontmatter-sections",
+      "description": "Add the IssueTemplate domain types (IIssueTemplate with Id/Name/About/IsDefault/SuitableFor/Defaults/Sections; IssueTemplateSection with Title/Guidance/Placeholder; IssueTemplateDefaults with Labels/Risk/Workflow), the IssueTemplates.DefaultId constant, the in-binary MohistDefaultIssueTemplate (5 sections in fixed order with guidance transcribed from the mohist-explore skill), and an IssueTemplateRegistry that merges built-in default + project customs and applies the disable filter. Add ProjectIssueTemplateRow + DbSet + an EF Core migration creating project_issue_templates and the disable flag, mirroring ProjectWorkflowTemplateRow. SuitableFor is typed IReadOnlyList<string> identical to IIssueWorkflowProfile so matching semantics are shared.",
+      "acceptanceCriteria": [
+        "IIssueTemplate, IssueTemplateSection, IssueTemplateDefaults exist with the required fields named in the spec; SuitableFor is IReadOnlyList<string>",
+        "IssueTemplates.DefaultId equals \"mohist/default\"",
+        "MohistDefaultIssueTemplate exposes sections in exact order User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals, each with non-empty guidance (sourced from the mohist-explore skill) and a placeholder",
+        "IssueTemplateRegistry.List returns the default when not disabled, merges project custom templates, and excludes mohist/default when the project disables it; Get/Exists/Default behave accordingly",
+        "An invalid template (missing required frontmatter field, or a section missing title/guidance/placeholder) is rejected and not surfaced",
+        "The built-in mohist/default is non-deletable: no delete operation is exposed for built-in defaults in the registry/API/CLI, satisfying the open-box guarantee",
+        "EF migration creates project_issue_templates (PK project_id+name, template JSON, created_at, updated_at) and the disable flag; DbSet<ProjectIssueTemplateRow> is registered in MohistDbContext; database starts cleanly",
+        "Unit tests cover: default present + section order, project customs merged, disable excludes default, invalid rejected; dotnet test for the new tests passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Issue/Domain/IssueTemplate/*, packages/server/src/Mohist.Server/Issue/Services/IssueTemplates/*, packages/server/src/Mohist.Server/Infrastructure/Data/Issue/ProjectIssueTemplateRow.cs, a new EF Core migration, and unit tests under packages/server/tests/",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Mirror IIssueWorkflowProfile / IssueWorkflowProfileRegistry / ProjectWorkflowTemplateRow. Keep a source-pointer comment in MohistDefaultIssueTemplate.cs naming the skill sections transcribed (no skill changes this issue). Use the IssueTemplate / issue-templates naming consistently to avoid confusion with prompt TemplateRoutes."
+    },
+    {
+      "id": "T-002",
+      "title": "API: issue-template list and get endpoints",
+      "spec": "specs/issue-template/spec.md#template-list-and-get-api",
+      "description": "Add a new Api/IssueTemplateRoutes.cs exposing GET /api/issue-templates (project-scoped via the active project resolution used by other project reads) returning IssueTemplateInfo (Name, About, SuitableFor, IsDefault, Source), and GET /api/issue-templates/{name} returning the full template incl. sections with guidance/placeholder. The list applies the disable filter and includes project customs. Register the route in the app pipeline. This is deliberately separate from the existing prompt TemplateRoutes.cs.",
+      "acceptanceCriteria": [
+        "GET /api/issue-templates returns every available template (non-disabled default + project customs), each item including name, about, suitable_for",
+        "GET /api/issue-templates/{name} returns the frontmatter and full sections array; each section includes title, guidance, placeholder",
+        "When a project disables mohist/default, GET /api/issue-templates omits it; other projects are unaffected",
+        "Endpoints resolve the active project the same way existing project-scoped reads do",
+        "API/integration tests cover list-includes-default, get-returns-sections, and disabled-default-excluded; dotnet test passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Api/IssueTemplateRoutes.cs, route registration, and API tests under packages/server/tests/",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "Do not reuse Api/TemplateRoutes.cs (prompt templates) and do not nest under /api/workflow-*."
+    },
+    {
+      "id": "T-003",
+      "title": "CLI: mo issue template list and get",
+      "spec": "specs/issue-template/spec.md#template-list-and-get-cli",
+      "description": "Add a template subcommand to IssueCommands (MohistCliCommands.Issue.cs) with list and get <name> children that consume /api/issue-templates via MohistCliApi, resolve the active project via ResolveProjectIdAsync (as mo issue list does), and render output with the existing TableRenderer. get displays metadata and each section incl. its guidance.",
+      "acceptanceCriteria": [
+        "`mo issue template list` lists the active project's available templates (non-disabled default + customs), each entry identifying the template by name",
+        "`mo issue template get <name>` displays the template metadata and its sections, showing each section's guidance",
+        "Both commands resolve and target the active project",
+        "CLI tests cover list and get command wiring/output; dotnet test passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs (new template subcommand group) and CLI tests under packages/cli/tests/",
+      "dependsOn": ["T-002"],
+      "passes": true,
+      "notes": "Follow the existing IssueCommands subcommand build pattern and MohistCliApi GET helpers."
+    },
+    {
+      "id": "T-004",
+      "title": "Web UI: template selector with body skeleton prefill",
+      "spec": "specs/issue-template/spec.md#web-ui-template-selector-prefills-body-skeleton",
+      "description": "Add an entities/issue-templates slice (types + useIssueTemplates/useIssueTemplate TanStack Query hooks hitting the new endpoints), mirroring entities/settings's useWorkflowProfiles. Add a TemplateSelector inside features/create-issue/ui/CreateIssueDialog.tsx that populates from useIssueTemplates and, on select, composes the body skeleton client-side by joining '## {section.title}\\n{section.placeholder}' in section order; guidance is never written into the body.",
+      "acceptanceCriteria": [
+        "useIssueTemplates/useIssueTemplate hooks call GET /api/issue-templates and GET /api/issue-templates/{name}",
+        "CreateIssueDialog shows a template selector populated from the list endpoint (non-disabled default + customs)",
+        "Selecting a template prefills the issue body with a section skeleton in section order using each section's placeholder",
+        "No section guidance appears in the prefilled body",
+        "Web tests (CreateIssueDialog.test.tsx extended) cover selector population and skeleton prefill (guidance excluded, order preserved); npm/vitest tests pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/entities/issue-templates/*, packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx (TemplateSelector), and packages/web/src/features/create-issue/ui/CreateIssueDialog.test.tsx",
+      "dependsOn": ["T-002"],
+      "passes": true,
+      "notes": "Body skeleton is a pure client-side transform of section title+placeholder; defaults (labels/risk/workflow) are advisory and not applied to the form in MVP."
+    }
+  ]
+}
