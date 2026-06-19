@@ -38,9 +38,15 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../widgets/issue-event-timeline', () => ({
-  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null }) => (
-    <div data-testid="event-timeline-panel-mock" data-issue-number={props.issueNumber} data-issue-id={props.issueId ?? ''} data-workflow-status={props.workflowStatus ?? ''} />
+vi.mock('../../../widgets/issue-event-timeline/ui/EventTimelinePanel', () => ({
+  EventTimelinePanel: vi.fn((props: { issueNumber: number; issueId?: string | null; workflowStatus?: string | null; enabled?: boolean }) => (
+    <div
+      data-testid="event-timeline-panel-mock"
+      data-issue-number={props.issueNumber}
+      data-issue-id={props.issueId ?? ''}
+      data-workflow-status={props.workflowStatus ?? ''}
+      data-enabled={props.enabled === undefined ? '' : String(props.enabled)}
+    />
   )),
 }))
 
@@ -177,7 +183,7 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
     expect(label).toHaveTextContent('#epic-leg')
   })
 
-  it('renders the event timeline panel between diff/commits and comments', async () => {
+  it('renders the activity dialog entry in the header without rendering the inline timeline panel', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue({
         id: 'issue-14',
@@ -195,13 +201,10 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
       },
     })
 
-    renderPage()
+    const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('event-timeline-panel-mock')).toBeTruthy())
-    const panel = screen.getByTestId('event-timeline-panel-mock')
-    expect(panel).toHaveAttribute('data-issue-number', '14')
-    expect(panel).toHaveAttribute('data-issue-id', 'issue-14')
-    expect(panel).toHaveAttribute('data-workflow-status', 'running')
+    await waitFor(() => expect(screen.getByTestId('activity-entry')).toBeTruthy())
+    expect(container.querySelector('[data-testid="event-timeline-panel-mock"]')).toBeNull()
   })
 })
 
@@ -558,5 +561,371 @@ describe('IssueDetailPage disconnected-runtime-notice routing', () => {
     const toastHost = screen.getByTestId('runtime-toast-host')
     expect(toastHost.textContent).toContain('Live events disconnected')
     expect(toastHost.textContent).toContain('Connection dropped')
+  })
+})
+
+describe('IssueDetailPage activity dialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders the activity entry in the header with aria-label and a min hit-target baseline', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue(),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const entry = await waitFor(() => screen.getByTestId('activity-entry'))
+    expect(entry).toHaveAttribute('aria-label', 'Activity')
+    expect(screen.getByRole('button', { name: 'Activity' })).toBe(entry)
+    expect(entry).toHaveClass('min-h-11')
+    expect(entry).toHaveClass('min-w-11')
+  })
+
+  it('does not render the inline activity panel in the main content column', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('activity-entry')).toBeTruthy())
+    expect(container.querySelector('[data-testid="event-timeline-panel-mock"]')).toBeNull()
+  })
+
+  it('does not mount the timeline panel (and so does not enable the events fetch) before the dialog opens', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('activity-entry')).toBeTruthy())
+    expect(container.querySelector('[data-testid="event-timeline-panel-mock"]')).toBeNull()
+    expect(screen.queryByTestId('event-timeline-panel-mock')).toBeNull()
+  })
+
+  it('mounts the timeline panel only after the entry opens the dialog and the dialog is unmounted on close', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('activity-entry')).toBeTruthy())
+    expect(container.querySelector('[data-testid="event-timeline-panel-mock"]')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('activity-entry'))
+
+    const panel = await waitFor(() => screen.getByTestId('event-timeline-panel-mock'))
+    expect(panel).toHaveAttribute('data-issue-number', '14')
+    expect(panel).toHaveAttribute('data-issue-id', 'issue-14')
+    expect(panel).toHaveAttribute('data-workflow-status', 'running')
+    expect(panel).toHaveAttribute('data-enabled', 'true')
+
+    const dialogContent = screen.getByTestId('activity-dialog-content')
+    expect(dialogContent).toBeTruthy()
+
+    fireEvent.keyDown(dialogContent, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="event-timeline-panel-mock"]')).toBeNull()
+    })
+  })
+
+  it('does not display a precise event count or fetch events before the dialog is first opened', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const entry = await waitFor(() => screen.getByTestId('activity-entry'))
+    expect(entry.textContent ?? '').not.toMatch(/\b\d+\b/)
+    expect(entry).not.toHaveTextContent(/\bcount\b/i)
+  })
+
+  it('renders the dialog as a near-fullscreen sheet on mobile width', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+    window.dispatchEvent(new Event('resize'))
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('activity-entry')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('activity-entry'))
+
+    const dialogContent = await waitFor(() => screen.getByTestId('activity-dialog-content'))
+    expect(dialogContent).toHaveClass('h-[100dvh]')
+    expect(dialogContent).toHaveClass('w-full')
+    expect(dialogContent).toHaveClass('max-w-full')
+    expect(dialogContent).toHaveClass('rounded-none')
+  })
+
+  it('passes enabled=true to the timeline panel only after the dialog opens, and unmounts the panel on close', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        workflowStatus: 'running',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('activity-entry')).toBeTruthy())
+    expect(screen.queryByTestId('event-timeline-panel-mock')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('activity-entry'))
+
+    const panel = await waitFor(() => screen.getByTestId('event-timeline-panel-mock'))
+    expect(panel).toHaveAttribute('data-enabled', 'true')
+    expect(panel).toHaveAttribute('data-issue-number', '14')
+    expect(panel).toHaveAttribute('data-issue-id', 'issue-14')
+    expect(panel).toHaveAttribute('data-workflow-status', 'running')
+
+    const dialogContent = screen.getByTestId('activity-dialog-content')
+    fireEvent.keyDown(dialogContent, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="event-timeline-panel-mock"]')).toBeNull()
+    })
+  })
+})
+
+describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    window.dispatchEvent(new Event('resize'))
+    mockUseIssueDiff.mockReturnValue({ data: undefined })
+    mockUseIssueCommits.mockReturnValue({ data: undefined })
+    mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
+    mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
+    mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function expectUsesUnifiedSpacingScale(element: HTMLElement) {
+    const allowed = new Set([
+      'space-y-1',
+      'space-y-2',
+      'space-y-3',
+      'space-y-4',
+      'space-y-6',
+      'space-y-8',
+    ])
+    const match = element.className.match(/space-y-(\d+(?:\.\d+)?)/g) ?? []
+    for (const cls of match) {
+      expect(allowed.has(cls), `${element.tagName} uses ad-hoc spacing class ${cls}`).toBe(true)
+    }
+  }
+
+  it('separates the main content column with a single group-level gap (no ad-hoc 5/7/9 values)', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ id: 'issue-14', number: 14 }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const mainColumn = await waitFor(() => {
+      const grid = screen.getByTestId('issue-detail-content-grid')
+      const main = grid.querySelector(':scope > .lg\\:col-span-2') as HTMLElement | null
+      expect(main).toBeTruthy()
+      return main!
+    })
+
+    expectUsesUnifiedSpacingScale(mainColumn)
+    expect(mainColumn.className).toContain('space-y-8')
+    expect(mainColumn.className).not.toContain('space-y-5')
+    expect(mainColumn.className).not.toContain('space-y-6')
+    expect(mainColumn.className).not.toContain('space-y-7')
+
+    const grid = screen.getByTestId('issue-detail-content-grid')
+    expect(grid.className).toContain('gap-8')
+    expect(grid.className).not.toContain('gap-6')
+  })
+
+  it('separates right-rail cards with a group-level gap and no ad-hoc 5/7/9 values', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ id: 'issue-14', number: 14 }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const rightRail = await waitFor(() => screen.getByTestId('issue-detail-right-rail'))
+    expectUsesUnifiedSpacingScale(rightRail)
+    expect(rightRail.className).toContain('space-y-6')
+    expect(rightRail.className).not.toContain('space-y-4')
+    expect(rightRail.className).not.toContain('space-y-5')
+  })
+
+  it('gives the first-screen runtime decision surface breathing room rather than sitting flush against neighbors', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const surfaceFrame = await waitFor(() => screen.getByTestId('runtime-decision-surface-frame'))
+    expect(surfaceFrame.className).toContain('mb-8')
+
+    const surface = screen.getByTestId('runtime-decision-surface')
+    expect(surface).toBeTruthy()
+  })
+
+  it('lets the header bottom margin match the page group rhythm (mb-8) so the next section is not flush', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ id: 'issue-14', number: 14 }),
+      isLoading: false,
+      isError: false,
+    })
+
+    renderPage()
+
+    const header = await waitFor(() => screen.getByTestId('issue-detail-header'))
+    expect(header.className).toContain('mb-8')
+  })
+
+  it('keeps the data-testid of every major section stable for downstream density regression checks', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({ id: 'issue-14', number: 14, body: 'Issue body content.' }),
+      isLoading: false,
+      isError: false,
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('issue-detail-header')).toBeTruthy())
+    expect(screen.getByTestId('runtime-decision-surface-frame')).toBeTruthy()
+    expect(screen.getByTestId('workflow-view-frame')).toBeTruthy()
+    expect(screen.getByTestId('workflow-profile-editor-frame')).toBeTruthy()
+    expect(screen.getByTestId('issue-detail-content-grid')).toBeTruthy()
+    expect(screen.getByTestId('issue-detail-right-rail')).toBeTruthy()
+    expect(screen.getByTestId('description-section')).toBeTruthy()
+    expect(screen.getByTestId('comments-section')).toBeTruthy()
+    expect(screen.getByTestId('activity-entry')).toBeTruthy()
+
+    expect(container.querySelector('[data-testid="issue-detail-header"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="diff-summary-banner"]')).toBeFalsy()
+  })
+
+  it('removes decorative borders from plain section cards (Description, Comments, Commits) in favor of whitespace grouping', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        body: 'Issue body content for the description test.',
+        comments: [
+          {
+            id: 'c1',
+            author: 'tester',
+            body: 'A reviewer comment for the comments test.',
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }),
+      isLoading: false,
+      isError: false,
+    })
+
+    mockUseIssueCommits.mockReturnValue({
+      data: {
+        available: true,
+        reason: null,
+        head: 'feature/head',
+        base: 'main',
+        mergeBase: 'abc',
+        ahead: 1,
+        behind: 0,
+        canFastForward: true,
+        comparison: 'merge-base',
+        summary: { filesChanged: 1, commits: 1, additions: 1, deletions: 0 },
+        files: [],
+        commits: [
+          {
+            hash: 'abcdef1234567890',
+            shortHash: 'abcdef1',
+            message: 'Test commit',
+            author: 'tester',
+            date: '2026-01-01T00:00:00Z',
+          },
+        ],
+      },
+    })
+
+    renderPage()
+
+    const description = await waitFor(() => screen.getByTestId('description-section'))
+    expect(description.className).not.toContain('border-gray-200')
+
+    const comments = screen.getByTestId('comments-section')
+    expect(comments.className).not.toContain('border-gray-200')
+
+    const commits = screen.getByTestId('commits-section')
+    expect(commits.className).not.toContain('border-gray-200')
   })
 })

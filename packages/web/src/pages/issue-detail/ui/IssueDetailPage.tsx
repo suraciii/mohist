@@ -11,7 +11,7 @@ import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
 import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel } from '../../../widgets/issue-workflow'
-import { EventTimelinePanel } from '../../../widgets/issue-event-timeline'
+import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -417,7 +417,7 @@ export function IssueDetailPage() {
             <span>Back to board</span>
           </button>
 
-          <div className="mb-6">
+          <div className="mb-8" data-testid="issue-detail-header">
             <div className="flex flex-wrap items-center gap-1.5 mb-2">
               <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
                 #{issue.number}
@@ -446,16 +446,23 @@ export function IssueDetailPage() {
               <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
                 {issue.title}
               </h1>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setEditOpen(true)}
-                aria-label="Edit issue"
-                title="Edit issue"
-                data-testid="edit-issue-button"
-              >
-                <PencilIcon className="size-4" />
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <ActivityDialog
+                  issueNumber={issueNumber}
+                  issueId={issue?.id}
+                  workflowStatus={issue?.workflowStatus}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setEditOpen(true)}
+                  aria-label="Edit issue"
+                  title="Edit issue"
+                  data-testid="edit-issue-button"
+                >
+                  <PencilIcon className="size-4" />
+                </Button>
+              </div>
             </div>
             {Object.keys(issue.labels ?? {}).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">
@@ -501,19 +508,25 @@ export function IssueDetailPage() {
             </div>
           </div>
 
-          <RuntimeDecisionSurface
-            issue={issue}
-            timeline={workflowTimeline ?? null}
-            agentStatus={agentStatus ?? null}
-            hasActiveAgent={isAgentRunningOnThis}
-          />
+          <div className="mb-8" data-testid="runtime-decision-surface-frame">
+            <RuntimeDecisionSurface
+              issue={issue}
+              timeline={workflowTimeline ?? null}
+              agentStatus={agentStatus ?? null}
+              hasActiveAgent={isAgentRunningOnThis}
+            />
+          </div>
 
-          <WorkflowView issue={issue} />
+          <div className="mb-8" data-testid="workflow-view-frame">
+            <WorkflowView issue={issue} />
+          </div>
 
-          <IssueWorkflowProfileEditor issueNumber={issueNumber} />
+          <div className="mb-8" data-testid="workflow-profile-editor-frame">
+            <IssueWorkflowProfileEditor issueNumber={issueNumber} />
+          </div>
 
           {diffData?.available === true && (
-            <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-4 mb-6" data-testid="diff-summary-banner">
+            <div className="min-w-0 rounded-lg bg-white p-4 mb-8 border-l-2 border-gray-200" data-testid="diff-summary-banner">
               <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                 <span className="min-w-0 text-gray-500 break-words">
                   <span className="font-medium text-gray-700 break-all" title={diffData.head} data-testid="diff-summary-head">{diffData.head}</span>
@@ -548,11 +561,11 @@ export function IssueDetailPage() {
             </div>
           )}
 
-          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-6" data-testid="issue-detail-content-grid">
-            <div className="min-w-0 lg:col-span-2 space-y-6">
+          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
+            <div className="min-w-0 lg:col-span-2 space-y-8">
               <BranchBar issueNumber={issueNumber} stage={workflowStage} isAgentRunning={isAgentRunningOnThis} />
               {issue.body && (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="rounded-lg bg-white p-4" data-testid="description-section">
                     <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
                     <MarkdownReader
                       content={issue.body}
@@ -569,7 +582,7 @@ export function IssueDetailPage() {
               )}
 
               {diffData?.available === true && (
-                <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-4">
+                <div className="min-w-0 rounded-lg bg-white p-4" data-testid="diff-files-section">
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
                       <span className="min-w-0 break-words">
@@ -593,7 +606,7 @@ export function IssueDetailPage() {
               )}
 
               {commitsData?.available === true && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="rounded-lg bg-white p-4" data-testid="commits-section">
                   <div className="flex items-center justify-between mb-3">
                     <h2 className="text-sm font-semibold text-gray-700">
                       Commits ({commitsData.summary.commits})
@@ -629,7 +642,7 @@ export function IssueDetailPage() {
               )}
 
               {(diffData?.available === false || commitsData?.available === false) && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="rounded-lg bg-white p-4">
                   <p className="text-sm text-gray-400">
                     {diffData?.available === false && diffData.message}
                     {diffData?.available === false && commitsData?.available === false && ' / '}
@@ -638,13 +651,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              <EventTimelinePanel
-                issueNumber={issueNumber}
-                issueId={issue?.id}
-                workflowStatus={issue?.workflowStatus}
-              />
-
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="rounded-lg bg-white p-4" data-testid="comments-section">
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">
                   Comments ({comments.length})
                 </h2>
@@ -725,7 +732,7 @@ export function IssueDetailPage() {
               </div>
             </div>
 
-            <div className="min-w-0 space-y-4" data-testid="issue-detail-right-rail">
+            <div className="min-w-0 space-y-6" data-testid="issue-detail-right-rail">
               <CardSection title="Details">
                 <dl className="min-w-0 space-y-2 text-sm" data-testid="issue-detail-details-metadata">
                   <div className="flex min-w-0 justify-between gap-3">

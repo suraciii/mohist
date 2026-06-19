@@ -76,34 +76,24 @@ const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
   },
 }
 
-const toneClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'border-blue-200 bg-blue-50',
-  amber: 'border-amber-200 bg-amber-50',
-  red: 'border-red-200 bg-red-50',
-  orange: 'border-orange-200 bg-orange-50',
-  green: 'border-green-200 bg-green-50',
-  gray: 'border-gray-200 bg-gray-50',
-  violet: 'border-violet-200 bg-violet-50',
+const toneEdgeClass: Record<SummaryPresentation['tone'], string> = {
+  blue: 'border-l-blue-500',
+  amber: 'border-l-amber-500',
+  red: 'border-l-red-500',
+  orange: 'border-l-orange-500',
+  green: 'border-l-green-500',
+  gray: 'border-l-gray-500',
+  violet: 'border-l-violet-500',
 }
 
-const toneTitleClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'text-blue-900',
-  amber: 'text-amber-900',
-  red: 'text-red-900',
-  orange: 'text-orange-900',
-  green: 'text-green-900',
-  gray: 'text-gray-900',
-  violet: 'text-violet-900',
-}
-
-const toneBodyClass: Record<SummaryPresentation['tone'], string> = {
-  blue: 'text-blue-800',
-  amber: 'text-amber-800',
-  red: 'text-red-800',
-  orange: 'text-orange-800',
-  green: 'text-green-800',
-  gray: 'text-gray-800',
-  violet: 'text-violet-800',
+const toneLabelClass: Record<SummaryPresentation['tone'], string> = {
+  blue: 'bg-blue-50 text-blue-700 border-blue-200',
+  amber: 'bg-amber-50 text-amber-700 border-amber-200',
+  red: 'bg-red-50 text-red-700 border-red-200',
+  orange: 'bg-orange-50 text-orange-700 border-orange-200',
+  green: 'bg-green-50 text-green-700 border-green-200',
+  gray: 'bg-gray-100 text-gray-700 border-gray-200',
+  violet: 'bg-violet-50 text-violet-700 border-violet-200',
 }
 
 const toneIconClass: Record<SummaryPresentation['tone'], string> = {
@@ -320,11 +310,12 @@ export function RuntimeDecisionSurface({
     <section
       data-testid="runtime-decision-surface"
       data-summary={decision.summary}
+      data-tone={presentation.tone}
       role="region"
       aria-label="Issue runtime decision"
       className={cn(
-        'rounded-lg border p-4 shadow-sm',
-        toneClass[presentation.tone],
+        'rounded-lg border border-l-4 border-gray-200 bg-white p-4 shadow-sm',
+        toneEdgeClass[presentation.tone],
       )}
     >
       <header className="flex flex-wrap items-start gap-3">
@@ -336,14 +327,17 @@ export function RuntimeDecisionSurface({
           />
           <span
             data-testid="runtime-summary-label"
-            className={cn('text-xs font-bold uppercase tracking-wide', toneTitleClass[presentation.tone])}
+            className={cn(
+              'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
+              toneLabelClass[presentation.tone],
+            )}
           >
             {presentation.label}
           </span>
         </div>
         <h2
           data-testid="runtime-headline"
-          className={cn('flex-1 min-w-0 text-base font-semibold leading-tight', toneTitleClass[presentation.tone])}
+          className="flex-1 min-w-0 text-base font-semibold leading-tight text-gray-900"
         >
           {decision.headline}
         </h2>
@@ -352,7 +346,7 @@ export function RuntimeDecisionSurface({
 
       <p
         data-testid="runtime-rationale"
-        className={cn('mt-2 text-sm', toneBodyClass[presentation.tone])}
+        className="mt-2 text-sm text-gray-700"
       >
         {decision.rationale}
       </p>
@@ -360,16 +354,13 @@ export function RuntimeDecisionSurface({
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <span
           data-testid="runtime-next-action"
-          className={cn(
-            'text-xs font-medium uppercase tracking-wide',
-            toneTitleClass[presentation.tone],
-          )}
+          className="text-xs font-medium uppercase tracking-wide text-gray-500"
         >
           Next action
         </span>
         <span
           data-testid="runtime-next-action-body"
-          className={cn('text-sm', toneBodyClass[presentation.tone])}
+          className="text-sm text-gray-700"
         >
           {decision.nextAction}
         </span>
@@ -378,7 +369,7 @@ export function RuntimeDecisionSurface({
       {decision.summary === 'queued' && decision.waitReason && (
         <p
           data-testid="runtime-wait-reason"
-          className={cn('mt-2 text-xs', toneBodyClass[presentation.tone])}
+          className="mt-2 text-xs text-gray-600"
         >
           Waiting on: {decision.waitReason}
         </p>
@@ -387,7 +378,7 @@ export function RuntimeDecisionSurface({
       {decision.driftNote && (
         <p
           data-testid="runtime-drift-note"
-          className={cn('mt-2 text-xs italic', toneBodyClass[presentation.tone])}
+          className="mt-2 text-xs italic text-gray-600"
         >
           Drift: {decision.driftNote}
         </p>

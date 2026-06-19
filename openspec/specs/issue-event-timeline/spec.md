@@ -1,37 +1,27 @@
 # OpenSpec Capability: issue-event-timeline
 
-### Requirement: Timeline loads merged event history on issue open
-
-The event timeline SHALL load a single time-ordered merge of issue events and workflow events for the current issue from the existing `GET /api/projects/{projectRef}/issues/{number}/events` endpoint when the issue detail page is opened. The timeline SHALL render historical events so a freshly opened issue immediately shows its past without requiring a live run to be in progress.
-
-#### Scenario: Opening an issue with prior history shows past events
-
-- **WHEN** a user opens the issue detail page for an issue that has prior stage transitions, comments, and label changes
-- **THEN** the Activity timeline SHALL display those prior events in chronological order
-- **AND** the timeline SHALL NOT require a live workflow run to be active to show history
-
-#### Scenario: Issue with no events shows empty state
-
-- **WHEN** a user opens the issue detail page for an issue that has no issue events and no workflow events
-- **THEN** the Activity timeline SHALL display a clear empty state indicating no activity yet
-- **AND** the timeline SHALL NOT render a raw error or a blank panel
-
 ### Requirement: Timeline updates in real time while workflow is active
 
-While the issue detail page is open and the issue's workflow is active, the event timeline SHALL append newly arrived events in real time over the existing SignalR bus without a full page reload. New events SHALL appear with a top-enter animation so the user can perceive live progress.
+While the Activity surface is open and the issue's workflow is active, the event timeline SHALL append newly arrived events in real time over the existing SignalR bus without a full page reload. The live enter animation SHALL be converged or removed so newly appended events do not dominate the surface with motion. The timeline SHALL NOT be required to accumulate live events while the Activity surface is closed; events that arrive while it is closed are recovered by re-fetching the persisted history on the next open.
 
-#### Scenario: New event arrives while viewing an active issue
+#### Scenario: New event arrives while the Activity surface is open
 
-- **WHEN** a user is viewing the issue detail page for an issue with an active workflow run
+- **WHEN** the Activity surface is open for an issue with an active workflow run
 - **AND** a new workflow or issue event arrives over SignalR for that issue
-- **THEN** the event timeline SHALL append the new event without reloading the page
-- **AND** the new event SHALL appear with a visible enter animation
+- **THEN** the event timeline SHALL append the new event without reloading
+- **AND** the appended event SHALL NOT use a loud full-row motion entrance that competes with the neutral reading experience
 
 #### Scenario: Timeline stops accumulating when issue is closed
 
 - **WHEN** the issue's workflow is no longer active
 - **THEN** the timeline SHALL continue to display all loaded events
 - **AND** the Live indicator SHALL stop pulsing to reflect that no live updates are expected
+
+#### Scenario: Closed surface does not need to accumulate live events
+
+- **WHEN** the Activity surface is closed and new events arrive
+- **THEN** the timeline SHALL NOT be required to mount or accumulate those events live
+- **AND** the events SHALL be recovered by re-fetching the persisted history the next time the surface is opened
 
 ### Requirement: Timeline entries are human-readable with timestamps
 
@@ -55,74 +45,48 @@ Each timeline entry SHALL display a human-readable description composed of a cle
 - **THEN** the entry SHALL display a description equivalent to "Rebase conflict detected on 3 files"
 - **AND** the conflicting file paths SHALL be available as expandable inline detail
 
-### Requirement: Timeline applies category color coding
-
-The timeline SHALL classify each event into one of six categories and render a colored dot and category tag per row using the existing pill/dot palette: workflow/lifecycle (blue), approval (amber), integration (purple), success (green), failures (red), and metadata (gray).
-
-#### Scenario: Workflow lifecycle events use blue
-
-- **WHEN** the timeline renders a run-started, stage-transition, or task start/complete event
-- **THEN** the row SHALL use the blue category color for its dot and tag
-
-#### Scenario: Approval events use amber
-
-- **WHEN** the timeline renders an approval-requested or approval-resolved event
-- **THEN** the row SHALL use the amber category color for its dot and tag
-
-#### Scenario: Integration events use purple
-
-- **WHEN** the timeline renders a rebase, merge, check, or integration step event that is not a failure
-- **THEN** the row SHALL use the purple category color for its dot and tag
-
-#### Scenario: Success events use green
-
-- **WHEN** the timeline renders a stage-completed or merge-completed event
-- **THEN** the row SHALL use the green category color for its dot and tag
-
-#### Scenario: Failure events use red
-
-- **WHEN** the timeline renders a stage-failed, run-failed, merge-failed, or rebase-conflict event
-- **THEN** the row SHALL use the red category color for its dot and tag
-
-#### Scenario: Metadata events use gray
-
-- **WHEN** the timeline renders a labels-changed, priority-changed, prerequisite-added, prerequisite-removed, or comment event
-- **THEN** the row SHALL use the gray category color for its dot and tag
-
 ### Requirement: Timeline visually emphasizes failures and attention-required events
 
-The timeline SHALL visually distinguish failures and attention-required events (stage failed, run failed, approval requested, rebase conflict, base drift needs-attention) from normal progress events using a tinted row background and a haloed dot so the eye finds decisions and failures fast.
+The timeline SHALL render regular event categories (workflow/lifecycle, approval, integration, success, and metadata) in neutral monochrome. It SHALL NOT apply category-saturated colors, category badges/tags, or full-row colored backgrounds to those regular categories. The timeline SHALL visually distinguish failures and attention-required events (stage failed, run failed, approval requested, rebase conflict, base drift needs-attention) from regular events using a colored accent on the event marker (for example a colored dot or haloed dot) so the eye finds decisions and failures fast. Failure and attention-required events SHALL NOT use a full-row tinted background; their emphasis SHALL come from the marker accent rather than a full-row color fill.
 
-#### Scenario: Failed stage is visually emphasized
+#### Scenario: Regular events use neutral monochrome
+
+- **WHEN** the timeline renders a workflow-lifecycle, approval, integration, success, or metadata event
+- **THEN** the row SHALL use a neutral monochrome treatment
+- **AND** the row SHALL NOT render a category-saturated color, a category badge/tag, or a full-row colored background
+
+#### Scenario: Failed stage is visually emphasized via marker accent only
 
 - **WHEN** the timeline renders a stage-failed event
-- **THEN** the row SHALL have a tinted background distinct from normal progress rows
-- **AND** the dot SHALL be rendered with a halo effect
+- **THEN** the event marker SHALL use a colored accent distinct from regular neutral events
+- **AND** the row SHALL NOT use a full-row tinted background
 
-#### Scenario: Approval requested is visually emphasized
+#### Scenario: Approval requested is visually emphasized via marker accent only
 
 - **WHEN** the timeline renders an approval-requested event
-- **THEN** the row SHALL have a tinted background distinct from normal progress rows
-- **AND** the dot SHALL be rendered with a halo effect
+- **THEN** the event marker SHALL use a colored accent distinct from regular neutral events
+- **AND** the row SHALL NOT use a full-row tinted background
 
-#### Scenario: Normal progress is not emphasized
+#### Scenario: Normal progress is not colored
 
 - **WHEN** the timeline renders a task-started or run-resumed event
-- **THEN** the row SHALL NOT have the attention tinted background or haloed dot
+- **THEN** the row SHALL NOT use a category-saturated color, a category badge/tag, or a colored marker accent
 
 ### Requirement: Timeline failures expand inline detail
 
-Failure events SHALL expose an inline mono detail block that the user can expand to see the surrounding context, such as conflicting file paths, error messages, or failing step output.
+Failure events SHALL expose an inline detail block that the user can expand to see the surrounding context, such as conflicting file paths, error messages, or failing step output. The expanded detail block SHALL use a neutral light background (paper/ink) instead of a dark background such as `bg-gray-900`, consistent with the neutral visual treatment of the timeline.
 
 #### Scenario: Rebase conflict expands file paths
 
 - **WHEN** a rebase-conflict event row is expanded
 - **THEN** the inline detail block SHALL display the conflicting file paths in a monospaced font
+- **AND** the detail block SHALL use a neutral light background rather than a dark background
 
 #### Scenario: Stage failure expands error detail
 
 - **WHEN** a stage-failed event row is expanded
 - **THEN** the inline detail block SHALL display the failure reason or error message in a monospaced font
+- **AND** the detail block SHALL use a neutral light background rather than a dark background
 
 ### Requirement: Timeline merges issue and workflow events with source tags
 
