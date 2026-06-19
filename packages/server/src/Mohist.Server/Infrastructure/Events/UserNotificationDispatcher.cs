@@ -108,17 +108,8 @@ public sealed class ConnectionSubscriptionRegistry
     {
         if (string.IsNullOrEmpty(eventType)) return false;
         return _byConnection.TryGetValue(connectionId, out var set)
-            && (set.Contains(eventType) || EventTypeAliases(eventType).Any(set.Contains));
+            && set.Contains(eventType);
     }
-
-    private static IReadOnlyList<string> EventTypeAliases(string eventType) => eventType switch
-    {
-        EventCatalog.ReverseDns.StageStarted => ["stage_changed"],
-        EventCatalog.ReverseDns.StageCompleted => ["stage_changed"],
-        EventCatalog.ReverseDns.StageFailed => ["stage_changed"],
-        EventCatalog.ReverseDns.StageApprovalRequested => ["approval_requested"],
-        _ => [],
-    };
 }
 
 /// <summary>

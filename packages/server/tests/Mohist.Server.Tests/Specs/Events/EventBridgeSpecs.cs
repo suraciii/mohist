@@ -37,31 +37,6 @@ public class EventBridgeSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task EventBridge_ReverseDnsStageStarted_ConnectionSubscribedToLegacyAliasOnly_ReceivesEnvelope()
-    {
-        var registry = new ConnectionSubscriptionRegistry();
-        registry.RegisterConnection("conn-legacy-only");
-        registry.Subscribe("conn-legacy-only", "stage_changed");
-
-        var hub = new RecordingHubContext();
-        var bridge = BuildBridge(registry, hub);
-        var bus = BuildBus(bridge);
-
-        await bus.PublishAsync(
-            data: new { Action = "started" },
-            type: EventCatalog.ReverseDns.StageStarted,
-            source: "/mohist/agent-session/sess-1");
-
-        var message = Assert.Single(hub.Messages);
-        Assert.Equal("conn-legacy-only", message.ConnectionId);
-        Assert.Equal(EventCatalog.ReverseDns.StageStarted, message.EventName);
-        var envelope = Assert.IsType<CloudEventEnvelope>(message.Data);
-        Assert.Equal(EventCatalog.ReverseDns.StageStarted, envelope.Type);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.System)]
-    [Fact]
     public async Task EventBridge_ReverseDnsStageStarted_ConnectionSubscribedToBothNames_Receives()
     {
         // The Web's canonical subscription list (built by useEventsConnection

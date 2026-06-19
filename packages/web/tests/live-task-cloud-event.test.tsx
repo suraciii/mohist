@@ -303,35 +303,6 @@ describe('LiveTaskProvider transcript routing', () => {
     off()
   })
 
-  it('shows approval toast for legacy approval_requested events', async () => {
-    const queryClient = new QueryClient()
-    queryClient.setQueryData(['issues'], [{ id: 'issue-1', number: 82 }])
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="project-1">
-          <RuntimeToastHost>
-            <LiveTaskProvider>
-              <LiveTaskProbe />
-            </LiveTaskProvider>
-          </RuntimeToastHost>
-        </ProjectProvider>
-      </QueryClientProvider>,
-    )
-
-    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
-    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
-
-    onEvent('approval_requested', { issueId: 'issue-1', projectId: 'project-1', stage: 'review' })
-
-    await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Issue #82 needs approval')
-    })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
-  })
-
   it('shows approval toast for reverse-DNS approval-requested events', async () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
