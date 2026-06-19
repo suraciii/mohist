@@ -21,7 +21,7 @@ public class RuntimeVariableMergeSpecs
             ["tasks.proposal.outputs.changeDir"] = JsonSerializer.SerializeToElement("openspec/changes/issue-97")
         };
 
-        var merged = WorkflowGrain.MergeRuntimeVariablesIntoPayload(payload, runtimeVariables);
+        var merged = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, runtimeVariables);
 
         Assert.True(merged.TryGetValue("tasks", out var tasksEl));
         var tasks = tasksEl!.Value;
@@ -55,7 +55,7 @@ public class RuntimeVariableMergeSpecs
             ["tasks.proposal.outputs.openspecName"] = JsonSerializer.SerializeToElement("runtime-value")
         };
 
-        var merged = WorkflowGrain.MergeRuntimeVariablesIntoPayload(payload, runtimeVariables);
+        var merged = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, runtimeVariables);
 
         var value = merged["tasks"]!.Value.GetProperty("proposal").GetProperty("outputs").GetProperty("openspecName");
         Assert.Equal("runtime-value", value.GetString());
@@ -69,7 +69,7 @@ public class RuntimeVariableMergeSpecs
             ["workflow"] = JsonSerializer.SerializeToElement(new { runId = "wr_1" })
         };
 
-        var merged = WorkflowGrain.MergeRuntimeVariablesIntoPayload(payload, new Dictionary<string, JsonElement>());
+        var merged = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, new Dictionary<string, JsonElement>());
 
         Assert.True(merged.TryGetValue("workflow", out var workflow));
         Assert.Equal("wr_1", workflow!.Value.GetProperty("runId").GetString());
@@ -91,7 +91,7 @@ public class RuntimeVariableMergeSpecs
             ["tasks.proposal.outputs.name"] = JsonSerializer.SerializeToElement("value")
         };
 
-        var merged = WorkflowGrain.MergeRuntimeVariablesIntoPayload(payload, runtimeVariables);
+        var merged = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, runtimeVariables);
 
         Assert.True(merged.ContainsKey("workflow"));
         Assert.True(merged.ContainsKey("stage"));
