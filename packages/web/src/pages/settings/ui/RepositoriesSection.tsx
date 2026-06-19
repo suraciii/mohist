@@ -87,7 +87,7 @@ export function RepositoriesSection({ projectId }: Props) {
                     )}
                   </div>
                   <div
-                    className="mt-0.5 text-xs text-foreground/85 truncate"
+                    className="mt-0.5 text-xs text-muted-foreground truncate"
                     data-testid={`repository-giturl-${repo.name}`}
                   >
                     {repo.gitUrl}
@@ -95,7 +95,7 @@ export function RepositoriesSection({ projectId }: Props) {
                   </div>
                   {repo.baseBranch !== 'main' && (
                     <div
-                      className="mt-0.5 text-xs text-foreground/85"
+                      className="mt-0.5 text-xs text-muted-foreground"
                       data-testid={`repository-basebranch-${repo.name}`}
                     >
                       base branch: {repo.baseBranch}

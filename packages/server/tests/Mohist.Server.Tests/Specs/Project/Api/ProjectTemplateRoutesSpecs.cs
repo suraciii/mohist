@@ -76,7 +76,7 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("project-override", rows["proposal"].Source);
         Assert.Equal("# Project proposal body", rows["proposal"].Body);
         Assert.Equal("system", rows["build"].Source);
-        Assert.DoesNotContain("---\n", rows["build"].Body);
+        Assert.DoesNotContain("tags: [build]", rows["build"].Body);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

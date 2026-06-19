@@ -14,7 +14,7 @@ export function SettingsSection({
   return (
     <section>
       <h2 className="text-sm font-medium text-foreground">{title}</h2>
-      {description && <p className="mt-1 text-sm text-foreground/85">{description}</p>}
+      {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       <div className="mt-4 space-y-4">{children}</div>
     </section>
   )

@@ -269,11 +269,11 @@ function auditContrast(container: HTMLElement) {
 
 function visualDiffSummary(sectionName: string, after: HTMLElement) {
   const cardSections = after.querySelectorAll('section.rounded-lg.border').length
-  const pageTitle = after.querySelector('h3.text-sm.font-medium.text-foreground')?.textContent?.trim()
+  const pageTitle = after.querySelector('h2.text-sm.font-medium.text-foreground')?.textContent?.trim()
   return [
     `Section: ${sectionName}`,
     beforeSummaries[sectionName],
-    `After: page title is rendered by SettingsSection as h3 "${pageTitle ?? 'unknown'}".`,
+    `After: page title is rendered by SettingsSection as h2 "${pageTitle ?? 'unknown'}".`,
     `After: detected ${cardSections} CardSection-style rounded-lg border containers in the rendered snapshot.`,
     'Diff verdict: expected visual contract migration observed in deterministic rendered artifact.',
     '',
@@ -296,7 +296,7 @@ describe('settings visual accessibility evidence', () => {
     for (const [sectionName, section] of sections) {
       arrangeLoadedMocks()
       const { container } = renderEvidenceSection(section)
-      expect(screen.getByRole('heading', { level: 3 })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument()
       writeBeforeArtifact(sectionName)
       writeArtifact(`${sectionName}-after.html`, renderTextSnapshot(container))
       writeArtifact(`${sectionName}-visual-diff.txt`, visualDiffSummary(sectionName, container))

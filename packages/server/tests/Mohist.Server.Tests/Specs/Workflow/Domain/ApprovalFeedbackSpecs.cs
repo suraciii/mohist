@@ -32,6 +32,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
+        run.StartTask("work-1", "runner-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
         return run;
@@ -218,6 +219,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
+        run.StartTask("work-1", "runner-1");
         run.CompleteTask();
         run.PassCheck(new CheckResult("plan-ok", "pass"));
 
@@ -267,6 +269,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
+        run.StartTask("work-1", "runner-1");
         run.FailTask(new TaskResult("failed", "boom"));
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);

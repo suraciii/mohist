@@ -145,8 +145,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
-        await ClearExecutableStateAsync(reason ?? "stopped");
+        // Transition to Stopped before clearing executable state so the
+        // task-failed heartbeat handler (EnsureWorkHeartbeatAsync) treats the
+        // run as non-runnable and does not re-dispatch checks while we are
+        // abandoning in-flight work.
         var events = _run.Stop();
+        await ClearExecutableStateAsync(reason ?? "stopped");
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
         await CommitAsync(events, reason);

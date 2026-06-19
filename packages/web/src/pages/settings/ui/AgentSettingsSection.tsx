@@ -213,7 +213,7 @@ function InputField({
       {disabled && disabledReason && (
         <p className="text-xs text-muted-foreground">{disabledReason}</p>
       )}
-      {!disabled && error && <p className="text-xs text-red-700">{error}</p>}
+      {!disabled && error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }
@@ -444,7 +444,7 @@ export function AgentSettingsSection() {
       </div>
 
       {saveError && (
-        <p className="text-xs text-red-700">{saveError}</p>
+        <p className="text-xs text-red-600">{saveError}</p>
       )}
 
       {showResetConfirm && (
