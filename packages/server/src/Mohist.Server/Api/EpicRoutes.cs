@@ -81,16 +81,23 @@ public static class EpicRoutes
             return ApiResults.Ok(new { epicId = resolvedId, issueId = issue.Id });
         });
 
-        group.MapDelete("/{id}/issues/{issueId}", async (HttpContext context, string id, string issueId, IGrainFactory grains, EpicQuerier queryService) =>
+        group.MapDelete("/{id}/issues/{issueId}", async (HttpContext context, string id, string issueId, IGrainFactory grains, EpicQuerier queryService, IssueQuerier issuesQuery) =>
         {
             var pid = context.GetResolvedProject().Id;
             var resolved = int.TryParse(id, out var number)
                 ? await queryService.GetByNumberAsync(pid, number)
                 : await queryService.GetAsync(pid, id);
             if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+            // Resolve issueId the same way the link endpoint does: accept either the
+            // internal id (issue_xxx) or the issue number. Without this, unlink by
+            // number silently no-ops because UnlinkIssueAsync matches on internal id.
+            var resolvedIssueId = await ResolveIssueIdAsync(issuesQuery, pid, issueId);
+            if (resolvedIssueId is null) return ApiResults.NotFound($"Issue {issueId} not found");
+
             var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
-            await grain.UnlinkIssueAsync(issueId, pid);
-            return ApiResults.Ok(new { epicId = resolved.Id, issueId });
+            await grain.UnlinkIssueAsync(resolvedIssueId, pid);
+            return ApiResults.Ok(new { epicId = resolved.Id, issueId = resolvedIssueId });
         });
 
         group.MapPost("/{id}/done", async (HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService) =>
@@ -127,6 +134,15 @@ public static class EpicRoutes
         {
             return ApiResults.NotFound(ex.Message);
         }
+    }
+
+    private static async Task<string?> ResolveIssueIdAsync(IssueQuerier issuesQuery, string projectId, string issueId)
+    {
+        if (!int.TryParse(issueId, out var issueNumber))
+            return issueId;
+
+        var issue = await issuesQuery.GetAsync(projectId, issueNumber);
+        return issue?.Id;
     }
 }
 

@@ -237,6 +237,51 @@ public class EpicLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task UnlinkIssue_ByIssueNumber_RemovesMembershipAndDoesNotSilentNoOp()
+    {
+        var project = await CreateProjectAsync();
+        var first = await CreateIssueAsync(project.Id, "First");
+        var second = await CreateIssueAsync(project.Id, "Second");
+        var epic = await CreateEpicAsync(project.Id, "Unlink by number");
+        await LinkIssueAsync(project.Id, epic.Id, first.Number);
+        await LinkIssueAsync(project.Id, epic.Id, second.Number);
+
+        // Regression: unlink by issue NUMBER (not internal id) must actually remove
+        // the link. Previously the DELETE endpoint passed the number straight to
+        // UnlinkIssueAsync, which matches on internal id — so it returned 200 but
+        // changed nothing.
+        using var response = await _client.DeleteAsync(
+            $"/api/projects/{project.Id}/epics/{epic.Id}/issues/{first.Number}");
+
+        response.EnsureSuccessStatusCode();
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Single(detail.LinkedIssues);
+        Assert.Equal(second.Id, detail.LinkedIssues[0].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task UnlinkIssue_ByInternalIssueId_RemainsSupported()
+    {
+        var project = await CreateProjectAsync();
+        var issue = await CreateIssueAsync(project.Id, "Only");
+        var epic = await CreateEpicAsync(project.Id, "Unlink by id");
+        await LinkIssueAsync(project.Id, epic.Id, issue.Number);
+
+        using var response = await _client.DeleteAsync(
+            $"/api/projects/{project.Id}/epics/{epic.Id}/issues/{issue.Id}");
+
+        response.EnsureSuccessStatusCode();
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Empty(detail.LinkedIssues);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task MarkDone_AllDelivered_EpicIsNotMarkedDoneAutomaticallyUntilRequested()
     {
         var project = await CreateProjectAsync();
