@@ -145,7 +145,7 @@ internal sealed class TableRenderer
     private void RenderIssueList(JsonNode? data)
     {
         var rows = AsArray(data);
-var headers = new[] { "number", "title", "stage", "status", "priority", "state", "labels" };
+        var headers = new[] { "number", "title", "stage", "status", "priority", "state", "labels" };
         var widths = new[] { 7, TitleSoftCap, 16, 12, 9, TitleSoftCap, TitleSoftCap };
 
         var cells = new List<string[]>();
@@ -156,7 +156,7 @@ var headers = new[] { "number", "title", "stage", "status", "priority", "state",
             var stage = StringOf(row, "workflowStage");
             var status = StringOf(row, "status");
             var priority = StringOf(row, "priority");
-var state = FormatIssueState(row);
+            var state = FormatIssueState(row);
             var labels = FormatLabels(row?["labels"]);
             cells.Add(new[]
             {
@@ -299,6 +299,8 @@ var state = FormatIssueState(row);
         var (kind, guidance, evidence) = DeliveryFailureGuidance.ResolveWithEvidence(message, output);
         if (kind is null || guidance is null) return;
 
+        var workspaceEvidence = DeliveryFailureGuidance.ResolveWorkspaceEvidence(message, output);
+
         _out.WriteLine("");
         _out.WriteLine("delivery failure:");
         _out.WriteLine($"  kind:       {kind}");
@@ -322,6 +324,22 @@ var state = FormatIssueState(row);
             else if (!string.IsNullOrEmpty(evidence.ObservedRef))
             {
                 _out.WriteLine($"  observed:   (detached at {evidence.ObservedRef})");
+            }
+        }
+        else if (DeliveryFailureGuidance.IsWorkspaceMaterializationKind(kind) && workspaceEvidence is not null)
+        {
+            _out.WriteLine($"  attribution: workflow infrastructure (not issue work)");
+            if (!string.IsNullOrEmpty(workspaceEvidence.WorkspacePath))
+            {
+                _out.WriteLine($"  workspace:  {workspaceEvidence.WorkspacePath}");
+            }
+            if (!string.IsNullOrEmpty(workspaceEvidence.ExpectedRunId))
+            {
+                _out.WriteLine($"  expected:   {workspaceEvidence.ExpectedRunId}");
+            }
+            if (!string.IsNullOrEmpty(workspaceEvidence.ActualRunId))
+            {
+                _out.WriteLine($"  actual:     {workspaceEvidence.ActualRunId}");
             }
         }
     }

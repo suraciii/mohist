@@ -6,6 +6,7 @@ import { WorkExecutor } from "../src/runtime/executor.js"
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, WorkItem, WorkItemResult } from "../src/core/types.js"
 import type { ServerConnection, ArtifactUploadResponse } from "../src/server/connection.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 class FakeServerConnection implements Pick<ServerConnection, "uploadArtifact" | "report"> {
   public uploads: Array<{ path: string; size: number; contentType: string | null; content: Uint8Array }> = []
@@ -75,7 +76,7 @@ describe("WorkExecutor output capture", () => {
         status: "success",
         output: JSON.stringify({ openspecName: "issue-97", changeDir: "openspec/changes/issue-97" }),
       })),
-      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,
@@ -105,7 +106,7 @@ describe("WorkExecutor output capture", () => {
         message: "agent crashed",
         output: JSON.stringify({ openspecName: "issue-97" }),
       })),
-      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,
@@ -128,7 +129,7 @@ describe("WorkExecutor output capture", () => {
         status: "success",
         output: JSON.stringify({ openspecName: "issue-97" }),
       })),
-      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,
@@ -154,7 +155,7 @@ describe("WorkExecutor output capture", () => {
         status: "success",
         output: JSON.stringify({ openspecName: "issue-97" }),
       })),
-      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,
@@ -174,7 +175,7 @@ describe("WorkExecutor output capture", () => {
         status: "success",
         output: JSON.stringify({ openspecName: "issue-97" }),
       })),
-      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,

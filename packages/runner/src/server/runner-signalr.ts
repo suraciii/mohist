@@ -2,9 +2,12 @@ import { existsSync } from "node:fs"
 import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import { deleteDirectory, runCommand } from "../system/process.js"
+import { WorkspaceManager } from "../runtime/workspace.js"
+import type { WorkItem } from "../core/types.js"
 
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
+  private readonly workspaceManager: WorkspaceManager
 
   constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string, buildGitHash: string | null = null) {
     const baseUrl = serverUrl.replace(/\/$/, "")
@@ -15,6 +18,7 @@ export class RunnerSignalRClient {
       .withUrl(`${baseUrl}/hubs/runner?${params.toString()}`)
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build()
+    this.workspaceManager = new WorkspaceManager(runnerRoot)
 
     this.registerHandlers()
   }
@@ -28,6 +32,16 @@ export class RunnerSignalRClient {
   }
 
   private registerHandlers(): void {
+    this.connection.on("MaterializeWorkspace", async (work: WorkItem) => {
+      const ac = new AbortController()
+      try {
+        const info = await this.workspaceManager.materialize(work, ac.signal)
+        return { ok: true, workspacePath: info.path, branch: info.branch ?? null, changeDir: info.changeDir ?? null }
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
     this.connection.on("GetDiff", async (query: WorkspaceQuery) => {
       const workspace = resolveWorkspaceQuery(query)
       if (!workspace) return null

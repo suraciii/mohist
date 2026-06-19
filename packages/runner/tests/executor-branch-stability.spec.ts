@@ -13,6 +13,7 @@ import {
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 const exec = promisify(execFile)
 
@@ -64,7 +65,7 @@ function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): A
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    { ensure: async () => ({ path: workDir, branch: RUN_BRANCH, changeDir: null }) } as never,
+    verifyOnlyWorkspaceManager({ path: workDir, branch: RUN_BRANCH, changeDir: null }),
     connection as never,
     {} as never,
     null,
@@ -344,37 +345,60 @@ describe("WorkExecutor branch-stability boundary checks", () => {
     expect(evidence.branchStability[0].observedBranch).toBe(RUN_BRANCH)
   })
 
-  it("retryAfterBranchInvariantViolationRecoversWorkspaceBranchViaEnsure", async () => {
+  it("retryAfterBranchInvariantViolationRecoversWorkspaceBranchViaStartBoundaryPrecheck", async () => {
     // After a task that ended off the run branch is retried, the
-    // runner must restore the workspace to `workspace.branch` via
-    // `workspace.ensure` without manual user action. The simulated
-    // workspace manager's `ensure` brings the workspace back onto the
-    // run branch on every task attempt, mirroring
-    // `WorkspaceManager.ensureRunBranch`'s real behaviour.
+    // runner must restore the workspace to `workspace.branch` via the
+    // start-boundary precheck (`materialize()` / `verify()`) before
+    // any action runs. Under the once-per-run materialization
+    // contract (T-002), the first dispatch materializes the
+    // workspace; every later dispatch verifies only — and a verify
+    // may bring the workspace back onto the run branch on behalf of
+    // the action. The simulated workspace manager's `materialize` /
+    // `verify` bring the workspace back onto the run branch on every
+    // task attempt, mirroring `WorkspaceManager.ensureRunBranch`'s
+    // real behaviour.
     const workspaceManager = {
-      ensureCalls: 0,
-      async ensure() {
-        this.ensureCalls += 1
-        // Simulate the real `ensure` semantics: bring the workspace
-        // back to the run branch.
+      materializeCalls: 0,
+      verifyCalls: 0,
+      async materialize(_work: WorkItem, _signal: AbortSignal) {
+        this.materializeCalls += 1
         const current = await readHeadRef()
         if (current !== RUN_BRANCH) {
           await exec("git", ["checkout", RUN_BRANCH], { cwd: workDir })
         }
         return { path: workDir, branch: RUN_BRANCH, changeDir: null }
       },
+      async verify(_work: WorkItem, _signal: AbortSignal) {
+        this.verifyCalls += 1
+        const current = await readHeadRef()
+        if (current !== RUN_BRANCH) {
+          await exec("git", ["checkout", RUN_BRANCH], { cwd: workDir })
+        }
+        return { path: workDir, branch: RUN_BRANCH, changeDir: null }
+      },
+      async planResolution(_work: WorkItem, _signal: AbortSignal) {
+        // First call → no marker yet → materialize; later calls →
+        // marker present → verify. This is the post-T-002 decision
+        // the real WorkspaceManager makes via the on-disk
+        // `.mohist/workspace.json`.
+        if (this.materializeCalls + this.verifyCalls === 0) {
+          return { action: "materialize" as const, workspacePath: workDir }
+        }
+        return { action: "verify" as const, workspacePath: workDir }
+      },
     }
     const executor = new WorkExecutor(
       makeRegistry(async (ctx) => {
         // On each attempt, leave the workspace on a fresh wrong
         // branch so the end-boundary check fails. The retry should
-        // see the workspace back on the run branch because `ensure`
-        // restored it.
+        // see the workspace back on the run branch because the
+        // start-boundary precheck restored it.
         const current = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: ctx.workDir })
         if (current.stdout.trim() === RUN_BRANCH) {
           // Use a unique branch name per call so the second attempt
           // does not collide with the first.
-          await exec("git", ["checkout", "-b", `feature/retry-${workspaceManager.ensureCalls}`], { cwd: ctx.workDir })
+          const callCount = workspaceManager.materializeCalls + workspaceManager.verifyCalls
+          await exec("git", ["checkout", "-b", `feature/retry-${callCount}`], { cwd: ctx.workDir })
         }
         return { status: "success", message: "ok" }
       }),
@@ -385,46 +409,56 @@ describe("WorkExecutor branch-stability boundary checks", () => {
       workDir,
     )
 
-    // First attempt: action moves the branch, end-boundary check
-    // fails, task is NOT reported completed.
+    // First attempt: start-boundary precheck materializes; action
+    // moves the branch; end-boundary check fails; task is NOT
+    // reported completed.
     const first = await executor.execute(buildWork(), new AbortController().signal)
     expect(first.status).toBe("failed")
     const firstEvidence = JSON.parse(first.output ?? "{}")
     expect(firstEvidence.kind).toBe("branch-invariant-violation")
     expect(firstEvidence.boundary).toBe("end")
-    expect(workspaceManager.ensureCalls).toBe(1)
+    expect(workspaceManager.materializeCalls).toBe(1)
+    expect(workspaceManager.verifyCalls).toBe(0)
 
-    // Retry: the runner calls `workspaceManager.ensure` again. The
-    // simulated ensure restores the workspace to the run branch
-    // before the start-boundary check runs.
+    // Retry: the start-boundary precheck verifies only (no re-clone),
+    // and the verify restores the workspace to the run branch before
+    // the start-boundary check runs.
     const second = await executor.execute(buildWork(), new AbortController().signal)
     // The retry action runs the same `feature/retry` checkout logic,
     // so it still ends off the run branch and the end-boundary check
     // still fails. What we are asserting here is that the start
-    // check passes (the workspace is back on the run branch via
-    // `ensure`) and that `ensure` was called again.
-    expect(workspaceManager.ensureCalls).toBe(2)
+    // check passes (the workspace is back on the run branch via the
+    // verify path) AND that `materialize` was NOT called again on
+    // the retry — the once-per-run contract holds.
+    expect(workspaceManager.materializeCalls).toBe(1)
+    expect(workspaceManager.verifyCalls).toBe(1)
     const secondEvidence = JSON.parse(second.output ?? "{}")
     expect(secondEvidence.kind).toBe("branch-invariant-violation")
     expect(secondEvidence.boundary).toBe("end")
   })
 
-  it("retryRecoversWorkspaceBranchViaEnsureBeforeStartCheck", async () => {
+  it("retryRecoversWorkspaceBranchViaStartBoundaryPrecheckBeforeStartCheck", async () => {
     // The retry path must restore the workspace to the run branch
     // before the start check runs. After a prior attempt left the
     // workspace on the wrong branch, the second attempt's start
-    // check must observe the run branch (because `ensure` brought
-    // it back) and pass, even though the worktree still has the
-    // wrong branch on disk right before `ensure` is called.
+    // check must observe the run branch (because the start-boundary
+    // precheck brought it back) and pass, even though the worktree
+    // still has the wrong branch on disk right before the precheck
+    // is called. Under the T-002 contract the precheck is
+    // `verify()` for retries (no re-clone), so the recovery path
+    // runs through verify.
     const workspaceManager = {
-      async ensure() {
+      async verify() {
         // Always restore the workspace to the run branch on
-        // `ensure`, mimicking the real `WorkspaceManager.ensure`.
+        // verify, mimicking the real `WorkspaceManager.verify`.
         const current = await readHeadRef()
         if (current !== RUN_BRANCH) {
           await exec("git", ["checkout", RUN_BRANCH], { cwd: workDir })
         }
         return { path: workDir, branch: RUN_BRANCH, changeDir: null }
+      },
+      async planResolution() {
+        return { action: "verify" as const, workspacePath: workDir }
       },
     }
     const executor = new WorkExecutor(
@@ -503,7 +537,7 @@ describe("WorkExecutor branch-stability boundary checks", () => {
     try {
       const executor = new WorkExecutor(
         makeRegistry(async () => ({ status: "success", message: "ran" })),
-        { ensure: async () => ({ path: plainDir, branch: RUN_BRANCH, changeDir: null }) } as never,
+        verifyOnlyWorkspaceManager({ path: plainDir, branch: RUN_BRANCH, changeDir: null }),
         connection as never,
         {} as never,
         null,
@@ -549,7 +583,7 @@ describe("WorkExecutor branch-stability boundary checks", () => {
     // is trivially satisfied.
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ status: "success", message: "ok" })),
-      { ensure: async () => ({ path: workDir, branch: null, changeDir: null }) } as never,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
       connection as never,
       {} as never,
       null,

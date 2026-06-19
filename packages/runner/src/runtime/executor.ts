@@ -4,7 +4,7 @@ import type { ActionContext, ActionResult, JsonObject, JsonValue, WorkItem, Work
 import { stringInput } from "../core/json.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir, runCommand } from "../system/process.js"
-import { runnerVariables, WorkspaceManager } from "./workspace.js"
+import { runnerVariables, WorkspaceBranchMismatchError, WorkspaceCorruptError, WorkspaceIdentityMismatchError, WorkspaceManager, WorkspaceMissingError } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { acpAgentAction } from "../actions/acp-agent.js"
 import { git as defaultGit } from "../actions/git.js"
@@ -94,16 +94,34 @@ export class WorkExecutor {
   }
 
   async execute(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
-    if (work.workType === "checks") return await this.executeChecks(work, signal)
-    return await this.executeOne(work, signal)
+    let resolvedWorkspace: ResolvedWorkspace
+    if (work.ownerKind !== "agent-job") {
+      const precheck = await this.verifyBoundWorkspace(work, signal)
+      if (precheck.kind === "failure") return precheck.result
+      resolvedWorkspace = precheck.workspace
+    } else {
+      resolvedWorkspace = this.workspaceFromVariables(work)
+    }
+
+    if (work.workType === "checks") return await this.executeChecks(work, resolvedWorkspace, signal)
+    return await this.executeOne(work, resolvedWorkspace, signal)
   }
 
-  private async executeOne(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  private async verifyBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+    try {
+      const info = await this.workspaceManager.verify(work, signal)
+      return { kind: "ok", workspace: infoToResolved(info) }
+    } catch (error) {
+      return { kind: "failure", result: workspaceMaterializationFailureFromError(work, error) }
+    }
+  }
+
+  private async executeOne(work: WorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
     const action = this.actions.resolve(work.uses)
     if (!action) return failure(work, `No action found for '${work.uses}'`)
 
     try {
-      const variables = await this.variables(work, signal)
+      const variables = await this.variables(work, resolvedWorkspace, signal)
       const unresolved = wholeStringUnresolvedReferences(work.with, variables)
       if (unresolved.length > 0) {
         return failure(work, formatUnresolvedError(work, unresolved))
@@ -318,8 +336,8 @@ export class WorkExecutor {
     return "ok"
   }
 
-  private async executeChecks(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
-    const variables = await this.variables(work, signal)
+  private async executeChecks(work: WorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
+    const variables = await this.variables(work, resolvedWorkspace, signal)
     const checks = Array.isArray(work.with?.checks) ? work.with.checks.filter(isCheck) : []
     if (checks.length === 0) return failure(work, "No checks found in dispatch")
 
@@ -358,15 +376,33 @@ export class WorkExecutor {
     return { status: "pass", output }
   }
 
-  private async variables(work: WorkItem, signal: AbortSignal): Promise<JsonObject> {
-    const workspace = await this.workspaceManager.ensure(work, signal)
+  private async variables(work: WorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
+    const workspace = resolvedWorkspaceToVariables(resolvedWorkspace)
     const userVariables = work.variables ?? {}
     const userRunner = userVariables.runner
     const mergedRunner: JsonObject = { ...runnerVariables() }
     if (userRunner && typeof userRunner === "object" && !Array.isArray(userRunner)) {
       Object.assign(mergedRunner, userRunner as JsonObject)
     }
-    return { ...userVariables, runner: mergedRunner, workspace: { path: workspace.path, branch: workspace.branch ?? null, changeDir: workspace.changeDir ?? null } }
+    return { ...userVariables, runner: mergedRunner, workspace }
+  }
+
+  // Read the workspace triple (path, branch, changeDir) directly from
+  // the dispatch's variables. Used by agent-job dispatches whose
+  // workspace is caller-owned and must NOT be re-cloned or verified by
+  // the runner (issue #126 standalone-workspace contract).
+  private workspaceFromVariables(work: WorkItem): ResolvedWorkspace {
+    const variables = work.variables ?? {}
+    const ws = variables["workspace"]
+    if (!ws || typeof ws !== "object" || Array.isArray(ws)) {
+      return { path: "", branch: null, changeDir: null }
+    }
+    const obj = ws as JsonObject
+    return {
+      path: typeof obj["path"] === "string" ? (obj["path"] as string) : "",
+      branch: typeof obj["branch"] === "string" ? (obj["branch"] as string) : null,
+      changeDir: typeof obj["changeDir"] === "string" ? (obj["changeDir"] as string) : null,
+    }
   }
 
   private workspaceRoot(variables: JsonObject) {
@@ -502,8 +538,78 @@ export class WorkExecutor {
   }
 }
 
+type ResolvedWorkspace = { path: string, branch: string | null, changeDir: string | null }
+
+function infoToResolved(info: { path: string, branch?: string | null, changeDir?: string | null }): ResolvedWorkspace {
+  return { path: info.path, branch: info.branch ?? null, changeDir: info.changeDir ?? null }
+}
+
+function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject {
+  return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
+}
+
 function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
   return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, projectId: work.projectId, issueNumber: work.issueNumber, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
+}
+
+// Build a workflow-infrastructure failure result for a workspace
+// precheck. The `kind` becomes the structured `output.kind` so CLI /
+// API / UI surfaces (T-003) can render these distinctly from ordinary
+// task failures (dirty-worktree, conflict, base-moved, branch-invariant
+// violation). The `message` carries a human-readable explanation
+// including the underlying cause where available.
+function workspaceMaterializationFailure(work: WorkItem, kind: "workspace-missing" | "workspace-corrupt" | "workspace-identity-mismatch", message: string, detail?: JsonObject): WorkItemResult {
+  const output = { kind, ...(detail ?? {}) }
+  return {
+    status: work.workType === "check" || work.workType === "checks" ? "fail" : "failed",
+    message: `workflow workspace materialization failure (${kind}): ${message}`.slice(0, 4000),
+    output: JSON.stringify(output),
+  }
+}
+
+function workspaceMaterializationFailureFromError(work: WorkItem, error: unknown): WorkItemResult {
+  if (error instanceof WorkspaceMissingError) {
+    return workspaceMaterializationFailure(work, "workspace-missing", error.message, { workspacePath: error.workspacePath ?? null })
+  }
+  if (error instanceof WorkspaceCorruptError) {
+    return workspaceMaterializationFailure(work, "workspace-corrupt", error.message, { workspacePath: error.workspacePath ?? null })
+  }
+  if (error instanceof WorkspaceIdentityMismatchError) {
+    return workspaceMaterializationFailure(work, "workspace-identity-mismatch", error.message, {
+      workspacePath: error.workspacePath ?? null,
+      expected: error.expected ? {
+        issueId: error.expected.issueId,
+        issueNumber: error.expected.issueNumber,
+        workflowRunId: error.expected.workflowRunId,
+      } : null,
+      actual: error.actual ? {
+        issueId: error.actual.issueId ?? null,
+        issueNumber: error.actual.issueNumber ?? null,
+        workflowRunId: error.actual.workflowRunId ?? null,
+      } : null,
+    })
+  }
+  if (error instanceof WorkspaceBranchMismatchError) {
+    return branchInvariantViolationFailure(work, {
+      kind: "branch-invariant-violation",
+      boundary: "start",
+      expectedBranch: error.expectedBranch,
+      observedBranch: error.observedBranch ?? "",
+      observedRef: error.observedRef,
+      detail: error.detail ?? error.message,
+    })
+  }
+  // Materialize-time errors that are not workspace-* kinds (e.g. a
+  // first-materialization clone failure) are still infrastructure
+  // failures: they mean the start boundary cannot complete. Surface
+  // them as workspace-corrupt so the CLI / API / UI can render a
+  // distinct "workflow-start materialization failure" rather than a
+  // generic task failure.
+  return workspaceMaterializationFailure(
+    work,
+    "workspace-corrupt",
+    error instanceof Error ? error.message : String(error),
+  )
 }
 
 function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {

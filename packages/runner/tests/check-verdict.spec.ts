@@ -5,6 +5,7 @@ import type { ServerConnection } from "../src/server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../src/runtime/acp-connection.js"
 import type { WorkItem } from "../src/core/types.js"
 import type { ActionResult } from "../src/core/types.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 const mockFallbackWorkDir = "/tmp"
 
@@ -13,9 +14,7 @@ describe("Check verdict validation", () => {
   let mockActionRegistry: ActionRegistry
 
   beforeEach(async () => {
-    const mockWorkspaceManager = {
-      ensure: vi.fn().mockResolvedValue({ path: "/tmp/test-work", branch: "main", changeDir: "/tmp/test-work" }),
-    }
+    const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main", changeDir: "/tmp/test-work" })
 
     const mockConnection = {} as unknown as ServerConnection
     const mockSessionManager = {} as unknown as AcpSessionManager
