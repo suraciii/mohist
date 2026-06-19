@@ -645,33 +645,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private async Task ApplyContextExhaustionBlockAsync(
         string? taskId,
         double? contextUsagePercent,
-        string? stage)
-    {
-        EnsureRun();
-        var blockingEvents = _run.BlockStageWithContextExhaustion(taskId, contextUsagePercent, sessionId: null);
-        _log.LogWarning(
-            "Workflow {Id} retry blocked: session context at {Percent:0.##}% (task={TaskId}, stage={Stage})",
-            GrainKey, contextUsagePercent ?? 0d, taskId ?? "(none)", stage ?? "(none)");
-        await CommitAsync(blockingEvents);
-
-        throw new WorkflowSessionContextExhaustedException(
-            WorkflowSessionHealthGate.BuildBlockingMessage(contextUsagePercent),
-            contextUsagePercent,
-            stage,
-            taskId);
-    }
-
-    private async Task ApplyDispatchContextExhaustionBlockAsync(
-        string? taskId,
-        double? contextUsagePercent,
         string? stage,
-        string? sessionId)
+        string? sessionId = null,
+        string context = "retry")
     {
         EnsureRun();
         var blockingEvents = _run.BlockStageWithContextExhaustion(taskId, contextUsagePercent, sessionId);
         _log.LogWarning(
-            "Workflow {Id} dispatch blocked: session context at {Percent:0.##}% (task={TaskId}, stage={Stage}, sessionId={SessionId})",
-            GrainKey, contextUsagePercent ?? 0d, taskId ?? "(none)", stage ?? "(none)", sessionId ?? "(unknown)");
+            "Workflow {Id} {Context} blocked: session context at {Percent:0.##}% (task={TaskId}, stage={Stage}, sessionId={SessionId})",
+            GrainKey, context, contextUsagePercent ?? 0d, taskId ?? "(none)", stage ?? "(none)", sessionId ?? "(unknown)");
         await CommitAsync(blockingEvents);
 
         throw new WorkflowSessionContextExhaustedException(
@@ -705,15 +687,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _announcedAcquiredLocks.Add(eventKey);
 
         return true;
-    }
-
-    private async Task ReleaseStageLocksIfDoneAsync(string stage)
-    {
-        if (_run is null) return;
-        var current = _run.Stages.FirstOrDefault(s => s.Id == stage);
-        if (current is null) return;
-        if (current.Status is not (StageRunStatus.Completed or StageRunStatus.Failed)) return;
-        await ReleaseStageLocksAsync(stage, current.Status.ToString().ToLowerInvariant());
     }
 
     private async Task ReleaseCurrentStageLocksAsync(string reason)
@@ -793,14 +766,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
-                var checksPayload = ch.Items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
-                {
-                    ["name"] = JsonSerializer.SerializeToElement(i.Name),
-                    ["title"] = JsonSerializer.SerializeToElement(i.Title),
-                    ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
-                    ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
-                }).ToList();
-                return await MakeDispatchAsync(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId, markRunning: markRunning);
+                return await MakeChecksDispatchAsync(work.Stage, ch.Items, runnerId, markRunning);
 
             default:
                 return null;
@@ -836,6 +802,33 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return dispatch;
     }
 
+    private Task<WorkDispatch> MakeChecksDispatchAsync(
+        string stage,
+        IReadOnlyList<CheckItem> items,
+        string runnerId,
+        bool markRunning = true,
+        string? workIdOverride = null)
+    {
+        var checksPayload = items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
+        {
+            ["name"] = JsonSerializer.SerializeToElement(i.Name),
+            ["title"] = JsonSerializer.SerializeToElement(i.Title),
+            ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
+            ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
+        }).ToList();
+
+        return MakeDispatchAsync(
+            stage,
+            $"checks-{stage}",
+            "checks",
+            "Stage checks",
+            uses: null,
+            with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
+            runnerId,
+            markRunning: markRunning,
+            workIdOverride: workIdOverride);
+    }
+
     private async Task<WorkDispatch> BuildDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null)
     {
         var workId = workIdOverride ?? (workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}");
@@ -847,7 +840,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             var verdict = WorkflowSessionHealthGate.Evaluate(usage.Percent);
             if (verdict == HealthVerdict.Block)
             {
-                await ApplyDispatchContextExhaustionBlockAsync(workId, usage.Percent, stage, usage.SessionId);
+                await ApplyContextExhaustionBlockAsync(workId, usage.Percent, stage, usage.SessionId, "dispatch");
             }
             else if (verdict == HealthVerdict.Warn)
             {
@@ -1066,23 +1059,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             .Where(c => c.Status == StageCheckStatus.Pending)
             .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
             .ToList();
-        var work = WorkflowWork.Checks(stage.Id, pendingChecks);
-        var checksData = (WorkflowWork.ChecksData)work.Data;
-        var checksPayload = checksData.Items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
-        {
-            ["name"] = JsonSerializer.SerializeToElement(i.Name),
-            ["title"] = JsonSerializer.SerializeToElement(i.Title),
-            ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
-            ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
-        }).ToList();
-        var checkDispatch = await MakeDispatchAsync(
-            stage.Id,
-            $"checks-{stage.Id}",
-            "checks",
-            "Stage checks",
-            uses: null,
-            with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
-            runnerId,
+        var checkDispatch = await MakeChecksDispatchAsync(
+            stage.Id, pendingChecks, runnerId,
+            markRunning: false,
             workIdOverride: dispatchedCheck.DispatchWorkId);
         await AssignRunnerWorkAsync(runnerId, checkDispatch);
         return true;
@@ -1390,17 +1369,19 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         e switch
         {
             null => Task.CompletedTask,
-            WorkflowRunStarted => OnWorkflowStartedAsync(),
-            WorkflowRunResumed => OnWorkflowResumedAsync(),
-            WorkflowRunPaused => OnWorkflowPausedAsync(reason),
-            WorkflowRunStopped => OnWorkflowStoppedAsync(reason),
-            WorkflowRunFailed => OnWorkflowFailedAsync(reason),
-            WorkflowRunCompleted => OnWorkflowCompletedAsync(),
+            WorkflowRunStarted => EnsureWorkHeartbeatAsync(),
+            WorkflowRunResumed => EnsureWorkHeartbeatAsync(),
+            WorkflowRunPaused => DisableWorkHeartbeatAsync(),
+            WorkflowRunStopped => OnWorkflowStoppedAsync(),
+            WorkflowRunFailed => DisableWorkHeartbeatAsync(),
+            WorkflowRunCompleted => DisableWorkHeartbeatAsync(),
             StageStarted => EnsureWorkHeartbeatAsync(),
             StageCompleted x => ReleaseStageLocksAsync(x.Stage, "completed"),
             StageFailed x => ReleaseStageLocksAsync(x.Stage, "failed"),
             StageApprovalRequested => DisableWorkHeartbeatAsync(),
-            StageApprovalResolved x => OnApprovalResolvedAsync(x),
+            StageApprovalResolved x => x.Result == ApprovalResult.Approved
+                ? EnsureWorkHeartbeatAsync()
+                : Task.CompletedTask,
             FeedbackRequested => EnsureWorkHeartbeatAsync(),
             TaskStarted => EnsureWorkHeartbeatAsync(),
             TaskCompleted => EnsureWorkHeartbeatAsync(),
@@ -1412,52 +1393,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             WorkflowArtifactRecorded => Task.CompletedTask,
         };
 
-    private async Task OnWorkflowStartedAsync()
-    {
-        await EnsureWorkHeartbeatAsync();
-    }
-
-    private async Task OnWorkflowResumedAsync()
-    {
-        await EnsureWorkHeartbeatAsync();
-    }
-
-    private async Task OnWorkflowPausedAsync(string? reason)
+    private async Task OnWorkflowStoppedAsync()
     {
         await DisableWorkHeartbeatAsync();
-    }
-
-    private async Task OnWorkflowStoppedAsync(string? reason)
-    {
-        await DisableWorkHeartbeatAsync();
-        // Step 8 of design/eventbus.md: hook dispatch removed.
         // Side effects now flow through the bus — IssueGrain subscribes
-        // to com.mohist.workflow.run.stopped (Step 5) and the
-        // workflow workspace cleanup service subscribes to .completed.
-    }
-
-    private async Task OnWorkflowFailedAsync(string? reason)
-    {
-        await DisableWorkHeartbeatAsync();
-    }
-
-    private async Task OnWorkflowCompletedAsync()
-    {
-        await DisableWorkHeartbeatAsync();
-    }
-
-    private Task OnApprovalResolvedAsync(StageApprovalResolved e)
-    {
-        return e.Result switch
-        {
-            ApprovalResult.Approved => OnApprovalApprovedAsync(),
-            _ => Task.CompletedTask,
-        };
-    }
-
-    private async Task OnApprovalApprovedAsync()
-    {
-        await EnsureWorkHeartbeatAsync();
+        // to com.mohist.workflow.run.stopped and the workspace cleanup
+        // service subscribes to .completed.
     }
 
     private string GetProjectId() =>
