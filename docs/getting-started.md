@@ -159,6 +159,7 @@ Integrate 完成后，issue 进入 Done。这时：
 - [Issue 管理](issues.md) — 学会 prerequisites、comments、force stop、retry 等
 - [用 Epic 规划](epics.md) — 把零散 issue 组织成产品路线
 - [Workflow Profile](workflow-profiles.md) — 改造 workflow 适配你的工作风格
+- [CLI 参考](cli-reference.md) — `mo` 完整命令、选项、退出码
 
 ---
 

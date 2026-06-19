@@ -1,6 +1,6 @@
 # Issue 管理
 
-Issue 是你日常打交道的核心对象。这篇覆盖创建到关闭的所有操作。
+Issue 是你日常打交道的核心对象。这篇覆盖创建到关闭的所有**操作**。各 workflow 阶段内部做什么、产出什么，见 [工作流详解](the-workflow.md)；把多个 issue 组织成里程碑，见 [用 Epic 规划](epics.md)。
 
 ## 创建 Issue
 

@@ -144,7 +144,11 @@ feat: add pause/resume functionality for issues
 
 ## 文档贡献
 
-改文档前，先读 [`README.md`](./README.md) 的"写作约束"。提 review 前自查：
+改文档前，先读 [`README.md`](./README.md) 的"写作约束"。
+
+**动手前**：重读该篇文末"对应源码"指向的代码，确认要改的事实陈述没因产品变更而过时。
+
+**提 review 前自查**：
 
 - [ ] 每条事实陈述都能在源码里找到对应
 - [ ] 代码里没有的功能不写（即使 UI / 数据库字段 / handler 接口有暗示）
