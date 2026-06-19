@@ -440,22 +440,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run is null || !_run.IsClaimedBy(runnerId)) return;
         var stage = _run.CurrentStage();
         var activeTask = stage.FindRunningTaskByWork(workId, runnerId);
-        var activeCheck = activeTask is null ? stage.FindDispatchedCheckByWork(workId, runnerId) : null;
-        if (activeTask is null && activeCheck is null) return;
+        var hasDispatchedChecks = activeTask is null && stage.Checks.Any(c => c.Status == StageCheckStatus.Dispatched);
+        if (activeTask is null && !hasDispatchedChecks) return;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
-        IReadOnlyList<WorkflowEvent> events = [];
-
-        if (activeTask is not null)
-        {
-            events = await ProcessTaskResultAsync(result, activeTask.Id, workId);
-        }
-        else
-        {
-            activeCheck!.ClearDispatch();
-            events = await ProcessCheckResultAsync(result);
-        }
+        IReadOnlyList<WorkflowEvent> events = activeTask is not null
+            ? await ProcessTaskResultAsync(result, activeTask.Id, workId)
+            : await ProcessCheckResultAsync(result);
 
         await CommitAsync(events);
     }
@@ -493,16 +485,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     public Task<string?> GetCurrentWorkIdAsync()
     {
         var stage = _run?.CurrentStage();
-        return Task.FromResult(stage?.RunningTask?.WorkId ?? stage?.DispatchedCheck?.DispatchWorkId);
+        if (stage is null) return Task.FromResult<string?>(null);
+        return Task.FromResult(stage.RunningTask?.WorkId ?? stage.DispatchedChecksWorkId);
     }
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
         if (string.IsNullOrWhiteSpace(workId)) return Task.FromResult<WorkflowActiveWorkView?>(null);
         var currentStage = _run?.CurrentStage();
-        var activeTask = currentStage?.RunningTask;
-        var activeCheck = activeTask is null ? currentStage?.DispatchedCheck : null;
-        if (!string.Equals(activeTask?.WorkId ?? activeCheck?.DispatchWorkId, workId, StringComparison.Ordinal))
+        if (currentStage is null) return Task.FromResult<WorkflowActiveWorkView?>(null);
+        var activeTask = currentStage.RunningTask;
+        var hasDispatchedChecks = activeTask is null && currentStage.DispatchedCheck is not null;
+        if (!string.Equals(activeTask?.WorkId ?? currentStage.DispatchedChecksWorkId, workId, StringComparison.Ordinal))
             return Task.FromResult<WorkflowActiveWorkView?>(null);
 
         var projectId = GetProjectId();
@@ -693,11 +687,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         else if (req.WorkType == "checks")
         {
             foreach (var check in _run!.CurrentStage().Checks.Where(c => c.Status == StageCheckStatus.Pending))
-            {
-                check.DispatchWorkId = dispatch.WorkId;
-                check.DispatchRunnerId = runnerId;
-                check.DispatchedAt = DateTimeOffset.UtcNow;
-            }
+                check.Status = StageCheckStatus.Dispatched;
+            _run!.CurrentStage().DispatchedChecksWorkId = dispatch.WorkId;
             await SaveRunAsync();
         }
         _lastKnownRunnerId = runnerId;
@@ -760,9 +751,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (dispatchedCheck is null)
             return false;
 
-        if (!string.Equals(dispatchedCheck.DispatchRunnerId, runnerId, StringComparison.Ordinal))
-            return true;
-
         var checkRunner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
         if (!await checkRunner.IsAvailableAsync())
         {
@@ -771,14 +759,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return false;
         }
 
-        var pendingChecks = currentStage.Checks
-            .Where(c => c.Status == StageCheckStatus.Pending)
+        var dispatchedChecks = currentStage.Checks
+            .Where(c => c.Status == StageCheckStatus.Dispatched)
             .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
             .ToList();
         var checkDispatch = await MakeChecksDispatchAsync(
-            currentStage.Id, pendingChecks, runnerId,
-            markRunning: false,
-            workIdOverride: dispatchedCheck.DispatchWorkId);
+            currentStage.Id, dispatchedChecks, runnerId,
+            markRunning: false);
         await AssignRunnerWorkAsync(runnerId, checkDispatch);
         return true;
     }

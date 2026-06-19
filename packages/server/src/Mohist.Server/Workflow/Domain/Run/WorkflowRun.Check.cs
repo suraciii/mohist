@@ -59,7 +59,6 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            check.ClearDispatch();
             check.Status = StageCheckStatus.Passed;
             check.Message = result.Message;
             check.Output = result.Output;
@@ -75,7 +74,6 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            check.ClearDispatch();
             check.Status = StageCheckStatus.Failed;
             check.Message = result.Message;
             check.Output = result.Output;
@@ -99,7 +97,6 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            check.ClearDispatch();
             check.Status = StageCheckStatus.Pending;
             check.Message = result.Message;
             check.Output = result.Output;

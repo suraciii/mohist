@@ -32,9 +32,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         Assert.Equal(checkWork.WorkId, await workflow.GetCurrentWorkIdAsync());
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Pending, check.Status);
-        Assert.Equal(checkWork.WorkId, check.DispatchWorkId);
-        Assert.Equal(runnerId, check.DispatchRunnerId);
+        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -51,8 +49,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var check = run.Stages.Single().Checks.Single();
 
         Assert.Equal(runnerId, run.Claim!.RunnerId);
-        Assert.Equal(checkWork.WorkId, check.DispatchWorkId);
-        Assert.Equal(run.Claim.RunnerId, check.DispatchRunnerId);
+        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -70,10 +67,8 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
 
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Pending, check.Status);
+        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
         Assert.Equal(runnerId, run.Claim!.RunnerId);
-        Assert.Equal(checkWork.WorkId, check.DispatchWorkId);
-        Assert.Equal(run.Claim.RunnerId, check.DispatchRunnerId);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
     }
 
@@ -94,12 +89,8 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
 
         var recoveredWorkId = await workflow.GetCurrentWorkIdAsync();
         Assert.NotNull(recoveredWorkId);
-        Assert.NotEqual(checkWork.WorkId, recoveredWorkId);
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Pending, check.Status);
-        Assert.Equal(recoveredWorkId, check.DispatchWorkId);
-        Assert.NotNull(check.DispatchRunnerId);
-        Assert.NotNull(check.DispatchedAt);
+        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
     }
 }

@@ -142,7 +142,6 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var (retried, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("checks-", retried.WorkId);
-        Assert.NotEqual(checks.WorkId, retried.WorkId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

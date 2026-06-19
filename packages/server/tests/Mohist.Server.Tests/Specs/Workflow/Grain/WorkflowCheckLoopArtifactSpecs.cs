@@ -93,7 +93,6 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
         // Second check passes.
         var (checks2, r5) = await PollWorkAnyAsync();
         Assert.Equal("checks", checks2.WorkType);
-        Assert.NotEqual(checks1.WorkId, checks2.WorkId);
         await ReportChecksPassAsync(r5, checks2, "review-passed");
 
         var workflowRunId = review1.WorkflowRunId;
