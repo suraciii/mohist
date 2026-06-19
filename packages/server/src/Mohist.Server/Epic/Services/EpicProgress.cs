@@ -1,9 +1,9 @@
+using Mohist.Server.Epic.Domain;
+
 namespace Mohist.Server.Epic.Services;
 
 public static class EpicProgress
 {
-    public static readonly IReadOnlyList<string> TerminalStatuses = new[] { "done", "closed" };
-
     public static EpicProgressDto Build(IReadOnlyList<LinkedIssueDto> linked)
     {
         var completed = linked.Where(IsCompleted).ToList();
@@ -19,5 +19,5 @@ public static class EpicProgress
 
     public static bool IsCompleted(LinkedIssueDto issue) => issue.Status is "done" or "completed";
 
-    public static bool IsTerminal(string status) => TerminalStatuses.Contains(status);
+    public static bool IsTerminal(EpicStatus status) => status is EpicStatus.Done or EpicStatus.Closed;
 }
