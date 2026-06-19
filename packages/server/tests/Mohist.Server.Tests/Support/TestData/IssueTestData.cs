@@ -29,7 +29,7 @@ public static class IssueTestData
         string title = DefaultTitle,
         IssueStatus status = DefaultStatus,
         string priority = DefaultPriority,
-        string[]? labels = null,
+        IReadOnlyDictionary<string, string>? labels = null,
         string? body = null,
         string? repositoryRef = null)
     {
@@ -42,7 +42,7 @@ public static class IssueTestData
             Body = body,
             Status = status,
             Priority = priority,
-            Labels = labels ?? [],
+            Labels = labels ?? new Dictionary<string, string>(StringComparer.Ordinal),
             CreatedAt = DefaultTimestamp,
             UpdatedAt = DefaultTimestamp,
             RepositoryRef = repositoryRef,

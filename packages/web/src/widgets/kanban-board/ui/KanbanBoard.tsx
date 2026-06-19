@@ -22,7 +22,7 @@ import {
   type BoardQueryState,
   type SortMode,
 } from '../model/board-query'
-import { useLabels } from '../../../entities/issue'
+import { deriveLabelPairsFromIssues, formatLabelToken } from '../../../entities/issue/model/labels'
 import { useProjectPath } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { deriveAttentionItems } from '../model/homepage-attention'
@@ -185,7 +185,7 @@ function FilterBar({
 }: {
   state: BoardQueryState
   onChange: (state: BoardQueryState) => void
-  allLabels: string[]
+  allLabels: Array<{ key: string; value: string }>
   sort: SortMode
   onSortChange: (s: SortMode) => void
 }) {
@@ -195,7 +195,10 @@ function FilterBar({
   const filteredLabels = useMemo(() => {
     if (!labelSearch.trim()) return allLabels
     const q = labelSearch.trim().toLowerCase()
-    return allLabels.filter((l) => l.toLowerCase().includes(q))
+    return allLabels.filter((pair) => {
+      const token = formatLabelToken(pair.key, pair.value).toLowerCase()
+      return token.includes(q)
+    })
   }, [allLabels, labelSearch])
 
   const togglePriority = useCallback(
@@ -210,9 +213,10 @@ function FilterBar({
   )
 
   const toggleLabel = useCallback(
-    (label: string) => {
-      const has = state.labels.includes(label)
-      const next = has ? state.labels.filter((x) => x !== label) : [...state.labels, label]
+    (pair: { key: string; value: string }) => {
+      const token = formatLabelToken(pair.key, pair.value)
+      const has = state.labels.includes(token)
+      const next = has ? state.labels.filter((x) => x !== token) : [...state.labels, token]
       onChange({ ...state, labels: next })
     },
     [state, onChange],
@@ -249,15 +253,16 @@ function FilterBar({
             </div>
           ) : (
             <div className="flex flex-wrap gap-1">
-              {filteredLabels.map((label) => {
-                const active = state.labels.includes(label)
+              {filteredLabels.map((pair) => {
+                const token = formatLabelToken(pair.key, pair.value)
+                const active = state.labels.includes(token)
                 return (
                   <Button
-                    key={label}
+                    key={token}
                     variant="ghost"
                     size="xs"
-                    onClick={() => toggleLabel(label)}
-                    data-testid={`label-option-${label}`}
+                    onClick={() => toggleLabel(pair)}
+                    data-testid={`label-option-${token}`}
                     data-active={active}
                     className={`rounded-full ${
                       active
@@ -265,7 +270,7 @@ function FilterBar({
                         : 'bg-muted text-muted-foreground hover:bg-muted/80'
                     }`}
                   >
-                    {label}
+                    {token}
                   </Button>
                 )
               })}
@@ -360,23 +365,21 @@ function FilterBar({
                 showLabel
               />
             </div>
-            {allLabels.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {labelPopover}
-                {hasActiveFilters && (
-                  <Button
-                    variant="link"
-                    size="xs"
-                    onClick={() =>
-                      onChange({ ...state, priorities: [], labels: [] })
-                    }
-                    className="h-auto p-0 text-muted-foreground/70"
-                  >
-                    Clear filters
-                  </Button>
-                )}
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {labelPopover}
+              {hasActiveFilters && (
+                <Button
+                  variant="link"
+                  size="xs"
+                  onClick={() =>
+                    onChange({ ...state, priorities: [], labels: [] })
+                  }
+                  className="h-auto p-0 text-muted-foreground/70"
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
             <div className="flex items-center gap-1 border-t pt-2">
               <SortToggle sort={sort} onChange={onSortChange} showLabel />
             </div>
@@ -469,7 +472,7 @@ function getSearchParams(): string {
 }
 
 export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
-  const { data: allLabels = [] } = useLabels()
+  const allLabels = useMemo(() => deriveLabelPairsFromIssues(issues), [issues])
 
   const queryState = useMemo(() => parseBoardQuery(getSearchParams()), [])
 

@@ -51,7 +51,7 @@ export type EventMap = {
   [REVERSE_DNS_EVENT_TYPES.IssueReopened]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueWorkStarted]: { issueId: string; projectId: string }
   [REVERSE_DNS_EVENT_TYPES.IssueWorkCompleted]: { issueId: string; projectId: string }
-  [REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged]: { issueId: string; projectId: string; labels: string[] }
+  [REVERSE_DNS_EVENT_TYPES.IssueLabelsChanged]: { issueId: string; projectId: string; oldLabels?: Record<string, string>; labels?: Record<string, string> }
   [REVERSE_DNS_EVENT_TYPES.IssuePriorityChanged]: { issueId: string; projectId: string; priority: string }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteAdded]: { issueId: string; projectId: string; prerequisiteId: string }
   [REVERSE_DNS_EVENT_TYPES.IssuePrerequisiteRemoved]: { issueId: string; projectId: string; prerequisiteId: string }

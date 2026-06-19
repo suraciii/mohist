@@ -17,9 +17,21 @@ describe('describeEvent', () => {
       .toBe('Approval requested for Check')
   })
 
-  it('describes issue labels changed', () => {
-    expect(describeEvent('com.mohist.issue.labels-changed', { labels: ['bug', 'ux'] }))
-      .toBe('Issue labeled bug, ux')
+  it('describes issue labels changed with key=value map', () => {
+    expect(describeEvent('com.mohist.issue.labels-changed', { labels: { stream: 'frontend', module: 'auth' } }))
+      .toBe('Issue labeled module=auth, stream=frontend')
+  })
+
+  it('describes issue labels changed with both old and new maps', () => {
+    expect(describeEvent('com.mohist.issue.labels-changed', {
+      oldLabels: { stream: 'frontend' },
+      labels: { stream: 'backend' },
+    })).toBe('Issue labels changed from stream=frontend to stream=backend')
+  })
+
+  it('describes issue labels changed with empty payload as a generic change', () => {
+    expect(describeEvent('com.mohist.issue.labels-changed', {}))
+      .toBe('Issue labels changed')
   })
 
   it('describes rebase conflict with file count', () => {

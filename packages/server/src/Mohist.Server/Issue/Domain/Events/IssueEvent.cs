@@ -17,13 +17,13 @@ public union IssueEvent(
 public sealed record IssueCreated(
     string Title,
     string Priority,
-    string[] Labels,
+    IReadOnlyDictionary<string, string> Labels,
     string? Risk,
     string? RepositoryRef);
 
 public sealed record IssueLabelsChanged(
-    string[] OldLabels,
-    string[] NewLabels);
+    IReadOnlyDictionary<string, string> OldLabels,
+    IReadOnlyDictionary<string, string> NewLabels);
 
 public sealed record IssuePriorityChanged(
     string OldPriority,

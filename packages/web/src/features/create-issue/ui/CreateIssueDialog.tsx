@@ -14,7 +14,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/shared/ui/components/popover'
-import { createIssue, extractAttachmentIds, useLabels } from '../../../entities/issue'
+import { createIssue, extractAttachmentIds } from '../../../entities/issue'
+import { LabelEditor } from '../../../entities/issue/lib/label-editor'
+import type { LabelMap } from '../../../entities/issue/model/labels'
 import { useAvailableModelIds, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useProject, useRepositories } from '../../../entities/project'
@@ -185,7 +187,7 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
 export function CreateIssueDialog({ open, onClose }: Props) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [labels, setLabels] = useState<string[]>([])
+  const [labels, setLabels] = useState<LabelMap>({})
   const [model, setModel] = useState<string | null>(null)
   const [priority, setPriority] = useState<string>('p2')
   const [repositoryName, setRepositoryName] = useState<string | null>(null)
@@ -198,7 +200,6 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const { data: repositories } = useRepositories(currentProject?.id)
   const { data: workflowProfiles } = useWorkflowProfiles()
   const queryClient = useQueryClient()
-  const { data: allLabels } = useLabels()
 
   const frontmatter = useMemo(() => parseIssueFrontmatter(body), [body])
   const recommendation = useMemo(() => {
@@ -236,8 +237,8 @@ export function CreateIssueDialog({ open, onClose }: Props) {
       createIssue({
         title,
         body: body || undefined,
-        attachmentIds: extractAttachmentIds(body),
-        labels: labels.length > 0 ? labels : undefined,
+attachmentIds: extractAttachmentIds(body),
+        labels: Object.keys(labels).length > 0 ? labels : undefined,
         ...(model ? { model } : {}),
         ...(projectId ? { projectId } : {}),
         priority,
@@ -254,7 +255,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   function resetAndClose() {
     setTitle('')
     setBody('')
-    setLabels([])
+    setLabels({})
     setModel(null)
     setPriority('p2')
     setRepositoryName(null)
@@ -263,12 +264,6 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     setRisk(null)
     setRiskTouched(false)
     onClose()
-  }
-
-  function toggleLabel(label: string) {
-    setLabels((prev) =>
-      prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label],
-    )
   }
 
   const profileOptions: WorkflowProfileInfo[] = useMemo(() => {
@@ -391,29 +386,15 @@ export function CreateIssueDialog({ open, onClose }: Props) {
             </div>
           </div>
 
-          {allLabels && allLabels.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Labels</label>
-              <div className="flex flex-wrap gap-1.5">
-                {allLabels.map((label) => (
-                  <Button
-                    key={label}
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => toggleLabel(label)}
-                    className={`rounded-full ${
-                      labels.includes(label)
-                        ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
-                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                    }`}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Labels</label>
+            <LabelEditor
+              value={labels}
+              onChange={setLabels}
+              inputIdPrefix="create-issue-label"
+              emptyHint="Add a key+value pair (e.g. stream=frontend) to classify this issue."
+            />
+          </div>
 
           {repositories && repositories.length > 1 && (
             <div>

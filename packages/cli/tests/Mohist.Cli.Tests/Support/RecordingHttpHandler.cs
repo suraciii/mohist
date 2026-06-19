@@ -6,7 +6,7 @@ namespace Mohist.Cli.Tests.Support;
 
 public sealed class RecordingHttpHandler : HttpMessageHandler
 {
-    private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responder;
+    private Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responder;
 
     public RecordingHttpHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
     {
@@ -14,6 +14,11 @@ public sealed class RecordingHttpHandler : HttpMessageHandler
     }
 
     public List<CapturedRequest> Requests { get; } = [];
+
+    public void SetResponder(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
+    {
+        _responder = responder;
+    }
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken cancellationToken)

@@ -18,7 +18,7 @@ import {
 import { groupIssuesByStage } from '../model/kanban-grouping'
 
 const { LABELS_MOCK } = vi.hoisted(() => ({
-  LABELS_MOCK: ['bug', 'feature', 'docs', 'workflow', 'ux', 'webui', 'improvement', 'reliability', 'session', 'agent'],
+  LABELS_MOCK: ['kind', 'area', 'stream'],
 }))
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
@@ -41,7 +41,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     status: IssueStatus.Backlog,
     health: IssueHealth.Active,
     projectId: 'proj-1',
-    labels: [],
+    labels: {},
     priority: 'p2',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
@@ -86,8 +86,13 @@ describe('Board Query State - URL Serialization', () => {
     })
 
     it('parses labels from URL', () => {
-      const state = parseBoardQuery('labels=bug,feature')
-      expect(state.labels).toEqual(['bug', 'feature'])
+      const state = parseBoardQuery('labels=stream=frontend&labels=module=auth')
+      expect(state.labels).toEqual(['stream=frontend', 'module=auth'])
+    })
+
+    it('parses legacy comma-separated labels from URL', () => {
+      const state = parseBoardQuery('labels=stream=frontend,module=auth')
+      expect(state.labels).toEqual(['stream=frontend', 'module=auth'])
     })
 
     it('parses search from URL', () => {
@@ -106,9 +111,9 @@ describe('Board Query State - URL Serialization', () => {
     })
 
     it('parses full board state from URL', () => {
-      const state = parseBoardQuery('priorities=p0&labels=bug&search=auth&sort=updated')
+      const state = parseBoardQuery('priorities=p0&labels=stream=frontend&search=auth&sort=updated')
       expect(state.priorities).toEqual(['p0'])
-      expect(state.labels).toEqual(['bug'])
+      expect(state.labels).toEqual(['stream=frontend'])
       expect(state.search).toBe('auth')
       expect(state.sort).toBe('updated')
     })
@@ -131,8 +136,10 @@ describe('Board Query State - URL Serialization', () => {
     })
 
     it('serializes labels', () => {
-      const query = serializeBoardQuery({ priorities: [], labels: ['bug', 'feature'], search: '', sort: 'priority' })
-      expect(query).toContain('labels=bug%2Cfeature')
+      const query = serializeBoardQuery({ priorities: [], labels: ['stream=frontend', 'module=auth'], search: '', sort: 'priority' })
+      expect(query).toContain('labelMode=repeated')
+      expect(query).toContain('labels=stream%3Dfrontend')
+      expect(query).toContain('labels=module%3Dauth')
     })
 
     it('serializes search', () => {
@@ -153,7 +160,7 @@ describe('Board Query State - URL Serialization', () => {
     it('round-trips URL state correctly', () => {
       const originalState: BoardQueryState = {
         priorities: ['p0', 'p1'],
-        labels: ['bug'],
+        labels: ['stream=front,end'],
         search: 'auth',
         sort: 'updated',
       }
@@ -198,29 +205,29 @@ describe('Board Query State - Filtering', () => {
       expect(filtered.every(i => i.priority === 'p0' || i.priority === 'p1')).toBe(true)
     })
 
-    it('filters by single label', () => {
+    it('filters by single key=value label', () => {
       const issues = [
-        makeIssue({ number: 1, labels: ['bug'] }),
-        makeIssue({ number: 2, labels: ['feature'] }),
-        makeIssue({ number: 3, labels: ['bug', 'docs'] }),
+        makeIssue({ number: 1, labels: { kind: 'bug' } }),
+        makeIssue({ number: 2, labels: { kind: 'feature' } }),
+        makeIssue({ number: 3, labels: { kind: 'bug', area: 'docs' } }),
       ]
-      const state: BoardQueryState = { priorities: [], labels: ['bug'], search: '', sort: 'priority' }
+      const state: BoardQueryState = { priorities: [], labels: ['kind=bug'], search: '', sort: 'priority' }
       const filtered = applyBoardFilters(issues, state)
       expect(filtered).toHaveLength(2)
-      expect(filtered.every(i => i.labels.includes('bug'))).toBe(true)
+      expect(filtered.every(i => i.labels.kind === 'bug')).toBe(true)
     })
 
-    it('filters by multiple labels (AND logic)', () => {
+    it('filters by multiple key=value labels (AND logic)', () => {
       const issues = [
-        makeIssue({ number: 1, labels: ['bug', 'urgent'] }),
-        makeIssue({ number: 2, labels: ['bug'] }),
-        makeIssue({ number: 3, labels: ['feature'] }),
+        makeIssue({ number: 1, labels: { kind: 'bug', priority: 'urgent' } }),
+        makeIssue({ number: 2, labels: { kind: 'bug' } }),
+        makeIssue({ number: 3, labels: { kind: 'feature' } }),
       ]
-      const state: BoardQueryState = { priorities: [], labels: ['bug', 'urgent'], search: '', sort: 'priority' }
+      const state: BoardQueryState = { priorities: [], labels: ['kind=bug', 'priority=urgent'], search: '', sort: 'priority' }
       const filtered = applyBoardFilters(issues, state)
       expect(filtered).toHaveLength(1)
-      expect(filtered[0].labels).toContain('bug')
-      expect(filtered[0].labels).toContain('urgent')
+      expect(filtered[0].labels.kind).toBe('bug')
+      expect(filtered[0].labels.priority).toBe('urgent')
     })
 
     it('filters by title search (case-insensitive)', () => {
@@ -238,14 +245,14 @@ describe('Board Query State - Filtering', () => {
 
     it('combines priority, label, and search filters', () => {
       const issues = [
-        makeIssue({ number: 1, title: 'Login bug', priority: 'p0', labels: ['bug'] }),
-        makeIssue({ number: 2, title: 'Login feature', priority: 'p0', labels: ['feature'] }),
-        makeIssue({ number: 3, title: 'Auth bug', priority: 'p1', labels: ['bug'] }),
-        makeIssue({ number: 4, title: 'Login bug', priority: 'p2', labels: ['bug'] }),
+        makeIssue({ number: 1, title: 'Login bug', priority: 'p0', labels: { kind: 'bug' } }),
+        makeIssue({ number: 2, title: 'Login feature', priority: 'p0', labels: { kind: 'feature' } }),
+        makeIssue({ number: 3, title: 'Auth bug', priority: 'p1', labels: { kind: 'bug' } }),
+        makeIssue({ number: 4, title: 'Login bug', priority: 'p2', labels: { kind: 'bug' } }),
       ]
       const state: BoardQueryState = {
         priorities: ['p0'],
-        labels: ['bug'],
+        labels: ['kind=bug'],
         search: 'login',
         sort: 'priority',
       }
@@ -262,6 +269,52 @@ describe('Board Query State - Filtering', () => {
       const state: BoardQueryState = { priorities: ['p2'], labels: [], search: '', sort: 'priority' }
       const filtered = applyBoardFilters(issues, state)
       expect(filtered).toHaveLength(2)
+    })
+
+    it('excludes issues whose key matches but value differs from the key=value filter', () => {
+      const issues = [
+        makeIssue({ number: 1, labels: { stream: 'frontend' } }),
+        makeIssue({ number: 2, labels: { stream: 'backend' } }),
+        makeIssue({ number: 3, labels: { stream: 'frontend', module: 'auth' } }),
+      ]
+      const state: BoardQueryState = { priorities: [], labels: ['stream=frontend'], search: '', sort: 'priority' }
+      const filtered = applyBoardFilters(issues, state)
+      const numbers = filtered.map((i) => i.number).sort()
+      expect(numbers).toEqual([1, 3])
+    })
+
+    it('requires every selected key=value token to be present (AND across keys)', () => {
+      const issues = [
+        makeIssue({ number: 1, labels: { stream: 'frontend', module: 'auth' } }),
+        makeIssue({ number: 2, labels: { stream: 'frontend' } }),
+        makeIssue({ number: 3, labels: { stream: 'backend', module: 'auth' } }),
+        makeIssue({ number: 4, labels: { module: 'auth' } }),
+      ]
+      const state: BoardQueryState = {
+        priorities: [],
+        labels: ['stream=frontend', 'module=auth'],
+        search: '',
+        sort: 'priority',
+      }
+      const filtered = applyBoardFilters(issues, state)
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0].number).toBe(1)
+    })
+
+    it('handles label values that contain an = character by splitting on the first = only', () => {
+      const issues = [
+        makeIssue({ number: 1, labels: { stream: 'name=value' } }),
+        makeIssue({ number: 2, labels: { stream: 'frontend' } }),
+      ]
+      const state: BoardQueryState = {
+        priorities: [],
+        labels: ['stream=name=value'],
+        search: '',
+        sort: 'priority',
+      }
+      const filtered = applyBoardFilters(issues, state)
+      expect(filtered).toHaveLength(1)
+      expect(filtered[0].number).toBe(1)
     })
   })
 })
@@ -961,9 +1014,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('can select a label beyond the first eight via label popover search', async () => {
       const issues = [
-        makeIssue({ number: 1, labels: ['reliability'] }),
-        makeIssue({ number: 2, labels: ['session'] }),
-        makeIssue({ number: 3, labels: ['agent'] }),
+        makeIssue({ number: 1, labels: { stream: 'reliability' } }),
+        makeIssue({ number: 2, labels: { stream: 'session' } }),
+        makeIssue({ number: 3, labels: { stream: 'agent' } }),
       ]
       const queryClient = new QueryClient()
 
@@ -990,16 +1043,16 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       fireEvent.change(searchInput, { target: { value: 'reliability' } })
 
       await waitFor(() => {
-        expect(within(popover!).getByText('reliability')).toBeInTheDocument()
+        expect(within(popover!).getByText('stream=reliability')).toBeInTheDocument()
       })
     })
 
     it('updates board counts after selecting a label beyond the first eight', async () => {
       const issues = [
-        makeIssue({ number: 1, status: IssueStatus.Backlog, labels: ['reliability'] }),
-        makeIssue({ number: 2, status: IssueStatus.Backlog, labels: ['bug'] }),
-        makeIssue({ number: 3, status: IssueStatus.Backlog, labels: ['session'] }),
-        makeIssue({ number: 4, status: IssueStatus.InProgress, labels: ['agent'] }),
+        makeIssue({ number: 1, status: IssueStatus.Backlog, labels: { stream: 'reliability' } }),
+        makeIssue({ number: 2, status: IssueStatus.Backlog, labels: { kind: 'bug' } }),
+        makeIssue({ number: 3, status: IssueStatus.Backlog, labels: { stream: 'session' } }),
+        makeIssue({ number: 4, status: IssueStatus.InProgress, labels: { stream: 'agent' } }),
       ]
       const queryClient = new QueryClient()
 
@@ -1019,7 +1072,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         expect(popover).toBeInTheDocument()
       })
 
-      const sessionLabel = within(document.querySelector('[class*="origin-top-right"]') as HTMLElement).getByText('session')
+      const sessionLabel = within(document.querySelector('[class*="origin-top-right"]') as HTMLElement).getByText('stream=session')
       fireEvent.click(sessionLabel)
 
       await waitFor(() => {
@@ -1030,14 +1083,16 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
         expect(backlogColumn.textContent).toContain('Backlog')
         expect(backlogColumn.textContent).toContain('#3')
-        expect(backlogColumn.textContent).toContain('session')
+        expect(backlogColumn.textContent).toContain('stream=session')
       })
     })
 
     it('reveals all available labels through the searchable label popover', async () => {
       const issues = [
-        makeIssue({ number: 1, labels: ['bug'] }),
-        makeIssue({ number: 2, labels: ['feature'] }),
+        makeIssue({ number: 1, labels: { kind: 'bug' } }),
+        makeIssue({ number: 2, labels: { kind: 'feature' } }),
+        makeIssue({ number: 3, labels: { stream: 'session' } }),
+        makeIssue({ number: 4, labels: { stream: 'agent' } }),
       ]
       const queryClient = new QueryClient()
 
@@ -1052,8 +1107,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const labelButton = screen.getByText(/Labels:/i)
       fireEvent.click(labelButton)
 
+      let popover: HTMLElement | null = null
       await waitFor(() => {
-        const popover = document.querySelector('[class*="origin-top-right"]')
+        popover = document.querySelector('[class*="origin-top-right"]')
         expect(popover).toBeInTheDocument()
       })
 
@@ -1061,13 +1117,50 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       fireEvent.change(searchInput, { target: { value: 'sess' } })
 
       await waitFor(() => {
-        expect(screen.getByText('session')).toBeInTheDocument()
+        expect(within(popover!).getByText('stream=session')).toBeInTheDocument()
       })
 
       fireEvent.change(searchInput, { target: { value: 'agen' } })
 
       await waitFor(() => {
-        expect(screen.getByText('agent')).toBeInTheDocument()
+        expect(within(popover!).getByText('stream=agent')).toBeInTheDocument()
+      })
+    })
+
+    it('clicking a key=value label option narrows the board to issues containing that pair', async () => {
+      const issues = [
+        makeIssue({ number: 1, status: IssueStatus.Backlog, labels: { stream: 'frontend' } }),
+        makeIssue({ number: 2, status: IssueStatus.Backlog, labels: { stream: 'backend' } }),
+        makeIssue({ number: 3, status: IssueStatus.Backlog, labels: { module: 'auth' } }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      const labelButton = screen.getByText(/Labels:/i)
+      fireEvent.click(labelButton)
+
+      let popover: HTMLElement | null = null
+      await waitFor(() => {
+        popover = document.querySelector('[class*="origin-top-right"]')
+        expect(popover).toBeInTheDocument()
+      })
+
+      fireEvent.click(within(popover!).getByTestId('label-option-stream=frontend'))
+
+      await waitFor(() => {
+        const desktopBoard = document.querySelector('.hidden.md\\:flex.flex-row') as HTMLElement
+        expect(desktopBoard).toBeInTheDocument()
+        const backlogColumn = desktopBoard.children[0] as HTMLElement
+        expect(backlogColumn.textContent).toContain('#1')
+        expect(backlogColumn.textContent).not.toContain('#2')
+        expect(backlogColumn.textContent).not.toContain('#3')
       })
     })
   })

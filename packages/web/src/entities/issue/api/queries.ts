@@ -41,9 +41,11 @@ export function useIssue(number: number) {
 }
 
 export function useLabels() {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['labels'],
-    queryFn: () => getLabels(),
+    queryKey: ['labels', projectId],
+    queryFn: () => getLabels(projectId),
+    enabled: !!projectId,
   })
 }
 

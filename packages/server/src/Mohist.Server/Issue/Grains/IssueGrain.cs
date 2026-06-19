@@ -374,7 +374,7 @@ public class IssueGrain : Grain, IIssueGrain
             await CompleteWorkAsync(workflowRunId);
     }
 
-    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null)
+public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -569,7 +569,7 @@ public class IssueGrain : Grain, IIssueGrain
 public record UpdateIssueData(
     [property: Id(0)] string? Title = null,
     [property: Id(1)] string? Body = null,
-    [property: Id(2)] string[]? Labels = null,
+[property: Id(2)] IReadOnlyDictionary<string, string>? Labels = null,
     [property: Id(3)] string? Priority = null,
     [property: Id(4)] bool? IsDraft = null,
     [property: Id(5)] string[]? AttachmentIds = null

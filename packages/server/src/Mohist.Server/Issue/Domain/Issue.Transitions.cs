@@ -10,7 +10,7 @@ public sealed partial class Issue
         int number,
         string title,
         string? body = null,
-        string[]? labels = null,
+        IReadOnlyDictionary<string, string>? labels = null,
         string priority = "p2",
         string? repositoryRef = null,
         string? risk = null,
@@ -18,7 +18,6 @@ public sealed partial class Issue
         DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
-        var labelsCopy = labels ?? [];
         var issue = new Issue
         {
             Id = id,
@@ -26,7 +25,6 @@ public sealed partial class Issue
             Number = number,
             Title = title,
             Body = body,
-            Labels = labelsCopy,
             Priority = priority,
             Risk = risk,
             RepositoryRef = repositoryRef,
@@ -34,25 +32,39 @@ public sealed partial class Issue
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
+        issue.ReplaceLabels(labels ?? new Dictionary<string, string>(StringComparer.Ordinal), recordEvent: false);
         issue.RecordEvent(new IssueCreated(
             Title: title,
             Priority: priority,
-            Labels: [.. labelsCopy],
+            Labels: issue.SnapshotLabels(),
             Risk: risk,
             RepositoryRef: repositoryRef));
         return issue;
     }
 
-    public void Update(string? title, string? body, string[]? labels, string? priority, DateTime? now = null)
+    public void Update(string? title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, DateTime? now = null)
     {
-        if (title != null) _title = RequireTitle(title);
-        if (body != null) _body = body;
+        var changed = false;
+        var labelsChanged = false;
+        if (title != null)
+        {
+            var nextTitle = RequireTitle(title);
+            if (!string.Equals(_title, nextTitle, StringComparison.Ordinal))
+            {
+                _title = nextTitle;
+                changed = true;
+            }
+        }
+        if (body != null && !string.Equals(_body, body, StringComparison.Ordinal))
+        {
+            _body = body;
+            changed = true;
+        }
         if (labels != null)
         {
-            var oldLabels = _labels;
-            _labels = labels ?? [];
-            if (!oldLabels.SequenceEqual(_labels))
-                RecordEvent(new IssueLabelsChanged([.. oldLabels], [.. _labels]));
+            labelsChanged = !LabelsMatch(labels);
+            ReplaceLabels(labels, recordEvent: true, now: now);
+            changed = changed || labelsChanged;
         }
         if (priority != null)
         {
@@ -60,9 +72,12 @@ public sealed partial class Issue
             var newPriority = IssuePriority.From(priority).Value;
             _priority = IssuePriority.From(priority);
             if (oldPriority != newPriority)
+            {
                 RecordEvent(new IssuePriorityChanged(oldPriority, newPriority));
+                changed = true;
+            }
         }
-        Touch(now);
+        if (changed && !labelsChanged) Touch(now);
     }
 
     public void SetDraft(bool isDraft, DateTime? now = null)

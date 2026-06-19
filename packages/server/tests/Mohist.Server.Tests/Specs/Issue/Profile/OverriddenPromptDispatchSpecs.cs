@@ -62,7 +62,7 @@ public class OverriddenPromptDispatchSpecs : IAsyncLifetime
             new { name = $"prompt-dispatch-{label}-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues",
-            new { title = $"Prompt dispatch {label}", body = "body", labels = Array.Empty<string>(), priority = "p1" });
+            new { title = $"Prompt dispatch {label}", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1" });
         _tracked.Add(new TrackedIssue(project.Id, issue.Number));
         return (project.Id, issue.Number);
     }

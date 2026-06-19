@@ -24,8 +24,9 @@ internal static class MohistCliCommands
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
-        root.Subcommands.Add(AgentCommands.Build(api));
+root.Subcommands.Add(AgentCommands.Build(api));
         root.Subcommands.Add(EpicCommands.Build(api));
+        root.Subcommands.Add(LabelCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
 
         return root;
@@ -67,7 +68,18 @@ internal static class MohistCliCommands
         "Project name or id (canonical: --project; --project-id is a backwards-compatible alias)";
 
     internal static Option<string[]?> LabelOption() =>
-        new("--label", "-l") { Description = "Filter by labels", AllowMultipleArgumentsPerToken = true };
+        new("--label", "-l")
+        {
+            Description = "Issue label in 'key=value' form (set) or '-key' (remove). Repeatable; e.g. -l stream=frontend -l -bug",
+            AllowMultipleArgumentsPerToken = true,
+        };
+
+    internal static Option<string[]?> LabelFilterOption() =>
+        new("--label", "-l")
+        {
+            Description = "Filter issues by a label in 'key=value' form (e.g. -l stream=frontend). Repeatable.",
+            AllowMultipleArgumentsPerToken = true,
+        };
 
     internal static Option<string?> PriorityOption() =>
         new("--priority", "-p") { Description = "Filter by priority" };
@@ -134,6 +146,7 @@ internal static class MohistCliCommands
         string? ProjectId = null,
         string? Stage = null,
         string? Label = null,
+        IReadOnlyList<string>? Labels = null,
         string? Priority = null,
         bool? Archived = null,
         bool? All = null)
@@ -142,6 +155,11 @@ internal static class MohistCliCommands
         Add("projectId", ProjectId);
         Add("stage", Stage);
         Add("label", Label);
+        if (Labels is not null)
+        {
+            foreach (var label in Labels)
+                Add("label", label);
+        }
         Add("priority", Priority);
         Add("archived", Archived?.ToString().ToLowerInvariant());
         Add("all", All?.ToString().ToLowerInvariant());

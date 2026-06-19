@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Net.Http;
 
 namespace Mohist.Cli;
 
@@ -50,7 +51,7 @@ internal static class IssueCommands
         cmd.Aliases.Add("ls");
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var stageOpt = MohistCliCommands.StageOption();
-        var labelOpt = MohistCliCommands.LabelOption();
+        var labelOpt = MohistCliCommands.LabelFilterOption();
         var priorityOpt = MohistCliCommands.PriorityOption();
         var allOpt = new Option<bool>("--all") { Description = "Show all issues" };
         var archivedOpt = new Option<bool>("--archived") { Description = "Show archived issues" };
@@ -80,9 +81,18 @@ internal static class IssueCommands
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
+                if (labels is { Length: > 0 })
+                {
+                    var labelError = LabelDelta.ValidateFilterTokens(labels);
+                    if (labelError is not null)
+                    {
+                        api.Error.WriteLine(labelError);
+                        return 1;
+                    }
+                }
                 var query = MohistCliCommands.Query(
                     Stage: stage,
-                    Label: labels is { Length: > 0 } ? string.Join(",", labels) : null,
+                    Labels: labels,
                     Priority: priority,
                     Archived: archived ? true : null,
                     All: all ? true : null);
@@ -151,7 +161,7 @@ internal static class IssueCommands
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
-                var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
+var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
                 {
                     api.Error.WriteLine("--ready and --draft are mutually exclusive");
@@ -163,6 +173,12 @@ internal static class IssueCommands
                     MohistCliCommands.DraftFlagState.Ready => false,
                     _ => true,
                 };
+                var labelParse = LabelDelta.Parse(labels);
+                if (!labelParse.IsValid)
+                {
+                    api.Error.WriteLine(labelParse.Error);
+                    return 1;
+                }
                 var resolvedBody = await BodyInputResolver.ResolveAsync(
                     body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
                 if (resolvedBody is BodyInputResolver.Result.Failure)
@@ -172,11 +188,18 @@ internal static class IssueCommands
                 var (effectiveBody, effectiveWorkflow, effectiveRisk) =
                     ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
 
+var labelMap = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var entry in labelParse.Entries)
+                {
+                    if (entry.IsSet)
+                        labelMap[entry.Key] = entry.Value!;
+                }
+
                 var result = await api.PostAndReadAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
                 {
                     title,
                     body = effectiveBody,
-                    labels = labels ?? [],
+                    labels = labelMap,
                     priority = priority ?? "p2",
                     model,
                     workflowProfileId = effectiveWorkflow,
@@ -341,23 +364,95 @@ internal static class IssueCommands
                         return 1;
                     body = ((BodyInputResolver.Result.Success)resolvedBody).Body;
                 }
-                return await api.PrintPatchAsync(ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"), new
+
+                object payload;
+                if (labels is { Length: > 0 })
                 {
-                    title,
-                    body,
-                    labels,
-                    priority,
-                    model,
-                    isDraft = draftState switch
+var labelParse = LabelDelta.Parse(labels);
+                    if (!labelParse.IsValid)
                     {
-                        MohistCliCommands.DraftFlagState.Draft => (bool?)true,
-                        MohistCliCommands.DraftFlagState.Ready => (bool?)false,
-                        _ => null,
-                    },
-                });
+                        api.Error.WriteLine(labelParse.Error);
+                        return 1;
+                    }
+                    var issuePath = $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/issues/{MohistCliCommands.Escape(number!)}";
+                    var (loadExit, current) = await LoadCurrentLabelsAsync(api, issuePath);
+                    if (loadExit != 0)
+                        return loadExit;
+                    var merged = LabelDelta.Apply(labelParse.Entries, current);
+                    payload = new
+                    {
+                        title,
+                        body,
+                        labels = merged,
+                        priority,
+                        model,
+                        isDraft = draftState switch
+                        {
+                            MohistCliCommands.DraftFlagState.Draft => (bool?)true,
+                            MohistCliCommands.DraftFlagState.Ready => (bool?)false,
+                            _ => null,
+                        },
+                    };
+                }
+                else
+                {
+                    payload = new
+                    {
+                        title,
+                        body,
+                        labels = (Dictionary<string, string>?)null,
+                        priority,
+                        model,
+                        isDraft = draftState switch
+                        {
+                            MohistCliCommands.DraftFlagState.Draft => (bool?)true,
+                            MohistCliCommands.DraftFlagState.Ready => (bool?)false,
+                            _ => null,
+                        },
+                    };
+                }
+
+                return await api.PrintPatchAsync(
+                    ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}"),
+                    payload);
             }
         });
         return cmd;
+    }
+
+    private static async Task<(int ExitCode, IReadOnlyDictionary<string, string> Labels)> LoadCurrentLabelsAsync(
+        MohistCliApi api, string issuePath)
+    {
+        try
+        {
+            var data = await api.GetDataAsync(issuePath);
+            if (data is null) return (0, new Dictionary<string, string>(StringComparer.Ordinal));
+            return (0, ParseLabelsFromIssue(data));
+        }
+        catch (HttpRequestException)
+        {
+            api.Error.WriteLine(MohistCliApi.ServerUnavailableMessage);
+            return (1, new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+    }
+
+    internal static IReadOnlyDictionary<string, string> ParseLabelsFromIssue(System.Text.Json.Nodes.JsonNode? data)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (data is null) return result;
+        var labels = data["labels"];
+        if (labels is null) return result;
+        if (labels is System.Text.Json.Nodes.JsonObject obj)
+        {
+            foreach (var kvp in obj)
+            {
+                if (kvp.Value is null) continue;
+                var str = kvp.Value.GetValue<string>();
+                if (str is not null)
+                    result[kvp.Key] = str;
+            }
+        }
+        return result;
     }
 
     private static Command BuildAction(string name, string description, MohistCliApi api)

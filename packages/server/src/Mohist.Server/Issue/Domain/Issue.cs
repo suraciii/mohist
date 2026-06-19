@@ -7,7 +7,7 @@ public sealed partial class Issue
 {
     private string _title = null!;
     private string? _body;
-    private string[] _labels = [];
+    private Dictionary<string, string> _labels = new(StringComparer.Ordinal);
     private IssuePriority _priority = IssuePriority.Default;
     private string? _risk;
     private DateTime _updatedAt;
@@ -35,10 +35,10 @@ public sealed partial class Issue
         init => _body = value;
     }
 
-    public string[] Labels
+    public IReadOnlyDictionary<string, string> Labels
     {
-        get => [.. _labels];
-        init => _labels = value ?? [];
+        get => _labels;
+        init => ReplaceLabels(value, recordEvent: false);
     }
 
     public string Priority
