@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Domain;
 using Issue = Mohist.Server.Issue.Domain.Issue;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -6,6 +7,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Services;
@@ -764,5 +766,310 @@ public class IssueQuerierSpecs
         Assert.Equal(
             new[] { "stream=frontend", "module=auth" },
             IssueQuerier.LabelFilterTokens("stream=frontend,module=auth"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_ReturnsThirtyTrailingDays()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-day-{Guid.NewGuid():N}", Name = "Day Project" };
+        var issue = SeedIssue(db, project, "issue_day_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        Assert.Equal("day", result.Bucket);
+        Assert.Equal(30, result.Buckets.Count);
+        Assert.Equal("2026-05-21", result.Buckets[0].Boundary);
+        Assert.Equal("2026-06-19", result.Buckets[^1].Boundary);
+        Assert.All(result.Buckets, b =>
+        {
+            Assert.Equal(0, b.Completed);
+            Assert.Equal(0, b.Failed);
+        });
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DayBucketing_BucketsCompletionAndFailureByIssueEventTime()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-day-fill-{Guid.NewGuid():N}", Name = "Day Fill Project" };
+        var i1 = SeedIssue(db, project, "issue_df_1");
+        var i2 = SeedIssue(db, project, "issue_df_2");
+        var i3 = SeedIssue(db, project, "issue_df_3");
+        await db.SaveChangesAsync();
+
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i2.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 18, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i3.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 19, 9, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var d17 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-17");
+        Assert.Equal(2, d17.Completed);
+        Assert.Equal(0, d17.Failed);
+        var d19 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-19");
+        Assert.Equal(0, d19.Completed);
+        Assert.Equal(1, d19.Failed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_IssueEditedAfterCompletion_StaysInCompletionBucket()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-edit-{Guid.NewGuid():N}", Name = "Edit Project" };
+        var i1 = SeedIssue(db, project, "issue_edit_1", updatedAt: new DateTimeOffset(2026, 6, 12, 0, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        // The completion event is in week 1 (early June).
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        // The issue's `updatedAt` is in week 2 (a later edit/archive
+        // touched it). The metric MUST keep the issue in the week 1
+        // bucket, because bucketing reads `IssueEvents.Time` (terminal
+        // transition time) — not issue `updatedAt`.
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, now);
+
+        var total = result.Buckets.Sum(b => b.Completed + b.Failed);
+        Assert.Equal(1, total);
+        // 2026-06-08 is a Monday; verify the boundary of the only
+        // non-zero bucket is exactly that Monday.
+        var firstHit = result.Buckets.First(b => b.Completed + b.Failed > 0);
+        Assert.Equal("2026-06-08", firstHit.Boundary);
+        Assert.Equal(1, firstHit.Completed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_FlappingIssue_AppearsInEachAffectedBucket()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-flap-{Guid.NewGuid():N}", Name = "Flap Project" };
+        var i1 = SeedIssue(db, project, "issue_flap_1");
+        await db.SaveChangesAsync();
+
+        // The issue closed in week 1, was reopened and closed again
+        // in week 2. The endpoint must count distinct completions
+        // across buckets, so it shows up in both week 1 and week 2.
+        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 8, 10, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, IssueQuerier.ClosedType, new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, now);
+
+        var week1 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-08");
+        Assert.Equal(1, week1.Failed);
+        var week2 = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-15");
+        Assert.Equal(1, week2.Failed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_DistinctPerBucket_CollapsesRepeatedEventsForSameIssueAndType()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-distinct-{Guid.NewGuid():N}", Name = "Distinct Project" };
+        var i1 = SeedIssue(db, project, "issue_distinct_1");
+        await db.SaveChangesAsync();
+
+        // Two same-type terminal events for the same issue in the
+        // same day: must count as 1, not 2.
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+        SeedEvent(db, i1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 16, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var day = Assert.Single(result.Buckets, b => b.Boundary == "2026-06-17");
+        Assert.Equal(1, day.Completed);
+        Assert.Equal(0, day.Failed);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_ProjectScoping_OnlyCountsTargetProjectsIssues()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var projectA = new ProjectInfo { Id = $"proj-scope-a-{Guid.NewGuid():N}", Name = "Scope A" };
+        var projectB = new ProjectInfo { Id = $"proj-scope-b-{Guid.NewGuid():N}", Name = "Scope B" };
+        var a1 = SeedIssue(db, projectA, "issue_scope_a_1");
+        var b1 = SeedIssue(db, projectB, "issue_scope_b_1");
+        await db.SaveChangesAsync();
+
+        SeedEvent(db, a1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, b1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var resultA = await service.GetCompletionBucketsAsync(projectA.Id, IssueQuerier.CompletionBucket.Day, now);
+        var resultB = await service.GetCompletionBucketsAsync(projectB.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var dayA = Assert.Single(resultA.Buckets, b => b.Boundary == "2026-06-17");
+        Assert.Equal(1, dayA.Completed);
+        var dayB = Assert.Single(resultB.Buckets, b => b.Boundary == "2026-06-17");
+        Assert.Equal(1, dayB.Completed);
+
+        // Project A's series must not include B's event.
+        Assert.DoesNotContain(resultA.Buckets, b => b.Completed > 1);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_NonTerminalEvents_AreNotCounted()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-noise-{Guid.NewGuid():N}", Name = "Noise Project" };
+        var i1 = SeedIssue(db, project, "issue_noise_1");
+        await db.SaveChangesAsync();
+
+        // Only the two terminal types should count; other types
+        // (work-started, archived, reopened, …) must not contribute
+        // to completed/failed counts.
+        SeedEvent(db, i1.Id, "com.mohist.issue.work-started", new DateTimeOffset(2026, 6, 17, 8, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, "com.mohist.issue.archived", new DateTimeOffset(2026, 6, 17, 9, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, i1.Id, "com.mohist.issue.reopened", new DateTimeOffset(2026, 6, 17, 10, 0, 0, TimeSpan.Zero));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Day, now);
+
+        var total = result.Buckets.Sum(b => b.Completed + b.Failed);
+        Assert.Equal(0, total);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetCompletionBucketsAsync_WeekBucketing_ReturnsTwelveTrailingWeeks()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-week-{Guid.NewGuid():N}", Name = "Week Project" };
+        SeedIssue(db, project, "issue_week_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        // 2026-06-19 is a Friday. Current ISO week starts on 2026-06-15
+        // (Monday). 12 trailing weeks => boundaries 2026-03-30 …
+        // 2026-06-15.
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var result = await service.GetCompletionBucketsAsync(project.Id, IssueQuerier.CompletionBucket.Week, now);
+
+        Assert.Equal("week", result.Bucket);
+        Assert.Equal(12, result.Buckets.Count);
+        Assert.Equal("2026-03-30", result.Buckets[0].Boundary);
+        Assert.Equal("2026-06-15", result.Buckets[^1].Boundary);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void StartOfIsoWeek_ReturnsMondayForAnyInput()
+    {
+        // 2026-06-19 is a Friday; the Monday of the same week is
+        // 2026-06-15.
+        var friday = new DateTime(2026, 6, 19);
+        Assert.Equal(new DateTime(2026, 6, 15), IssueQuerier.ISOWeekHelper.StartOfIsoWeek(friday));
+
+        // 2026-06-15 is itself a Monday.
+        var monday = new DateTime(2026, 6, 15);
+        Assert.Equal(new DateTime(2026, 6, 15), IssueQuerier.ISOWeekHelper.StartOfIsoWeek(monday));
+
+        // 2026-06-21 is a Sunday — the Monday of that week is
+        // 2026-06-15, not 2026-06-22.
+        var sunday = new DateTime(2026, 6, 21);
+        Assert.Equal(new DateTime(2026, 6, 15), IssueQuerier.ISOWeekHelper.StartOfIsoWeek(sunday));
+    }
+
+    private static int _seedIssueCounter = 0;
+    private static Mohist.Server.Issue.Domain.Issue SeedIssue(
+        MohistDbContext db,
+        ProjectInfo project,
+        string idSuffix,
+        DateTimeOffset? updatedAt = null)
+    {
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = idSuffix,
+            ProjectId = project.Id,
+            Number = ++_seedIssueCounter,
+            Title = "Test issue",
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
+            Priority = "p2",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+            CreatedAt = updatedAt?.UtcDateTime ?? DateTime.UtcNow,
+            UpdatedAt = updatedAt?.UtcDateTime ?? DateTime.UtcNow,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        return issue;
+    }
+
+    private static void SeedEvent(
+        MohistDbContext db,
+        string issueId,
+        string type,
+        DateTimeOffset time)
+    {
+        var source = IssueQuerier.IssueSourcePrefix + issueId;
+        var dbMax = db.IssueEvents
+            .AsNoTracking()
+            .Where(e => e.Source == source)
+            .Select(e => (long?)e.Id)
+            .Max();
+        var trackedMax = db.ChangeTracker.Entries<IssueEventRow>()
+            .Where(e => e.Entity.Source == source)
+            .Select(e => (long?)e.Entity.Id)
+            .Max();
+        var nextId = (dbMax ?? 0) > (trackedMax ?? 0) ? (dbMax ?? 0) : (trackedMax ?? 0);
+        nextId += 1;
+        db.IssueEvents.Add(new IssueEventRow
+        {
+            Id = nextId,
+            Source = source,
+            EventId = Guid.NewGuid().ToString(),
+            Type = type,
+            Time = time,
+            SpecVersion = "1.0",
+            Subject = "1",
+            DataContentType = "application/json",
+            Data = System.Text.Json.JsonDocument.Parse("null").RootElement,
+            ExtensionsJson = "{}",
+        });
     }
 }

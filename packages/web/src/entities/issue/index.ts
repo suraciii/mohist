@@ -1,6 +1,8 @@
 export { useArchivedIssues, useCommitDiff, useIssue, useIssueCommits, useIssueDiff, useIssueEvents, useIssues, useLabels, useRequestChangesIssue, useWorkflowTimeline, useWorkflowYaml, useWorkspaceStatus, useIssueWorkflowProfileYaml, useUpdateIssueWorkflowProfileYaml, useDeleteIssueWorkflowProfileTemplate, useIssueWorkflowArtifacts, useIssueWorkflowArtifactContent } from './api/queries'
 export { addComment, addPrerequisite, approveIssue, rejectIssue, archiveAllCompleted, archiveIssue, cleanupIssueWorkspace, closeIssue, commentAttachmentContentPath, createIssue, deleteComment, deleteIssueWorkflowProfileTemplate, extractAttachmentIds, forceStopIssue, getFileContent, getIssueEvents, getIssueFeedback, getIssueWorkflowVariables, getIssueWorkflowArtifacts, getIssueWorkflowArtifactContent, issueAttachmentContentPath, listIssueFeedback, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar, rebaseIssue, removePrerequisite, reopenIssue, requestChangesIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue, updateIssue } from './api/client'
 export { statusBadge, statusLabel } from './lib/status-badge'
+export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
+export type { CompletionSnapshot } from './lib/completion-snapshot'
 export { dispatchRebaseEvent, onRebaseEvent } from './model/rebase-events'
 export { dispatchTimelineEvent, onTimelineEvent } from './model/timeline-events'
 export type { TimelineLiveEvent } from './model/timeline-events'

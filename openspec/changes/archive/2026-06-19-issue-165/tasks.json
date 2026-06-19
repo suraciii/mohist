@@ -1,0 +1,49 @@
+{
+  "project": "mohist-local",
+  "description": "Completion productivity metrics for the Issue context: a client-side trailing-7-day completion snapshot (standalone, replaceable) and a server-side time-series aggregation endpoint bucketed by the correct completion time from the durable IssueEvents log.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Client completion snapshot derivation (pure function + replaceable hook)",
+      "spec": "specs/issue-completion-metrics/spec.md#Client snapshot derives rolling 7-day completion counts",
+      "description": "Add a pure `deriveCompletionSnapshot(issues, now)` in `packages/web/src/entities/issue/lib/completion-snapshot.ts` that computes `{ completed, failed, new }` for the trailing 7-day window from already-loaded issues (completed ← status `done` by `updatedAt`, failed ← status `cancelled` by `updatedAt`, new ← `createdAt`; non-terminal issues excluded from completed/failed). Add a thin `useCompletionSnapshot()` hook that wraps `useIssues()` + the pure function, exposing a stable `{completed,failed,new}` return shape so its body can later be swapped to the server endpoint without changing consumers (the reservation contract). The pure function MUST NOT perform any fetch.",
+      "acceptanceCriteria": [
+        "`deriveCompletionSnapshot(issues, now)` is pure: accepts an issue collection and returns `{ completed, failed, new }`; it issues no network request and does not call the issue list query.",
+        "Trailing 7-day window is correct: issues with `done`/`cancelled` status and `updatedAt` inside the window count as completed/failed; issues with `createdAt` inside the window count as new; everything outside the window is excluded.",
+        "Non-terminal issues (`backlog`, `in_progress`) are never counted as completed or failed, but still count as `new` when `createdAt` is in window.",
+        "`useCompletionSnapshot()` hook exists with a stable return shape (`{completed, failed, new}`) preserved as the documented reservation for the future endpoint-backed swap.",
+        "Snapshot derives counts from issue `status`/`createdAt`/`updatedAt` only; it does NOT source `AgentActivity.summary.completed`/`.failed`.",
+        "Unit tests cover the spec scenarios: counts in window, exclusion outside window, non-terminal exclusion, and `createdAt` driving `new`; tests live alongside the implementation (no separate test task).",
+        "Web lint and typecheck pass (`packages/web`)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/entities/issue/lib/completion-snapshot.ts (+ hook export) with co-located unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Status mapping per design D5: completed ← done, failed ← cancelled. The `updatedAt` approximation is an accepted v1 limitation for the snapshot only; the server endpoint (T-002) is precise. The actual swap of the hook body to the endpoint is explicitly out of scope for this issue (reservation only)."
+    },
+    {
+      "id": "T-002",
+      "title": "Server completion time-series aggregation endpoint",
+      "spec": "specs/issue-completion-metrics/spec.md#Server aggregation endpoint returns completion count buckets",
+      "description": "Add `IssueQuerier.GetCompletionBucketsAsync(projectId, bucket, now)` that buckets the durable `IssueEvents` rows of type `com.mohist.issue.work-completed` (→ completed) and `com.mohist.issue.closed` (→ failed) by their `Time`, constrained to the project's issue ids (no indexed projectId column on IssueEvents). Expose `GET /api/projects/{projectRef}/issues/metrics/completion?bucket=day|week` via a new `packages/server/src/Mohist.Server/Api/IssueRoutes.Metrics.cs` partial, returning fixed trailing windows (by-day = 30 days, by-week = 12 weeks) with `{ boundary, completed, failed }` per bucket. Completion time MUST come from `IssueEvents.Time`, never from issue `updatedAt` and never from `AgentActivity.summary`. Count distinct issue ids per bucket.",
+      "acceptanceCriteria": [
+        "`GET /api/projects/{projectRef}/issues/metrics/completion?bucket=day` returns one bucket per day for the trailing 30 days; `?bucket=week` returns one bucket per week for the trailing 12 weeks; each bucket carries `{ boundary, completed, failed }`.",
+        "Bucketing uses `IssueEvents.Time` for the `com.mohist.issue.work-completed` / `com.mohist.issue.closed` types: an issue that reached its terminal state in week 1 but whose `updatedAt` is in week 2 is counted in the week-1 bucket only (verified by a dedicated test).",
+        "Only fixed `day`/`week` bucketing is honored; a custom bucket size or custom time range is not applied (v1 contract).",
+        "Response is project-scoped (only terminal events of the resolved project's issues are counted).",
+        "The aggregation path reads only issue/workflow completion facts; it does NOT read `AgentActivity.summary.completed`/`.failed`.",
+        "Server-side tests cover: edited-after-completion attribution, fixed-bucket-only behavior, project scoping, and distinct-per-bucket counting; the server builds and existing issue/API tests still pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Issue/Services/IssueQuerier.cs (new GetCompletionBucketsAsync) + packages/server/src/Mohist.Server/Api/IssueRoutes.Metrics.cs (new partial) + DTO + tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D1–D3: no schema migration, no domain aggregate change — IssueEvents already durably records terminal transitions. The literal `metrics` route segment precedes `{number:int}` so the int constraint cannot collide. Open question D-OQ1: during implementation, spot-check that Complete()/Close() (including programmatic/recovery closures) always project to IssueEvents, otherwise the endpoint silently undercounts. D-OQ2: add an `IssueEvents(Type, Time)` index only if profiling the by-week query shows it is needed."
+    }
+  ]
+}

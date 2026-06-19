@@ -155,6 +155,198 @@ public class IssueQuerier
         string.Equals(issue.Status, "in_progress", StringComparison.OrdinalIgnoreCase)
         && string.Equals(issue.WorkflowStatus, "awaiting-approval", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Bucketing granularity for the completion time-series. v1 only supports
+    /// fixed by-day and by-week windows; the controller rejects anything else.
+    /// </summary>
+    public enum CompletionBucket
+    {
+        Day,
+        Week,
+    }
+
+    /// <summary>
+    /// One bucket in the completion time-series. The <see cref="Boundary"/>
+    /// string is the ISO calendar boundary that the bucket represents:
+    /// <c>yyyy-MM-dd</c> for day buckets, and the Monday of the ISO week for
+    /// week buckets. Both are UTC. Counts are the distinct number of
+    /// project-scoped issues that reached the terminal state within the
+    /// bucket.
+    /// </summary>
+    public sealed record CompletionBucketPoint(
+        string Boundary,
+        int Completed,
+        int Failed);
+
+    /// <summary>
+    /// The result of <see cref="GetCompletionBucketsAsync"/>. <see cref="Buckets"/>
+    /// is dense — every bucket in the fixed trailing window is present, even
+    /// when its counts are zero, so callers can render a continuous chart.
+    /// </summary>
+    public sealed record CompletionBucketsResult(
+        string Bucket,
+        DateTimeOffset WindowFrom,
+        DateTimeOffset WindowTo,
+        IReadOnlyList<CompletionBucketPoint> Buckets);
+
+    // CloudEvents reverse-DNS bus types that mark a terminal transition.
+    // <c>com.mohist.issue.work-completed</c> → <c>completed</c> (Done).
+    // <c>com.mohist.issue.closed</c> → <c>failed</c> (Cancelled).
+    internal const string WorkCompletedType = "com.mohist.issue.work-completed";
+    internal const string ClosedType = "com.mohist.issue.closed";
+    internal const string IssueSourcePrefix = "/mohist/issues/";
+
+    /// <summary>
+    /// Buckets the project's terminal-issue transitions (<c>work-completed</c>
+    /// and <c>closed</c>) from the durable <c>IssueEvents</c> table by
+    /// <c>IssueEvents.Time</c>, not by issue <c>updatedAt</c>. The window
+    /// is fixed: <paramref name="bucket"/> = <see cref="CompletionBucket.Day"/>
+    /// returns 30 trailing UTC days; <see cref="CompletionBucket.Week"/>
+    /// returns 12 trailing ISO weeks (Mon-anchored, UTC). Every bucket in
+    /// the window is emitted (zeros included). Issue counts are distinct
+    /// per bucket — an issue with multiple terminal events of the same
+    /// Type in the same bucket counts once.
+    /// </summary>
+    public async Task<CompletionBucketsResult> GetCompletionBucketsAsync(
+        string projectId,
+        CompletionBucket bucket,
+        DateTimeOffset now)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Resolve the project's issue sources once. IssueEvents has no
+        // indexed projectId column, so we constrain on Source in the
+        // computed set of "/mohist/issues/{id}" URIs.
+        var projectIssueIds = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .Select(row => row.IssueId)
+            .ToListAsync();
+        var projectSources = projectIssueIds
+            .Select(id => IssueSourcePrefix + id)
+            .ToList();
+
+        DateTimeOffset windowFrom;
+        DateTimeOffset windowTo;
+        IReadOnlyList<DateOnly> boundaries;
+
+        if (bucket == CompletionBucket.Day)
+        {
+            // 30 trailing UTC days inclusive of today.
+            var today = DateOnly.FromDateTime(now.UtcDateTime.Date);
+            windowFrom = new DateTimeOffset(today.AddDays(-29).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            windowTo = new DateTimeOffset(today.AddDays(1).ToDateTime(new TimeOnly(0, 0)), TimeSpan.Zero);
+            boundaries = Enumerable.Range(0, 30)
+                .Select(i => today.AddDays(-29 + i))
+                .ToList();
+        }
+        else
+        {
+            // 12 trailing ISO weeks inclusive of the current week.
+            var currentWeek = ISOWeekHelper.StartOfIsoWeek(now.UtcDateTime);
+            var firstWeek = currentWeek.AddDays(-7 * 11);
+            windowFrom = new DateTimeOffset(firstWeek, TimeSpan.Zero);
+            windowTo = new DateTimeOffset(currentWeek.AddDays(7), TimeSpan.Zero);
+            boundaries = Enumerable.Range(0, 12)
+                .Select(i => DateOnly.FromDateTime(firstWeek.AddDays(7 * i)))
+                .ToList();
+        }
+
+        var points = Enumerable.Range(0, boundaries.Count)
+            .Select(i => new CompletionBucketPoint(
+                Boundary: boundaries[i].ToString("yyyy-MM-dd"),
+                Completed: 0,
+                Failed: 0))
+            .ToList();
+
+        if (projectSources.Count == 0)
+        {
+            return new CompletionBucketsResult(
+                Bucket: bucket == CompletionBucket.Day ? "day" : "week",
+                WindowFrom: windowFrom,
+                WindowTo: windowTo,
+                Buckets: points);
+        }
+
+        // Pull terminal events inside the bounded window, scoped to this
+        // project's issue sources. We then bucket in-memory because the
+        // result set is already tightly bounded (≤ 30/12 buckets × small
+        // event volume) and the project-id set is already a memory hash.
+        // EF Core SQLite cannot translate a `DateTimeOffset` comparison
+        // against a TEXT column, so we fetch all events first and
+        // filter the time + type + project-source predicates in memory.
+        // At v1 volumes (≤ 30/12 buckets per project) the candidate set
+        // is small; profiling per design D-OQ2 will tell us whether we
+        // need an explicit index on (Type, Time) later.
+        var candidates = await db.IssueEvents.AsNoTracking()
+            .Select(e => new { e.Source, e.Type, e.Time })
+            .ToListAsync();
+        var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
+        var terminalTypes = new HashSet<string>(StringComparer.Ordinal) { WorkCompletedType, ClosedType };
+        var rows = candidates
+            .Where(r => r.Time >= windowFrom
+                && r.Time < windowTo
+                && sourceSet.Contains(r.Source)
+                && terminalTypes.Contains(r.Type))
+            .ToList();
+
+        var indexByBoundary = boundaries
+            .Select((b, i) => (Boundary: b, Index: i))
+            .ToDictionary(t => t.Boundary, t => t.Index);
+
+        // Dedupe per bucket on (Source, Type) so that an issue with
+        // multiple same-type terminal events in one bucket counts once,
+        // but a flapping issue whose closed→reopened→closed straddles
+        // different buckets is counted in each bucket where an event
+        // landed.
+        var seenPerBucket = new Dictionary<int, HashSet<string>>(points.Count);
+        foreach (var row in rows)
+        {
+            var boundary = bucket == CompletionBucket.Day
+                ? DateOnly.FromDateTime(row.Time.UtcDateTime.Date)
+                : DateOnly.FromDateTime(ISOWeekHelper.StartOfIsoWeek(row.Time.UtcDateTime));
+            if (!indexByBoundary.TryGetValue(boundary, out var idx)) continue;
+
+            if (!seenPerBucket.TryGetValue(idx, out var seen))
+            {
+                seen = new HashSet<string>(StringComparer.Ordinal);
+                seenPerBucket[idx] = seen;
+            }
+            if (!seen.Add(row.Source + "|" + row.Type)) continue;
+
+            if (row.Type == WorkCompletedType)
+            {
+                points[idx] = points[idx] with { Completed = points[idx].Completed + 1 };
+            }
+            else
+            {
+                points[idx] = points[idx] with { Failed = points[idx].Failed + 1 };
+            }
+        }
+
+        return new CompletionBucketsResult(
+            Bucket: bucket == CompletionBucket.Day ? "day" : "week",
+            WindowFrom: windowFrom,
+            WindowTo: windowTo,
+            Buckets: points);
+    }
+
+    /// <summary>
+    /// Helpers for the completion aggregation. Internal so the unit tests
+    /// can pin ISO-week boundary computation without instantiating the
+    /// service.
+    /// </summary>
+    internal static class ISOWeekHelper
+    {
+        public static DateTime StartOfIsoWeek(DateTime utc)
+        {
+            // ISO weeks start on Monday. DayOfWeek: Sunday=0, Monday=1, ....
+            var dow = (int)utc.DayOfWeek;
+            // Number of days since Monday (treating Monday as 0).
+            var daysSinceMonday = (dow + 6) % 7;
+            return utc.Date.AddDays(-daysSinceMonday);
+        }
+    }
+
     internal static (string? Key, string Value) ParseLabelFilter(string token)
     {
         var idx = token.IndexOf('=');
