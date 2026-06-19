@@ -1,10 +1,6 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { HubConnectionBuilder, LogLevel, HubConnection, HubConnectionState } from '@microsoft/signalr'
 import { EVENT_TYPES } from '../lib/canonical-event-types'
-import {
-  RuntimeToastContext,
-  type RuntimeToastTone,
-} from '../ui/toast'
 
 const HUB_URL = '/hubs/events'
 const SUBSCRIBE_METHOD = 'SetSubscriptionsAsync'
@@ -57,31 +53,16 @@ export type TranscriptEnvelope = unknown
 
 export type TranscriptCallback = (envelope: TranscriptEnvelope) => void
 
-export interface UseEventsConnectionOptions {
-  /**
-   * When true, the hook pushes a runtime toast on every state transition
-   * (connecting → connected, connected → reconnecting, etc.). Defaults to
-   * true so transport notices surface without callers opting in.
-   */
-  publishToasts?: boolean
-}
-
 export function useEventsConnection(
   projectId: string | null,
   onEvent: EventCallback,
   onTranscriptEvent?: TranscriptCallback,
-  options: UseEventsConnectionOptions = {},
 ): ConnectionStatus {
-  const { publishToasts = true } = options
   const callbackRef = useRef(onEvent)
   callbackRef.current = onEvent
   const transcriptCallbackRef = useRef(onTranscriptEvent)
   transcriptCallbackRef.current = onTranscriptEvent
-  const toastCtx = useContext(RuntimeToastContext)
-  const toastCtxRef = useRef(toastCtx)
-  toastCtxRef.current = toastCtx
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
-  const lastReportedRef = useRef<ConnectionStatus | null>(null)
 
   useEffect(() => {
     if (!projectId) {
@@ -93,11 +74,6 @@ export function useEventsConnection(
 
     const handleState = (next: ConnectionStatus) => {
       setStatus(next)
-      if (lastReportedRef.current === next) return
-      lastReportedRef.current = next
-      if (publishToasts && toastCtxRef.current) {
-        toastCtxRef.current.push(buildNoticeForStatus(next))
-      }
     }
 
     connection.on('OnEvent', (eventName: string, data: unknown) => {
@@ -134,48 +110,7 @@ export function useEventsConnection(
       connection.onclose(() => {})
       connection.stop().catch(() => {})
     }
-  }, [projectId, publishToasts])
+  }, [projectId])
 
   return status
-}
-
-interface ToastPushInput {
-  tone: RuntimeToastTone
-  title: string
-  body?: string
-  testId: string
-}
-
-export function buildNoticeForStatus(status: ConnectionStatus): ToastPushInput {
-  switch (status) {
-    case 'connecting':
-      return {
-        tone: 'transport',
-        title: 'Connecting to live events',
-        body: 'Re-establishing the SignalR connection…',
-        testId: 'runtime-toast-connection-connecting',
-      }
-    case 'connected':
-      return {
-        tone: 'transport',
-        title: 'Live events reconnected',
-        body: 'Issue updates will resume streaming.',
-        testId: 'runtime-toast-connection-connected',
-      }
-    case 'reconnecting':
-      return {
-        tone: 'transport',
-        title: 'Reconnecting…',
-        body: 'Live events briefly lost. Recent updates may be delayed.',
-        testId: 'runtime-toast-connection-reconnecting',
-      }
-    case 'disconnected':
-    default:
-      return {
-        tone: 'transport',
-        title: 'Live events disconnected',
-        body: 'Connection dropped. Activity continues to update in the background.',
-        testId: 'runtime-toast-connection-disconnected',
-      }
-  }
 }

@@ -85,7 +85,7 @@ function makeFakeConnection(): FakeConnection {
 }
 
 function StateProbe({ projectId, onState }: { projectId: string | null; onState: (s: string) => void }) {
-  const state = useEventsConnection(projectId, () => {}, undefined, { publishToasts: false })
+  const state = useEventsConnection(projectId, () => {}, undefined)
   onState(state)
   return <div data-testid="state-probe" data-state={state}>{state}</div>
 }
