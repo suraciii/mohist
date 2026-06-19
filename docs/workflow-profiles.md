@@ -194,3 +194,7 @@ mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
 
 完整变量列表看 `design/workflow-template-variables.md`。
+
+---
+
+对应源码：`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`、`design/workflow-template-variables.md`。

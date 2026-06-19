@@ -163,3 +163,7 @@ skill 是普通文件（在 `.agents/skills/` 下）。看 `mohist-explore` 的 
 - `mohist-explore` skill 源文件：`.agents/skills/mohist-explore/SKILL.md`
 - `mohist` skill 源文件：`.agents/skills/mohist/SKILL.md`
 - 架构边界：[`design/architecture.md`](../design/architecture.md) 的 "Agent Skill Boundary" 章节
+
+---
+
+对应源码：`.agents/skills/`、`design/architecture.md`（Agent Skill Boundary）。

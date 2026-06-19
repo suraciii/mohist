@@ -137,3 +137,7 @@ AI 自治执行到 Done
 ```
 
 记住一个心智模型：**你是 owner，AI 是开发团队，Workflow 是工作流，Epic 是路线图，Skill 是你的需求分析助手。**
+
+---
+
+对应源码：领域分解见 [`design/domain-analysis.md`](../design/domain-analysis.md)。

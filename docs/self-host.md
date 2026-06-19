@@ -69,7 +69,7 @@ mo install service --type scheduled-task
 
 ### 步骤
 
-1. **装系统依赖**：.NET 10 SDK、Node 18、opencode（按官方文档）
+1. **装系统依赖**：.NET 11 SDK、Node 18、opencode（按官方文档）
 2. **clone Mohist 仓库**：`git clone <mohist> /opt/mohist && cd /opt/mohist && npm install && npm run build`
 3. **创建专用用户**（推荐）：`sudo useradd -m -s /bin/bash mohist`
 4. **配 systemd system service**：
@@ -245,3 +245,7 @@ Roadmap（已知不足）：
 - 数据库 schema 升级没自动化
 
 这些在 roadmap。当前**默认信任局域网**，远程访问必须自己加层。
+
+---
+
+对应源码：`mo install`（`packages/cli/`）、`scripts/`。
