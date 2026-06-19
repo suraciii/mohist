@@ -45,6 +45,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
+        siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
         siloBuilder.Services.AddScoped<WorkflowProfileManager>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();

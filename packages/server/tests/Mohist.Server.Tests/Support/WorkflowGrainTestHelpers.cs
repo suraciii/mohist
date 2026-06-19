@@ -1,7 +1,11 @@
 using System.Text.Json;
+using EnvironmentAbstractions.TestHelpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -112,9 +116,22 @@ public static class WorkflowGrainTestHelpers
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         return new WorkflowQuerier(
             factory,
-            new WorkflowProfileManager(factory, null!, new PromptTemplateEngine()),
+            new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), CreateEmptyConfigService()),
             new WorkflowArtifactQuerier(factory));
     }
+
+    /// <summary>
+    /// Builds a <see cref="ConfigService"/> backed by a non-existent config
+    /// file, so <see cref="ConfigService.GetVariables"/> returns
+    /// <see cref="VariableBundle.Empty"/> — the global layer is empty in
+    /// workflow-grain specs that exercise project/issue layers directly.
+    /// </summary>
+    public static ConfigService CreateEmptyConfigService() =>
+        new(
+            new ConfigurationBuilder().Build(),
+            new MockEnvironmentVariableProvider(),
+            NullLogger<ConfigService>.Instance,
+            configPath: "/nonexistent/mohist-config-test.jsonc");
 
     public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)
     {

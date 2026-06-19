@@ -5,7 +5,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
-using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -17,7 +17,6 @@ using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Serialization;
-using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -37,7 +36,6 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
-    private readonly ConfigService _configService;
     private readonly AttachmentService _attachmentService;
     private readonly IEventStore _eventStore;
     private readonly IEventPublisher _eventBus;
@@ -55,7 +53,6 @@ public class IssueGrain : Grain, IIssueGrain
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
-        ConfigService configService,
         AttachmentService attachmentService,
         IEventStore eventStore,
         IEventPublisher eventBus,
@@ -72,7 +69,6 @@ public class IssueGrain : Grain, IIssueGrain
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
         _issueProfileManager = issueProfileManager;
-        _configService = configService;
         _attachmentService = attachmentService;
         _eventStore = eventStore;
         _eventBus = eventBus;
@@ -163,16 +159,12 @@ public class IssueGrain : Grain, IIssueGrain
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
 
-        // T1: snapshot the issue's effective Variables by merging the global
-        // config.jsonc bundle and the project Variables bundle (project wins),
-        // then layering the built-in calling context on top. The result is
-        // stored on the issue profile and read directly by runtime; no second
-        // merge happens at dispatch time.
-        var globalBundle = await _configService.GetVariables();
-        var projectBundle = await _projectProfileManager.GetVariablesAsync(projectContext.Id);
-        var issueBundle = IssueVariableBuilder.Build(
-            globalBundle,
-            projectBundle,
+        // T1: persist only the issue's built-in calling context on the issue
+        // profile. Global (config.jsonc) and project Variables are NOT baked
+        // in here — they are merged live at resolution time (dispatch + display)
+        // so that edits to project/global Variables propagate to already-created
+        // issues. Explicit issue overrides are layered on later via PATCH.
+        var issueBundle = IssueVariableBuilder.BuildContextBundle(
             wrId,
             issue,
             projectContext,
