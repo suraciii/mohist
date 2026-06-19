@@ -50,7 +50,9 @@ public static partial class IssueRoutes
             var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
-            await grains.GetGrain<IWorkflowGrain>(wrId).RejectAsync(req?.Message);
+            if (string.IsNullOrWhiteSpace(req?.Message))
+                return ApiResults.BadRequest("Reject reason is required");
+            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message);
             return ApiResults.Ok();
         });
 

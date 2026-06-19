@@ -99,11 +99,9 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        // Legacy RejectAsync must NOT mark the workflow as failed; it now
+        // RequestChanges must NOT mark the workflow as failed; it
         // routes through the feedback loop.
-#pragma warning disable CS0618
-        await workflow.RejectAsync("not good enough");
-#pragma warning restore CS0618
+        await workflow.RequestChangesAsync("not good enough");
 
         var run = await LoadRunAsync();
         Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);
@@ -133,11 +131,9 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        // Legacy RejectAsync now routes through the feedback loop and
+        // RequestChanges routes through the feedback loop and
         // schedules an apply-feedback task. The stage does not fail.
-#pragma warning disable CS0618
-        await workflow.RejectAsync("plan is too short");
-#pragma warning restore CS0618
+        await workflow.RequestChangesAsync("plan is too short");
 
         var run = await LoadRunAsync();
         var current = run.Stages.First(s => s.Id == run.CurrentStageId);
