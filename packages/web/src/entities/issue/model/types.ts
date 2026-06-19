@@ -172,7 +172,6 @@ export interface Issue {
   stageModels?: Record<string, string> | null
   archivedAt?: string
   blockedReason?: string
-  checkSuite?: CheckSuite | null
   prerequisites?: IssuePrerequisiteSummary[]
   isDraft: boolean
   canStart: boolean
@@ -264,72 +263,6 @@ export type ApprovalOutput = {
   summary?: string
   artifacts?: ApprovalArtifact[]
   [key: string]: unknown
-}
-
-export interface CheckResult {
-  name: string
-  status: 'pending' | 'running' | 'pass' | 'fail' | 'error'
-  duration?: number
-  summary?: string
-  message?: string
-  buildLog?: string
-  reviewReport?: string
-  autoFixed?: boolean
-  verdict?: string
-  output?: unknown
-}
-
-export interface CheckSuiteOutput {
-  checks: CheckResult[]
-  overallResult: 'passed' | 'failed' | 'blocked'
-}
-
-export type CheckSuiteStatus = 'running' | 'awaiting-approval' | 'pass' | 'fail'
-export type CheckStateStatus = 'pending' | 'running' | 'pass' | 'fail'
-
-export interface CheckState {
-  status: CheckStateStatus
-  output?: unknown
-  ranAt?: string
-}
-
-export interface CheckSuiteChecks {
-  'review-passed': CheckState
-  'merge-ready': CheckState
-  'user-approval': CheckState
-}
-
-export interface CheckSuite {
-  id: string
-  issueId: string
-  snapshotSha: string
-  status: CheckSuiteStatus
-  checks: CheckSuiteChecks
-  createdAt: string
-  updatedAt: string
-}
-
-export interface StageTaskResult {
-  taskId: string
-  title: string
-  status: 'completed' | 'failed' | 'skipped'
-  artifacts: string[]
-  output?: unknown
-  attempts: number
-  duration: number
-}
-
-export type StageExecutionStatus = 'running' | 'awaiting-approval' | 'passed' | 'failed'
-
-export interface StageExecution {
-  id: string
-  issueId: string
-  stage: string
-  status: StageExecutionStatus
-  taskResults: StageTaskResult[]
-  checkResults: CheckResult[]
-  createdAt: string
-  updatedAt: string
 }
 
 export interface IntegrationStepResult {
