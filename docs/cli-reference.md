@@ -1,6 +1,6 @@
 # CLI 参考
 
-`mo` 是 Mohist 的命令行入口。和 Web UI 功能等价，适合脚本、自动化、远程 SSH 场景。
+`mo` 是 Mohist 的命令行入口。和 Web UI 功能等价，适合脚本、自动化、远程 SSH 场景。首次安装上手走 [快速上手](getting-started.md)；本文是完整命令参考。
 
 ## 全局
 
