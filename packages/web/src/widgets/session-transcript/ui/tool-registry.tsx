@@ -8,7 +8,6 @@ import {
   parseEditInput,
   parseEditWriteChanges,
   getFallbackSubtitle,
-  getDisplayType,
 } from '../model/transcript-tool-utils'
 
 export type ToolCategory = 'context' | 'file-change' | 'execution' | 'question' | 'network' | 'fallback'
@@ -361,10 +360,6 @@ export function getToolIcon(toolName: string): React.ReactElement {
 
 export function getToolCategory(toolName: string): ToolCategory {
   return getToolRegistryEntry(toolName).category
-}
-
-export function getToolDisplayType(toolName: string): 'diff' | 'terminal' | 'summary' | 'generic' {
-  return getDisplayType(toolName)
 }
 
 export function parseToolChangedFiles(toolName: string, rawInput?: string): FileChangeSummary[] {
