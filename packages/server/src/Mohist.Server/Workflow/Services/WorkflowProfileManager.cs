@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -24,15 +25,18 @@ public class WorkflowProfileManager
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
+    private readonly ConfigService _configService;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
-        PromptTemplateEngine engine)
+        PromptTemplateEngine engine,
+        ConfigService configService)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
+        _configService = configService;
     }
 
     public async Task<ResolvedTemplate> LoadTemplateAsync(
@@ -83,14 +87,21 @@ public class WorkflowProfileManager
 
     public async Task<VariableBundle> LoadVariablesAsync(string runId)
     {
-        // Runtime variables are resolved from current project defaults plus
-        // issue-scoped overrides. This keeps project-level model settings live
-        // for already-created issues while preserving issue page overrides.
+        // Resolution merges three live layers, lowest priority first, so that
+        // edits to project/global Variables propagate to already-created issues:
+        //   1. global config.jsonc bundle (ConfigService.GetVariables)
+        //   2. project Variables (ProjectWorkflowProfile.Variables)
+        //   3. issue Variables (IssueWorkflowProfile.Variables — built-in
+        //      calling context + explicit issue overrides)
+        // The issue layer no longer bakes in project/global values (see
+        // IssueGrain.StartWorkflowAsync), so the project layer is the source of
+        // truth for model/agent defaults unless the issue has an explicit override.
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
+        var global = await _configService.GetVariables();
         var project = await LoadProjectLayerAsync(db, context);
         var issue = await LoadIssueLayerAsync(db, context);
-        return VariableBundle.Patch(project, issue);
+        return VariableBundle.MergeAll(global, project, issue);
     }
 
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)

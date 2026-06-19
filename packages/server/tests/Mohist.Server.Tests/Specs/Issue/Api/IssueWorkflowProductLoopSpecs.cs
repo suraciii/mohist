@@ -210,6 +210,63 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task ProjectVariablesEdit_PropagatesToIssueCreatedWithPriorProjectConfig()
+    {
+        // Regression: the project had an agent model configured BEFORE the
+        // issue was started (so the T1 snapshot would have baked it in under
+        // the old design). After the issue is running, the project model is
+        // changed. The next stage dispatch must use the NEW project model,
+        // not the value that was live at issue creation.
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-live-propagate-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{ project.Id }/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await UseNoArtifactTemplateAsync(project.Id);
+
+        // Project is configured with model A BEFORE the issue is started.
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/workflow-profile/variables",
+            new { vars = new { agent = new { type = "opencode", model = "old-coding/legacy" } } });
+
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Live project config propagation", body = "body", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        _runnerId = $"live-propagate-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+
+        var proposal = await PollWorkAnyAsync();
+        Assert.StartsWith("proposal", proposal.WorkId);
+        await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
+
+        // Project model changed to B AFTER the issue is already running.
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/workflow-profile/variables",
+            new { vars = new { agent = new { type = "opencode", model = "deepseek/deepseek-v4-pro" } } });
+
+        await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
+        var tasks = await PollWorkAnyAsync();
+        Assert.Equal("mohist/openspec-tasks", tasks.Uses);
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
+        await workflow.AddTasksAsync(new AddTasksBatchRequest([
+            new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+        ]));
+        await ReportAsync(tasks.WorkflowRunId, tasks.WorkId, "completed");
+
+        var build = await PollWorkAnyAsync();
+        Assert.Equal("build", build.Stage);
+        Assert.StartsWith("build-1", build.WorkId);
+        Assert.NotNull(build.Variables);
+
+        using var doc = JsonDocument.Parse(build.Variables!);
+        var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("deepseek/deepseek-v4-pro", agent.GetProperty("model").GetString());
+        Assert.DoesNotContain("old-coding/legacy", build.Variables);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}" });

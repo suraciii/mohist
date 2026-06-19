@@ -52,7 +52,7 @@ public abstract class WorkflowGrainSpecs
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         return new WorkflowQuerier(
             factory,
-            new Mohist.Server.Workflow.Services.WorkflowProfileManager(factory, null!, new PromptTemplateEngine()),
+            new Mohist.Server.Workflow.Services.WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), WorkflowGrainTestHelpers.CreateEmptyConfigService()),
             new WorkflowArtifactQuerier(factory));
     }
 

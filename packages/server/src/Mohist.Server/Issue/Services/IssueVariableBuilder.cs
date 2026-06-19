@@ -9,28 +9,32 @@ using MohistIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.Issue.Services;
 
 /// <summary>
-/// Builds the variable bundle persisted on <c>IssueWorkflowProfile</c> at issue
-/// start (T1). The issue profile is the single resolution point: project values
-/// win, global <c>config.jsonc</c> values fill gaps, and the built-in calling
-/// context (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c> /
-/// <c>openspec*</c>) is layered on top. The result is snapshotted once, at
-/// issue creation, so subsequent edits to project or global <c>Variables</c>
-/// do not retroactively change this issue's effective variables.
+/// Builds the built-in calling context bundle persisted on
+/// <c>IssueWorkflowProfile</c> at issue start (T1).
 ///
-/// Merge layers, lowest priority first, are merged via
-/// <see cref="VariableBundle.MergeAll"/>:
-///
-///   1. Global <see cref="Mohist.Server.Workflow.Domain.VariableBundle"/> from
-///      <c>config.jsonc</c> (exposed by <c>ConfigService.GetVariables()</c>).
-///   2. Project <c>VariableBundle</c> (<c>ProjectWorkflowProfile.Variables</c>).
-///   3. Built-in calling context.
-///
-/// The merge is symmetric: <c>vars</c> and each
-/// <c>stages.&lt;stage&gt;.vars</c> use the same project-over-global precedence
-/// via <see cref="VariableBundle.MergeAll"/>, with no special-cased key.
+/// The issue profile stores ONLY the issue's static identity context
+/// (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c> /
+/// <c>openspec*</c> / <c>workspace</c>) plus any explicit overrides the user
+/// sets on the issue page. It deliberately does NOT bake in global
+/// (<c>config.jsonc</c>) or project <c>Variables</c>: those layers are merged
+/// live at resolution time (dispatch + display) so that subsequent edits to
+/// project or global <c>Variables</c> propagate to already-created issues.
+/// Resolution order is <c>MergeAll(global, project, issue)</c>.
 /// </summary>
 public static class IssueVariableBuilder
 {
+    /// <summary>
+    /// Builds the T1 issue-context bundle: only the built-in calling context,
+    /// no global/project user variables. This is what gets persisted on the
+    /// issue profile at start.
+    /// </summary>
+    public static VariableBundle BuildContextBundle(
+        string workflowRunId,
+        MohistIssue issue,
+        WorkflowProjectContext project,
+        WorkspaceIdentity workspace)
+        => BuildBuiltInContext(workflowRunId, issue, project, workspace);
+
     public static VariableBundle Build(
         VariableBundle? globalBundle,
         VariableBundle? projectBundle,

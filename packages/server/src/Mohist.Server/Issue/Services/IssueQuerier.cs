@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -28,17 +29,20 @@ public class IssueQuerier
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly ProjectQuerier _projects;
     private readonly IssueRepositoryResolver _resolver;
+    private readonly ConfigService _configService;
 
     public IssueQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueWorkflowProfileRegistry profiles,
         ProjectQuerier projects,
-        IssueRepositoryResolver resolver)
+        IssueRepositoryResolver resolver,
+        ConfigService configService)
     {
         _dbFactory = dbFactory;
         _profiles = profiles;
         _projects = projects;
         _resolver = resolver;
+        _configService = configService;
     }
 
     public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
@@ -588,7 +592,7 @@ public class IssueQuerier
             || (currentStage.Tasks.All(t => t.Status == "completed") && currentStage.Checks.All(c => c.Status == "completed"));
     }
 
-    private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
+    private async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
     {
         if (issues.Count == 0) return issues;
 
@@ -637,11 +641,26 @@ public class IssueQuerier
 
         var profileRows = await db.IssueWorkflowProfiles.AsNoTracking()
             .Where(profile => issueIds.Contains(profile.IssueId))
-            .ToListAsync();
-        foreach (var profile in profileRows)
+            .ToDictionaryAsync(profile => profile.IssueId, profile => profile.Variables);
+
+        // Resolve the effective agent config for display by merging the live
+        // global + project layers with each issue's snapshot (which now holds
+        // only built-in context + explicit issue overrides). This keeps the
+        // displayed model/agent in sync with project edits; see
+        // WorkflowProfileManager.LoadVariablesAsync for the dispatch equivalent.
+        var globalBundle = await _configService.GetVariables();
+        VariableBundle? projectBundle = null;
+        if (!string.IsNullOrWhiteSpace(projectId))
         {
-            if (!byId.TryGetValue(profile.IssueId, out var issue)) continue;
-            ApplyIssueWorkflowVariables(issue, profile.Variables);
+            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+            projectBundle = VariableBundle.FromJson(projectProfile?.Variables);
+        }
+
+        foreach (var issue in issues)
+        {
+            profileRows.TryGetValue(issue.Id, out var variablesJson);
+            ApplyIssueWorkflowVariables(issue, variablesJson, globalBundle, projectBundle);
         }
 
         var persistedRows = await db.IssuePrerequisites.AsNoTracking()
@@ -717,10 +736,10 @@ public class IssueQuerier
         return issues;
     }
 
-    private static async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueInfo issue) =>
+    private async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueInfo issue) =>
         (await EnrichAsync(db, [ToReadModel(issue)]))[0];
 
-    private static async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueReadModel issue) =>
+    private async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueReadModel issue) =>
         (await EnrichAsync(db, [issue]))[0];
 
     public static IssueCommentDto ToCommentDto(IssueCommentRow comment) =>
@@ -742,21 +761,26 @@ public class IssueQuerier
         string.IsNullOrWhiteSpace(row.ContentType) ? "application/octet-stream" : row.ContentType,
         row.Size);
 
-    private static void ApplyIssueWorkflowVariables(IssueReadModel issue, string? variablesJson)
+    private static void ApplyIssueWorkflowVariables(
+        IssueReadModel issue,
+        string? variablesJson,
+        VariableBundle globalBundle,
+        VariableBundle? projectBundle)
     {
-        var bundle = VariableBundle.FromJson(variablesJson);
-        var agentConfig = ReadAgentConfig(bundle.Vars);
+        var issueBundle = VariableBundle.FromJson(variablesJson);
+        var effective = VariableBundle.MergeAll(globalBundle, projectBundle, issueBundle);
+        var agentConfig = ReadAgentConfig(effective.Vars);
         issue.AgentConfig = agentConfig;
         issue.Model = ReadAgentModel(agentConfig);
 
-        if (bundle.Stages is null || bundle.Stages.Count == 0)
+        if (effective.Stages is null || effective.Stages.Count == 0)
         {
             issue.StageModels = null;
             return;
         }
 
         var stageModels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (stage, variables) in bundle.Stages)
+        foreach (var (stage, variables) in effective.Stages)
         {
             var model = ReadAgentModel(ReadAgentConfig(variables.Vars));
             if (!string.IsNullOrWhiteSpace(model))
