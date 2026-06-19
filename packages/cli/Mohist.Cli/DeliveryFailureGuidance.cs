@@ -10,6 +10,9 @@ internal static class DeliveryFailureGuidance
     public const string BaseMoved = "base-moved";
     public const string RetrySafe = "retry-safe";
     public const string BranchInvariantViolation = "branch-invariant-violation";
+    public const string WorkspaceMissing = "workspace-missing";
+    public const string WorkspaceCorrupt = "workspace-corrupt";
+    public const string WorkspaceIdentityMismatch = "workspace-identity-mismatch";
 
     private static readonly Dictionary<string, (string Label, string NextAction)> Guidance =
         new(StringComparer.Ordinal)
@@ -26,12 +29,37 @@ internal static class DeliveryFailureGuidance
             [BranchInvariantViolation] = (
                 Label: "Runner / action branch-invariant violation",
                 NextAction: "This is a runner or action bug: the workflow workspace left its expected run branch. Retry the task — the runner will restore the run branch automatically — and report the issue if it recurs. Issue work is not the cause."),
+            [WorkspaceMissing] = (
+                Label: "Workflow workspace materialization failure",
+                NextAction: "The runner could not find the workflow workspace bound to this run. Issue work is not the cause — the workflow-start materialization pipeline must be repaired (rebind the workspace, or investigate the runner's workspace root) before this run can continue."),
+            [WorkspaceCorrupt] = (
+                Label: "Workflow workspace materialization failure",
+                NextAction: "The runner's workflow workspace is unreadable or its workspace marker is missing/corrupt. Issue work is not the cause — re-materialize the workflow workspace at the run's bound path before this run can continue."),
+            [WorkspaceIdentityMismatch] = (
+                Label: "Workflow workspace materialization failure",
+                NextAction: "The workflow workspace at the run's bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue."),
         };
 
-    public static readonly IReadOnlyList<string> AllKinds = new[] { Conflict, BaseMoved, RetrySafe, BranchInvariantViolation };
+    public static readonly IReadOnlyList<string> AllKinds = new[]
+    {
+        Conflict,
+        BaseMoved,
+        RetrySafe,
+        BranchInvariantViolation,
+        WorkspaceMissing,
+        WorkspaceCorrupt,
+        WorkspaceIdentityMismatch,
+    };
+
+    public static readonly IReadOnlyList<string> WorkspaceMaterializationKinds = new[]
+    {
+        WorkspaceMissing,
+        WorkspaceCorrupt,
+        WorkspaceIdentityMismatch,
+    };
 
     private static readonly Regex KindInMessage = new(
-        @"\((conflict|base-moved|retry-safe|branch-invariant-violation)\)",
+        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch)\)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex BranchInvariantInMessage = new(
@@ -47,6 +75,17 @@ internal static class DeliveryFailureGuidance
         string? ObservedBranch,
         string? Boundary,
         string? ObservedRef);
+
+    public sealed record WorkspaceEvidence(
+        string? WorkspacePath,
+        string? ExpectedRunId,
+        string? ActualRunId);
+
+    public static bool IsWorkspaceMaterializationKind(string? failureKind)
+    {
+        if (string.IsNullOrEmpty(failureKind)) return false;
+        return WorkspaceMaterializationKinds.Contains(failureKind, StringComparer.OrdinalIgnoreCase);
+    }
 
     public static string? ResolveFailureKind(string? message)
     {
@@ -114,6 +153,35 @@ internal static class DeliveryFailureGuidance
             evidence = ResolveBranchEvidence(message, output);
         }
         return (kind, guidance, evidence);
+    }
+
+    public static (string? FailureKind, (string Label, string NextAction)? Guidance, WorkspaceEvidence? Evidence) ResolveWithWorkspaceEvidence(
+        string? message,
+        JsonNode? output)
+    {
+        var kind = ResolveFailureKind(output) ?? ResolveFailureKind(message);
+        var guidance = ResolveGuidance(kind);
+        WorkspaceEvidence? evidence = null;
+        if (IsWorkspaceMaterializationKind(kind))
+        {
+            evidence = ResolveWorkspaceEvidence(message, output);
+        }
+        return (kind, guidance, evidence);
+    }
+
+    public static WorkspaceEvidence? ResolveWorkspaceEvidence(string? message, JsonNode? output)
+    {
+        if (output is not null)
+        {
+            var fromOutput = ExtractWorkspaceEvidenceFromOutput(output);
+            if (fromOutput is not null) return fromOutput;
+        }
+        if (!string.IsNullOrEmpty(message))
+        {
+            var fromMessage = ExtractWorkspaceEvidenceFromMessage(message);
+            if (fromMessage is not null) return fromMessage;
+        }
+        return null;
     }
 
     private static BranchEvidence? ExtractBranchEvidenceFromMessage(string message)
@@ -249,9 +317,9 @@ internal static class DeliveryFailureGuidance
             {
                 if (kindNode is JsonValue kv && kv.TryGetValue<string>(out var kvs))
                 {
-                    if (string.Equals(kvs, BranchInvariantViolation, StringComparison.OrdinalIgnoreCase))
+                    if (AllKinds.Contains(kvs, StringComparer.OrdinalIgnoreCase))
                     {
-                        return BranchInvariantViolation;
+                        return kvs.ToLowerInvariant();
                     }
                 }
             }
@@ -296,5 +364,89 @@ internal static class DeliveryFailureGuidance
             "end" => "end",
             _ => boundary.ToLowerInvariant(),
         };
+    }
+
+    private static WorkspaceEvidence? ExtractWorkspaceEvidenceFromOutput(JsonNode output)
+    {
+        var node = FindWorkspaceEvidenceNode(output);
+        if (node is null) return null;
+        var workspacePath = StringOf(node, "workspacePath");
+        var expectedRunId = StringOf(ReadIdentityNode(node, "expected"), "workflowRunId");
+        var actualRunId = StringOf(ReadIdentityNode(node, "actual"), "workflowRunId");
+        if (string.IsNullOrEmpty(workspacePath)
+            && string.IsNullOrEmpty(expectedRunId)
+            && string.IsNullOrEmpty(actualRunId))
+        {
+            return null;
+        }
+        return new WorkspaceEvidence(
+            WorkspacePath: string.IsNullOrEmpty(workspacePath) ? null : workspacePath,
+            ExpectedRunId: string.IsNullOrEmpty(expectedRunId) ? null : expectedRunId,
+            ActualRunId: string.IsNullOrEmpty(actualRunId) ? null : actualRunId);
+    }
+
+    private static WorkspaceEvidence? ExtractWorkspaceEvidenceFromMessage(string message)
+    {
+        // The runner emits `workflow workspace materialization failure
+        // (<kind>): <explanation>`. The structured output is the source
+        // of truth for workspacePath / expected / actual; the message
+        // is only a fallback when structured output is unavailable.
+        return null;
+    }
+
+    private static JsonObject? FindWorkspaceEvidenceNode(JsonNode? node)
+    {
+        if (node is null) return null;
+
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<string>(out var raw))
+            {
+                var trimmed = raw?.Trim();
+                if (string.IsNullOrEmpty(trimmed)) return null;
+                try
+                {
+                    return FindWorkspaceEvidenceNode(JsonNode.Parse(trimmed));
+                }
+                catch (JsonException)
+                {
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        if (node is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                var found = FindWorkspaceEvidenceNode(item);
+                if (found is not null) return found;
+            }
+            return null;
+        }
+
+        if (node is JsonObject obj)
+        {
+            var kind = StringOf(obj, "kind");
+            if (IsWorkspaceMaterializationKind(kind))
+            {
+                return obj;
+            }
+            if (obj.TryGetPropertyValue("output", out var nested))
+            {
+                var found = FindWorkspaceEvidenceNode(nested);
+                if (found is not null) return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonNode? ReadIdentityNode(JsonObject? parent, string property)
+    {
+        if (parent is null) return null;
+        if (!parent.TryGetPropertyValue(property, out var value)) return null;
+        return value;
     }
 }

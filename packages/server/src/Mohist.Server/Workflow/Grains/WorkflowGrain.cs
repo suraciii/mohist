@@ -6,6 +6,7 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain;
@@ -44,6 +45,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly WorkflowProfileManager _profileManager;
     private readonly IWorkflowArtifactBindService _artifactBindService;
     private readonly AgentSessionQuery _agentSessionQuery;
+    private readonly IRunnerWorkspaceClient _workspaceClient;
     private readonly ILogger<WorkflowGrain> _log;
 
     private readonly record struct SessionContextUsage(double? Percent, string? SessionId)
@@ -57,6 +59,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         WorkflowProfileManager profileManager,
         IWorkflowArtifactBindService artifactBindService,
         AgentSessionQuery agentSessionQuery,
+        IRunnerWorkspaceClient workspaceClient,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
@@ -64,6 +67,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _profileManager = profileManager;
         _artifactBindService = artifactBindService;
         _agentSessionQuery = agentSessionQuery;
+        _workspaceClient = workspaceClient;
         _log = log;
     }
 
@@ -291,7 +295,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (!string.Equals(_run.Claim.RunnerId, runnerId, StringComparison.Ordinal))
                 return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, _run.Claim.RunnerId, "already-assigned");
         }
-        else
+        if (_run.Claim is null)
         {
             _run.ClaimBy(runnerId, DateTimeOffset.UtcNow);
             _lastKnownRunnerId = runnerId;
@@ -300,6 +304,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         await RunCoreAsync();
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
+    }
+
+    public async Task<WorkflowStartMaterializationDispatch?> PrepareStartMaterializationAsync(string runnerId)
+    {
+        if (_run is null || _run.Status != WorkflowRunStatus.Running) return null;
+        if (_run.Claim is not null && !string.Equals(_run.Claim.RunnerId, runnerId, StringComparison.Ordinal)) return null;
+        var work = _run.NextWork();
+        if (work is null) return null;
+        var dispatch = await PrepareWorkAsync(work, runnerId, markRunning: false);
+        if (dispatch is null) return null;
+        return new WorkflowStartMaterializationDispatch(dispatch);
+    }
+
+    public async Task RecordStartMaterializationFailureAsync(string runnerId, string? message)
+    {
+        if (_run is null || _run.Status != WorkflowRunStatus.Running) return;
+        if (_run.Claim is not null && !string.Equals(_run.Claim.RunnerId, runnerId, StringComparison.Ordinal)) return;
+        if (_run.NextWork() is null) return;
+
+        var failureMessage = FormatWorkspaceMaterializationFailure(message);
+        var events = _run.FailStage(failureMessage);
+        await CommitAsync(events);
     }
 
     private async Task RunCoreAsync()
@@ -325,12 +351,43 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (!await AcquireStageLocksIfNeededAsync(work.Stage))
             return;
 
-        var dispatch = await PrepareWorkAsync(work, runnerId);
+        if (ShouldMaterializeWorkflowWorkspace())
+        {
+            var materialization = await PrepareStartMaterializationAsync(runnerId);
+            if (materialization is null)
+                return;
+
+            var result = await _workspaceClient.MaterializeWorkspaceAsync(GetProjectId(), runnerId, materialization.Dispatch);
+            if (!result.Ok)
+            {
+                await RecordStartMaterializationFailureAsync(runnerId, result.Message);
+                return;
+            }
+
+            _run.WorkspaceMaterializedAt = DateTimeOffset.UtcNow;
+            await SaveRunAsync();
+        }
+
+        var dispatch = await PrepareWorkAsync(work, runnerId, markRunning: true);
         if (dispatch is null)
             return;
 
         await SaveRunAsync();
         await AssignRunnerWorkAsync(runnerId, dispatch);
+    }
+
+    private static string FormatWorkspaceMaterializationFailure(string? resultMessage)
+    {
+        var message = string.IsNullOrWhiteSpace(resultMessage)
+            ? "workspace materialization failed"
+            : resultMessage.Trim();
+        return $"workflow workspace materialization failure (workspace-corrupt): {message}";
+    }
+
+    private bool ShouldMaterializeWorkflowWorkspace()
+    {
+        if (_run is null) return false;
+        return _run.WorkspaceMaterializedAt is null;
     }
 
     private async Task EnsureWorkHeartbeatAsync()
@@ -712,7 +769,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await backlog.EnqueueAsync(workflowRunId);
     }
 
-    private async Task<WorkDispatch?> PrepareWorkAsync(WorkflowWork work, string runnerId)
+    private async Task<WorkDispatch?> PrepareWorkAsync(WorkflowWork work, string runnerId, bool markRunning)
     {
         switch (work.WorkType)
         {
@@ -724,14 +781,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 if (events.Count > 0)
                     await CommitAsync(events);
                 var nextWork = _run!.NextWork();
-                return nextWork is not null ? await PrepareWorkAsync(nextWork, runnerId) : null;
+                return nextWork is not null ? await PrepareWorkAsync(nextWork, runnerId, markRunning) : null;
 
             case "task":
                 var t = (WorkflowWork.TaskData)work.Data;
                 var taskWith = t.With is not null
                     ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
                     : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
-                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId, t.Artifacts, t.Outputs);
+                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId, t.Artifacts, t.Outputs, markRunning: markRunning);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -742,14 +799,43 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                     ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
                     ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
                 }).ToList();
-                return await MakeDispatchAsync(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
+                return await MakeDispatchAsync(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId, markRunning: markRunning);
 
             default:
                 return null;
         }
     }
 
-    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null)
+    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null, bool markRunning = true)
+    {
+        var dispatch = await BuildDispatchAsync(stage, logicalId, workType, title, uses, with, runnerId, artifacts, outputs, workIdOverride);
+        if (!markRunning) return dispatch;
+        if (workType == "task")
+        {
+            var currentTask = _run!.CurrentStage().Tasks.FirstOrDefault(t => t.Id == logicalId);
+            if (currentTask?.Status != TaskRunStatus.Running)
+            {
+                var events = _run!.StartTask(dispatch.WorkId, runnerId);
+                await SaveRunAsync(events);
+                foreach (var e in events)
+                    await On(e);
+            }
+        }
+        else if (workType == "checks")
+        {
+            foreach (var check in _run!.CurrentStage().Checks.Where(c => c.Status == StageCheckStatus.Pending))
+            {
+                check.DispatchWorkId = dispatch.WorkId;
+                check.DispatchRunnerId = runnerId;
+                check.DispatchedAt = DateTimeOffset.UtcNow;
+            }
+            await SaveRunAsync();
+        }
+        _lastKnownRunnerId = runnerId;
+        return dispatch;
+    }
+
+    private async Task<WorkDispatch> BuildDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId, TaskArtifactCapture? artifacts = null, List<TaskOutputDefinition>? outputs = null, string? workIdOverride = null)
     {
         var workId = workIdOverride ?? (workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}");
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
@@ -888,7 +974,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             ? JsonSerializer.Serialize(outputs)
             : null;
 
-        var dispatch = new WorkDispatch(
+        return new WorkDispatch(
             WorkflowRunId: GrainKey,
             WorkId: workId,
             Uses: uses,
@@ -900,29 +986,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             Issue: issueRef,
             Artifacts: artifactsStr,
             Outputs: outputsStr);
-        if (workType == "task")
-        {
-            var currentTask = _run!.CurrentStage().Tasks.FirstOrDefault(t => t.Id == logicalId);
-            if (currentTask?.Status != TaskRunStatus.Running)
-            {
-                var events = _run!.StartTask(workId, runnerId);
-                await SaveRunAsync(events);
-                foreach (var e in events)
-                    await On(e);
-            }
-        }
-        else
-        {
-            foreach (var check in _run!.CurrentStage().Checks.Where(c => c.Status == StageCheckStatus.Pending))
-            {
-                check.DispatchWorkId = workId;
-                check.DispatchRunnerId = runnerId;
-                check.DispatchedAt = DateTimeOffset.UtcNow;
-            }
-            await SaveRunAsync();
-        }
-        _lastKnownRunnerId = runnerId;
-        return dispatch;
     }
 
     private static JsonElement? DeepMergeSkippingNulls(JsonElement? @base, JsonElement? overlay)
@@ -1146,7 +1209,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 runningTask.Uses,
                 runningTask.WithInput,
                 runningTask.Artifacts,
-                runningTask.Outputs), runnerId);
+                runningTask.Outputs), runnerId, markRunning: false);
             if (dispatch is not null)
                 await AssignRunnerWorkAsync(runnerId, dispatch);
             return true;

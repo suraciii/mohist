@@ -5,6 +5,76 @@ import { join, resolve } from "node:path"
 import type { JsonObject, WorkItem } from "../core/types.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 
+// Marker for a refused cache replacement. Replacement was justified
+// (origin identity mismatch or verified corruption) but an active
+// workspace references the cache's object store through alternates, so
+// the cache must NOT be deleted. The object store is preserved until
+// active references are released.
+export class CacheReplacementBlockedError extends Error {
+  readonly kind = "cache-replacement-blocked"
+  constructor(message: string, readonly cause?: unknown) {
+    super(message)
+    this.name = "CacheReplacementBlockedError"
+  }
+}
+
+// Workspace dispatch-time infrastructure failures. Each carries a
+// distinct `kind` so CLI/API/UI can render a "workflow-start
+// workspace-materialization failure" distinct from ordinary task
+// failures (dirty-worktree, conflict, base-moved). The kinds are the
+// runner-side of the workspace-materialization failure-kind taxonomy;
+// T-003 maps them through the CLI/web surface.
+//
+// - workspace-missing: the workflow workspace path does not exist at
+//   dispatch time. The bound workspace identity says it SHOULD be on
+//   disk; the disk says otherwise. Recoverable only by re-materializing
+//   (which the dispatch-time contract explicitly refuses), so this is
+//   attributed to workflow infrastructure.
+// - workspace-corrupt: the workspace exists but the marker is missing
+//   or unreadable. The runner cannot trust that this directory is the
+//   bound workflow workspace, so it refuses to dispatch into it.
+// - workspace-identity-mismatch: the workspace exists AND has a marker,
+//   but the marker is bound to a different workflow run (issueId /
+//   issueNumber / workflowRunId does not match this dispatch).
+//   Re-cloning would discard in-progress work on the run branch, so
+//   the runner refuses to recover this by materializing again.
+//
+// Branch mismatches reuse the existing branch-invariant-violation kind
+// (runner/action bug at the task boundary) per the spec's "Agent-job
+// standalone workspaces are exempt" rule and the existing
+// branch-stability contract.
+export class WorkspaceMissingError extends Error {
+  readonly kind = "workspace-missing"
+  constructor(message: string, readonly workspacePath?: string, readonly cause?: unknown) {
+    super(message)
+    this.name = "WorkspaceMissingError"
+  }
+}
+
+export class WorkspaceCorruptError extends Error {
+  readonly kind = "workspace-corrupt"
+  constructor(message: string, readonly workspacePath?: string, readonly cause?: unknown) {
+    super(message)
+    this.name = "WorkspaceCorruptError"
+  }
+}
+
+export class WorkspaceIdentityMismatchError extends Error {
+  readonly kind = "workspace-identity-mismatch"
+  constructor(message: string, readonly workspacePath?: string, readonly expected?: IssueWorkspaceMarker, readonly actual?: Partial<IssueWorkspaceMarker>, readonly cause?: unknown) {
+    super(message)
+    this.name = "WorkspaceIdentityMismatchError"
+  }
+}
+
+export class WorkspaceBranchMismatchError extends Error {
+  readonly kind = "branch-invariant-violation"
+  constructor(message: string, readonly workspacePath: string, readonly expectedBranch: string, readonly observedBranch: string | null, readonly observedRef: string | null = null, readonly detail?: string) {
+    super(message)
+    this.name = "WorkspaceBranchMismatchError"
+  }
+}
+
 export interface WorkspaceInfo {
   path: string
   branch?: string | null
@@ -23,6 +93,14 @@ export class WorkspaceManager {
   constructor(private readonly runnerRoot = defaultRunnerRoot()) {}
 
   async ensure(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+    const plan = await this.planResolution(work, signal)
+    if (plan.action === "materialize") {
+      return await this.materialize(work, signal)
+    }
+    return await this.verify(work, signal)
+  }
+
+  async materialize(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const gitUrl = stringAt(variables, ["repository", "gitUrl"])
     const baseBranch = stringAt(variables, ["repository", "baseBranch"])
@@ -40,30 +118,94 @@ export class WorkspaceManager {
     const runBranch = runBranchName(runId)
 
     const cachePath = resolve(join(this.runnerRoot, "repos", slug(projectId), slug(repoName)))
-    await this.ensureCache(cachePath, gitUrl, signal)
+    const projectRoot = resolve(join(this.runnerRoot, slug(projectName)))
+    await this.ensureCache(cachePath, gitUrl, projectRoot, effectiveBaseBranch, signal)
     await this.resolveBranch(cachePath, effectiveBaseBranch, signal)
 
-    // workspace.path is a runtime fact supplied by the server. The runner
-    // materializes the workspace at that path; it does not short-circuit
-    // the cache/clone work that prepares a real working tree.
     const suppliedPath = stringAt(variables, ["workspace", "path"])
     const workspacePath = suppliedPath
       ? resolve(suppliedPath)
       : issueWorkspacePath(this.runnerRoot, projectName, issueNumber)
     const marker = issueWorkspaceMarker(variables)
+    const workspaceExistsBeforeCacheRepair = exists(workspacePath)
+    if (workspaceExistsBeforeCacheRepair && !await hasSameMarker(workspacePath, marker)) {
+      await deleteDirectory(workspacePath)
+    }
     await this.ensureFreshWorkspace(cachePath, workspacePath, effectiveBaseBranch, runBranch, gitUrl, marker, signal)
 
     // Prune any landing workspaces left behind by a previous, possibly
     // crashed, run. Each landing is runId-scoped (and uuid-disambiguated),
-    // so removing them cannot affect a different run and cannot reach into
-    // the workflow workspace's object store — landing clones are isolated
-    // `--shared` alternates clones of the workflow workspace.
+    // so removing them cannot affect a different run and cannot reach
+    // into the workflow workspace's object store — landing clones are
+    // isolated `--shared` alternates clones of the workflow workspace.
     await this.pruneLandingWorkspaces(variables, runId, signal)
 
     const changeDir = stringAt(variables, ["openspecChangeDir"])
     if (changeDir) await ensureDir(join(workspacePath, changeDir, "specs"))
+    await ensureMarkerExcluded(workspacePath)
     await writeText(markerPath(workspacePath), JSON.stringify(marker, null, 2))
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
+  }
+
+  async verify(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+    const variables = work.variables ?? {}
+    const issueNumber = numberAt(variables, ["issue", "number"])
+    const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
+    const runBranch = runBranchName(runId)
+    const marker = issueWorkspaceMarker(variables)
+    const changeDir = stringAt(variables, ["openspecChangeDir"])
+
+    const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
+    const suppliedPath = stringAt(variables, ["workspace", "path"])
+    const workspacePath = suppliedPath
+      ? resolve(suppliedPath)
+      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber ?? 0)
+
+    if (!exists(workspacePath)) {
+      throw new WorkspaceMissingError(
+        `Workflow workspace ${workspacePath} is missing; workflow start materialization did not produce a bound workspace for this run.`,
+        workspacePath,
+      )
+    }
+
+    const markerOnDisk = await readMarker(workspacePath)
+    if (markerOnDisk === null) {
+      throw new WorkspaceCorruptError(
+        `Workflow workspace ${workspacePath} has no marker at .mohist/workspace.json; the bound workspace identity cannot be verified.`,
+        workspacePath,
+      )
+    }
+    if (!markerMatches(markerOnDisk, marker)) {
+      throw new WorkspaceIdentityMismatchError(
+        `Workflow workspace ${workspacePath} marker is bound to a different run (expected ${formatIdentity(marker)}, found ${formatIdentity(markerOnDisk)}).`,
+        workspacePath,
+        marker,
+        markerOnDisk,
+      )
+    }
+
+    await verifyWorkspaceBranch(workspacePath, runBranch, signal)
+
+    return {
+      path: workspacePath,
+      branch: runBranch,
+      changeDir: changeDir ? join(workspacePath, changeDir) : null,
+    }
+  }
+
+  async planResolution(work: WorkItem, signal: AbortSignal): Promise<{ action: "materialize" | "verify", workspacePath: string, marker?: Partial<IssueWorkspaceMarker> }> {
+    const variables = work.variables ?? {}
+    const issueNumber = numberAt(variables, ["issue", "number"])
+    const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
+    const suppliedPath = stringAt(variables, ["workspace", "path"])
+    const workspacePath = suppliedPath
+      ? resolve(suppliedPath)
+      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber ?? 0)
+    if (!exists(workspacePath)) {
+      return { action: "materialize", workspacePath }
+    }
+    const onDiskMarker = await readMarker(workspacePath)
+    return { action: "verify", workspacePath, marker: onDiskMarker ?? undefined }
   }
 
   // Materialize an isolated temporary landing workspace as a `git clone
@@ -202,18 +344,52 @@ export class WorkspaceManager {
     return removed
   }
 
-  private async ensureCache(cachePath: string, gitUrl: string, signal: AbortSignal) {
-    if (exists(cachePath)) {
-      const result = await runCommand("git", ["-C", cachePath, "remote", "get-url", "origin"], ".", signal)
-      if (result.exitCode === 0 && result.stdout.trim() === gitUrl) {
-        const fetchResult = await runCommand("git", ["-C", cachePath, "fetch", "origin"], ".", signal)
-        if (fetchResult.exitCode === 0) return
+  private async ensureCache(cachePath: string, gitUrl: string, projectRoot: string, baseBranch: string, signal: AbortSignal) {
+    if (!exists(cachePath)) {
+      await this.cloneBareCache(cachePath, gitUrl, signal)
+      return
+    }
+
+    const origin = await readCacheOrigin(cachePath, signal)
+    const originMatches = origin === gitUrl
+    const corrupt = await isCacheCorrupt(cachePath, baseBranch, signal)
+
+    const replaceCache = async (reason: string) => {
+      if (await isCacheReferencedByActiveWorkspace(cachePath, projectRoot, signal)) {
+        throw new CacheReplacementBlockedError(
+          `Cache ${cachePath} ${reason}; replacement is blocked because an active workspace still references its object store.`,
+        )
       }
       await deleteDirectory(cachePath)
+      await this.cloneBareCache(cachePath, gitUrl, signal)
     }
+
+    if (originMatches) {
+      if (corrupt) {
+        await replaceCache("is corrupt")
+        return
+      }
+      const fetch = await runCommand("git", ["-C", cachePath, "fetch", "origin"], ".", signal)
+      if (fetch.exitCode !== 0) {
+        if (await isCacheCorrupt(cachePath, baseBranch, signal)) await replaceCache("is corrupt")
+        return
+      }
+      return
+    }
+
+    await replaceCache(`origin (${origin ?? "<unknown>"}) does not match ${gitUrl}`)
+  }
+
+  // Initial bare clone. Called when no prior cache exists; failure is
+  // fatal (no fallback). For an existing cache, replacement paths use
+  // the same clone primitive but gate the deletion on the reference
+  // scan first.
+  private async cloneBareCache(cachePath: string, gitUrl: string, signal: AbortSignal) {
     await ensureDir(join(cachePath, ".."))
     const result = await runCommand("git", ["clone", "--bare", gitUrl, cachePath], ".", signal)
-    if (result.exitCode !== 0) throw new Error(`git clone failed for ${gitUrl}: ${result.stderr || result.stdout}`)
+    if (result.exitCode !== 0) {
+      throw new Error(`git clone failed for ${gitUrl}: ${result.stderr || result.stdout}`)
+    }
   }
 
   private async resolveBranch(cachePath: string, baseBranch: string, signal: AbortSignal) {
@@ -225,10 +401,6 @@ export class WorkspaceManager {
   }
 
   private async ensureFreshWorkspace(cachePath: string, workspacePath: string, baseBranch: string, runBranch: string, gitUrl: string, marker: IssueWorkspaceMarker, signal: AbortSignal) {
-    if (exists(workspacePath) && !await hasSameMarker(workspacePath, marker)) {
-      await deleteDirectory(workspacePath)
-    }
-
     if (!exists(workspacePath)) {
       await ensureDir(join(workspacePath, ".."))
       const result = await runCommand("git", ["clone", "--shared", "--branch", baseBranch, "--single-branch", cachePath, workspacePath], ".", signal)
@@ -317,6 +489,32 @@ function issueWorkspaceMarker(variables: JsonObject): IssueWorkspaceMarker {
   }
 }
 
+// Read the workspace marker from disk. Returns `null` when the marker
+// is missing or unreadable; the caller decides what kind of failure
+// that is (corrupt vs missing). Used by both `verify()` (which needs
+// to distinguish missing / corrupt / mismatch) and `planResolution()`
+// (which just needs a yes/no answer).
+async function readMarker(workspacePath: string): Promise<Partial<IssueWorkspaceMarker> | null> {
+  const path = markerPath(workspacePath)
+  if (!exists(path)) return null
+  try {
+    const raw = await readText(path)
+    return JSON.parse(raw) as Partial<IssueWorkspaceMarker>
+  } catch {
+    return null
+  }
+}
+
+function markerMatches(actual: Partial<IssueWorkspaceMarker>, expected: IssueWorkspaceMarker): boolean {
+  return actual.issueId === expected.issueId
+    && actual.issueNumber === expected.issueNumber
+    && actual.workflowRunId === expected.workflowRunId
+}
+
+function formatIdentity(marker: Partial<IssueWorkspaceMarker> | IssueWorkspaceMarker): string {
+  return `issueId=${marker.issueId ?? "<null>"}, issueNumber=${marker.issueNumber ?? "<null>"}, workflowRunId=${marker.workflowRunId ?? "<null>"}`
+}
+
 async function hasSameMarker(workspacePath: string, expected: IssueWorkspaceMarker) {
   const path = markerPath(workspacePath)
   if (!exists(path)) return false
@@ -330,8 +528,168 @@ async function hasSameMarker(workspacePath: string, expected: IssueWorkspaceMark
   }
 }
 
+async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: string, signal: AbortSignal) {
+  const branch = await runCommand("git", ["-C", workspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
+  if (branch.exitCode !== 0) {
+    throw new WorkspaceBranchMismatchError(
+      `Workflow workspace ${workspacePath} branch probe failed; expected ${expectedBranch}.`,
+      workspacePath,
+      expectedBranch,
+      null,
+      null,
+      branch.stderr || branch.stdout || `exit ${branch.exitCode}`,
+    )
+  }
+  const observed = branch.stdout.trim()
+  if (observed === expectedBranch) return
+  if (observed === "HEAD") {
+    const ref = await runCommand("git", ["-C", workspacePath, "rev-parse", "HEAD"], ".", signal)
+    throw new WorkspaceBranchMismatchError(
+      `Workflow workspace ${workspacePath} is detached; expected branch ${expectedBranch}.`,
+      workspacePath,
+      expectedBranch,
+      null,
+      ref.exitCode === 0 ? ref.stdout.trim() : null,
+    )
+  }
+  throw new WorkspaceBranchMismatchError(
+    `Workflow workspace ${workspacePath} is on branch ${observed}; expected ${expectedBranch}.`,
+    workspacePath,
+    expectedBranch,
+    observed,
+  )
+}
+
 function markerPath(workspacePath: string) {
   return join(workspacePath, ".mohist", "workspace.json")
+}
+
+async function ensureMarkerExcluded(workspacePath: string) {
+  const excludePath = join(workspacePath, ".git", "info", "exclude")
+  const markerRule = ".mohist/"
+  let raw = ""
+  try {
+    raw = await readText(excludePath)
+  } catch {
+    // ignore
+  }
+  if (raw.split(/\r?\n/).some((line) => line.trim() === markerRule || line.trim() === ".mohist")) return
+  const suffix = raw.endsWith("\n") || raw.length === 0 ? "" : "\n"
+  await writeText(excludePath, `${raw}${suffix}${markerRule}\n`)
+}
+
+// Read the configured `origin` URL of a bare repository cache. Returns
+// `undefined` if the cache is unreadable / unconfigured rather than
+// throwing, so the caller can decide how to surface an unreadable cache
+// (treat as identity mismatch → replacement candidate).
+async function readCacheOrigin(cachePath: string, signal: AbortSignal) {
+  const result = await runCommand("git", ["-C", cachePath, "remote", "get-url", "origin"], ".", signal)
+  if (result.exitCode !== 0) return undefined
+  return result.stdout.trim() || undefined
+}
+
+// Decide whether the cache's object store is still referenced by an
+// active workspace clone. The check is scoped to the project root: only
+// clones under `<projectRoot>/workspaces/` and `<projectRoot>/landing/`
+// are scanned, which is where the runner actually creates `--shared`
+// alternates clones.
+//
+// References can be transitive. A `--shared` clone's
+// `.git/objects/info/alternates` lists sibling `<git_dir>/objects`
+// paths; one of those alternates may itself be a `.git/objects` path
+// belonging to another clone (the source clone of a `--shared` clone),
+// which in turn has its own alternates chain. The scan follows the
+// chain so a landing workspace whose alternates point at the workflow
+// workspace (whose alternates point at the cache) is detected as a
+// transitive reference. Deleting the cache in that situation would
+// corrupt both clones' object stores.
+//
+// The scan tolerates missing directories, unreadable alternates
+// files, and malformed entries — a corrupt alternates file in a stale
+// landing dir is not a reason to refuse cache replacement. Only an
+// unambiguous match (direct or transitive) triggers the block.
+async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot: string, signal: AbortSignal) {
+  const target = resolve(join(cachePath, "objects"))
+  const cloneRoots = [join(projectRoot, "workspaces"), join(projectRoot, "landing")]
+
+  async function readAlternates(objectsDir: string): Promise<string[]> {
+    const gitDir = objectsDir.replace(/[\\/]objects$/, "")
+    const alternatesPath = join(gitDir, "objects", "info", "alternates")
+    if (!exists(alternatesPath)) return []
+    let raw: string
+    try {
+      raw = await readText(alternatesPath)
+    } catch {
+      return []
+    }
+    const out: string[] = []
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith("#")) continue
+      try {
+        out.push(resolve(trimmed))
+      } catch {
+        // skip
+      }
+    }
+    return out
+  }
+
+  for (const dir of cloneRoots) {
+    if (!exists(dir)) continue
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const gitDir = join(dir, entry.name, ".git")
+      if (!exists(gitDir)) continue
+      // BFS the alternates chain rooted at this clone. An alternates
+      // entry is a `<git_dir>/objects` path; if it equals the target,
+      // this clone references the cache. If it does not, but it is
+      // itself a `.git/objects` path belonging to another clone, we
+      // enqueue that clone's alternates to follow the chain further.
+      const visited = new Set<string>()
+      const queue: string[] = await readAlternates(join(gitDir, "objects"))
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        if (visited.has(current)) continue
+        visited.add(current)
+        if (current === target) return true
+        // Only follow when the current entry looks like another clone's
+        // `.git/objects` (i.e., ends with `.git/objects`). Other paths
+        // (e.g., environment-provided object dirs) are leaf nodes.
+        if (/(^|[\\/])\.git[\\/]objects$/.test(current)) {
+          const next = await readAlternates(current)
+          for (const n of next) if (!visited.has(n)) queue.push(n)
+        }
+      }
+    }
+  }
+  return false
+}
+
+// `git fsck` based corruption detector. Runs an unconnected fsck
+// against the bare cache; returns true when fsck reports any corrupt /
+// missing object. Used as an alternate justification for cache
+// replacement (per the spec's "origin URL mismatch OR verified
+// corruption" rule).
+async function isCacheCorrupt(cachePath: string, baseBranch: string, signal: AbortSignal) {
+  const result = await runCommand("git", ["-C", cachePath, "fsck", "--full", "--no-progress"], ".", signal)
+  if (result.exitCode !== 0) return true
+  const base = await runCommand("git", ["-C", cachePath, "rev-parse", "--verify", `refs/heads/${baseBranch}^{commit}`], ".", signal)
+  if (base.exitCode !== 0) return true
+  const baseType = await runCommand("git", ["-C", cachePath, "cat-file", "-t", base.stdout.trim()], ".", signal)
+  if (baseType.exitCode !== 0) return true
+  const refs = await runCommand("git", ["-C", cachePath, "show-ref", "--heads", "--dereference"], ".", signal)
+  if (refs.exitCode !== 0) return true
+  for (const line of refs.stdout.split(/\r?\n/)) {
+    const oid = line.trim().split(/\s+/)[0]
+    if (!oid) continue
+    const object = await runCommand("git", ["-C", cachePath, "cat-file", "-e", `${oid}^{object}`], ".", signal)
+    if (object.exitCode !== 0) return true
+    const tree = await runCommand("git", ["-C", cachePath, "ls-tree", "-r", oid], ".", signal)
+    if (tree.exitCode !== 0) return true
+  }
+  return false
 }
 
 function slug(value: string): string {

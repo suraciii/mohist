@@ -458,6 +458,8 @@ function TaskItem({
     (messageResolution.failureKind === 'branch-invariant-violation'
       ? messageResolution.evidence
       : null)
+  const workspaceEvidence =
+    outputResolution.workspaceEvidence ?? messageResolution.workspaceEvidence
   const canExpand = hasArtifacts || hasRequiredFiles || isFailed || hasOutput || deliveryFailure != null
 
   let icon: React.ReactNode
@@ -542,6 +544,7 @@ function TaskItem({
                 label={deliveryFailure.label}
                 nextAction={deliveryFailure.nextAction}
                 evidence={branchEvidence}
+                workspaceEvidence={workspaceEvidence}
               />
             )}
             {hasReason && (
@@ -608,6 +611,7 @@ function DeliveryFailureBanner({
   label,
   nextAction,
   evidence,
+  workspaceEvidence,
 }: {
   failureKind: DeliveryFailureKind
   label: string
@@ -618,13 +622,25 @@ function DeliveryFailureBanner({
     observedRef?: string | null
     boundary?: 'start' | 'end' | null
   } | null
+  workspaceEvidence?: {
+    workspacePath: string | null
+    expectedRunId: string | null
+    actualRunId: string | null
+  } | null
 }) {
   const colors: Record<DeliveryFailureKind, string> = {
     conflict: 'border-red-300 bg-red-50 text-red-800',
     'base-moved': 'border-amber-300 bg-amber-50 text-amber-800',
     'retry-safe': 'border-blue-300 bg-blue-50 text-blue-800',
     'branch-invariant-violation': 'border-purple-300 bg-purple-50 text-purple-800',
+    'workspace-missing': 'border-rose-300 bg-rose-50 text-rose-800',
+    'workspace-corrupt': 'border-rose-300 bg-rose-50 text-rose-800',
+    'workspace-identity-mismatch': 'border-rose-300 bg-rose-50 text-rose-800',
   }
+  const isWorkspaceMaterialization =
+    failureKind === 'workspace-missing' ||
+    failureKind === 'workspace-corrupt' ||
+    failureKind === 'workspace-identity-mismatch'
   return (
     <div className={`rounded-md border px-2.5 py-2 text-xs space-y-1 ${colors[failureKind]}`}>
       <div className="flex items-center gap-2 font-semibold">
@@ -654,6 +670,30 @@ function DeliveryFailureBanner({
                   : '(unknown)'}
             </span>
           </div>
+        </div>
+      )}
+      {isWorkspaceMaterialization && (
+        <div className="rounded bg-white/60 px-2 py-1 space-y-0.5 font-mono text-[11px]">
+          <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
+            Attribution: workflow infrastructure (not issue work)
+          </div>
+          {workspaceEvidence?.workspacePath && (
+            <div>
+              <span className="font-sans opacity-70">workspace:</span> {workspaceEvidence.workspacePath}
+            </div>
+          )}
+          {workspaceEvidence?.expectedRunId && (
+            <div>
+              <span className="font-sans opacity-70">expected:</span>{' '}
+              <span className="text-green-700">{workspaceEvidence.expectedRunId}</span>
+            </div>
+          )}
+          {workspaceEvidence?.actualRunId && (
+            <div>
+              <span className="font-sans opacity-70">actual:</span>{' '}
+              <span className="text-red-700">{workspaceEvidence.actualRunId}</span>
+            </div>
+          )}
         </div>
       )}
       <p className="leading-snug">{nextAction}</p>
@@ -1217,6 +1257,7 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   const deliveryResolution = resolveDeliveryFailureFromMessage(blockedReason)
   const deliveryGuidance = deliveryResolution.guidance
   const branchEvidence = deliveryResolution.evidence
+  const workspaceEvidence = deliveryResolution.workspaceEvidence
   let deliveryFailureLabel: string | null = null
 
   if (blockedReason) {
@@ -1243,6 +1284,10 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 
   const isBranchViolation =
     deliveryGuidance?.failureKind === 'branch-invariant-violation' && branchEvidence
+  const isWorkspaceMaterializationFailure =
+    deliveryGuidance?.failureKind === 'workspace-missing' ||
+    deliveryGuidance?.failureKind === 'workspace-corrupt' ||
+    deliveryGuidance?.failureKind === 'workspace-identity-mismatch'
 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
@@ -1283,6 +1328,28 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
                     : '(unknown)'}
               </span>
             </div>
+          </div>
+        )}
+        {isWorkspaceMaterializationFailure && workspaceEvidence && (
+          <div className="rounded border border-rose-300 bg-rose-50 px-2.5 py-2 text-xs text-rose-800 space-y-0.5 font-mono">
+            <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: workflow infrastructure (not issue work)</div>
+            {workspaceEvidence.workspacePath && (
+              <div>
+                <span className="font-sans opacity-70">workspace:</span> {workspaceEvidence.workspacePath}
+              </div>
+            )}
+            {workspaceEvidence.expectedRunId && (
+              <div>
+                <span className="font-sans opacity-70">expected:</span>{' '}
+                <span className="text-green-700">{workspaceEvidence.expectedRunId}</span>
+              </div>
+            )}
+            {workspaceEvidence.actualRunId && (
+              <div>
+                <span className="font-sans opacity-70">actual:</span>{' '}
+                <span className="text-red-700">{workspaceEvidence.actualRunId}</span>
+              </div>
+            )}
           </div>
         )}
         {capabilityOrFiles && (

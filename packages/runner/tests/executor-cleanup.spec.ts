@@ -8,6 +8,7 @@ import { WorkExecutor, setCleanupAgentActionForTest, setExecutorGitRunnerForTest
 import { ActionRegistry } from "../src/actions/registry.js"
 import type { ActionContext, ActionResult, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 
 const exec = promisify(execFile)
 
@@ -79,7 +80,7 @@ function makeRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): A
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    { ensure: async () => ({ path: workDir, branch: "main", changeDir: null }) } as never,
+    verifyOnlyWorkspaceManager({ path: workDir, branch: "main", changeDir: null }),
     connection as never,
     {} as never,
     null,
@@ -533,7 +534,7 @@ describe("WorkExecutor clean worktree invariant", () => {
     try {
       const executor = new WorkExecutor(
         makeRegistry(async () => ({ status: "success", message: "ran" })),
-        { ensure: async () => ({ path: plainDir, branch: null, changeDir: null }) } as never,
+        verifyOnlyWorkspaceManager({ path: plainDir, branch: null, changeDir: null }),
         connection as never,
         {} as never,
         null,

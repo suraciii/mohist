@@ -346,6 +346,9 @@ public class IssueCliTableRendererSpecs
         new object[] { DeliveryFailureGuidance.BaseMoved, "Base branch moved", "Prepare the branch again, then publish." },
         new object[] { DeliveryFailureGuidance.RetrySafe, "Transient failure", "Retry the task" },
         new object[] { DeliveryFailureGuidance.BranchInvariantViolation, "Runner / action branch-invariant violation", "runner or action bug" },
+        new object[] { DeliveryFailureGuidance.WorkspaceMissing, "Workflow workspace materialization failure", "workflow-start materialization pipeline" },
+        new object[] { DeliveryFailureGuidance.WorkspaceCorrupt, "Workflow workspace materialization failure", "re-materialize the workflow workspace" },
+        new object[] { DeliveryFailureGuidance.WorkspaceIdentityMismatch, "Workflow workspace materialization failure", "belongs to a different workflow run" },
     };
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -370,6 +373,9 @@ public class IssueCliTableRendererSpecs
     [InlineData("Prepare failed (retry-safe): network reset", DeliveryFailureGuidance.RetrySafe, "Transient failure")]
     [InlineData("Prepare failed (branch-invariant-violation): wrong branch", DeliveryFailureGuidance.BranchInvariantViolation, "Runner / action branch-invariant violation")]
     [InlineData("branch-invariant violation at start boundary for Prepare branch: expected branch 'mohist/run-wr-1', observed 'master'", DeliveryFailureGuidance.BranchInvariantViolation, "Runner / action branch-invariant violation")]
+    [InlineData("workflow workspace materialization failure (workspace-missing): workspace path does not exist", DeliveryFailureGuidance.WorkspaceMissing, "Workflow workspace materialization failure")]
+    [InlineData("workflow workspace materialization failure (workspace-corrupt): marker missing or unreadable", DeliveryFailureGuidance.WorkspaceCorrupt, "Workflow workspace materialization failure")]
+    [InlineData("workflow workspace materialization failure (workspace-identity-mismatch): workspace belongs to wr_other", DeliveryFailureGuidance.WorkspaceIdentityMismatch, "Workflow workspace materialization failure")]
     public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_ExtractsKind(
         string message, string expectedKind, string expectedLabel)
     {
@@ -772,6 +778,198 @@ public class IssueCliTableRendererSpecs
         Assert.Contains("boundary:   end", text);
         Assert.Contains("expected:   mohist/run-wr-1", text);
         Assert.Contains("observed:   (detached at abc123)", text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData(DeliveryFailureGuidance.WorkspaceMissing)]
+    [InlineData(DeliveryFailureGuidance.WorkspaceCorrupt)]
+    [InlineData(DeliveryFailureGuidance.WorkspaceIdentityMismatch)]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_ExtractsWorkspaceMaterializationKind(string kind)
+    {
+        var output = JsonNode.Parse($$"""
+            {
+              "kind": "{{kind}}",
+              "workspacePath": "/home/runner/workspaces/proj_x/run_abc",
+              "status": "failed"
+            }
+            """);
+
+        var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
+
+        Assert.Equal(kind, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveWorkspaceEvidence_FromRunnerOutput()
+    {
+        var output = JsonNode.Parse("""
+            {
+              "kind": "workspace-identity-mismatch",
+              "workspacePath": "/home/runner/workspaces/proj_x/run_abc",
+              "expected": {
+                "issueId": "iss_181",
+                "issueNumber": 181,
+                "workflowRunId": "wr_a6782a03822846ba8c43da0eb6a013fe"
+              },
+              "actual": {
+                "issueId": "iss_other",
+                "issueNumber": 99,
+                "workflowRunId": "wr_other"
+              }
+            }
+            """);
+
+        var (kind, guidance, evidence) = DeliveryFailureGuidance.ResolveWithWorkspaceEvidence(message: null, output);
+
+        Assert.Equal(DeliveryFailureGuidance.WorkspaceIdentityMismatch, kind);
+        Assert.NotNull(guidance);
+        Assert.NotNull(evidence);
+        Assert.Equal("/home/runner/workspaces/proj_x/run_abc", evidence!.WorkspacePath);
+        Assert.Equal("wr_a6782a03822846ba8c43da0eb6a013fe", evidence.ExpectedRunId);
+        Assert.Equal("wr_other", evidence.ActualRunId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_IsWorkspaceMaterializationKind_RecognisesAllThreeKinds()
+    {
+        Assert.True(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.WorkspaceMissing));
+        Assert.True(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.WorkspaceCorrupt));
+        Assert.True(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.WorkspaceIdentityMismatch));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.Conflict));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.BaseMoved));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.RetrySafe));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.BranchInvariantViolation));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(null));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(""));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Theory]
+    [InlineData(DeliveryFailureGuidance.WorkspaceMissing)]
+    [InlineData(DeliveryFailureGuidance.WorkspaceCorrupt)]
+    [InlineData(DeliveryFailureGuidance.WorkspaceIdentityMismatch)]
+    public async Task RenderTable_WorkflowStatus_SurfacesWorkspaceMaterializationFailureKindLabelAndNextAction(string kind)
+    {
+        var failureMessage = $"workflow workspace materialization failure ({kind}): workspace state is broken for run wr_abc";
+        var data = JsonNode.Parse($$"""
+            {
+              "issueId": "iss_181",
+              "issueNumber": 181,
+              "title": "Materialize workflow workspace once at run start",
+              "stage": "build",
+              "runtimeStatus": "failed",
+              "workflowRunId": "wr_abc",
+              "workflow": {
+                "workflowRunId": "wr_abc",
+                "status": "failed",
+                "currentStage": "build",
+                "failure": {
+                  "reason": "TaskFailed",
+                  "stage": "build",
+                  "taskId": "build:task-1",
+                  "message": "{{failureMessage}}",
+                  "output": "{\"kind\":\"{{kind}}\",\"workspacePath\":\"/home/runner/workspaces/proj_x/wr_abc\"}"
+                },
+                "stages": [
+                  { "stage": "build", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
+                ]
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowStatus);
+
+        var text = output.ToString();
+        // The runner-side workspace-materialization failure must be rendered as a
+        // distinct workflow-infrastructure failure, NOT collapsed into a generic
+        // task failure.
+        Assert.Contains("delivery failure:", text);
+        Assert.Contains(kind, text);
+        Assert.Contains("Workflow workspace materialization failure", text);
+        Assert.Contains("attribution: workflow infrastructure (not issue work)", text);
+        Assert.Contains("workspace:  /home/runner/workspaces/proj_x/wr_abc", text);
+        Assert.Contains("next action:", text);
+        // The new failure kind must NOT reuse the existing delivery-failure
+        // labels (dirty-worktree, conflict, base-moved, retry-safe,
+        // branch-invariant).
+        Assert.DoesNotContain("Conflict needs attention", text);
+        Assert.DoesNotContain("Base branch moved", text);
+        Assert.DoesNotContain("Transient failure", text);
+        Assert.DoesNotContain("Runner / action branch-invariant violation", text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task RenderTable_WorkflowStatus_SurfacesWorkspaceIdentityMismatchExpectedAndActual()
+    {
+        var data = JsonNode.Parse("""
+            {
+              "issueId": "iss_181",
+              "issueNumber": 181,
+              "title": "Materialize workflow workspace once at run start",
+              "stage": "build",
+              "runtimeStatus": "failed",
+              "workflowRunId": "wr_abc",
+              "workflow": {
+                "workflowRunId": "wr_abc",
+                "status": "failed",
+                "currentStage": "build",
+                "failure": {
+                  "reason": "TaskFailed",
+                  "stage": "build",
+                  "taskId": "build:task-1",
+                  "message": "workflow workspace materialization failure (workspace-identity-mismatch): workspace bound to a different run",
+                  "output": "{\"kind\":\"workspace-identity-mismatch\",\"workspacePath\":\"/home/runner/workspaces/proj_x/wr_abc\",\"expected\":{\"workflowRunId\":\"wr_abc\"},\"actual\":{\"workflowRunId\":\"wr_other\"}}"
+                },
+                "stages": [
+                  { "stage": "build", "status": "failed", "tasks": [ { "status": "failed" } ], "approvalStatus": null }
+                ]
+              }
+            }
+            """);
+
+        var output = new StringWriter();
+        var api = new MohistCliApi(
+            new HttpClient(new HttpClientHandler()) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+        await api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowStatus);
+
+        var text = output.ToString();
+        Assert.Contains(DeliveryFailureGuidance.WorkspaceIdentityMismatch, text);
+        Assert.Contains("expected:   wr_abc", text);
+        Assert.Contains("actual:     wr_other", text);
+        Assert.Contains("attribution: workflow infrastructure (not issue work)", text);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_DoesNotMistakeDirtyWorktreeForWorkspaceMaterialization()
+    {
+        var (kind, _) = DeliveryFailureGuidance.Resolve(
+            "Prepare failed (dirty-worktree): staged changes left behind",
+            output: null);
+        Assert.Null(kind);
     }
 
     private static string InvokeTruncate(string value, int softCap)
