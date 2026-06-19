@@ -38,11 +38,8 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     globals: true,
     exclude: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
-      '**/.{idea,git,cache,output,temp}/**',
-      'tests/a11y/**',
+      '**/*.a11y.spec.ts',
+      'node_modules/**',
     ],
   },
 })

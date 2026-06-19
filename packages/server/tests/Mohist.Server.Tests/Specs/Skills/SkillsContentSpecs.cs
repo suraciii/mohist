@@ -122,10 +122,11 @@ public sealed class SkillsContentSpecs
     public async Task Get_All_EmitsAllVisibleBuiltInSkillsInNameOrder()
     {
         using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "--all"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout, stderr).Parse(["skills", "get", "--all"]).InvokeAsync();
 
-        Assert.Equal(0, exitCode);
+        Assert.True(exitCode == 0, $"stderr: {stderr}");
         var content = stdout.ToString();
         var mohistIndex = content.IndexOf("## mohist", StringComparison.Ordinal);
         var exploreIndex = content.IndexOf("## mohist-explore", StringComparison.Ordinal);

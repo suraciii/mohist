@@ -153,7 +153,6 @@ describe('LiveTaskProvider transcript routing', () => {
         status: 'started',
         acpSessionId: 'session-1',
         coderSessionId: 'session-1',
-        executionId: 'work-1',
         payload: { toolCallId: 'tool-1', toolName: 'Read', status: 'started' },
       },
     })
@@ -301,6 +300,34 @@ describe('LiveTaskProvider transcript routing', () => {
       })
     })
     off()
+  })
+
+  // Legacy approval_requested event format is no longer directly handled;
+  // only the reverse-DNS com.mohist.workflow.stage.approval-requested is routed.
+  it.skip('shows approval toast for legacy approval_requested events', async () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(['issues'], [{ id: 'issue-1', number: 82 }])
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="project-1">
+          <RuntimeToastHost>
+            <LiveTaskProvider>
+              <LiveTaskProbe />
+            </LiveTaskProvider>
+          </RuntimeToastHost>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    const connectionCall = eventsHub.useEventsConnection.mock.calls[0]
+    const onEvent = connectionCall[1] as (eventName: string, envelope: unknown) => void
+
+    onEvent('approval_requested', { issueId: 'issue-1', projectId: 'project-1', stage: 'review' })
+
+    await waitFor(() => {
+      expect(toast.info).toHaveBeenCalledWith('Issue #82 needs approval')
+    })
   })
 
   it('shows approval toast for reverse-DNS approval-requested events', async () => {

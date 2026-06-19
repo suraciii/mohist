@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Issue.Services.IssueTemplates;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -80,6 +81,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();
+        services.AddScoped<IssueTemplateRegistry>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionQuery>();
         services.AddScoped<WorkflowSessionHealthService>();

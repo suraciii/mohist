@@ -32,6 +32,7 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildSessions(api));
         issue.Subcommands.Add(BuildWorkflow(api));
         issue.Subcommands.Add(BuildFeedback(api));
+        issue.Subcommands.Add(BuildTemplate(api));
 
         return issue;
     }
@@ -871,5 +872,102 @@ var labelParse = LabelDelta.Parse(labels);
                 return id;
         }
         return null;
+    }
+
+    private static Command BuildTemplate(MohistCliApi api)
+    {
+        var template = new Command("template", "Issue template management");
+        template.Subcommands.Add(BuildTemplateList(api));
+        template.Subcommands.Add(BuildTemplateGet(api));
+        return template;
+    }
+
+    private static Command BuildTemplateList(MohistCliApi api)
+    {
+        var cmd = new Command("list", "List available issue templates for the active project");
+        cmd.Aliases.Add("ls");
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ListAsync();
+
+            async Task<int> ListAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    IssueTemplatesPath(resolvedProjectId, "/"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueTemplateList));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildTemplateGet(MohistCliApi api)
+    {
+        var cmd = new Command("get", "Show a single issue template by name");
+        var nameArg = new Argument<string>("name") { Description = "Template name or id (e.g. mohist/default)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var name = ctx.GetValue(nameArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return GetAsync();
+
+            async Task<int> GetAsync()
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    api.Error.WriteLine("Template name is required");
+                    return 1;
+                }
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintWithOutputAsync(
+                    IssueTemplatesPath(resolvedProjectId, $"/{name}"),
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueTemplateShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static string IssueTemplatesPath(string? projectId, string path)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new InvalidOperationException(MohistCliCommands.NoActiveProjectMessage);
+        var suffix = path == "/" ? string.Empty : (path.StartsWith('/') ? path : "/" + path);
+        return $"/api/issue-templates{suffix}?projectId={MohistCliCommands.Escape(projectId)}";
     }
 }

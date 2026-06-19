@@ -254,6 +254,8 @@ internal sealed class MohistCliApi
         EpicLink,
         EpicUnlink,
         LabelList,
+        IssueTemplateList,
+        IssueTemplateShow,
     }
 
     internal static TableShape ParseTableShape(string? shape)

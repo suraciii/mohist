@@ -19,6 +19,7 @@ import { LabelEditor } from '../../../entities/issue/lib/label-editor'
 import type { LabelMap } from '../../../entities/issue/model/labels'
 import { useAvailableModelIds, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
+import { composeIssueTemplateBody, useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import { parseIssueFrontmatter } from '../lib/frontmatter'
@@ -184,6 +185,50 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
   )
 }
 
+function TemplateSelector({
+  templates,
+  isLoading,
+  value,
+  onChange,
+}: {
+  templates: Array<{ id: string; name: string; about: string; isDefault: boolean; source: 'builtin' | 'custom' }>
+  isLoading: boolean
+  value: string | null
+  onChange: (id: string | null) => void
+}) {
+  const options = useMemo(() => {
+    const list = templates
+    const known = new Set(list.map((t) => t.id))
+    const extras = value && !known.has(value)
+      ? [{ id: value, name: value, about: '', isDefault: false, source: 'custom' as const }]
+      : []
+    return [...list, ...extras]
+  }, [templates, value])
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-foreground mb-1">Template</label>
+      <select
+        aria-label="Template"
+        data-testid="issue-template-selector"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+        className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+        disabled={isLoading}
+      >
+        <option value="">{isLoading ? 'Loading templates…' : 'No template'}</option>
+        {options.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+            {t.isDefault ? ' (default)' : ''}
+            {t.source === 'custom' ? ' (custom)' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export function CreateIssueDialog({ open, onClose }: Props) {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -195,10 +240,13 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [workflowTouched, setWorkflowTouched] = useState(false)
   const [risk, setRisk] = useState<string | null>(null)
   const [riskTouched, setRiskTouched] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const { projectId, projects } = useProject()
   const currentProject = projects?.find((p) => p.id === projectId)
   const { data: repositories } = useRepositories(currentProject?.id)
   const { data: workflowProfiles } = useWorkflowProfiles()
+  const { data: issueTemplates, isLoading: issueTemplatesLoading } = useIssueTemplates()
+  const { data: selectedTemplate } = useIssueTemplate(selectedTemplateId)
   const queryClient = useQueryClient()
 
   const frontmatter = useMemo(() => parseIssueFrontmatter(body), [body])
@@ -232,6 +280,12 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     }
   }, [frontmatterRisk, riskTouched])
 
+  useEffect(() => {
+    if (selectedTemplate) {
+      setBody(composeIssueTemplateBody(selectedTemplate))
+    }
+  }, [selectedTemplate])
+
   const mutation = useMutation({
     mutationFn: () =>
       createIssue({
@@ -263,6 +317,7 @@ attachmentIds: extractAttachmentIds(body),
     setWorkflowTouched(false)
     setRisk(null)
     setRiskTouched(false)
+    setSelectedTemplateId(null)
     onClose()
   }
 
@@ -295,6 +350,13 @@ attachmentIds: extractAttachmentIds(body),
               autoFocus
             />
           </div>
+
+          <TemplateSelector
+            templates={issueTemplates ?? []}
+            isLoading={issueTemplatesLoading}
+            value={selectedTemplateId}
+            onChange={setSelectedTemplateId}
+          />
 
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Description</label>

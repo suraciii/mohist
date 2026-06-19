@@ -1,0 +1,198 @@
+## Codebase Patterns
+
+- **Mirroring existing domain:** When adding a new project-scoped resource that mirrors an existing pattern (e.g., IssueTemplate mirroring IssueWorkflowProfile), follow the exact same conventions: constant class with DefaultId, interface in Domain/, service class in Services/, DB row in Infrastructure/Data/, registry scoped service, and JSON serialization via `Infrastructure.JSON`.
+- **EF entities:** Follow `string` PKs with `HasMaxLength(256)`, composite keys as `HasKey(e => new { e.ProjectId, e.Name })`, and `DateTimeOffset` for timestamps. Use SQLite TEXT type throughout.
+- **DI registration:** New scoped services go in `MohistServiceRegistration.ConfigureMohistServices()` alongside their mirrored siblings.
+- **Test pattern:** Use xunit `[Fact]` with `[Trait]` attributes (Speed.Integration + Sut.Issue). Use SQLite in-memory for DB integration tests via custom `IDbContextFactory<MohistDbContext>` fake.
+- **IssueResource naming:** Project-scoped resources that mirror workflow profiles use `Project{Resource}Row` in `Infrastructure/Data/` and a dedicated directory under `Issue/Domain/` and `Issue/Services/`.
+- **Catch-all routes for slash-bearing IDs:** When the resource identifier may contain `/` (e.g. `mohist/default`), use the route pattern `{*name}` (catch-all), not `{name}` (which only matches a single segment). Existing precedent: `SystemRoutes.cs` uses `MapGet("/api/workflow-templates/system/{*id}", ...)` for the same reason. **Clients (CLI/Web) must NOT URL-encode the slash** — ASP.NET Core preserves the literal slash for catch-all segments.
+- **Project-scoped reads with a path param:** Every existing project-scoped read is mounted at `/api/projects/{projectRef}/...` and applies `ProjectResolutionEndpointFilter`. Inside the handler call `IssueRoutes.GetRequiredProject(ctx)` to get the resolved `ProjectInfo`. This pattern is shared by `IssueRoutes/*`, `AttachmentRoutes`, `LabelsRoutes`, and `ProjectRoutes` (by-ref sub-group).
+- **Test collection for integration specs:** HTTP-level integration tests live under `Mohist.Server.Tests/Specs/...` and use `[Collection("MohistIntegration")]` against `MohistIntegrationFixture`. They share a single Sqlite in-memory DB per fixture; ensure schema is initialized (`MohistWebApplicationFactory.EnsureSchemaAsync`).
+- **API envelope shape:** Successful responses use `ApiResponse<T>` with `{ success, data, error, code, details }`. The test helpers `ApiTestClient.GetDataAsync<T>`/`PostDataAsync<T>` unwrap `data` automatically. For ad-hoc reads of nested shape, use `JsonElement`.
+- **Adding a new `TableShape`:** Three places must change together — add the enum value in `MohistCliApi.TableShape`, add a `case` in `TableRenderer.Render` switch, and add the `RenderXxx` method. Enum parsing is case-sensitive and falls back to `ProjectList` on unknown values. Prefer freeform key/value output (not a table) for "show" commands whose payload contains nested arrays like `sections[]`.
+- **CLI subcommand-group pattern:** New subcommand groups live in a static `XxxCommands` class with `Build(MohistCliApi api) → Command`. Project-scoped groups add a private `XxxPath(projectId, subPath)` helper that throws `InvalidOperationException(NoActiveProjectMessage)` when projectId is null/whitespace, mirroring `ProjectIssuesPath`/`ProjectEpicsPath`. The handler short-circuits with `if (resolvedProjectId is null) return 1;` before calling the path helper, so the throw is defensive.
+- **Web entity slice for project-scoped read with catch-all id:** Mirror `entities/settings`'s `api/client.ts` + `api/queries.ts` + `model/types.ts` + `index.ts` layout. Project-scoped GET that takes a catch-all `{name}` must use `projectApiPath(projectId, '/path/' + name)` — the slash concatenation is required because `projectApiPath` URL-encodes only the `projectRef` segment, leaving `name` literal so the server's `{*name}` route matches. The `name` argument is the issue-template id (e.g. `mohist/default`) and must NOT be passed through `encodeURIComponent` or the slash will become `%2F` and the server will 404.
+- **Web hook enablement for project-scoped resources:** `useQuery` config must set `enabled: !!projectId && (extra-arg ?)` so the hook stays inert when the project context is null. Returning `data: undefined` from the hook in that case is fine — components just read `data ?? []` (or `?.x`).
+- **Web dialog body prefill via useEffect:** When a dialog needs to prefill its body whenever a query result lands (e.g. on template detail fetch), put a `useEffect` keyed on the query data inside the dialog and have it call the existing setter. Do NOT prefill in the onChange handler — the data may not be available yet. Reset the source-id state in the dialog's `resetAndClose()` to avoid the next session keeping the prior selection.
+- **Vi.mock of an entity that exports both hooks and pure functions:** Use `vi.mock(path, async (importOriginal) => ({ ...(await importOriginal()), ...overrides }))` and pull the function under test into the test setup (or trust that the real implementation is used because `importOriginal` spreads it in). Forgetting `importOriginal` makes the real `composeIssueTemplateBody` etc. `undefined` and the dialog crashes at runtime even though tests "mocked" the module.
+
+## Task T-001: Server foundation: issue-template domain model, built-in mohist/default, registry, and project storage
+
+- **What was implemented:**
+  - Domain types: `IIssueTemplate` (Id/Name/About/IsDefault/SuitableFor/Defaults/Sections), `IssueTemplateSection` (Title/Guidance/Placeholder), `IssueTemplateDefaults` (Labels/Risk/Workflow) in `Issue/Domain/IssueTemplate/IIssueTemplate.cs`
+  - `IssueTemplates.DefaultId = "mohist/default"` in `Issue/Services/IssueTemplates/IssueTemplates.cs`
+  - `MohistDefaultIssueTemplate` with 5 sections (User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals) in fixed order, each with guidance transcribed from mohist-explore skill and a placeholder
+  - `IssueTemplateRegistry` scoped service merging built-in default + project custom templates from DB, applying disable filter via `ProjectWorkflowProfile.DisableDefaultIssueTemplate`
+  - `ProjectIssueTemplateRow` EF entity in `Infrastructure/Data/Issue/ProjectIssueTemplateRow.cs` with composite PK (ProjectId+Name)
+  - `DbSet<ProjectIssueTemplateRow>` added to MohistDbContext with entity configuration
+  - `DisableDefaultIssueTemplate` boolean column added to `ProjectWorkflowProfile`
+  - EF Core migration `20260619142739_AddProjectIssueTemplates` creating `ProjectIssueTemplates` table and the disable column
+  - DI registration: `services.AddScoped<IssueTemplateRegistry>()` in MohistServiceRegistration
+  - 26 unit tests covering default presence, section order, guidance/placeholder non-empty, project customs merged, disable excludes default, invalid template rejection (missing frontmatter fields, missing section fields, corrupt JSON, empty sections), project privacy, and order (defaults first)
+
+- **Files changed:**
+  - Created: `Issue/Domain/IssueTemplate/IIssueTemplate.cs`
+  - Created: `Issue/Services/IssueTemplates/IssueTemplates.cs`
+  - Created: `Issue/Services/IssueTemplates/MohistDefaultIssueTemplate.cs`
+  - Created: `Issue/Services/IssueTemplates/IssueTemplateRegistry.cs`
+  - Created: `Infrastructure/Data/Issue/ProjectIssueTemplateRow.cs`
+  - Created: `Infrastructure/Data/Migrations/20260619142739_AddProjectIssueTemplates.cs`
+  - Created: `Infrastructure/Data/Migrations/20260619142739_AddProjectIssueTemplates.Designer.cs`
+  - Created: `tests/.../Specs/Issue/IssueTemplate/IssueTemplateRegistrySpecs.cs`
+  - Modified: `Infrastructure/Data/Db/MohistDbContext.cs` (added DbSet + entity config for ProjectIssueTemplateRow, added DisableDefaultIssueTemplate to ProjectWorkflowProfile config)
+  - Modified: `Infrastructure/Data/Workflow/ProjectWorkflowProfileRow.cs` (added DisableDefaultIssueTemplate property)
+  - Modified: `Infrastructure/Hosting/MohistServiceRegistration.cs` (added using + scoped registration)
+  - Updated: `Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs` (auto-updated by migration)
+
+- **Learnings for future tasks:**
+  - **Decisions made:**
+    - Disable flag stored as `bool DisableDefaultIssueTemplate` on `ProjectWorkflowProfile` — simplest approach for MVP, data-layer only, no UX
+    - Custom templates stored as JSON in `project_issue_templates.Template` — deserialized via `IssueTemplateDto` then validated
+    - Template ID is an opaque string (Name is the PK column, Id is the domain identifier stored in JSON) — this is deliberate: Name=PK for DB uniqueness, Id=domain identity
+    - `SuitableFor` typed `IReadOnlyList<string>` matching `IIssueWorkflowProfile.SuitableFor`
+    - `IssueTemplateDefaults` uses `IReadOnlyDictionary<string, string>?` for Labels (matches Issue domain Labels type), `string?` for Risk (matches Issue.Risk), `string?` for Workflow
+  - **Gotchas discovered:**
+    - Don't use `--no-build` with `dotnet test` when test code changed — always build first
+    - EF Core migration tool (`dotnet ef`) needs to be on PATH or use absolute path `~/.dotnet/tools/dotnet-ef`
+    - JSON deserialization must handle missing optional fields — `Defaults` can be null in stored JSON
+  - **Patterns / API shapes established:**
+    - `IssueTemplateRegistry` follows `IssueWorkflowProfileRegistry` pattern: `Get(id, projectId?)`, `List(projectId?)`, `ListDescribed(projectId?)`, `Default`, `Exists(id, projectId?)`
+    - `IssueTemplateInfo` record returns `Id`, `Name`, `About`, `IsDefault`, `SuitableFor`, `Source` ("builtin" or "custom")
+    - Validation: `ValidateTemplate()` checks Id/Name/About/SuitableFor/Sections non-empty + each section has Title/Guidance/Placeholder
+  - **Cross-task invariants:**
+    - T-002 (API) should consume `IssueTemplateRegistry.List(projectId)` and `IssueTemplateRegistry.Get(name, projectId)`
+    - T-002 should resolve active project the same way other project-scoped reads do
+    - `mohist/default` is never deletable — no delete operation exists in registry (satisfies open-box guarantee)
+    - Route naming: `/api/issue-templates` — consistent with `/api/workflow-profiles` pattern
+
+---
+
+## Task T-002: API: issue-template list and get endpoints
+
+- **What was implemented:**
+  - `Api/IssueTemplateRoutes.cs` exposing:
+    - `GET /api/projects/{projectRef}/issue-templates/` — list, project-scoped, returns `IssueTemplateInfo` records (Id, Name, About, IsDefault, SuitableFor, Source)
+    - `GET /api/projects/{projectRef}/issue-templates/{*name}` — full template incl. sections with title/guidance/placeholder, returns `IssueTemplateDetail`
+  - Mounted at `/api/projects/{projectRef}/issue-templates` so it inherits the same project resolution (`ProjectResolutionEndpointFilter` + `IssueRoutes.GetRequiredProject`) as every other project-scoped read in the codebase (consistent with `LabelsRoutes`, `AttachmentRoutes`, etc.)
+  - Route registered via `app.MapIssueTemplateRoutes()` in `Infrastructure/Hosting/MohistApiRegistration.cs`
+  - `IssueTemplateApiSpecs` integration tests (5 tests) covering:
+    - `List_IncludesDefaultTemplate` — list returns the built-in default with name/about/suitableFor/isDefault/source
+    - `Get_ReturnsFullTemplateWithSections` — get returns full template with 5 sections in order, each carrying title/guidance/placeholder
+    - `Get_NonexistentTemplate_ReturnsNotFound` — 404 on missing template
+    - `List_ExcludesDefaultWhenDisabled` — disabled `mohist/default` is omitted from the list
+    - `DisabledDefault_DoesNotAffectOtherProjects` — disabling on project A does not affect project B
+
+- **Files changed:**
+  - Created: `packages/server/src/Mohist.Server/Api/IssueTemplateRoutes.cs`
+  - Modified: `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistApiRegistration.cs` (registered `MapIssueTemplateRoutes()` between `MapTemplateRoutes` and `MapOpencodeRoutes`)
+  - Created: `packages/server/tests/Mohist.Server.Tests/Specs/Issue/IssueTemplate/IssueTemplateApiSpecs.cs`
+
+- **Learnings for future tasks:**
+  - **Decisions made:**
+    - Mounted at `/api/projects/{projectRef}/issue-templates` (NOT `/api/issue-templates`) because `ProjectResolutionEndpointFilter` only resolves when a `{projectRef}` route value is present. The design doc note "project-scoped via `ProjectResolutionEndpointFilter`" requires the path param, so the actual path becomes `/api/projects/{projectRef}/issue-templates`. This matches every other project-scoped read in the codebase.
+    - Used catch-all `{*name}` (not `{name}`) so that template IDs containing `/` (notably the built-in `mohist/default`) match. Existing precedent: `SystemRoutes.cs:21` uses `{*id}` for the same reason with workflow template IDs.
+    - Detail DTO carries `Id/Name/About/IsDefault/SuitableFor/Defaults/Sections/Source`. The list DTO is the registry's built-in `IssueTemplateInfo`. Two distinct shapes because the consumer (CLI / Web) needs only metadata for the list and the full body for get.
+  - **Gotchas discovered:**
+    - ASP.NET Core minimal API route segments do NOT match across `/` by default. A route `MapGet("/{name}", ...)` will NOT match `/api/projects/.../issue-templates/mohist/default` — the path `/default` becomes a second segment and the request falls through to the Fallback endpoint. Use `{*name}` for any identifier that may contain slashes.
+    - When `dotnet test` is run after a code change with `--no-build`, the runner uses the stale assembly. Always rebuild before running when the source changed.
+    - A handful of pre-existing test failures in `Workflow.Domain.ApprovalFeedbackSpecs`, `Workflow.Grain.PausingWorkSpecs`, `Skills.*`, and `WorkflowArtifactUploadRouteSpecs` are NOT caused by issue-template work — they exist on the base commit and are unrelated to this task.
+  - **Patterns / API shapes established:**
+    - `IssueTemplateRoutes.MapIssueTemplateRoutes` is a `WebApplication → WebApplication` extension; consumers call it once from `MohistApiRegistration.MapMohistApi`.
+    - Detail handler pattern: `registry.Exists(name, projectId)` → 404 short-circuit; otherwise `registry.Get(name, projectId)` → build DTO. The `Source` field is computed inline as `"builtin"` iff `template.Id == IssueTemplates.DefaultId`.
+    - Tests create projects via `POST /api/projects` and manipulate the disable flag via direct DB write (`IDbContextFactory<MohistDbContext>`); this is the same approach `AttachmentApiSpecs` uses when bypassing the API to set up state.
+  - **Cross-task invariants:**
+    - T-003 (CLI `mo issue template`) should hit `/api/projects/{projectRef}/issue-templates` and `/api/projects/{projectRef}/issue-templates/{*name}` via `MohistCliApi.GetAsync`, after resolving the project via `ResolveProjectIdAsync` exactly as other CLI subcommands do.
+    - T-004 (Web selector) should call the same endpoints. Use the `useIssueTemplates` / `useIssueTemplate` hooks that wrap the API, mirroring `useWorkflowProfiles`.
+    - When tests/clients request a template by name and the name contains a slash (e.g. `mohist/default`), they should NOT URL-encode the slash — ASP.NET Core preserves it and the catch-all `{*name}` handles it.
+
+---
+
+## Task T-003: CLI: mo issue template list and get
+
+- **What was implemented:**
+  - `template` subcommand group added to `IssueCommands.Build()` in `MohistCliCommands.Issue.cs` with two children: `list` (`ls` alias) and `get <name>`.
+  - Both commands call `MohistCliApi.ResolveProjectIdAsync(project, projectId)` exactly like `mo issue list` and other issue subcommands, so they honor `--project`, `--project-id`, and the active project state file.
+  - List endpoint: `GET /api/projects/{projectRef}/issue-templates/` — rendered via the existing `MohistCliApi.PrintWithOutputAsync` + new `TableShape.IssueTemplateList`.
+  - Get endpoint: `GET /api/projects/{projectRef}/issue-templates/{name}` (no URL-encoding of the slash in `mohist/default`) — rendered via the existing `PrintWithOutputAsync` + new `TableShape.IssueTemplateShow`.
+  - Two new `TableShape` enum values: `IssueTemplateList`, `IssueTemplateShow`.
+  - Two new render methods in `TableRenderer.cs`:
+    - `RenderIssueTemplateList` — table with `name`, `about`, `default` (yes/no), `source` (builtin/custom). Renders "No issue templates" when the list is empty.
+    - `RenderIssueTemplateShow` — multi-section output: id/name/about/default/source/suitable_for on top, an optional `defaults.*` block (risk/workflow/labels), and one numbered block per section with `guidance:` and `placeholder:` indented under the title.
+  - 18 new CLI tests in `packages/cli/tests/Mohist.Cli.Tests/CliIssueTemplateCommandSpecs.cs` covering: list-hits-endpoint, `ls` alias works, `--project` resolves, no-active-project short-circuits with the standard error message, table renders each template by name with source and default marker, json passes through, empty-list renders a "No issue templates" message, server-error returns exit 1, get-default-hits-catch-all-path-without-encoding-slash, get-custom-hits-correct-path, get with no-active-project, get-table-displays-metadata-and-section-guidance, section titles print in fixed order, defaults block renders risk/workflow, 404 returns exit code 4, json envelope passes through, server-unavailable returns exit 1 with `mo server start` hint, and invalid-output-mode is rejected before any HTTP call.
+  - Total CLI tests now 84 (was 66). All 84 pass; full clean rebuild succeeds.
+
+- **Files changed:**
+  - Modified: `packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs` (added `BuildTemplate`/`BuildTemplateList`/`BuildTemplateGet`/`IssueTemplatesPath`, registered the `template` group in `Build`)
+  - Modified: `packages/cli/Mohist.Cli/MohistCliApi.cs` (added two `TableShape` enum values)
+  - Modified: `packages/cli/Mohist.Cli/TableRenderer.cs` (added switch cases + `RenderIssueTemplateList` + `RenderIssueTemplateShow`)
+  - Created: `packages/cli/tests/Mohist.Cli.Tests/CliIssueTemplateCommandSpecs.cs`
+
+- **Learnings for future tasks:**
+  - **Decisions made:**
+    - The template subcommand was added to the existing `IssueCommands` class as a sibling of `feedback`/`workflow`/`sessions`, not as a top-level command. This matches the spec ("`mo issue template list` and `mo issue template get <name>`") and Decision 5 of the design doc.
+    - List and get both route through `MohistCliApi.PrintWithOutputAsync` (the same helper used by issue list/show), passing a `TableShape` to render in `table` mode and emitting the JSON envelope in `json` mode. Output-mode validation (`table|json`) is handled the same way as issue list/show.
+    - Template name is **not** URL-encoded when building the path. The API catch-all `{*name}` requires the literal slash (e.g. `mohist/default`) so `Uri.EscapeDataString` must NOT be applied. This is consistent with `SystemRoutes.cs:21` precedent noted by T-002.
+    - For the show render, the table view deliberately prints both `guidance:` and `placeholder:` indented under each section number, so the spec's "displays metadata and its sections, showing each section's guidance" requirement is satisfied without writing any guidance into a body (which is the Web UI's job, not the CLI's).
+  - **Gotchas discovered:**
+    - `TableShape` enum parsing is case-sensitive (`Enum.TryParse(..., ignoreCase: false, ...)`) and falls back to `ProjectList` on an unknown value. Adding new shapes requires: enum value in `MohistCliApi`, switch case in `TableRenderer.Render`, and a `RenderXxx` method.
+    - `TableRenderer.Truncate(softCap=24)` (the `IdSoftCap`) is too narrow to hold the literal string `mohist/default`. The list table therefore shows the **Name** field (`Mohist Default`), not the id, when in table mode. The id is still visible in `json` mode. Tests should assert against the Name column or json id, not the literal id text in table output.
+    - `MohistCliApi.PrintEnvelopeAsync` short-circuits to `PrintResponseAsync` for non-success status codes, which means a 404 from the server surfaces as exit code 4 with the server's error message routed to stderr — same shape as `mo issue show <n>` for a missing issue. Tests can rely on this without special handling.
+    - `HttpRequestException` thrown by an unreachable server is caught by `PrintWithOutputAsync` (the wrapper around `_http.GetAsync`) and prints `MohistCliApi.ServerUnavailableMessage` to stderr with exit code 1. Tests can simulate this by having the recording handler throw.
+  - **Patterns / API shapes established:**
+    - **CLI subcommand group registration:** Within `IssueCommands.Build(api)`, the new `template` group is appended via `issue.Subcommands.Add(BuildTemplate(api))`. The build helper signature is `Build(MohistCliApi api) → Command` — consistent with `feedback`, `workflow`, `sessions`.
+    - **Path-builder helper:** Introduced `IssueTemplatesPath(projectId, path)` mirroring `ProjectIssuesPath`, `ProjectEpicsPath`, `ProjectAgentsPath`, `ProjectRepositoriesPath`. It throws `InvalidOperationException(NoActiveProjectMessage)` when `projectId` is null/whitespace, matching the other path helpers — but note the actual exit is short-circuited earlier by the `if (resolvedProjectId is null) return 1;` guard, so the throw is defensive only.
+    - **Table shape for "list + show" feature slice:** List table → 4 columns (`name`, `about`, `default`, `source`) using `IdSoftCap`/`TitleSoftCap`/`7`/`12`. Show → freeform multi-section key/value layout, not a table — best for nested arrays like `sections[]`. This is a useful template for any "list metadata + show full content" CLI command.
+  - **Cross-task invariants:**
+    - T-004 (Web UI selector) will consume the same `/api/projects/{projectRef}/issue-templates` and `/api/projects/{projectRef}/issue-templates/{name}` endpoints. The CLI rendering here is one consumer; the Web prefill transforms (client-side `## {title}\n{placeholder}`) are a separate consumer and never include `guidance`.
+    - The CLI never URL-encodes the slash in template IDs. T-004 should also use a literal slash (encode with `encodeURI` if at all, never `encodeURIComponent` on the whole id) when fetching by name, to match the catch-all API contract.
+    - `--output table|json` semantics are uniform across `mo issue list/show`, `mo issue template list/get`, and `mo epic list/show`.
+
+---
+
+## Task T-004: Web UI: template selector with body skeleton prefill
+
+- **What was implemented:**
+  - `entities/issue-templates/` slice mirroring `entities/settings/`:
+    - `model/types.ts` — `IssueTemplateInfo`, `IssueTemplateSection`, `IssueTemplateDefaults`, `IssueTemplateDetail` (matches the server `IssueTemplateDetail` DTO shape including the `defaults` and `sections` arrays).
+    - `api/client.ts` — `getIssueTemplates(projectId)` → `GET /api/projects/{ref}/issue-templates`, `getIssueTemplate(name, projectId)` → `GET /api/projects/{ref}/issue-templates/{name}` (literal slash in the path, no `encodeURIComponent` on `name`), and a pure `composeIssueTemplateBody(template)` helper that joins `## {title}\n{placeholder}` per section with `\n\n` between sections and never reads `guidance`.
+    - `api/queries.ts` — `useIssueTemplates()` (query key `['issue-templates', projectId]`, enabled only when `projectId` is set) and `useIssueTemplate(name)` (query key `['issue-template', projectId, name]`, enabled only when both are set; calls `getIssueTemplate(name!, projectId)` from the queryFn).
+    - `index.ts` — barrel re-exporting the hooks, the client functions, the helper, and the types.
+  - `features/create-issue/ui/CreateIssueDialog.tsx`:
+    - Imported the new hooks + `composeIssueTemplateBody`; consumed `useIssueTemplates()` for the list and `useIssueTemplate(selectedTemplateId)` for the detail.
+    - Added `selectedTemplateId` state plus a `useEffect` keyed on the fetched detail that calls `setBody(composeIssueTemplateBody(selectedTemplate))` so the body is prefilled as soon as the detail query resolves (avoids a race in the onChange handler).
+    - Added a `TemplateSelector` local subcomponent that renders a `<select>` populated by `useIssueTemplates`. It is disabled while `isLoading` is true, shows a `Loading templates…` placeholder option, always offers a `No template` option to clear the selection, and shows the existing selection even if it gets removed from the list (defensive, mirrors the `profileOptions` extras pattern already in the dialog).
+    - `resetAndClose()` now also clears `selectedTemplateId` so the next session starts fresh.
+  - 21 new tests in 3 files (15 entity-level + 6 dialog-level):
+    - `entities/issue-templates/api/client.test.ts` (6 tests) — `getIssueTemplates` calls the right path, returns the payload, `getIssueTemplate` issues a literal-slash URL (`/api/projects/proj-1/issue-templates/mohist/default` with no `%2F`), `composeIssueTemplateBody` joins sections in order, returns empty for empty sections, and never leaks guidance.
+    - `entities/issue-templates/api/queries.test.ts` (9 tests) — query keys are `['issue-templates', projectId]` and `['issue-template', projectId, name]`, queryFn delegates to the right client function, `enabled` is `false` when projectId is missing (and when `name` is null for the detail hook), and `enabled` is `true` when both are set.
+    - `features/create-issue/ui/CreateIssueDialog.test.tsx` (6 tests) — populates the selector with both default and custom templates, shows a loading option while loading, prefills the body with the 5-section skeleton in order, never includes any section guidance, and handles a custom 2-section template preserving order.
+  - `tsc --noEmit -p tsconfig.json` is clean, `vite build` succeeds, and all 27 web tests under `src/features/create-issue/`, `src/entities/issue-templates/`, and `tests/CreateIssueDialog.test.tsx` pass. Pre-existing failures in `EpicListPage`, `settings-consistency`, `events-hub*`, `live-task-cloud-event`, `useCoderSessions`, `settings-visual-accessibility-evidence`, and `AgentSettingsSection` are unrelated (verified by stashing my changes and re-running).
+
+- **Files changed:**
+  - Created: `packages/web/src/entities/issue-templates/model/types.ts`
+  - Created: `packages/web/src/entities/issue-templates/api/client.ts`
+  - Created: `packages/web/src/entities/issue-templates/api/client.test.ts`
+  - Created: `packages/web/src/entities/issue-templates/api/queries.ts`
+  - Created: `packages/web/src/entities/issue-templates/api/queries.test.ts`
+  - Created: `packages/web/src/entities/issue-templates/index.ts`
+  - Modified: `packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx` (added `TemplateSelector` local subcomponent, `selectedTemplateId` state + body-prefill useEffect, reset in `resetAndClose`, new imports)
+  - Modified: `packages/web/src/features/create-issue/ui/CreateIssueDialog.test.tsx` (added `vi.mock('../../../entities/issue-templates', ...)` that uses `importOriginal` to keep `composeIssueTemplateBody` real, 5 new tests in a new `describe('CreateIssueDialog template selector')` block, plus `setupTemplates` helper)
+
+- **Learnings for future tasks:**
+  - **Decisions made:**
+    - `composeIssueTemplateBody` lives in the entity `client.ts` (not in the dialog) so it can be unit-tested without React, and so any future consumer (e.g. a CLI Web preview, a "duplicate from template" flow) reuses it.
+    - Body prefill is wired via a `useEffect` keyed on the detail query, not in the selector's `onChange` — the onChange handler fires synchronously with the id but the detail query is async, so prefilling there would require buffering the id. The effect keeps the click → body update path declarative and naturally handles the "select, change mind, select again" sequence.
+    - The selector is a plain `<select>` (not a `Popover`-based combobox) to match the visual treatment of the existing `Workflow` selector in the same dialog. The component can be promoted to a richer popover later without changing the contract.
+    - `selectedTemplateId` state is reset in `resetAndClose` so the next time the dialog opens the selector shows `No template` and the detail hook re-fires only when a new selection is made.
+  - **Gotchas discovered:**
+    - `vi.mock(path, factory)` that returns a plain object REPLACES the module entirely. If the module exports pure functions (like `composeIssueTemplateBody`) that the dialog imports alongside the mocked hooks, those functions become `undefined` and the dialog crashes at render time. The fix is to use the `async (importOriginal) => ({ ...(await importOriginal()), ...overrides })` form so the real exports are preserved.
+    - `projectApiPath(projectId, '/issue-templates/' + name)` is the correct way to build the path; the leading `/` on the inner segment matters because `projectApiPath` only adds a separator when the inner path doesn't start with one. The test asserts the literal-slash URL form, mirroring T-002/T-003's "no URL-encoding" invariant.
+    - The dialog imports `useIssueTemplate` for the detail hook, but it only needs `useIssueTemplate` to be enabled when `selectedTemplateId` is set — the hook's internal `enabled: !!projectId && !!name` guard handles that, so the dialog doesn't need a local `enabled` toggle. (If a future caller wanted to gate on additional conditions, they'd need to call `useQuery` directly or use the `enabled` option in the hook.)
+    - When the existing `tests/CreateIssueDialog.test.tsx` (under `packages/web/tests/`) and the colocated `src/features/create-issue/ui/CreateIssueDialog.test.tsx` both run against the same component, both test files must be updated together if a new hook is added — otherwise the older test file's `vi.mock('../../../entities/settings')` will return an object missing the new mock and the dialog will throw at render. (In this case, the older test file only mocks `useWorkflowProfiles`/`useAvailableModelIds` from settings, so adding the issue-templates import doesn't break it; the new mocks are added in the colocated test file only.)
+  - **Patterns / API shapes established:**
+    - **Entity slice for a project-scoped read resource with catch-all id:** `api/client.ts` (typed fetches + a pure transform helper), `api/queries.ts` (`useQuery` wrappers keyed on `projectId` and the optional `id` arg), `api/client.test.ts` (URL-encoding + pure-helper tests), `api/queries.test.ts` (query-key + enabled/disabled tests using `useQuery` mock), `model/types.ts` (DTO types matching the server), `index.ts` (barrel re-export). This is the same shape as `entities/settings`, `entities/project`, `entities/issue`, and is a good template for any new project-scoped read resource.
+    - **Dialog body-prefill effect:** `[queryData]` key on a `useEffect` that calls the existing body setter. Avoids the race in the onChange handler and naturally handles "select → data resolves → body updates". Reset the source-id state in `resetAndClose` so the next session starts fresh.
+  - **Cross-task invariants:**
+    - T-004 is the final task in the `issue-template` MVP slice. All four task IDs are now wired: T-001 (server domain), T-002 (list/get API at `/api/projects/{projectRef}/issue-templates`), T-003 (CLI), T-004 (Web selector with client-side body prefill). The body skeleton is composed purely client-side from `title` + `placeholder`; `guidance` is rendered by the CLI's `get` command and the API's detail response but is never written into a body.
+    - Defaults (labels/risk/workflow) are advisory and explicitly NOT applied to the create-issue form in MVP — see T-001's open question and T-004's `notes`. A follow-up issue should decide whether to apply them on template select.
+
