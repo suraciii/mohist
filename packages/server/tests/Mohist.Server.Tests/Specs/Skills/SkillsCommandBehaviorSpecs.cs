@@ -191,12 +191,10 @@ public sealed class SkillsCommandBehaviorSpecs
     {
         var sourceSkillData = Path.Combine(publishRoot, "skill-data");
         Assert.True(Directory.Exists(sourceSkillData), $"Published skill-data missing at '{sourceSkillData}'.");
-        Assert.True(File.Exists(Path.Combine(sourceSkillData, "manifest.json")), "Published manifest.json missing.");
 
         var managedRoot = Path.Combine(tempHome, ".mohist", "cli", "skill-data");
         CopyDirectory(sourceSkillData, managedRoot);
 
-        Assert.True(File.Exists(Path.Combine(managedRoot, "manifest.json")));
         Assert.True(File.Exists(Path.Combine(managedRoot, "mohist", "SKILL.md")));
         Assert.True(File.Exists(Path.Combine(managedRoot, "mohist-explore", "SKILL.md")));
 

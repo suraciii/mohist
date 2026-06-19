@@ -18,6 +18,18 @@ The input is a seed — a sentence, a vague hunch, an improvement intent, or a h
 
 Do **not** use this skill for unfocused product patrols ("go find anything broken"). That is a different mode. This skill always starts from a seed the user provides.
 
+## Writing principles
+
+The PRD is a product document, not a technical design. Every section of the output must be:
+
+- **Concise and precise.** No filler, no restating context, no throat-clearing. Each sentence carries information the next sentence depends on.
+- **Literal, not figurative.** No metaphors and no anthropomorphism ("the CLI lies", "dead code", "silently drops", "wiring"). Describe what actually happens in plain terms: *the `--model` flag is accepted by the command but not persisted on the issue.*
+- **Product source language.** Use the names the product already uses for its own concepts — issue, workflow, stage, label, prerequisite, comment, feedback, epic, repository. Do not invent fancy synonyms or borrowed jargon.
+- **Product perspective for functional requirements.** Describe what the user sees and can do, not which files or symbols change. The PRD body must not cite source paths, file names, line numbers, or symbol names. Mapping to code is the Plan stage's job.
+- **Domain concepts in domain language.** When the Domain Model section is present, name its concepts, invariants, and constraints in the vocabulary of the domain — not as a tour of the codebase.
+
+The distinction that governs everything below: **you explore the code internally to ground your understanding, but the PRD you write down is product-facing prose. Code paths are your evidence, never your output.**
+
 ## The three-voice model
 
 A good PRD is a collaboration between three perspectives. They are **not** peers — they form a dependency chain: Product builds on User, Domain builds on Product. The skill works through them in order, and each voice has its own exploration direction and a gate it must pass before the next voice begins.
@@ -25,8 +37,8 @@ A good PRD is a collaboration between three perspectives. They are **not** peers
 | Voice | Who speaks | Explores | Language | Core question |
 |---|---|---|---|---|
 | **User Voice** | The user (you); the agent records faithfully | The user's real scenario | The user's own words | What do you actually need? Where do you get stuck? |
-| **Product Shape** | The agent as PM | Current **product form** — what the user experiences today (Web UI, CLI, user journeys) | Product language | How does the need become a concrete product decision with a real boundary? |
-| **Domain Model** | The agent as domain expert | Current **technical implementation** — how it works today, what constrains it | Domain language | How does this product decision hold up in the domain? What are the invariants and constraints? |
+| **Product Shape** | The agent as PM | The **product form** the user experiences today (Web UI, CLI, user journeys) and the target form | Product language | How does the need become a concrete product decision with a real boundary? |
+| **Domain Model** | The agent as domain expert | The **domain** the decision lives in — its concepts, invariants, and constraints. **Optional** for simple technical changes (see step 3). | Domain language | How does this product decision hold up in the domain? What are the invariants and constraints? |
 
 The most common PRD failure is skipping User Voice and jumping straight to implementation. This skill enforces that User Voice comes first, even when the idea feels obvious.
 
@@ -49,23 +61,25 @@ A minimal User Voice is one sentence naming the scenario and the need. Even for 
 
 Switch to PM perspective. Explore the current product form, then translate User Voice into a concrete product decision.
 
-- Explore what the user experiences today: the relevant Web UI pages, CLI commands, user journeys, and failure paths. Cite what you actually observe (pages visited, commands run, flows traced).
+- Explore what the user experiences today: the relevant Web UI pages, CLI commands, user journeys, and failure paths. This exploration is internal — use it to ground your understanding. Do not put source paths, file names, or symbol names in the PRD body; describe the product form in product language.
 - Translate the need into a target product form: what will the user see or be able to do? What changes in their journey?
 - Decide the boundary. State what is in scope and — just as importantly — what is not. A PRD that cannot name its non-goals is under-cooked.
 - Make the trade-offs explicit. If two directions exist, name the one you chose and why.
 
 **Gate:** Is the boundary clear? Are the non-goals brave enough (actually cutting things, not just listing safe trivia)? Does the Product Shape demonstrably resolve the User Voice — can you trace each user need to a product decision that addresses it? If not, refine.
 
-### 3. Distill Domain Model
+### 3. Distill Domain Model (optional for simple technical changes)
 
 Switch to domain expert perspective. Explore the current technical implementation, then express the Product Shape in domain terms — just enough for the Plan stage to understand the problem, not a full technical design.
 
-- Explore how the relevant area works today: the code paths, data models, and architectural constraints. Cite files and symbols you inspected.
-- Name the key domain concepts, the invariants that must hold, and the constraints that shape the solution.
+**When to include this section.** Write the Domain Model when the requirement touches a non-trivial business domain — where invariants, lifecycle rules, or cross-aggregate constraints are part of what makes the decision hard. **Omit the section entirely** when the change is a pure technical correction (a flag that doesn't persist, a missing subcommand, a CLI/API parity gap) with no complex business scenario behind it. An omitted Domain Model is better than a padded one that restates Product Shape in code terms.
+
+- Explore how the relevant area works today: the code paths, data models, and architectural constraints. This exploration is internal; do not cite files, symbols, or line numbers in the PRD body.
+- Name the key domain concepts, the invariants that must hold, and the constraints that shape the solution — in the domain's own vocabulary, not as a codebase tour.
 - Do **not** prescribe files, functions, database tables, or step-by-step implementation tasks. That belongs to the Plan stage. Domain Model is about the *problem space*, not the solution space.
 - If the Product Shape turns out to be infeasible or more complex than expected, stop and say so — then go back and revise Product Shape (see Iteration below).
 
-**Gate:** Are the domain concepts accurate (verifiable against the code)? Are the real constraints identified? Is this the minimum domain context needed to plan — or have you drifted into premature design? Trim anything that looks like an implementation recipe.
+**Gate:** If the section is present, are the domain concepts accurate and stated in domain language? Are the real constraints identified? Is this the minimum domain context needed to plan — or have you drifted into premature design? Trim anything that looks like an implementation recipe. If the section is omitted, confirm the change genuinely has no complex business scenario worth capturing.
 
 ### 4. Scope: one issue or many?
 
@@ -129,9 +143,10 @@ Common backtrack triggers:
 
 - Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist` skill's responsibility. This skill produces PRD *content*; `mohist` turns it into an issue.
 - Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
+- The PRD body carries no source paths, file names, line numbers, or symbol names. You explore code to ground your understanding; the PRD itself is product-facing prose.
 - When splitting, apply the rules strictly in priority order: bounded context → concern → scale. Do **not** split by UI surface (e.g. "the attention zone" vs "the pulse zone") or by phasing (e.g. "v1 snapshot" vs "v2 trend") — those are neither context nor concern boundaries, and they produce coupled, mis-scoped issues. Do not split by scale alone either: if context and concern are identical, keep it in one issue even if large (express the phasing inside that issue instead).
 - Do not start from a blank slate and patrol for random problems. Always begin from a user-provided seed.
-- Do not let Domain Model grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement.
+- Do not let Domain Model grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement, or omit it.
 
 ## Handoff
 

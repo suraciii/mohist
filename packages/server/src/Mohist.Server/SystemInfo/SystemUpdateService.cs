@@ -722,71 +722,41 @@ public sealed class SystemUpdateService
 
     private RuntimeConsistencyComponent BuildManagedAssetsComponent(SystemInfoResponse info)
     {
-        var manifestPath = ResolveManagedAssetManifestPath(info);
-        if (string.IsNullOrWhiteSpace(manifestPath) || !File.Exists(manifestPath))
+        var assetRoot = ResolveManagedAssetRoot();
+        if (string.IsNullOrWhiteSpace(assetRoot) || !Directory.Exists(assetRoot))
         {
             return new RuntimeConsistencyComponent(
                 "managed-assets",
                 "mismatched",
-                "Managed skill asset manifest is missing or unreadable.");
+                "Managed skill asset directory is missing or unreadable.");
         }
 
-        var manifestIdentity = TryReadManifestIdentity(manifestPath);
-        if (manifestIdentity is null)
+        try
         {
-            return new RuntimeConsistencyComponent(
-                "managed-assets",
-                "mismatched",
-                "Managed skill asset manifest is missing or unreadable.");
-        }
+            var hasSkill = Directory.EnumerateFiles(assetRoot, "SKILL.md", new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+            }).Any();
 
-        var runningHash = info.Running.GitHash;
-        if (!string.IsNullOrWhiteSpace(manifestIdentity.GitHash)
-            && !string.IsNullOrWhiteSpace(runningHash)
-            && !string.Equals(manifestIdentity.GitHash, runningHash, StringComparison.Ordinal))
-        {
-            return new RuntimeConsistencyComponent(
-                "managed-assets",
-                "mismatched",
-                $"Managed skill asset manifest git hash '{manifestIdentity.GitHash}' differs from running git hash '{runningHash}'.");
+            if (!hasSkill)
+            {
+                return new RuntimeConsistencyComponent(
+                    "managed-assets",
+                    "mismatched",
+                    $"Managed skill assets at '{assetRoot}' contain no skill.");
+            }
         }
-
-        var runningVersion = info.Running.Version;
-        if (!string.IsNullOrWhiteSpace(manifestIdentity.CliVersion)
-            && !string.IsNullOrWhiteSpace(runningVersion)
-            && !string.Equals(manifestIdentity.CliVersion, runningVersion, StringComparison.Ordinal))
+        catch
         {
             return new RuntimeConsistencyComponent(
                 "managed-assets",
                 "mismatched",
-                $"Managed skill asset manifest CLI version '{manifestIdentity.CliVersion}' differs from running version '{runningVersion}'.");
+                "Managed skill asset directory is missing or unreadable.");
         }
 
         return new RuntimeConsistencyComponent("managed-assets", "consistent", null);
     }
-
-    private static ManagedAssetIdentity? TryReadManifestIdentity(string manifestPath)
-    {
-        try
-        {
-            using var stream = File.OpenRead(manifestPath);
-            using var doc = System.Text.Json.JsonDocument.Parse(stream);
-            var root = doc.RootElement;
-            var gitHash = root.TryGetProperty("gitHash", out var gh) && gh.ValueKind == System.Text.Json.JsonValueKind.String
-                ? gh.GetString()
-                : null;
-            var cliVersion = root.TryGetProperty("cliVersion", out var cv) && cv.ValueKind == System.Text.Json.JsonValueKind.String
-                ? cv.GetString()
-                : null;
-            return new ManagedAssetIdentity(gitHash, cliVersion);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private sealed record ManagedAssetIdentity(string? GitHash, string? CliVersion);
 
     private static RuntimeConsistencyComponent BuildCliComponent(SystemInfoResponse info)
     {
@@ -798,15 +768,15 @@ public sealed class SystemUpdateService
         return new RuntimeConsistencyComponent("cli", "consistent", null);
     }
 
-    private string ResolveManagedAssetManifestPath(SystemInfoResponse info)
+    private string ResolveManagedAssetRoot()
     {
         var configured = _configuration["Mohist:CliSkillDataPath"];
         if (!string.IsNullOrWhiteSpace(configured))
-            return Path.Combine(configured, "manifest.json");
+            return configured;
 
         var home = _environment.GetEnvironmentVariable(HomeEnvironmentVariable)
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".mohist", "cli", "skill-data", "manifest.json");
+        return Path.Combine(home, ".mohist", "cli", "skill-data");
     }
 
     private static string NormalizeOutcomeStatus(string? status)

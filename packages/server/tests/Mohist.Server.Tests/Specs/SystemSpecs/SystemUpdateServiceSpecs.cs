@@ -831,9 +831,10 @@ public class SystemUpdateServiceSpecs
     public async Task GetConsistencyAsync_AllCoherentReturnsConsistent()
     {
         var store = new InMemoryUpdateStore();
-        var manifestDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(manifestDir);
-        File.WriteAllText(Path.Combine(manifestDir, "manifest.json"), "{}");
+        var skillDataDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(skillDataDir);
+        Directory.CreateDirectory(Path.Combine(skillDataDir, "mohist"));
+        File.WriteAllText(Path.Combine(skillDataDir, "mohist", "SKILL.md"), "---\nname: mohist\ndescription: test.\n---\n\n# mohist\n");
         try
         {
             var service = CreateConsistencyService(
@@ -841,7 +842,7 @@ public class SystemUpdateServiceSpecs
                 store,
                 new RecordingCommandRunner(),
                 new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                manifestDir);
+                skillDataDir);
 
             var response = await service.GetConsistencyAsync();
 
@@ -850,7 +851,7 @@ public class SystemUpdateServiceSpecs
         }
         finally
         {
-            Directory.Delete(manifestDir, recursive: true);
+            Directory.Delete(skillDataDir, recursive: true);
         }
     }
 
@@ -860,9 +861,10 @@ public class SystemUpdateServiceSpecs
     public async Task GetConsistencyAsync_RunnerUnavailableIsReported()
     {
         var store = new InMemoryUpdateStore();
-        var manifestDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(manifestDir);
-        File.WriteAllText(Path.Combine(manifestDir, "manifest.json"), "{}");
+        var skillDataDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(skillDataDir);
+        Directory.CreateDirectory(Path.Combine(skillDataDir, "mohist"));
+        File.WriteAllText(Path.Combine(skillDataDir, "mohist", "SKILL.md"), "---\nname: mohist\ndescription: test.\n---\n\n# mohist\n");
         try
         {
             var service = CreateConsistencyService(
@@ -874,7 +876,7 @@ public class SystemUpdateServiceSpecs
                 store,
                 new RecordingCommandRunner(),
                 new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                manifestDir);
+                skillDataDir);
 
             var response = await service.GetConsistencyAsync();
 
@@ -884,7 +886,7 @@ public class SystemUpdateServiceSpecs
         }
         finally
         {
-            Directory.Delete(manifestDir, recursive: true);
+            Directory.Delete(skillDataDir, recursive: true);
         }
     }
 
@@ -1014,7 +1016,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenManifestMissing()
+    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenSkillFilesMissing()
     {
         var store = new InMemoryUpdateStore();
         var missingDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
@@ -1043,13 +1045,10 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenManifestHashDiffersFromRunning()
+    public async Task GetConsistencyAsync_ManagedAssetsMismatchedWhenSkillDataDirMissing()
     {
         var store = new InMemoryUpdateStore();
-        var manifestDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(manifestDir);
-        File.WriteAllText(Path.Combine(manifestDir, "manifest.json"),
-            "{\"schemaVersion\":1,\"cliVersion\":\"1.0.0\",\"gitHash\":\"stalehash\",\"skills\":[\"mohist\"]}");
+        var skillDataDir = Path.Combine(Path.GetTempPath(), $"mohist-consistency-{Guid.NewGuid():N}");
         try
         {
             var service = CreateConsistencyService(
@@ -1057,20 +1056,18 @@ public class SystemUpdateServiceSpecs
                 store,
                 new RecordingCommandRunner(),
                 new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)),
-                manifestDir);
+                skillDataDir);
 
             var response = await service.GetConsistencyAsync();
 
             Assert.Equal("inconsistent", response.Status);
             var managed = Assert.Single(response.Components, c => c.Name == "managed-assets");
             Assert.Equal("mismatched", managed.Status);
-            Assert.Contains("stalehash", managed.Reason);
-            Assert.Contains("newhash", managed.Reason);
         }
         finally
         {
-            if (Directory.Exists(manifestDir))
-                Directory.Delete(manifestDir, recursive: true);
+            if (Directory.Exists(skillDataDir))
+                Directory.Delete(skillDataDir, recursive: true);
         }
     }
 

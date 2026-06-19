@@ -120,6 +120,7 @@ public sealed class SkillAssetServiceSpecs : IDisposable
         "..",
         "..",
         "..",
+        "..",
         "cli",
         "Mohist.Cli",
         "skill-data"));
