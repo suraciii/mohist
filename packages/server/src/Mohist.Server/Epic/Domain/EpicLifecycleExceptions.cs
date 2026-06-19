@@ -1,4 +1,4 @@
-namespace Mohist.Server.Epic.Grains;
+namespace Mohist.Server.Epic.Domain;
 
 public class EpicAlreadyTerminalException : InvalidOperationException
 {
@@ -23,5 +23,16 @@ public class EpicNotReadyToMarkDoneException : InvalidOperationException
     {
         EpicId = epicId;
         UndeliveredCount = undeliveredCount;
+    }
+}
+
+public class EpicDuplicateLinkedIssueException : InvalidOperationException
+{
+    public int IssueNumber { get; }
+
+    public EpicDuplicateLinkedIssueException(int issueNumber)
+        : base($"Issue #{issueNumber} is already linked to this epic.")
+    {
+        IssueNumber = issueNumber;
     }
 }

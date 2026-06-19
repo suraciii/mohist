@@ -1,12 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
-using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using IssueDomain = Mohist.Server.Issue.Domain;
+using EpicAggregate = Mohist.Server.Epic.Domain.Epic;
+using EpicStatusEnum = Mohist.Server.Epic.Domain.EpicStatus;
 
 namespace Mohist.Server.Epic.Grains;
 
@@ -29,21 +29,18 @@ public class EpicGrain : Grain, IEpicGrain
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var epic = new EpicRow
-        {
-            Id = $"epic_{Guid.NewGuid():N}",
-            ProjectId = projectId,
-            Number = number,
-            Title = title,
-            Description = description ?? "",
-            Priority = string.IsNullOrWhiteSpace(priority) ? "p2" : priority,
-            Status = "active",
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        db.Epics.Add(epic);
+        var epic = EpicAggregate.Create(
+            id: $"epic_{Guid.NewGuid():N}",
+            projectId: projectId,
+            number: number,
+            title: title,
+            description: description,
+            priority: priority);
+        var row = MapToRow(epic, now);
+        db.Epics.Add(row);
         await db.SaveChangesAsync();
-        return ToDto(epic);
+        epic.ClearPendingEvents();
+        return ToDto(row);
     }
 
     public async Task LinkIssueAsync(string issueId, int issueNumber, string projectId)
@@ -52,8 +49,8 @@ public class EpicGrain : Grain, IEpicGrain
         var parts = GrainKey.Split(':');
         var epicId = parts.Length > 1 ? parts[1] : parts[0];
 
-        var epic = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (epic is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
 
         var existing = await db.EpicIssues.AsNoTracking()
             .FirstOrDefaultAsync(link => link.ProjectId == projectId && link.IssueId == issueId);
@@ -64,18 +61,26 @@ public class EpicGrain : Grain, IEpicGrain
             throw new InvalidOperationException($"Issue already belongs to Epic '{existing.EpicId}'{(existingEpic is not null ? $" ({existingEpic.Title})" : "")}");
         }
 
-        if (existing is null)
+        if (existing is not null) return;
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.LinkIssue(issueId, issueNumber, now.UtcDateTime);
+
+        db.EpicIssues.Add(new EpicIssueRow
         {
-            db.EpicIssues.Add(new EpicIssueRow
-            {
-                EpicId = epicId,
-                ProjectId = projectId,
-                IssueId = issueId,
-                IssueNumber = issueNumber,
-            });
-            epic.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync();
-        }
+            EpicId = epicId,
+            ProjectId = projectId,
+            IssueId = issueId,
+            IssueNumber = issueNumber,
+        });
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
     }
 
     public async Task UnlinkIssueAsync(string issueId, string projectId)
@@ -84,15 +89,23 @@ public class EpicGrain : Grain, IEpicGrain
         var parts = GrainKey.Split(':');
         var epicId = parts.Length > 1 ? parts[1] : parts[0];
 
-        var row = await db.EpicIssues.FirstOrDefaultAsync(
-            link => link.ProjectId == projectId && link.EpicId == epicId && link.IssueId == issueId);
-        if (row is not null)
-        {
-            db.EpicIssues.Remove(row);
-            var epic = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-            if (epic is not null) epic.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync();
-        }
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) return;
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.UnlinkIssue(issueId, now.UtcDateTime);
+
+        var link = await db.EpicIssues.FirstOrDefaultAsync(
+            l => l.ProjectId == projectId && l.EpicId == epicId && l.IssueId == issueId);
+        if (link is not null) db.EpicIssues.Remove(link);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
     }
 
     public async Task<EpicDto> SetStatusAsync(string status)
@@ -102,53 +115,72 @@ public class EpicGrain : Grain, IEpicGrain
         var epicId = parts.Length > 1 ? parts[1] : parts[0];
         var projectId = parts[0];
 
-        var epic = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (epic is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
 
-        if (EpicProgress.IsTerminal(epic.Status))
-            throw new EpicAlreadyTerminalException(epic.Status, status);
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
 
-        if (string.Equals(status, "done", StringComparison.OrdinalIgnoreCase))
+        switch (status?.ToLowerInvariant())
         {
-            var ready = await IsReadyToMarkDoneAsync(db, projectId, epicId);
-            if (!ready)
-                throw new EpicNotReadyToMarkDoneException(epicId, await CountUndeliveredAsync(db, projectId, epicId));
+            case "done":
+            {
+                var undelivered = await ComputeUndeliveredLinkedNumbersAsync(db, projectId, links);
+                domain.MarkDone(undelivered, now.UtcDateTime);
+                break;
+            }
+            case "closed":
+                domain.Close(now.UtcDateTime);
+                break;
+            default:
+                throw new InvalidOperationException($"Unknown epic status '{status}'");
         }
 
-        if (string.Equals(status, "closed", StringComparison.OrdinalIgnoreCase))
-        {
-            var links = await db.EpicIssues
-                .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-                .ToListAsync();
-            if (links.Count > 0)
-                db.EpicIssues.RemoveRange(links);
-        }
-
-        epic.Status = status;
-        epic.UpdatedAt = DateTimeOffset.UtcNow;
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
-        return ToDto(epic);
+        domain.ClearPendingEvents();
+        return ToDto(row);
     }
 
-    private async Task<bool> IsReadyToMarkDoneAsync(MohistDbContext db, string projectId, string epicId)
+    public async Task<EpicDto?> UpdateAsync(string? title, string? description, string? priority)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) return null;
+
         var links = await db.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
-        if (links.Count == 0) return false;
-        var linked = await BuildLinkedIssueDtosAsync(db, projectId, links);
-        var progress = EpicProgress.Build(linked);
-        return progress.ReadyToMarkDone;
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.Update(title, description, priority, now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
+        return ToDto(row);
     }
 
-    private async Task<int> CountUndeliveredAsync(MohistDbContext db, string projectId, string epicId)
+    private async Task<HashSet<int>> ComputeUndeliveredLinkedNumbersAsync(
+        MohistDbContext db, string projectId, IReadOnlyList<EpicIssueRow> links)
     {
-        var links = await db.EpicIssues.AsNoTracking()
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToListAsync();
-        if (links.Count == 0) return 0;
+        if (links.Count == 0) return new HashSet<int>();
         var linked = await BuildLinkedIssueDtosAsync(db, projectId, links);
-        return linked.Count(i => !EpicProgress.IsCompleted(i));
+        var undelivered = new HashSet<int>();
+        foreach (var dto in linked)
+        {
+            if (!EpicProgress.IsCompleted(dto))
+                undelivered.Add(dto.Number);
+        }
+        return undelivered;
     }
 
     private static async Task<List<LinkedIssueDto>> BuildLinkedIssueDtosAsync(MohistDbContext db, string projectId, IReadOnlyList<EpicIssueRow> links)
@@ -177,22 +209,81 @@ public class EpicGrain : Grain, IEpicGrain
             .ToList();
     }
 
-    public async Task<EpicDto?> UpdateAsync(string? title, string? description, string? priority)
+    private static EpicAggregate Materialize(EpicRow row, IReadOnlyList<EpicIssueRow> links)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var parts = GrainKey.Split(':');
-        var epicId = parts.Length > 1 ? parts[1] : parts[0];
-        var projectId = parts[0];
+        var epic = new EpicAggregate
+        {
+            Id = row.Id,
+            ProjectId = row.ProjectId,
+            Number = row.Number ?? 0,
+            Title = row.Title,
+            Description = row.Description,
+            Priority = row.Priority,
+            Status = ParseStatus(row.Status),
+            CreatedAt = row.CreatedAt.UtcDateTime,
+            UpdatedAt = row.UpdatedAt.UtcDateTime,
+        };
+        foreach (var link in links)
+            epic.SeedLink(link.IssueId, link.IssueNumber);
+        return epic;
+    }
 
-        var epic = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
-        if (epic is null) return null;
+    private static EpicRow MapToRow(EpicAggregate epic, DateTimeOffset now) => new()
+    {
+        Id = epic.Id,
+        ProjectId = epic.ProjectId,
+        Number = epic.Number,
+        Title = epic.Title,
+        Description = epic.Description,
+        Priority = epic.Priority,
+        Status = StatusName(epic.Status),
+        CreatedAt = epic.CreatedAt == default ? now : new DateTimeOffset(epic.CreatedAt, TimeSpan.Zero),
+        UpdatedAt = new DateTimeOffset(epic.UpdatedAt, TimeSpan.Zero),
+    };
 
-        if (title is not null) epic.Title = title;
-        if (description is not null) epic.Description = description;
-        if (priority is not null) epic.Priority = string.IsNullOrWhiteSpace(priority) ? "p2" : priority;
-        epic.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync();
-        return ToDto(epic);
+    private static void MapToRow(EpicAggregate epic, EpicRow row, DateTimeOffset now)
+    {
+        row.Title = epic.Title;
+        row.Description = epic.Description;
+        row.Priority = epic.Priority;
+        row.Status = StatusName(epic.Status);
+        row.UpdatedAt = new DateTimeOffset(epic.UpdatedAt, TimeSpan.Zero);
+        if (row.CreatedAt == default) row.CreatedAt = now;
+    }
+
+    private static string StatusName(EpicStatusEnum status) => status switch
+    {
+        EpicStatusEnum.Active => "active",
+        EpicStatusEnum.Done => "done",
+        EpicStatusEnum.Closed => "closed",
+        _ => "active",
+    };
+
+    private static EpicStatusEnum ParseStatus(string status) => status?.ToLowerInvariant() switch
+    {
+        "done" => EpicStatusEnum.Done,
+        "closed" => EpicStatusEnum.Closed,
+        _ => EpicStatusEnum.Active,
+    };
+
+    private static void ApplyPendingEvents(MohistDbContext db, EpicAggregate epic, string projectId, string epicId)
+    {
+        var drained = epic.PendingEvents.ToArray();
+        epic.ClearPendingEvents();
+        foreach (var evt in drained)
+        {
+            if (evt is EpicClosed)
+                RemoveAllLinkedIssues(db, projectId, epicId);
+        }
+    }
+
+    private static void RemoveAllLinkedIssues(MohistDbContext db, string projectId, string epicId)
+    {
+        var links = db.EpicIssues
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToList();
+        if (links.Count > 0)
+            db.EpicIssues.RemoveRange(links);
     }
 
     private static EpicDto ToDto(EpicRow epic) =>
