@@ -37,12 +37,25 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  ariaModal = true,
+  contentProps,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  /**
+   * When true (default) the dialog content is exposed as `aria-modal="true"`.
+   * Consumers building non-modal commands can opt out.
+   */
+  ariaModal?: boolean
+  /**
+   * Extra props forwarded to the inner `DialogContent` element so callers
+   * can attach `data-testid`, additional aria attributes, etc., without
+   * wrapping the primitive.
+   */
+  contentProps?: React.ComponentProps<typeof DialogContent>
   children: React.ReactNode
 }) {
   return (
@@ -52,13 +65,15 @@ function CommandDialog({
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
       <DialogContent
+        aria-modal={ariaModal ? "true" : undefined}
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
           className
         )}
         showCloseButton={showCloseButton}
+        {...contentProps}
       >
-        {children}
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   )

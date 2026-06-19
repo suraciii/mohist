@@ -4,12 +4,42 @@ import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
+import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
 interface Props {
   projectId: string
 }
+
+export const REVEAL_REPOSITORY_ADD_FORM_EVENT = 'mohist:settings:reveal-repository-add-form'
+
+export const REPOSITORIES_DESCRIPTORS: SettingsSearchEntry[] = [
+  {
+    tab: 'repositories',
+    label: 'Repository name',
+    description: 'Display name for a new repository in this project.',
+    placeholder: 'e.g. frontend',
+    focusTargetId: 'repository-add-name',
+    revealEvent: REVEAL_REPOSITORY_ADD_FORM_EVENT,
+  },
+  {
+    tab: 'repositories',
+    label: 'Repository base branch',
+    description: 'Default branch checked out when work begins on this repository.',
+    placeholder: 'main',
+    focusTargetId: 'repository-add-branch',
+    revealEvent: REVEAL_REPOSITORY_ADD_FORM_EVENT,
+  },
+  {
+    tab: 'repositories',
+    label: 'Repository Git URL',
+    description: 'Remote URL for cloning the repository.',
+    placeholder: 'https://github.com/org/repo.git',
+    focusTargetId: 'repository-add-giturl',
+    revealEvent: REVEAL_REPOSITORY_ADD_FORM_EVENT,
+  },
+]
 
 export function RepositoriesSection({ projectId }: Props) {
   const { data: repositories, isLoading } = useRepositories(projectId)
@@ -30,6 +60,14 @@ export function RepositoriesSection({ projectId }: Props) {
       nameInputRef.current?.focus()
     }
   }, [showForm])
+
+  useEffect(() => {
+    function revealAddForm() {
+      setShowForm(true)
+    }
+    window.addEventListener(REVEAL_REPOSITORY_ADD_FORM_EVENT, revealAddForm)
+    return () => window.removeEventListener(REVEAL_REPOSITORY_ADD_FORM_EVENT, revealAddForm)
+  }, [])
 
   function handleAdd() {
     if (!newName.trim() || !newGitUrl.trim()) return

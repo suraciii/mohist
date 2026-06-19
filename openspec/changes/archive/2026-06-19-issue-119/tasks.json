@@ -1,0 +1,94 @@
+{
+  "project": "mohist-local",
+  "description": "Settings 2.0: settings-page-scoped ⌘K search over a central field registry, plus a 7th Preferences tab with a no-FOUC light/dark/system theme selector and a read-only shortcut reference.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Theme system foundation: no-FOUC dark-mode activation",
+      "spec": "specs/settings-preferences/spec.md#Theme selection loads without a flash of unstyled content (no FOUC)",
+      "description": "Activate the currently-dead `dark:` styles via a class-based `.dark` toggle on `<html>`. Add a synchronous inline pre-paint `<script>` in `packages/web/index.html` that reads `mohist:theme` (resolving `system` through `matchMedia('(prefers-color-scheme: dark)')`) and sets the `.dark` class before first paint. Extract the resolution into a pure `resolveTheme(stored, prefersDark)` helper, and add a minimal `ThemeProvider` + `useTheme` at the app root (`main.tsx`/`App`) that persists the choice to `mohist:theme` and tracks OS changes via a `matchMedia` listener while in `system` mode. localStorage access is try/catch guarded.",
+      "acceptanceCriteria": [
+        "Loading with `mohist:theme=dark` in localStorage produces a first paint that is already dark (no light flash); unit test of `resolveTheme` covers light/dark/system resolution.",
+        "`useTheme` setTheme('light'|'dark'|'system') adds/removes the `.dark` class on `document.documentElement` immediately and writes the value to `mohist:theme`.",
+        "In `system` mode, firing a `matchMedia('(prefers-color-scheme: dark)')` change updates the applied theme live (unit test).",
+        "With no stored preference, the applied theme follows `prefers-color-scheme` (unit test).",
+        "localStorage access is guarded so private-mode/quota errors do not throw (unit test).",
+        "`npm test` theme unit tests pass and existing vitest suites remain green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/index.html (pre-paint script), pure resolveTheme helper, ThemeProvider/useTheme, and unit tests covering FOUC resolution, persistence, system tracking, and the try/catch guard.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D5. Also satisfies the dark-theme-reachable precondition for the modified `settings-accessibility` contrast/focus-visible requirements (dark scans become possible once `.dark` is activatable). Additional spec coverage: `specs/settings-preferences/spec.md#Theme switching activates the existing dark-mode styles`."
+    },
+    {
+      "id": "T-002",
+      "title": "Central settings-search registry + stable field-id backfill",
+      "spec": "specs/settings-search/spec.md#Every searchable settings field is registered in a central settings registry",
+      "description": "Create the settings-search registry module (`settings-search/registry.ts`) with the descriptor shape `{ tab, label, description, placeholder?, focusTargetId }`, aggregating descriptor arrays exported by each section. Backfill stable focusable ids on the controls that lack them (Repositories, Workflows, Templates, System) and reuse the existing ids in `AgentSettingsSection` (`agent-runtime-<key>`) and `AiSettingsSection` (stage labels) — no duplicate ids. This is the data substrate the search dialog consumes; the id backfill is itself a verifiable quality improvement.",
+      "acceptanceCriteria": [
+        "Every configurable field across the 6 existing tabs has a registry entry containing `{ tab, label, description, placeholder?, focusTargetId }`.",
+        "Every entry's `focusTargetId` resolves via `document.getElementById` to a focusable element when its tab is active (unit/integration test renders each tab and asserts focus).",
+        "No two entries share a `focusTargetId`; `AgentSettingsSection.FIELDS` and `AiSettingsSection` stage ids are reused rather than duplicated (unit test).",
+        "A unit test enumerates the registry and asserts each tab's expected fields are present.",
+        "`npm test` passes (new registry tests + existing `AgentSettingsSection.test.tsx`/section tests unchanged in intent)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "settings-search/registry.ts, per-section exported descriptor arrays, stable id backfill on the 4 id-less sections, and registry unit/integration tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D2. Foundational task consumed by T-004; the descriptor arrays are owned by each section (Preferences self-registers in T-003). Independent of T-001 (no theme dependency)."
+    },
+    {
+      "id": "T-003",
+      "title": "Preferences tab: theme selector + read-only shortcut reference",
+      "spec": "specs/settings-preferences/spec.md#Preferences tab holds only real user preferences and read-only reference information",
+      "description": "Add the 7th Preferences tab. `PreferencesSection` composes the existing `<SettingsSection>` (page title) and `<CardSection tone=\"default\">` (cards). A labeled 3-option theme selector (light/dark/system) is wired to `useTheme` from T-001. A single-source-of-truth `keyboard-shortcuts.ts` array lists only real shortcuts (sidebar ⌘B, settings search ⌘K) rendered read-only. Wire the tab into `SettingsPage` (`VALID_SECTIONS`, `SECTION_META`, `SectionContent`, redirect validation) and have `PreferencesSection` export its own descriptor into the registry from T-002.",
+      "acceptanceCriteria": [
+        "SettingsPage renders a navigable Preferences tab; `/settings/preferences` resolves and invalid sections still redirect (updated `SettingsPage.test.tsx`).",
+        "Theme selector offers exactly light/dark/system; selecting an option applies immediately without reload and persists to `mohist:theme`; with no stored preference the selector reflects `system`.",
+        "Shortcut reference lists only real shortcuts (⌘B sidebar toggle, ⌘K settings search) and is non-interactive; a unit test asserts each shortcut id maps to a registered handler.",
+        "No notification toggle and no timezone/CLI-path fields appear on Preferences (non-goal guard test).",
+        "Preferences page title comes from `<SettingsSection>` and cards from `<CardSection>` (satisfies modified `settings-visual-consistency` scope).",
+        "Preferences theme control is programmatically labeled (`<label htmlFor>`/`aria-labelledby`) and its interactive elements meet the 44×44 target (modified `settings-accessibility`).",
+        "Preferences descriptor is present in the registry; the axe-core a11y regression scans the Preferences tab in both light and dark themes with zero critical/serious violations (modified `settings-accessibility` enumeration now includes preferences).",
+        "`npm test` passes (new `PreferencesSection` tests + updated `SettingsPage.test.tsx`)."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "PreferencesSection.tsx, keyboard-shortcuts.ts, SettingsPage tab wiring, Preferences descriptor export, and unit tests; extended a11y scan coverage for the Preferences tab.",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Implements design D6/D7. Depends on T-001 (useTheme/provider) and T-002 (registry module to self-register into). Additional spec coverage: `#Theme selector offers light, dark, and system options with immediate effect`, `#Keyboard-shortcut reference is read-only and lists only currently-real shortcuts`, and modified `settings-visual-consistency` / `settings-accessibility` (Preferences portion)."
+    },
+    {
+      "id": "T-004",
+      "title": "Settings search dialog: ⌘K, cmdk-based, navigate + focus",
+      "spec": "specs/settings-search/spec.md#Settings search is invoked by a settings-scoped keyboard shortcut",
+      "description": "Add a `SettingsSearch` component mounted inside `SettingsPage` that registers a local ⌘K (Mac) / Ctrl+K (other) handler (guarded against editable fields and re-trigger while open; not registered globally). It renders the existing cmdk `CommandDialog`/`CommandInput`/`CommandList`/`CommandEmpty`/`CommandGroup`/`CommandItem` fed by the registry from T-002/T-003, with each `CommandItem` setting `value` = label+description+placeholder so live values are excluded from matching. Enter closes the dialog, navigates to the owning tab, and focuses the field via an rAF element-poll; empty results show 'No matching settings'; Esc/overlay dismiss without navigating.",
+      "acceptanceCriteria": [
+        "⌘K / Ctrl+K opens the dialog only while on the Settings page; it does not fire on other routes, inside editable fields, or when the dialog is already open; no global handler is registered (unit test).",
+        "Search matches on label/description/placeholder and excludes current values — a unit test seeds a numeric value (e.g. a timeout of 30) and asserts searching that number returns no result unless it appears in label/description/placeholder.",
+        "Enter on a highlighted result closes the dialog, switches to the owning tab, and focuses the field with a visible `:focus-visible` indicator — verified by a Playwright e2e spec.",
+        "An empty query result renders 'No matching settings'; Esc and overlay click close the dialog without navigating (unit + e2e).",
+        "The dialog is an accessible modal (`aria-modal`, labelled via `aria-labelledby`, focus-trapped, closes on Escape) — covered by the extended axe-core a11y spec scanning the open dialog.",
+        "The extended axe-core regression scans all 7 Settings tabs and the open search dialog in BOTH light and dark themes with zero critical/serious violations (modified `settings-accessibility` regression-coverage requirement).",
+        "A new non-a11y Playwright config (e.g. `playwright.config.ts`, `testDir: ./tests/e2e`, modeled on `playwright.a11y.config.ts`) is added and the search e2e passes.",
+        "No new command-palette infrastructure is introduced — only the existing cmdk primitives are used (grep/ review check).",
+        "`npm test` and the new e2e run pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SettingsSearch.tsx (mounted in SettingsPage), new Playwright config, search e2e spec, search unit tests, and extended a11y coverage for the open search dialog.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Implements design D1/D3/D4. Depends on T-002 (registry) and T-003 (registry complete across all 7 tabs incl. Preferences). Additional spec coverage: `#Settings search is built from the existing cmdk primitives`, `#Settings search matches on label, description, and placeholder but excludes current values`, `#Activating a search result navigates to its tab and focuses the field`, `#Settings search empty state and dismissal`, and the modified `settings-accessibility` modal-dialog/keyboard-nav requirements for the search dialog."
+    }
+  ]
+}

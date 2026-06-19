@@ -6,6 +6,7 @@ import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Input } from '@/shared/ui/components/input'
 import { Tooltip } from '@/shared/ui/components/tooltip'
+import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -151,6 +152,13 @@ const FIELDS: FieldDef[] = [
     group: 'recovery',
   },
 ]
+
+export const AGENT_RUNTIME_DESCRIPTORS: SettingsSearchEntry[] = FIELDS.map((field) => ({
+  tab: 'agent',
+  label: field.label,
+  description: field.description,
+  focusTargetId: `agent-runtime-${field.key}`,
+}))
 
 function TimeoutDiagram({ session, stage, task }: { session: number; stage: number; task: number }) {
   const lines = [

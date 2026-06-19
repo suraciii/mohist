@@ -10,6 +10,7 @@ import {
   useSystemTemplates,
 } from '../../../entities/template'
 import type { ProjectTemplate, SystemTemplate } from '../../../entities/template'
+import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 import { TemplateEditor, type TemplateEditorTarget, type EditorMode } from './TemplateEditor'
@@ -79,6 +80,22 @@ function TagChips({ tags }: { tags: string[] }) {
     </div>
   )
 }
+
+export const TEMPLATES_DESCRIPTORS: SettingsSearchEntry[] = [
+  {
+    tab: 'templates',
+    label: 'Template search',
+    description: 'Filter templates by key, name, tag, or description.',
+    placeholder: 'Search by key, name, tag, or description',
+    focusTargetId: 'templates-search',
+  },
+  {
+    tab: 'templates',
+    label: 'New Template',
+    description: 'Create a project-unique prompt template.',
+    focusTargetId: 'template-new-button',
+  },
+]
 
 function matchesSearch(
   template: ProjectTemplate,
@@ -254,6 +271,7 @@ export function TemplatesSection() {
     >
       <div className="flex justify-end">
         <Button
+          id="template-new-button"
           size="sm"
           onClick={() => setNewDialogOpen(true)}
           data-testid="template-new-button"
@@ -267,6 +285,7 @@ export function TemplatesSection() {
       <div className="relative">
         <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
+          id="templates-search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by key, name, tag, or description"

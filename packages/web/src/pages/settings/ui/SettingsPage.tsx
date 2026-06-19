@@ -7,9 +7,11 @@ import {
   FolderTreeIcon,
   GitBranchIcon,
   SettingsIcon,
+  SlidersHorizontalIcon,
 } from 'lucide-react'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
+import { PreferencesSection } from './PreferencesSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
 import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 import { RepositoriesSection } from './RepositoriesSection'
@@ -17,6 +19,7 @@ import { TemplatesSection } from './TemplatesSection'
 import { OnboardingBanner } from './OnboardingBanner'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject, useProjectPath } from '../../../entities/project'
+import { SettingsSearch } from '@/features/settings-search'
 import {
   Tabs,
   TabsContent,
@@ -24,7 +27,15 @@ import {
   TabsTrigger,
 } from '@/shared/ui/components/tabs'
 
-const VALID_SECTIONS = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system'] as const
+const VALID_SECTIONS = [
+  'ai',
+  'agent',
+  'repositories',
+  'workflows',
+  'templates',
+  'system',
+  'preferences',
+] as const
 type Section = (typeof VALID_SECTIONS)[number]
 const ONBOARDING_DISMISSED_KEY = 'mohist:settings-onboarding-dismissed'
 
@@ -35,6 +46,7 @@ const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
   { key: 'workflows', label: 'Workflows', icon: <GitBranchIcon /> },
   { key: 'templates', label: 'Templates', icon: <FileTextIcon /> },
   { key: 'system', label: 'System', icon: <SettingsIcon /> },
+  { key: 'preferences', label: 'Preferences', icon: <SlidersHorizontalIcon /> },
 ]
 
 function isValidSection(s: string): s is Section {
@@ -61,6 +73,8 @@ function SectionContent({ section }: { section: Section }) {
       return <TemplatesSection />
     case 'system':
       return <SystemSettingsSection />
+    case 'preferences':
+      return <PreferencesSection />
   }
 }
 
@@ -111,6 +125,7 @@ export function SettingsPage() {
           ))}
         </Tabs>
       </div>
+      <SettingsSearch />
     </div>
   )
 }

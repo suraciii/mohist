@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useParams, Outlet } from 'react-router-dom'
 import { useProjects } from '../entities/project'
 import { LiveTaskProvider } from './providers/LiveTaskProvider'
+import { ThemeProvider } from './providers/ThemeProvider'
 import { ProjectProvider, useProject, projectPath } from '../entities/project'
 import { Header } from '../widgets/app-shell'
 import { AppSidebar } from '../widgets/app-shell/ui/AppSidebar'
@@ -119,14 +120,16 @@ function shouldShowCreateIssueFab(pathname: string) {
 
 export default function App() {
   return (
-    <ProjectProvider>
-      <RuntimeToastHost>
-        <LiveTaskProvider>
-          <BrowserRouter>
-            <AppContent />
-          </BrowserRouter>
-        </LiveTaskProvider>
-      </RuntimeToastHost>
-    </ProjectProvider>
+    <ThemeProvider>
+      <ProjectProvider>
+        <RuntimeToastHost>
+          <LiveTaskProvider>
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+          </LiveTaskProvider>
+        </RuntimeToastHost>
+      </ProjectProvider>
+    </ThemeProvider>
   )
 }

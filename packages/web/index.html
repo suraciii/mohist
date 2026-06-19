@@ -5,6 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#ffffff" />
     <title>mohist</title>
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('mohist:theme');
+          var prefersDark = false;
+          try {
+            prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches === true;
+          } catch (_) {
+            prefersDark = false;
+          }
+          var resolved = (stored === 'light' || stored === 'dark')
+            ? stored
+            : (prefersDark ? 'dark' : 'light');
+          var root = document.documentElement;
+          if (resolved === 'dark') {
+            root.classList.add('dark');
+          } else {
+            root.classList.remove('dark');
+          }
+        } catch (_) {
+          // Storage or DOM unavailable: leave the root element untouched.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

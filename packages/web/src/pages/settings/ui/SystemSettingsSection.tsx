@@ -14,6 +14,7 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 import { CardSection } from '@/shared/ui/components/card-section'
+import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 import { ALL_LEVELS, type LogLevel } from '@/shared/lib/log-levels'
@@ -72,6 +73,21 @@ function formatTimestamp(value: string | null | undefined) {
 function isLogLevel(value: string): value is LogLevel {
   return (ALL_LEVELS as readonly string[]).includes(value)
 }
+
+export const SYSTEM_DESCRIPTORS: SettingsSearchEntry[] = [
+  {
+    tab: 'system',
+    label: 'Log Level',
+    description: 'Server-side logging verbosity for diagnostics.',
+    focusTargetId: 'system-log-level',
+  },
+  {
+    tab: 'system',
+    label: 'Source Path',
+    description: 'Local source checkout path used by this Mohist runtime.',
+    focusTargetId: 'system-source-path',
+  },
+]
 
 export function SystemSettingsSection() {
   const { data: logLevelData, isLoading: logLevelLoading, isError: logLevelError, error: logLevelErrorValue } = useLogLevel()
@@ -219,7 +235,7 @@ export function SystemSettingsSection() {
               onValueChange={(value) => value && handleLogLevelChange(value)}
               disabled={saving || !currentLevel}
             >
-              <SelectTrigger aria-labelledby="system-log-level-label" className="w-full max-w-xs">
+              <SelectTrigger id="system-log-level" aria-labelledby="system-log-level-label" className="w-full max-w-xs">
                 <SelectValue placeholder="Select log level" />
               </SelectTrigger>
               <SelectContent>
@@ -277,7 +293,11 @@ export function SystemSettingsSection() {
           </CardSection>
 
           <CardSection title="Source" titleAs="h3" tone={systemInfo.source.dirty ? 'amber' : 'default'}>
-            <InfoRow label="Path">{formatValue(systemInfo.source.path)}</InfoRow>
+            <InfoRow label="Path">
+              <span id="system-source-path" tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+                {formatValue(systemInfo.source.path)}
+              </span>
+            </InfoRow>
             <InfoRow label="Branch">{formatValue(systemInfo.source.branch)}</InfoRow>
             <InfoRow label="HEAD">
               <span title={sourceHead ?? undefined}>
