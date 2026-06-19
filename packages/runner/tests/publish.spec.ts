@@ -111,12 +111,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -148,15 +146,14 @@ describe("mohist/publish (branch-stable)", () => {
     expect(workspaceSeen.some((c) => c.startsWith("merge --squash "))).toBe(false)
     expect(workspaceSeen.some((c) => c.startsWith("commit "))).toBe(false)
     expect(workspaceSeen.some((c) => c.startsWith("push "))).toBe(false)
-    expect(workspaceSeen.some((c) => c === "checkout master")).toBe(false)
+    expect(workspaceSeen.some((c) => c === "checkout -B master origin/master")).toBe(false)
 
     // Landing workspace has the full landing sequence.
     expect(landingSeen).toEqual([
       "fetch origin master",
       "rev-parse origin/master",
-      "checkout master",
+      "checkout -B master origin/master",
       "status --porcelain",
-      "merge --ff-only origin/master",
       "merge-base --is-ancestor origin/master mo/issue-82",
       "merge --squash mo/issue-82",
       "commit -m SignalR realtime push (#82) -m mo/issue-82 into master",
@@ -178,7 +175,7 @@ describe("mohist/publish (branch-stable)", () => {
     expect(output).not.toHaveProperty("resolveAttempts")
   })
 
-  it("StaleLocalTarget_FastForwardsToRemoteBeforeSquashAndPush", async () => {
+  it("StaleLocalTarget_ResetToRemoteBeforeSquashAndPush", async () => {
     const { calls } = installGitAndLanding(async () => fail("unexpected"))
 
     const landingSeen: string[] = []
@@ -193,12 +190,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("From https://example.com/repo.git\n * branch            master     -> FETCH_HEAD")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Updating local..remote\nFast-forward")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -222,7 +217,9 @@ describe("mohist/publish (branch-stable)", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(landingSeen.indexOf("merge --ff-only origin/master")).toBeLessThan(landingSeen.indexOf("merge --squash mo/issue-82"))
+    expect(landingSeen).toContain("checkout -B master origin/master")
+    expect(landingSeen).not.toContain("merge --ff-only origin/master")
+    expect(landingSeen.indexOf("checkout -B master origin/master")).toBeLessThan(landingSeen.indexOf("merge --squash mo/issue-82"))
     expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
     expect(output).toMatchObject({
       kind: "publish",
@@ -245,12 +242,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Updating local..remote\nFast-forward")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return fail("")
         case "reset --hard remote-head-sha":
@@ -296,12 +291,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -353,12 +346,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -414,12 +405,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -468,12 +457,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -518,7 +505,7 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok(" M packages/server/src/Server.cs\n")
@@ -562,7 +549,7 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return fail("error: pathspec 'master' did not match any file(s) known to git")
         case "rev-parse --git-path rebase-merge":
           return ok(".git/rebase-merge\n")
@@ -606,7 +593,7 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return fail("error: Your local changes would be overwritten")
         case "rev-parse --git-path rebase-merge":
           return ok(".git/rebase-merge\n")
@@ -652,12 +639,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/main":
           return ok("remote-head-sha\n")
-        case "checkout main":
+        case "checkout -B main origin/main":
           return ok("Switched to branch 'main'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/main":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/main mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -681,7 +666,7 @@ describe("mohist/publish (branch-stable)", () => {
 
     expect(result.status).toBe("success")
     expect(workspaceCalls(calls)).toEqual(["rev-parse mo/issue-82"])
-    expect(landingSeen).toContain("checkout main")
+    expect(landingSeen).toContain("checkout -B main origin/main")
     expect(landingSeen).toContain("push origin main")
     expect(output).toMatchObject({
       kind: "publish",
@@ -704,12 +689,10 @@ describe("mohist/publish (branch-stable)", () => {
           return ok("")
         case "rev-parse origin/master":
           return ok("remote-head-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return ok("Switched to branch 'master'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/master":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-82":
           return ok("")
         case "merge --squash mo/issue-82":
@@ -736,7 +719,7 @@ describe("mohist/publish (branch-stable)", () => {
     // operation. The only operation against the workflow workspace is
     // the read-only source-anchor resolution; everything else lives in
     // the landing workspace.
-    for (const forbidden of ["checkout master", "merge --squash mo/issue-82", "commit -m SignalR realtime push (#82) -m mo/issue-82 into master", "push origin master"]) {
+    for (const forbidden of ["checkout -B master origin/master", "merge --squash mo/issue-82", "commit -m SignalR realtime push (#82) -m mo/issue-82 into master", "push origin master"]) {
       expect(workspaceCmdSet.has(forbidden)).toBe(false)
     }
   })

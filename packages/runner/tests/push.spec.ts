@@ -104,12 +104,10 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
           return ok("")
         case "rev-parse origin/main":
           return ok("remote-head-sha\n")
-        case "checkout main":
+        case "checkout -B main origin/main":
           return ok("Switched to branch 'main'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/main":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/main mo/issue-99":
           return ok("")
         case "merge --squash mo/issue-99":
@@ -161,12 +159,10 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
           return ok("")
         case "rev-parse origin/main":
           return ok("remote-head-sha\n")
-        case "checkout main":
+        case "checkout -B main origin/main":
           return ok("Switched to branch 'main'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/main":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/main mo/issue-99":
           return ok("")
         case "merge --squash mo/issue-99":
@@ -219,12 +215,10 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
           return ok("")
         case "rev-parse origin/main":
           return ok("remote-head-sha\n")
-        case "checkout main":
+        case "checkout -B main origin/main":
           return ok("Switched to branch 'main'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/main":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/main mo/issue-99":
           return ok("")
         case "merge --squash mo/issue-99":
@@ -272,12 +266,10 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
           return ok("")
         case "rev-parse upstream/main":
           return ok("remote-head-sha\n")
-        case "checkout main":
+        case "checkout -B main upstream/main":
           return ok("Switched to branch 'main'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only upstream/main":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor upstream/main mo/issue-99":
           return ok("")
         case "merge --squash mo/issue-99":
@@ -307,7 +299,8 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
     // workspace path.
     expect(landingCalls(calls)).toContain("push upstream main")
     expect(landingCalls(calls)).toContain("fetch upstream main")
-    expect(landingCalls(calls)).toContain("merge --ff-only upstream/main")
+    expect(landingCalls(calls)).toContain("checkout -B main upstream/main")
+    expect(landingCalls(calls)).not.toContain("merge --ff-only upstream/main")
     expect(workspaceCalls(calls)).not.toContain("push upstream main")
     expect(output).toMatchObject({
       kind: "publish",
@@ -330,12 +323,10 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
           return ok("")
         case "rev-parse origin/main":
           return ok("remote-head-sha\n")
-        case "checkout main":
+        case "checkout -B main origin/main":
           return ok("Switched to branch 'main'")
         case "status --porcelain":
           return ok("")
-        case "merge --ff-only origin/main":
-          return ok("Already up to date.")
         case "merge-base --is-ancestor origin/main mo/issue-99":
           return ok("")
         case "merge --squash mo/issue-99":
@@ -362,7 +353,7 @@ describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
     // workflow workspace. The only operation against the workflow
     // workspace is the read-only source-anchor check.
     const workspaceCmdSet = new Set(workspaceCalls(calls))
-    expect(workspaceCmdSet.has("checkout main")).toBe(false)
+    expect(workspaceCmdSet.has("checkout -B main origin/main")).toBe(false)
     expect(workspaceCmdSet.has("merge --squash mo/issue-99")).toBe(false)
     expect(workspaceCmdSet.has("commit -m Push action issue (#99) -m mo/issue-99 into main")).toBe(false)
     expect(workspaceCmdSet.has("push origin main")).toBe(false)
