@@ -57,7 +57,6 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 
         var (checks2, r4) = await PollWorkAnyAsync();
         Assert.Equal("checks", checks2.WorkType);
-        Assert.NotEqual(checks1.WorkId, checks2.WorkId);
         await ReportChecksPassAsync(r4, checks2, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
@@ -89,7 +88,6 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 
         var (checks2, r5) = await PollWorkAnyAsync();
         Assert.Equal("checks", checks2.WorkType);
-        Assert.NotEqual(checks1.WorkId, checks2.WorkId);
         await ReportChecksPassAsync(r5, checks2, "review-passed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r5);

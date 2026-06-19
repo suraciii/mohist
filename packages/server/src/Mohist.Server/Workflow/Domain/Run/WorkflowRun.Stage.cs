@@ -86,20 +86,13 @@ public static partial class WorkflowRunExtensions
                 && string.Equals(t.RunnerId, runnerId, StringComparison.Ordinal));
 
         public StageCheck? DispatchedCheck =>
-            stage.Checks.FirstOrDefault(c =>
-                c.Status == StageCheckStatus.Pending
-                && !string.IsNullOrWhiteSpace(c.DispatchWorkId));
-
-        public StageCheck? FindDispatchedCheckByWork(string workId, string runnerId) =>
-            stage.Checks.FirstOrDefault(c =>
-                c.Status == StageCheckStatus.Pending
-                && string.Equals(c.DispatchWorkId, workId, StringComparison.Ordinal)
-                && string.Equals(c.DispatchRunnerId, runnerId, StringComparison.Ordinal));
+            stage.Checks.FirstOrDefault(c => c.Status == StageCheckStatus.Dispatched);
 
         public void ClearDispatchedChecks()
         {
-            foreach (var check in stage.Checks)
-                check.ClearDispatch();
+            foreach (var check in stage.Checks.Where(c => c.Status == StageCheckStatus.Dispatched))
+                check.Status = StageCheckStatus.Pending;
+            stage.DispatchedChecksWorkId = null;
         }
 
         internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
@@ -123,9 +116,6 @@ public static partial class WorkflowRunExtensions
         private StageCheck FindCheck(string name)
             => stage.Checks.FirstOrDefault(c => c.Name == name)
                 ?? throw new InvalidOperationException($"Check {name} not found in stage {stage.Id}");
-
-        private StageCheck CurrentCheck()
-            => stage.Checks.FirstOrDefault(c => c.Status == StageCheckStatus.Pending)!;
 
         public bool HasNoPendingTasksAndPassedChecks()
         {
@@ -211,7 +201,6 @@ public static partial class WorkflowRunExtensions
             foreach (var stageCheck in stage.Checks)
             {
                 stageCheck.Status = StageCheckStatus.Pending;
-                stageCheck.ClearDispatch();
                 stageCheck.Message = null;
                 stageCheck.Output = null;
             }

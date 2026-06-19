@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum StageCheckStatus { Pending, Passed, Failed }
+public enum StageCheckStatus { Pending, Dispatched, Passed, Failed }
 
 public sealed record CheckItem(
     string Name,
@@ -29,17 +29,7 @@ public sealed class StageCheck
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
     public StageCheckStatus Status { get; set; }
-    public string? DispatchWorkId { get; set; }
-    public string? DispatchRunnerId { get; set; }
-    public DateTimeOffset? DispatchedAt { get; set; }
     public int RepairCount { get; set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }
-
-    public void ClearDispatch()
-    {
-        DispatchWorkId = null;
-        DispatchRunnerId = null;
-        DispatchedAt = null;
-    }
 }

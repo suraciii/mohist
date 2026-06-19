@@ -132,7 +132,7 @@ public class TaskLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void StageCheck_DispatchMetadataCanBeSetAndCleared()
+    public void StageCheck_LifecycleTransitionsThroughDispatched()
     {
         var check = new StageCheck
         {
@@ -140,23 +140,11 @@ public class TaskLifecycleSpecs
             Title = "Build OK",
             Status = StageCheckStatus.Pending
         };
-        var dispatchedAt = DateTimeOffset.UtcNow;
 
-        check.DispatchWorkId = "check-work-1";
-        check.DispatchRunnerId = "runner-1";
-        check.DispatchedAt = dispatchedAt;
+        check.Status = StageCheckStatus.Dispatched;
+        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
 
-        Assert.Equal(StageCheckStatus.Pending, check.Status);
-        Assert.Equal("check-work-1", check.DispatchWorkId);
-        Assert.Equal("runner-1", check.DispatchRunnerId);
-        Assert.Equal(dispatchedAt, check.DispatchedAt);
-
-        check.DispatchWorkId = null;
-        check.DispatchRunnerId = null;
-        check.DispatchedAt = null;
-
-        Assert.Null(check.DispatchWorkId);
-        Assert.Null(check.DispatchRunnerId);
-        Assert.Null(check.DispatchedAt);
+        check.Status = StageCheckStatus.Passed;
+        Assert.Equal(StageCheckStatus.Passed, check.Status);
     }
 }
