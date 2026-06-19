@@ -18,5 +18,4 @@ public sealed class StageRun
     public List<StageCheck> Checks { get; set; } = new();
     public ApprovalStatus? ApprovalStatus { get; set; }
     public FailureDetails? Failure { get; set; }
-    public string? DispatchedChecksWorkId { get; set; }
 }

@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum StageCheckStatus { Pending, Dispatched, Passed, Failed }
+public enum StageCheckStatus { Pending, Passed, Failed }
 
 public sealed record CheckItem(
     string Name,

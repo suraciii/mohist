@@ -85,16 +85,6 @@ public static partial class WorkflowRunExtensions
                 && string.Equals(t.WorkId, workId, StringComparison.Ordinal)
                 && string.Equals(t.RunnerId, runnerId, StringComparison.Ordinal));
 
-        public StageCheck? DispatchedCheck =>
-            stage.Checks.FirstOrDefault(c => c.Status == StageCheckStatus.Dispatched);
-
-        public void ClearDispatchedChecks()
-        {
-            foreach (var check in stage.Checks.Where(c => c.Status == StageCheckStatus.Dispatched))
-                check.Status = StageCheckStatus.Pending;
-            stage.DispatchedChecksWorkId = null;
-        }
-
         internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
 
         /// <summary>

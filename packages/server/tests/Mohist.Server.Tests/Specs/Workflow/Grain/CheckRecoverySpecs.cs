@@ -12,7 +12,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task Reactivation_WithDispatchedCheckAndOnlineRunner_RedispachesSameCheckWork()
+    public async Task Reactivation_WithDispatchedCheckAndOnlineRunner_RedispatchesCheckWork()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var (taskWork, runnerId) = await PollWorkAnyAsync();
@@ -29,10 +29,12 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
 
         workflow = Grains.GetGrain<Mohist.Server.Workflow.Grains.IWorkflowGrain>(checkWork.WorkflowRunId);
 
-        Assert.Equal(checkWork.WorkId, await workflow.GetCurrentWorkIdAsync());
+        var recoveredWorkId = await workflow.GetCurrentWorkIdAsync();
+        Assert.NotNull(recoveredWorkId);
+        Assert.StartsWith("checks-", recoveredWorkId);
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
+        Assert.Equal(StageCheckStatus.Pending, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -49,7 +51,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var check = run.Stages.Single().Checks.Single();
 
         Assert.Equal(runnerId, run.Claim!.RunnerId);
-        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
+        Assert.Equal(StageCheckStatus.Pending, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -67,7 +69,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
 
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
+        Assert.Equal(StageCheckStatus.Pending, check.Status);
         Assert.Equal(runnerId, run.Claim!.RunnerId);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
     }
@@ -91,6 +93,6 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         Assert.NotNull(recoveredWorkId);
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
+        Assert.Equal(StageCheckStatus.Pending, check.Status);
     }
 }
