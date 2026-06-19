@@ -40,6 +40,53 @@ function formatDuration(ms: number): string {
   return `${m}m ${s}s`
 }
 
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function TaskLifecycleTime({ task }: { task: StageTaskState }) {
+  const startedAt = task.startedAt
+  if (!startedAt) return null
+
+  const startClock = formatClock(startedAt)
+
+  if (task.status === 'running') {
+    return <RunningElapsed startClock={startClock} startedAt={startedAt} />
+  }
+
+  const completedAt = task.completedAt
+  if (!completedAt) {
+    return (
+      <span className="text-xs text-gray-400 flex-shrink-0">{startClock}</span>
+    )
+  }
+
+  const endClock = formatClock(completedAt)
+  const dur = task.duration > 0 ? ` · ${formatDuration(task.duration)}` : ''
+  return (
+    <span className="text-xs text-gray-400 flex-shrink-0" title={`Started ${startClock}, ended ${endClock}`}>
+      {startClock}→{endClock}{dur}
+    </span>
+  )
+}
+
+function RunningElapsed({ startClock, startedAt }: { startClock: string; startedAt: string }) {
+  const [elapsedMs, setElapsedMs] = useState(() => Date.now() - new Date(startedAt).getTime())
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsedMs(Date.now() - new Date(startedAt).getTime())
+    }, 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+
+  return (
+    <span className="text-xs text-gray-400 flex-shrink-0" title={`Started at ${startClock}`}>
+      {startClock} · {formatDuration(elapsedMs)}
+    </span>
+  )
+}
+
 function getStageStatus(
   stage: WorkflowStage,
   stageStateMap: Map<string, StageStateRead>,
@@ -464,11 +511,6 @@ function TaskItem({
     icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
-  const duration =
-    task.status === 'completed' || task.status === 'failed'
-      ? task.duration
-      : undefined
-
   const hasReason = task.reason != null
   const originLabel = formatOriginLabel(task.origin)
   const originTitle = formatOriginTitle(task.origin)
@@ -506,9 +548,7 @@ function TaskItem({
         {sessionName && (
           <TaskSessionChip issueNumber={issueNumber} sessionName={sessionName} />
         )}
-        {duration != null && duration > 0 && (
-          <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(duration)}</span>
-        )}
+        <TaskLifecycleTime task={task} />
         {isFailed && (
           <span className="text-xs text-red-500 flex-shrink-0">failed</span>
         )}

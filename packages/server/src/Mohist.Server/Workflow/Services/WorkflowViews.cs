@@ -96,7 +96,10 @@ public sealed record TaskStatusView(
     IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles = null,
     TaskClassification Classification = TaskClassification.UserFacing,
     string? SessionName = null,
-    IReadOnlyList<ArtifactSummaryView>? ArtifactSummaries = null);
+    IReadOnlyList<ArtifactSummaryView>? ArtifactSummaries = null,
+    DateTimeOffset? StartedAt = null,
+    DateTimeOffset? CompletedAt = null,
+    long? DurationMs = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

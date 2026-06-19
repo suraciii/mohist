@@ -101,7 +101,12 @@ public static class WorkflowStatusMapper
                     FrontendStatus(t.Status.ToString()),
                     t.RequiredFiles,
                     t.Classification,
-                    TaskRunExtensions.ExtractSessionName(t.WithInput)))
+                    TaskRunExtensions.ExtractSessionName(t.WithInput),
+                    StartedAt: t.StartedAt,
+                    CompletedAt: t.FinishedAt,
+                    DurationMs: t.StartedAt is not null && t.FinishedAt is not null
+                        ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
+                        : null))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
