@@ -67,3 +67,30 @@ public sealed record IssueWorkflowProfileResponse(
     string TemplateSource);
 
 public sealed record IssuePromptUpsertRequest(string? Body);
+
+/// <summary>
+/// Single bucket in the completion time-series. <c>Boundary</c> is the
+/// ISO calendar boundary that the bucket represents (yyyy-MM-dd for
+/// day buckets, the Monday of the ISO week for week buckets). Counts
+/// are the number of issues that reached the terminal state within
+/// the bucket, deduped per (issue, type).
+/// </summary>
+public sealed record CompletionMetricsBucketDto(
+    string Boundary,
+    int Completed,
+    int Failed);
+
+/// <summary>
+/// Response shape for the completion metrics endpoint. <c>Bucket</c>
+/// is one of <c>day</c> / <c>week</c>; <c>Window</c> is the trailing
+/// time range the series covers. <c>Buckets</c> is dense: every
+/// bucket in the window is present, even when its counts are zero.
+/// </summary>
+public sealed record CompletionMetricsResponse(
+    string Bucket,
+    CompletionMetricsWindowDto Window,
+    CompletionMetricsBucketDto[] Buckets);
+
+public sealed record CompletionMetricsWindowDto(
+    string From,
+    string To);
