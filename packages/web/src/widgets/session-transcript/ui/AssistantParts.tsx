@@ -2,8 +2,8 @@ import React, { useState } from 'react'
 import Markdown from 'react-markdown'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayAssistantPart, DisplayChangedFile } from '../model/session-transcript-display'
-import { getToolRegistryEntry, getToolDisplayType } from './tool-registry'
-import { parseJsonSafely, getFallbackSubtitle, parsePatchOperations, parseEditInput } from '../model/transcript-tool-utils'
+import { getToolRegistryEntry } from './tool-registry'
+import { parseJsonSafely, getFallbackSubtitle, parsePatchOperations, parseEditInput, getDisplayType } from '../model/transcript-tool-utils'
 import { parseDiff, isLargeDiff, type FileBlock } from '../../issue-changed-files/model/diffModel'
 
 function formatTime(iso: string): string {
@@ -951,7 +951,7 @@ function ToolRowView({ part }: ToolRowViewProps) {
   const fallbackSubtitleCandidate = !registrySubtitle && !part.displayTitle && !part.displaySubtitle ? getFallbackSubtitle(part.input) : undefined
   const fallbackSubtitle = fallbackSubtitleCandidate && fallbackSubtitleCandidate !== toolLabel ? fallbackSubtitleCandidate : undefined
   const hasChangedFiles = part.changedFiles && part.changedFiles.length > 0
-  const displayType = getToolDisplayType(part.normalizedName)
+  const displayType = getDisplayType(part.normalizedName)
   const displayChangedFilesInline = hasChangedFiles && !(displayType === 'diff' && registrySubtitle)
 
   const showExpandableDetails = !isRunning && (part.input || part.output || part.error || hasChangedFiles)

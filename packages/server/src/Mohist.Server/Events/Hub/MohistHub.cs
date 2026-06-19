@@ -68,10 +68,6 @@ public interface IEventsClient
 /// <list type="number">
 ///   <item><c>OnConnectedAsync</c>:
 ///     <list type="bullet">
-///       <item>Add the connection to <c>project:global</c> and
-///             <c>project:{projectId}</c> SignalR groups for
-///             back-compat (older clients used these groups for
-///             broadcast).</item>
 ///       <item>Register the connectionId in
 ///             <see cref="ConnectionSubscriptionRegistry"/>. The
 ///             initial subscription set is empty — that is the
@@ -90,11 +86,10 @@ public interface IEventsClient
 ///             its <c>onreconnected</c> callback.</item>
 ///     </list>
 ///   </item>
-///   <item><c>OnDisconnectedAsync</c>: remove from groups and
-///         unregister from the registry. The grain is left
-///         alone — the connection is gone, but the user's
-///         subscription preference may survive a reconnect, so the
-///         durable record stays.</item>
+///   <item><c>OnDisconnectedAsync</c>: unregister from the registry.
+///         The grain is left alone — the connection is gone, but
+///         the user's subscription preference may survive a
+///         reconnect, so the durable record stays.</item>
 ///   <item>Hub methods: <see cref="SubscribeAsync"/> /
 ///         <see cref="UnsubscribeAsync"/> / <see cref="SetSubscriptionsAsync"/>:
 ///         update both the registry (hot path) and the grain
@@ -120,16 +115,6 @@ public sealed class MohistHub : Hub<IEventsClient>
 
     public override async Task OnConnectedAsync()
     {
-        // Back-compat group memberships. New clients prefer
-        // Subscribe-based filtering; the SignalR groups are kept
-        // for any client that still relies on broadcast.
-        await Groups.AddToGroupAsync(Context.ConnectionId, "project:global");
-        var projectId = Context.GetHttpContext()?.Request.Query["projectId"].ToString();
-        if (!string.IsNullOrEmpty(projectId))
-        {
-            await Groups.AddToGroupAsync(Context.ConnectionId, $"project:{projectId}");
-        }
-
         // Hot-path registry. RegisterConnection always inserts
         // an empty subscription set. That empty set is the
         // expected initial state for a freshly opened tab — the
@@ -171,13 +156,6 @@ public sealed class MohistHub : Hub<IEventsClient>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _registry.UnregisterConnection(Context.ConnectionId);
-
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, "project:global");
-        var projectId = Context.GetHttpContext()?.Request.Query["projectId"].ToString();
-        if (!string.IsNullOrEmpty(projectId))
-        {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"project:{projectId}");
-        }
 
         await base.OnDisconnectedAsync(exception);
     }

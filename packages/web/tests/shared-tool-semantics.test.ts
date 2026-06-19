@@ -10,84 +10,33 @@ import {
   getFallbackSubtitle,
   inferToolName,
   normalizeToolName,
-  type ToolDisplayType,
   type EditInput,
 } from '../src/widgets/session-transcript/model/transcript-tool-utils'
-import { getToolRegistryEntry, getToolTitle, getToolBadges, getToolDisplayType } from '../src/widgets/session-transcript/ui/tool-registry'
-
-interface ToolCallEntry {
-  id: string
-  toolName: string
-  rawInput?: string
-  rawOutput?: string
-  result?: string
-  args?: Record<string, unknown>
-  state: 'pending' | 'started' | 'completed' | 'failed'
-  startedAt: string
-  completedAt?: string | null
-  duration?: number
-  error?: string
-  changedFiles?: FileChangeSummary[]
-}
-
-function makeEntry(toolName: string, rawInput?: string, rawOutput?: string, state: ToolCallEntry['state'] = 'completed'): ToolCallEntry {
-  return {
-    id: 'entry-1',
-    toolName,
-    rawInput,
-    rawOutput,
-    state,
-    startedAt: '2024-01-01T00:00:01Z',
-    completedAt: state === 'completed' ? '2024-01-01T00:00:02Z' : null,
-  }
-}
+import { getToolRegistryEntry, getToolTitle, getToolBadges } from '../src/widgets/session-transcript/ui/tool-registry'
 
 describe('shared tool semantics: display type', () => {
   const terminalTools = ['bash']
   const diffTools = ['edit', 'write', 'apply_patch']
 
   for (const tool of terminalTools) {
-    it(`${tool} is terminal via both paths`, () => {
-      const entry = makeEntry(tool, '{}')
-      const legacyType: ToolDisplayType = getDisplayType(entry.toolName)
-      const registryType = getToolDisplayType(tool)
-      expect(legacyType).toBe('terminal')
-      expect(registryType).toBe('terminal')
-      expect(legacyType).toBe(registryType)
+    it(`${tool} is terminal`, () => {
+      expect(getDisplayType(tool)).toBe('terminal')
     })
   }
 
   for (const tool of diffTools) {
-    it(`${tool} is diff via both paths`, () => {
-      const entry = makeEntry(tool, '{}')
-      const legacyType: ToolDisplayType = getDisplayType(entry.toolName)
-      const registryType = getToolDisplayType(tool)
-      expect(legacyType).toBe('diff')
-      expect(registryType).toBe('diff')
-      expect(legacyType).toBe(registryType)
+    it(`${tool} is diff`, () => {
+      expect(getDisplayType(tool)).toBe('diff')
     })
   }
 
-  it('unknown tool falls back to generic via both paths', () => {
-    const legacyType: ToolDisplayType = getDisplayType('some_unknown_tool')
-    const registryType = getToolDisplayType('some_unknown_tool')
-    expect(legacyType).toBe('generic')
-    expect(registryType).toBe('generic')
-    expect(legacyType).toBe(registryType)
+  it('unknown tool falls back to generic', () => {
+    expect(getDisplayType('some_unknown_tool')).toBe('generic')
   })
 
-  it('read and grep are summary via both paths', () => {
-    const legacyRead: ToolDisplayType = getDisplayType('read')
-    const registryRead = getToolDisplayType('read')
-    expect(legacyRead).toBe('summary')
-    expect(registryRead).toBe('summary')
-    expect(legacyRead).toBe(registryRead)
-
-    const legacyGrep: ToolDisplayType = getDisplayType('grep')
-    const registryGrep = getToolDisplayType('grep')
-    expect(legacyGrep).toBe('summary')
-    expect(registryGrep).toBe('summary')
-    expect(legacyGrep).toBe(registryGrep)
+  it('read and grep are summary', () => {
+    expect(getDisplayType('read')).toBe('summary')
+    expect(getDisplayType('grep')).toBe('summary')
   })
 })
 
