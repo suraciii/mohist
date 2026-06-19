@@ -2,6 +2,15 @@ using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
+/// <summary>
+/// Represents a runner's exclusive claim on a <see cref="WorkflowRun"/>.
+/// The single-runner invariant guarantees at most one claim exists for the
+/// entire lifecycle of a run. Once this record is set on
+/// <see cref="WorkflowRun.Claim"/>, the <c>RunnerId</c> is the unique
+/// runner identity for that run. A <c>Running</c> <see cref="TaskRun"/>'s
+/// <c>RunnerId</c> equals <c>Claim.RunnerId</c> as a derivation of this
+/// invariant, not as a separately synchronized fact.
+/// </summary>
 public sealed record WorkflowClaimInfo(string RunnerId, DateTimeOffset ClaimedAt);
 
 public static partial class WorkflowRunExtensions

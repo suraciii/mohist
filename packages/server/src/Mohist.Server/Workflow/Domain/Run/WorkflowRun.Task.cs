@@ -35,6 +35,17 @@ public static partial class WorkflowRunExtensions
             return events;
         }
 
+        /// <summary>
+        /// Completes a <see cref="TaskRun"/> as Failed and transitions the
+        /// <see cref="WorkflowRun"/> to Failed.
+        /// This is an <b>event-driven policy reaction</b> of the workflow
+        /// aggregate to the task result, not a continuous status derivation
+        /// (<c>Status != f(task statuses)</c>). There is no recompute-later
+        /// or sync-from-tasks path — the run decides its own transition
+        /// on receiving the failure event. This does not violate the
+        /// independence of <see cref="WorkflowRunStatus"/> and
+        /// <see cref="TaskRunStatus"/> state machines.
+        /// </summary>
         public IReadOnlyList<WorkflowEvent> FailTask(TaskResult result)
         {
             var current = run.CurrentStage();

@@ -4,6 +4,15 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
+/// <summary>
+/// The lifecycle status of a <see cref="TaskRun"/> aggregate.
+/// This state machine is independent from <see cref="WorkflowRunStatus"/> —
+/// the two describe different aggregates and do not derive each other.
+/// A task transition between <c>Pending</c>, <c>Running</c>, and <c>Completed</c>
+/// does not recompute the workflow status. The two facts may diverge
+/// (e.g. a <c>WorkflowRun</c> may be <c>Running</c> while no <c>TaskRun</c>
+/// is <c>Running</c>).
+/// </summary>
 public enum TaskRunStatus { Pending, Running, Completed, Failed }
 
 public sealed class TaskRun
