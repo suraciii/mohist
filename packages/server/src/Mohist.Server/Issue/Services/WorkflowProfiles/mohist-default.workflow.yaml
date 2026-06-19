@@ -173,13 +173,7 @@ stages:
         title: Build & full test suite
         uses: core/script
         with:
-          run: |
-            npm ci
-            dotnet test Mohist.sln --nologo
-            npm run -w packages/web typecheck
-            npm run -w packages/web test:run
-            npm run -w packages/runner typecheck
-            npm run -w packages/runner test -- --no-file-parallelism
+          run: ${{ vars.ci.verify }}
           timeout: 1500000
         repairLimit: 2
         repairTask:
