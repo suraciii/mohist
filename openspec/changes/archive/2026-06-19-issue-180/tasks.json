@@ -1,0 +1,90 @@
+{
+  "project": "mohist-local",
+  "description": "Issue 详情页信息层级与密度优化：Activity 弹窗化 + 懒加载、事件视觉降权、RuntimeDecisionSurface 改白底+左彩条、统一间距节奏。",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Activity 弹窗化与懒加载（移除主区面板、新增入口 Dialog、移动端近全屏 sheet）",
+      "spec": "specs/issue-detail-activity-dialog/spec.md#issue-detail-opens-activity-event-timeline-in-an-on-demand-dialog",
+      "description": "从 IssueDetailPage 主内容列移除内联 EventTimelinePanel；在标题/头部区新增 `Activity` 入口按钮，点击打开 Dialog，复用 EventTimelinePanel 作为弹窗主体。将 useIssueEvents 的 enabled 绑定到弹窗 open 状态（镜像 WorkflowYamlDialog 的 useWorkflowYaml(id, open) 惯例），使页面初始加载不发任何事件请求；每次打开时 invalidate/refetch 事件查询，保证关闭期间的事件在重开时完整呈现。移动端以近全屏 sheet 呈现弹窗。入口在首次打开前不显示事件计数。",
+      "acceptanceCriteria": [
+        "IssueDetailPage 主内容列不再渲染 EventTimelinePanel：无事件列表、无事件计数、无「最近失败」预览（主区默认零 Activity 痕迹）",
+        "头部存在 `Activity` 入口（aria-label=\"Activity\"），点击后在 Dialog 内打开时间线，且不导航到独立路由",
+        "IssueDetailPage 初始加载不发起 GET .../events（通过 useIssueEvents 的 enabled 门控验证）",
+        "打开弹窗触发事件拉取；关闭后再重开能呈现关闭期间到达的事件（完整持久化历史）",
+        "首次打开前入口不显示精确事件计数，且不为计数预加载事件",
+        "弹窗内分类筛选、新旧排序、事件详情展开仍然可用",
+        "移动端宽度下弹窗以近全屏 sheet 呈现（非居中小框），入口满足最小触控目标且可达",
+        "更新 IssueDetailPage.test.tsx：断言主区无内联面板、入口打开弹窗、初始不拉事件、打开时拉事件、移动端近全屏；EventTimelinePanel 懒加载 enabled 接线有覆盖"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueDetailPage 改造（移除内联面板+新增 Activity 入口）、新增 ActivityDialog 包装组件、相关测试更新",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "复用现有 Dialog（@/shared/ui/components/dialog）+ 响应式类名实现近全屏，不引入新 Sheet 原语。blocked/failed 原因仍由 RuntimeDecisionSurface 在首屏承担，不在主区重复。"
+    },
+    {
+      "id": "T-002",
+      "title": "Activity 事件视觉降权（常规中性单色、仅 failure/attention 留色、中性详情块、收敛动画）",
+      "spec": "specs/issue-event-timeline/spec.md#timeline-visually-emphasizes-failures-and-attention-required-events",
+      "description": "更新 EventTimelineRow：常规分类（workflow/approval/integration/success/metadata）改为中性单色——去掉分类饱和色、分类徽章、整行铺彩底；仅 failure/attention 保留彩色标记强调（圆点/halo），且不使用整行铺彩底。事件详情展开块由 bg-gray-900 改为中性浅底。去除/收敛 live 事件的 slide-in-from-top 入场动画。分类筛选能力保留。",
+      "acceptanceCriteria": [
+        "常规分类行以中性单色渲染：无分类饱和色、无分类徽章/标签、无整行彩色背景（通过 data-category/data-attention 与 class 断言验证）",
+        "failure/attention 行保留与中性明显区分的彩色标记强调（圆点/halo），且无整行铺彩底",
+        "展开的详情块使用中性浅底（不再出现 bg-gray-900）",
+        "live/新增事件不再使用 slide-in-from-top 这类抢眼入场动画",
+        "分类筛选 chip 仍可用且按所选分类正确收窄列表",
+        "更新 EventTimelinePanel.test.tsx / EventTimelineRow 相关断言：常规中性、仅 failure/attention 留色、中性详情块、无入场动画"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EventTimelineRow 与 CATEGORY_STYLES 渲染调整、事件详情块底色与动画收敛、相关测试更新",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "该渲染变更容器无关——无论面板还是弹窗内都生效；T-001 落地后在弹窗内观察。仅改颜色/底色/动画，不动筛选与排序逻辑。"
+    },
+    {
+      "id": "T-003",
+      "title": "RuntimeDecisionSurface 改白底 + 左侧彩色边条（状态仍可区分）",
+      "spec": "specs/issue-runtime-decision-surface/spec.md#decision-surface-uses-a-restrained-background-with-a-colored-edge-accent",
+      "description": "将 RuntimeDecisionSurface 的整片彩色背景（toneClass 的 bg-<tone>-50）改为中性卡片（bg-white）+ 左侧彩色边条（border-l-<tone>）+ 彩色图标/标签；标题/正文文字回归中性墨色。确保各运行状态（running/queued/approval-required/blocked/failed/done）在不依赖整片彩色背景的前提下，通过边条+图标+标签仍视觉可区分。状态文案与动作按钮保留。",
+      "acceptanceCriteria": [
+        "每个状态下 Decision Surface 渲染中性背景（无整片 bg-<tone>-50 填充）",
+        "存在左侧彩色边条；各状态之间通过边条+图标+标签彼此视觉可区分",
+        "状态文案、下一步动作与动作按钮（approve/retry/resume/rerun/stop/start 等）保留且可用",
+        "首屏不再出现相互竞争的整片彩色块叠加",
+        "更新 RuntimeDecisionSurface.test.tsx：断言中性背景+左侧边条，并覆盖各状态仍可区分"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RuntimeDecisionSurface tone 样式（toneClass/标题/正文/图标）改版、相关测试更新",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "具体中性化程度（如标签 chip 是否保留彩色）见 design.md Open Questions；最低要求是去整片背景并以左彩条承载状态色。"
+    },
+    {
+      "id": "T-004",
+      "title": "Issue 详情页密度与节奏统一（间距阶梯、留白分组替代装饰边框、首屏下一步动作缓冲）",
+      "spec": "specs/web-ui/spec.md#issue-detail-follows-a-unified-spacing-rhythm-with-group-tight-and-group-gap-whitespace",
+      "description": "在 IssueDetailPage 应用一致的间距节奏：组内紧凑、组间用更大留白拉开（section 之间、右栏卡片之间），用留白分组替代不承载信息的装饰性边框；Tasks/Checks/事件行成组紧凑、组间留白；为首屏下一步动作区（RuntimeDecisionSurface）给足缓冲。统一间距阶梯，消除零散的 ad-hoc 间距值。",
+      "acceptanceCriteria": [
+        "IssueDetailPage 使用统一的间距阶梯，无零散 ad-hoc 间距值",
+        "section 与右栏卡片边界主要通过组间留白表达；装饰性边框在不承载信息处被减少",
+        "Tasks/Checks/事件行组内紧凑、组间有可辨留白",
+        "首屏下一步动作区（RuntimeDecisionSurface 及其动作）有充足缓冲，不与相邻模块紧贴",
+        "新增/更新 IssueDetailPage 密度与留白分组的回归断言（保持 data-testid 稳定）"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "IssueDetailPage 间距/留白调整、装饰边框收敛、相关测试更新",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": true,
+      "notes": "作为结构/首屏视觉变更之后的收尾打磨：T-001 移除主区面板、T-003 改版 Decision Surface 后再统一节奏，避免返工。不引入新的设计 token 体系。"
+    }
+  ]
+}

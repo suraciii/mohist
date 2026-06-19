@@ -173,6 +173,51 @@ describe('useEventTimeline', () => {
 
     expect(result.current.isLoading).toBe(true)
   })
+
+  it('forwards the enabled flag to useIssueEvents for lazy loading', () => {
+    vi.mocked(useIssueEvents).mockClear()
+
+    renderHook(() => useEventTimeline(42, 'issue-42', false))
+
+    expect(useIssueEvents).toHaveBeenLastCalledWith(42, false)
+
+    renderHook(() => useEventTimeline(42, 'issue-42', true))
+
+    expect(useIssueEvents).toHaveBeenLastCalledWith(42, true)
+  })
+
+  it('does not subscribe to live events when enabled is false', () => {
+    handlers.clear()
+
+    renderHook(() => useEventTimeline(42, 'issue-42', false))
+
+    act(() => {
+      dispatch(makeLiveEvent({ issueNumber: 42, eventId: 'lazy-l1' }))
+    })
+
+    expect(handlers.size).toBe(0)
+  })
+
+  it('subscribes to live events only after enabled flips to true', () => {
+    handlers.clear()
+
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useEventTimeline(42, 'issue-42', enabled),
+      { initialProps: { enabled: false } },
+    )
+
+    expect(handlers.size).toBe(0)
+
+    rerender({ enabled: true })
+
+    expect(handlers.size).toBe(1)
+
+    act(() => {
+      dispatch(makeLiveEvent({ issueNumber: 42, eventId: 'lazy-after-open' }))
+    })
+
+    expect(handlers.size).toBe(1)
+  })
 })
 
 void onTimelineEvent

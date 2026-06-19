@@ -9,6 +9,9 @@ interface EventTimelinePanelProps {
   issueNumber: number
   issueId: string | null | undefined
   workflowStatus?: string | null
+  enabled?: boolean
+  className?: string
+  showHeader?: boolean
 }
 
 function startOfDay(iso: string): string {
@@ -22,8 +25,15 @@ function startOfDay(iso: string): string {
   })
 }
 
-export function EventTimelinePanel({ issueNumber, issueId, workflowStatus }: EventTimelinePanelProps) {
-  const { entries, isLoading } = useEventTimeline(issueNumber, issueId)
+export function EventTimelinePanel({
+  issueNumber,
+  issueId,
+  workflowStatus,
+  enabled = true,
+  className,
+  showHeader = true,
+}: EventTimelinePanelProps) {
+  const { entries, isLoading } = useEventTimeline(issueNumber, issueId, enabled)
   const [order, setOrder] = useState<'newest' | 'chronological'>('newest')
   const [selectedCategories, setSelectedCategories] = useState<Set<TimelineCategory>>(
     new Set(['workflow', 'approval', 'integration', 'success', 'failure', 'metadata']),
@@ -84,51 +94,53 @@ export function EventTimelinePanel({ issueNumber, issueId, workflowStatus }: Eve
 
   return (
     <div
-      className="rounded-lg border border-gray-200 bg-white p-4"
+      className={className ?? 'rounded-lg border border-gray-200 bg-white p-4'}
       data-testid="event-timeline-panel"
     >
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <ActivityIcon className="h-4 w-4 text-gray-500" />
-          <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
-          {isLive && (
-            <span
-              data-testid="timeline-live-badge"
-              className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700"
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
-              Live
-            </span>
-          )}
-          {!isLive && (
-            <span
-              data-testid="timeline-inactive-badge"
-              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500"
-            >
-              Live
-            </span>
-          )}
-        </div>
+      {showHeader && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ActivityIcon className="h-4 w-4 text-gray-500" />
+            <h2 className="text-sm font-semibold text-gray-700">Activity</h2>
+            {isLive && (
+              <span
+                data-testid="timeline-live-badge"
+                className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700"
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                Live
+              </span>
+            )}
+            {!isLive && (
+              <span
+                data-testid="timeline-inactive-badge"
+                className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500"
+              >
+                Live
+              </span>
+            )}
+          </div>
 
-        <button
-          type="button"
-          onClick={() => setOrder((o) => (o === 'newest' ? 'chronological' : 'newest'))}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
-          data-testid="timeline-order-toggle"
-        >
-          {order === 'newest' ? (
-            <>
-              <ArrowDownIcon className="h-3 w-3" />
-              Newest first
-            </>
-          ) : (
-            <>
-              <ArrowUpIcon className="h-3 w-3" />
-              Chronological
-            </>
-          )}
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setOrder((o) => (o === 'newest' ? 'chronological' : 'newest'))}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+            data-testid="timeline-order-toggle"
+          >
+            {order === 'newest' ? (
+              <>
+                <ArrowDownIcon className="h-3 w-3" />
+                Newest first
+              </>
+            ) : (
+              <>
+                <ArrowUpIcon className="h-3 w-3" />
+                Chronological
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <CategoryFilter
@@ -172,7 +184,7 @@ export function EventTimelinePanel({ issueNumber, issueId, workflowStatus }: Eve
         </div>
       )}
 
-      <div className="space-y-1">
+      <div className="space-y-6">
         {grouped.map((group) => (
           <div key={group.day}>
             <div className="sticky top-0 z-10 mb-2 bg-white/95 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 backdrop-blur-sm">

@@ -91,11 +91,15 @@ function dedupeKey(entry: TimelineEntry): string {
   return entry.id
 }
 
-export function useEventTimeline(issueNumber: number, issueId: string | null | undefined): {
+export function useEventTimeline(
+  issueNumber: number,
+  issueId: string | null | undefined,
+  enabled: boolean = true,
+): {
   entries: TimelineEntry[]
   isLoading: boolean
 } {
-  const { data: history, isLoading } = useIssueEvents(issueNumber)
+  const { data: history, isLoading } = useIssueEvents(issueNumber, enabled)
   const [liveTick, setLiveTick] = useState(0)
   const liveRef = useRef<TimelineEntry[]>([])
 
@@ -105,13 +109,14 @@ export function useEventTimeline(issueNumber: number, issueId: string | null | u
   }, [issueNumber])
 
   useEffect(() => {
+    if (!enabled) return
     return onTimelineEvent((event) => {
       if (!belongsToIssue(event, issueNumber, issueId)) return
       const entry = liveToEntry(event)
       liveRef.current = [entry, ...liveRef.current].slice(0, MAX_LIVE_EVENTS)
       setLiveTick((n) => n + 1)
     })
-  }, [issueNumber, issueId])
+  }, [issueNumber, issueId, enabled])
 
   const entries = useMemo(() => {
     const historyEntries = (history ?? []).map(historyToEntry)

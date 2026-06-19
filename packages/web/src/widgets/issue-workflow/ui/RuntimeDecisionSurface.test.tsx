@@ -20,6 +20,29 @@ import {
   type WorkflowTimeline,
 } from '../../../entities/issue'
 
+const FORBIDDEN_FULL_SURFACE_BG = [
+  'bg-blue-50',
+  'bg-amber-50',
+  'bg-red-50',
+  'bg-orange-50',
+  'bg-green-50',
+  'bg-gray-50',
+  'bg-violet-50',
+]
+
+function expectNeutralBackgroundWithLeftEdgeAccent(
+  surface: HTMLElement,
+  expectedTone: 'blue' | 'amber' | 'red' | 'orange' | 'green' | 'gray' | 'violet',
+) {
+  expect(surface.className).toContain('bg-white')
+  expect(surface.className).toContain('border-l-4')
+  expect(surface.className).toContain(`border-l-${expectedTone}-500`)
+  expect(surface.dataset.tone).toBe(expectedTone)
+  for (const bg of FORBIDDEN_FULL_SURFACE_BG) {
+    expect(surface.className).not.toContain(bg)
+  }
+}
+
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()
   return {
@@ -154,6 +177,7 @@ describe('RuntimeDecisionSurface', () => {
     const surface = screen.getByTestId('runtime-decision-surface')
     expect(surface).toBeInTheDocument()
     expect(surface.dataset.summary).toBe('running')
+    expectNeutralBackgroundWithLeftEdgeAccent(surface, 'blue')
 
     expect(within(surface).getByTestId('runtime-summary-label')).toHaveTextContent('Running')
     expect(within(surface).getByTestId('runtime-headline').textContent).toContain(
@@ -232,6 +256,7 @@ describe('RuntimeDecisionSurface', () => {
 
     const surface = screen.getByTestId('runtime-decision-surface')
     expect(surface.dataset.summary).toBe('approval-required')
+    expectNeutralBackgroundWithLeftEdgeAccent(surface, 'amber')
     expect(within(surface).getByTestId('runtime-summary-label')).toHaveTextContent('Approval required')
     expect(within(surface).getByTestId('runtime-headline').textContent).toContain('Health check')
 
@@ -296,6 +321,7 @@ describe('RuntimeDecisionSurface', () => {
 
     const surface = screen.getByTestId('runtime-decision-surface')
     expect(surface.dataset.summary).toBe('failed')
+    expectNeutralBackgroundWithLeftEdgeAccent(surface, 'red')
     expect(within(surface).getByTestId('runtime-summary-label')).toHaveTextContent('Failed')
     expect(within(surface).getByTestId('runtime-current-task').textContent).toContain('Typecheck')
     expect(within(surface).getByTestId('runtime-action-retry')).not.toBeDisabled()
@@ -331,6 +357,7 @@ describe('RuntimeDecisionSurface', () => {
 
     const surface = screen.getByTestId('runtime-decision-surface')
     expect(surface.dataset.summary).toBe('approval-required')
+    expectNeutralBackgroundWithLeftEdgeAccent(surface, 'amber')
     expect(within(surface).getByTestId('runtime-action-approve')).toBeDisabled()
     expect(within(surface).getByTestId('runtime-action-send-back')).toBeDisabled()
   })
@@ -375,5 +402,290 @@ describe('RuntimeDecisionSurface', () => {
     expect(mockedRerun).not.toHaveBeenCalled()
     expect(mockedStart).not.toHaveBeenCalled()
     expect(mockedStop).not.toHaveBeenCalled()
+  })
+
+  describe('restrained background with colored edge accent', () => {
+    const emptyTimeline: WorkflowTimeline = {
+      workflowRunId: '',
+      status: '',
+      currentStage: null,
+      pendingWork: null,
+      stages: [],
+      availableActions: [],
+    }
+
+    type StateCase = {
+      summary: 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done'
+      tone: 'blue' | 'amber' | 'red' | 'orange' | 'green' | 'gray' | 'violet'
+      label: string
+      issue: Partial<Issue>
+      timeline?: WorkflowTimeline
+      agentStatus?: Parameters<typeof renderSurface>[0]['agentStatus']
+      hasActiveAgent?: boolean
+    }
+
+    const cases: StateCase[] = [
+      {
+        summary: 'running',
+        tone: 'blue',
+        label: 'Running',
+        issue: {
+          workflowStage: WorkflowStage.Build,
+          workflowStatus: 'running',
+          health: IssueHealth.Active,
+          recovery: {
+            currentWorkItem: { type: 'task', id: 't1', title: 'Implement RuntimeDecisionSurface' },
+            latestAttemptState: 'running',
+            workflowSummaryState: 'running',
+            allowedActions: ['stop'],
+          },
+        },
+        timeline: {
+          workflowRunId: 'wr-run',
+          status: 'Running',
+          currentStage: WorkflowStage.Build,
+          pendingWork: null,
+          stages: [
+            {
+              stage: WorkflowStage.Build,
+              status: 'running',
+              order: 2,
+              startedAt: null,
+              completedAt: null,
+              durationMs: null,
+              tasks: [
+                {
+                  id: 't1',
+                  title: 'Implement RuntimeDecisionSurface',
+                  uses: 'mohist/coder-agent',
+                  status: 'running',
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                  attempts: 1,
+                  message: null,
+                },
+              ],
+              checks: [],
+              approval: null,
+            },
+          ],
+          availableActions: [{ name: 'stop', label: 'Stop', target: null }],
+        },
+        agentStatus: {
+          running: true,
+          issueId: 'issue-1',
+          issueNumber: 121,
+          activeAgents: [],
+          capacity: { active: 0, max: 1 },
+          runnerAvailable: true,
+        },
+        hasActiveAgent: true,
+      },
+      {
+        summary: 'queued',
+        tone: 'violet',
+        label: 'Queued',
+        issue: {
+          workflowStage: WorkflowStage.Build,
+          workflowStatus: 'pending',
+          health: IssueHealth.Active,
+          blocker: { kind: 'waiting-for', issue: { number: 99, title: 'Blocker issue' } },
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: null,
+            allowedActions: [],
+          },
+        },
+        timeline: emptyTimeline,
+      },
+      {
+        summary: 'approval-required',
+        tone: 'amber',
+        label: 'Approval required',
+        issue: {
+          workflowStage: WorkflowStage.Check,
+          workflowStatus: 'awaiting-approval',
+          health: IssueHealth.Paused,
+          approvalState: {
+            status: 'awaiting',
+            stage: WorkflowStage.Check,
+            requestedAt: '2026-01-01T00:00:00.000Z',
+          },
+          recovery: {
+            currentWorkItem: { type: 'check', id: 'c1', title: 'Health check' },
+            latestAttemptState: null,
+            workflowSummaryState: 'awaiting-approval',
+            allowedActions: ['approve', 'reject'],
+          },
+        },
+        timeline: {
+          workflowRunId: 'wr-approval',
+          status: 'AwaitingApproval',
+          currentStage: WorkflowStage.Check,
+          pendingWork: null,
+          stages: [
+            {
+              stage: WorkflowStage.Check,
+              status: 'awaiting-approval',
+              order: 3,
+              startedAt: null,
+              completedAt: null,
+              durationMs: null,
+              tasks: [],
+              checks: [],
+              approval: {
+                status: 'awaiting',
+                output: null,
+                requestedAt: '2026-01-01T00:00:00.000Z',
+                respondedAt: null,
+              },
+            },
+          ],
+          availableActions: [
+            { name: 'approve', label: 'Approve', target: null },
+            { name: 'reject', label: 'Send back', target: null },
+          ],
+        },
+      },
+      {
+        summary: 'blocked',
+        tone: 'orange',
+        label: 'Blocked',
+        issue: {
+          workflowStage: WorkflowStage.Build,
+          workflowStatus: 'blocked',
+          health: IssueHealth.Blocked,
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: 'interrupted',
+            workflowSummaryState: null,
+            allowedActions: ['resume'],
+          },
+        },
+        timeline: emptyTimeline,
+      },
+      {
+        summary: 'failed',
+        tone: 'red',
+        label: 'Failed',
+        issue: {
+          workflowStage: WorkflowStage.Check,
+          workflowStatus: 'failed',
+          health: IssueHealth.Blocked,
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: 'failed',
+            workflowSummaryState: 'waiting-for-recovery',
+            allowedActions: ['retry', 'rerun'],
+          },
+        },
+        timeline: {
+          workflowRunId: 'wr-failed',
+          status: 'Failed',
+          currentStage: WorkflowStage.Check,
+          pendingWork: null,
+          stages: [
+            {
+              stage: WorkflowStage.Check,
+              status: 'failed',
+              order: 3,
+              startedAt: null,
+              completedAt: null,
+              durationMs: null,
+              tasks: [],
+              checks: [
+                {
+                  name: 'health',
+                  title: 'Typecheck',
+                  uses: null,
+                  status: 'failed',
+                  message: 'Typecheck failed',
+                  startedAt: null,
+                  completedAt: null,
+                  durationMs: null,
+                },
+              ],
+              approval: null,
+            },
+          ],
+          availableActions: [
+            { name: 'retry', label: 'Retry', target: null },
+            { name: 'rerun', label: 'Rerun', target: null },
+          ],
+        },
+      },
+      {
+        summary: 'done',
+        tone: 'green',
+        label: 'Done',
+        issue: {
+          workflowStage: WorkflowStage.Done,
+          workflowStatus: 'done',
+          health: IssueHealth.Done,
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: 'completed',
+            allowedActions: [],
+          },
+        },
+        timeline: {
+          workflowRunId: 'wr-done',
+          status: 'Done',
+          currentStage: WorkflowStage.Done,
+          pendingWork: null,
+          stages: [],
+          availableActions: [],
+        },
+      },
+    ]
+
+    for (const c of cases) {
+      it(`renders ${c.summary} with a neutral background, a colored left edge accent, and the ${c.label} label`, () => {
+        renderSurface({
+          issue: makeIssue(c.issue),
+          timeline: c.timeline,
+          agentStatus: c.agentStatus,
+          hasActiveAgent: c.hasActiveAgent,
+        })
+
+        const surface = screen.getByTestId('runtime-decision-surface')
+        expect(surface.dataset.summary).toBe(c.summary)
+        expectNeutralBackgroundWithLeftEdgeAccent(surface, c.tone)
+
+        const label = within(surface).getByTestId('runtime-summary-label')
+        expect(label).toHaveTextContent(c.label)
+      })
+    }
+
+    it('never stacks a full-surface colored block across all states', () => {
+      const edgeAccents = new Set<string>()
+
+      for (const c of cases) {
+        cleanup()
+        renderSurface({
+          issue: makeIssue(c.issue),
+          timeline: c.timeline,
+          agentStatus: c.agentStatus,
+          hasActiveAgent: c.hasActiveAgent,
+        })
+
+        const surface = screen.getByTestId('runtime-decision-surface')
+        for (const bg of FORBIDDEN_FULL_SURFACE_BG) {
+          expect(surface.className, `state ${c.summary} leaked ${bg}`).not.toContain(bg)
+        }
+        expect(surface.className).toContain('bg-white')
+        expect(surface.className).toContain('border-l-4')
+
+        const accents = surface.className.match(/border-l-\S+/g) ?? []
+        const coloredAccent = accents.find((cls) => /border-l-(blue|amber|red|orange|green|gray|violet)-500/.test(cls))
+        expect(coloredAccent, `state ${c.summary} missing colored left edge accent`).toBeDefined()
+        edgeAccents.add(coloredAccent!)
+      }
+
+      expect(edgeAccents.size).toBeGreaterThan(1)
+    })
   })
 })
