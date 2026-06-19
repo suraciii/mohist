@@ -141,8 +141,8 @@ public class TaskLifecycleSpecs
             Status = StageCheckStatus.Pending
         };
 
-        check.Status = StageCheckStatus.Dispatched;
-        Assert.Equal(StageCheckStatus.Dispatched, check.Status);
+        check.Status = StageCheckStatus.Pending;
+        Assert.Equal(StageCheckStatus.Pending, check.Status);
 
         check.Status = StageCheckStatus.Passed;
         Assert.Equal(StageCheckStatus.Passed, check.Status);
