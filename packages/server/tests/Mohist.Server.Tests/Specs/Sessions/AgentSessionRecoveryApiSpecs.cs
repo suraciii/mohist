@@ -235,7 +235,7 @@ public class AgentSessionRecoveryApiSpecs
         var projectName = $"recovery-api-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Recovery api {name}", body = "track sessions", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id, isDraft = false });
+var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = $"Recovery api {name}", body = "track sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
         return (project, issue);
     }
 

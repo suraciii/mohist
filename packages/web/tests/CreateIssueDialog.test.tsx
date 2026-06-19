@@ -49,7 +49,7 @@ function mockHooks() {
     status: 'backlog',
     health: 'active',
     projectId: 'test-project',
-    labels: [],
+    labels: {},
     createdAt: '2026-06-16T00:00:00.000Z',
     updatedAt: '2026-06-16T00:00:00.000Z',
   })

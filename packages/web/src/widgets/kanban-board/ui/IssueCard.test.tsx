@@ -34,7 +34,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     status: IssueStatus.Backlog,
     health: IssueHealth.Active,
     projectId: 'proj-1',
-    labels: [],
+    labels: {},
     priority: 'p2',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
@@ -103,7 +103,7 @@ describe('IssueCard - draft indicator and de-emphasis', () => {
       isDraft: false,
       canStart: true,
       blocker: null,
-      labels: ['draft', 'wip'],
+      labels: { draft: 'true', stage: 'wip' },
       title: 'Draft idea placeholder',
     })
     renderCard(readyWithDraftishLabel)
@@ -116,7 +116,7 @@ describe('IssueCard - draft indicator and de-emphasis', () => {
       isDraft: true,
       canStart: false,
       blocker: { kind: 'draft' },
-      labels: ['ready-to-go'],
+      labels: { status: 'ready-to-go' },
       title: 'Ready to ship',
     })
     renderCard(draftWithReadyishLabel)

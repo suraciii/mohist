@@ -52,7 +52,7 @@ public class IssueDomainSpecs
             "project-1",
             1,
             "Build the feature",
-            labels: ["bug"],
+            labels: new Dictionary<string, string>(StringComparer.Ordinal) { ["module"] = "auth" },
             repositoryRef: "main",
             now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
         issue.AddPrerequisite(42, new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));

@@ -71,14 +71,24 @@ public class IssueQuerier
         return row is null ? null : IssueStore.Deserialize(row.State);
     }
 
-    public async Task<List<IssueReadModel>> ListAsync(
+    public Task<List<IssueReadModel>> ListAsync(
         string projectId,
         ProjectInfo? project = null,
         string? stage = null,
         string? label = null,
         string? priority = null,
         bool? archived = null,
-        bool? all = null)
+        bool? all = null) =>
+        ListWithLabelFiltersAsync(projectId, project, stage, LabelFilterTokens(label), priority, archived, all);
+
+    public async Task<List<IssueReadModel>> ListWithLabelFiltersAsync(
+        string projectId,
+        ProjectInfo? project,
+        string? stage,
+        IReadOnlyList<string>? labels,
+        string? priority,
+        bool? archived,
+        bool? all)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(); var rows = await db.Issues
             .AsNoTracking()
@@ -102,8 +112,19 @@ public class IssueQuerier
         if (!string.IsNullOrEmpty(stage))
             query = query.Where(i => string.Equals(i.Status, stage, StringComparison.OrdinalIgnoreCase));
 
-        if (!string.IsNullOrEmpty(label))
-            query = query.Where(i => i.Labels.Contains(label, StringComparer.OrdinalIgnoreCase));
+        if (labels is { Count: > 0 })
+        {
+            var filters = labels
+                .Select(ParseLabelFilter)
+                .Where(filter => filter.Key is not null)
+                .ToArray();
+            if (filters.Length > 0)
+            {
+                query = query.Where(i => filters.All(filter =>
+                    i.Labels.TryGetValue(filter.Key!, out var v)
+                    && string.Equals(v, filter.Value, StringComparison.Ordinal)));
+            }
+        }
 
         if (!string.IsNullOrEmpty(priority))
             query = query.Where(i => string.Equals(i.Priority, priority, StringComparison.OrdinalIgnoreCase));
@@ -134,6 +155,20 @@ public class IssueQuerier
         string.Equals(issue.Status, "in_progress", StringComparison.OrdinalIgnoreCase)
         && string.Equals(issue.WorkflowStatus, "awaiting-approval", StringComparison.OrdinalIgnoreCase);
 
+    internal static (string? Key, string Value) ParseLabelFilter(string token)
+    {
+        var idx = token.IndexOf('=');
+        if (idx <= 0) return (null, token);
+        var key = token[..idx];
+        var value = token[(idx + 1)..];
+        return (key, value);
+    }
+
+    internal static IReadOnlyList<string> LabelFilterTokens(string? label) =>
+        string.IsNullOrWhiteSpace(label)
+            ? []
+            : label.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
     {
         var model = ToReadModel(ToInfo(issue, project));
@@ -160,7 +195,7 @@ public class IssueQuerier
             Health = MohistDefaultWorkflowProjection.Health(issue.Status),
             ProjectId = issue.ProjectId,
             ProjectName = project?.Name,
-            Labels = issue.Labels,
+            Labels = new Dictionary<string, string>(issue.Labels, StringComparer.Ordinal),
             Priority = issue.Priority,
             Risk = issue.Risk,
             Model = null,

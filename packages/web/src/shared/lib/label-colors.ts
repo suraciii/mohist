@@ -50,9 +50,16 @@ export function getLabelStyle(label: string): LabelStyle {
   return DEFAULT_STYLE
 }
 
-export function getStripColor(labels: string[]): string {
+export function getStripColor(labels: Record<string, string> | string[] | undefined | null): string {
+  if (!labels) return '#6b7280'
+  if (Array.isArray(labels)) {
+    for (const type of STRIP_PRIORITY) {
+      if (labels.includes(type)) return TYPE_STRIP_COLORS[type]
+    }
+    return '#6b7280'
+  }
   for (const type of STRIP_PRIORITY) {
-    if (labels.includes(type)) return TYPE_STRIP_COLORS[type]
+    if (type in labels) return TYPE_STRIP_COLORS[type]
   }
   return '#6b7280'
 }
@@ -102,17 +109,34 @@ export function getRiskStyle(risk: string): { bg: string; text: string } {
   return RISK_COLORS[risk] ?? { bg: '#f3f4f6', text: '#6b7280' }
 }
 
-export function sortLabels(labels: string[]): string[] {
+export function formatLabelEntry(key: string, value: string): string {
+  return `${key}=${value}`
+}
+
+export function sortLabels(labels: Record<string, string> | string[] | undefined | null): string[] {
   const types: string[] = []
   const urgency: string[] = []
   const areas: string[] = []
   const other: string[] = []
 
-  for (const label of labels) {
-    if (isTypeLabel(label)) types.push(label)
-    else if (isUrgencyLabel(label)) urgency.push(label)
-    else if (isAreaLabel(label)) areas.push(label)
-    else other.push(label)
+  if (!labels) return []
+
+  if (Array.isArray(labels)) {
+    for (const label of labels) {
+      if (isTypeLabel(label)) types.push(label)
+      else if (isUrgencyLabel(label)) urgency.push(label)
+      else if (isAreaLabel(label)) areas.push(label)
+      else other.push(label)
+    }
+    return [...types.sort(), ...urgency.sort(), ...areas.sort(), ...other.sort()]
+  }
+
+  for (const [key, value] of Object.entries(labels)) {
+    const formatted = formatLabelEntry(key, value)
+    if (isTypeLabel(formatted)) types.push(formatted)
+    else if (isUrgencyLabel(formatted)) urgency.push(formatted)
+    else if (isAreaLabel(formatted)) areas.push(formatted)
+    else other.push(formatted)
   }
 
   return [...types.sort(), ...urgency.sort(), ...areas.sort(), ...other.sort()]

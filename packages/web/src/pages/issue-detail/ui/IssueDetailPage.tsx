@@ -457,7 +457,7 @@ export function IssueDetailPage() {
                 <PencilIcon className="size-4" />
               </Button>
             </div>
-            {issue.labels.length > 0 && (
+            {Object.keys(issue.labels ?? {}).length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">
                 {sortLabels(issue.labels).map((label) => {
                   const s = getLabelStyle(label)

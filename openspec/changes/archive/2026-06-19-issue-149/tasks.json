@@ -1,0 +1,73 @@
+{
+  "project": "mohist-local",
+  "description": "Replace the Issue labels primitive from flat string[] to a single-value key-value (Dictionary<string,string>) model across backend, Web, and CLI, with no data migration.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Backend: Issue labels key-value primitive, storage, and HTTP API",
+      "spec": "specs/issue-labels/spec.md#Label operations are key-addressed",
+      "description": "Replace Issue.Labels from string[] to an IReadOnlyDictionary<string,string> single-value key-value model and thread it through the whole server so the backend builds and serves key-value labels. Covers: domain type + a new partial Issue.Labels.cs with SetLabel/RemoveLabel/ReplaceLabels and key/value validation; Create/Update signatures and map change-detection; IssueCreated/IssueLabelsChanged event records carrying maps; tolerant IssueStore deserialization of legacy array-form labels to an empty map; grain (IIssueGrain.CreateAsync, UpdateIssueData serializer field, IssueGrain wiring); IssueInfo/IssueReadModel types; IssueQuerier key=value filtering instead of .Contains; Api/LabelsRoutes returning distinct label keys from stored issues (drop the hardcoded list); IssueEventSerializer payload (bus type unchanged). Also satisfies specs/issue-labels (primitive), the http-api delta (POST/PATCH labels object, GET /api/labels keys, 400 on invalid), and the local-issue-store persistence delta.",
+      "acceptanceCriteria": [
+        "Issue.Labels is IReadOnlyDictionary<string,string>; each key maps to at most one value (setting an existing key replaces its value).",
+        "SetLabel(key,value) upserts; RemoveLabel(key) removes by key and is idempotent (missing key is not an error); ReplaceLabels/full update replaces the entire map.",
+        "Keys are validated against ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$; values must be non-empty/non-whitespace; invalid input throws ArgumentException with a clear message.",
+        "IssueLabelsChanged event carries the old and new maps; a no-op change (same value) emits no event.",
+        "POST /api/issues and PATCH /api/issues/:id accept a labels JSON object (full-replacement on update); invalid key or empty value returns HTTP 400 with a clear error.",
+        "GET /api/labels returns the distinct label keys used across the project's issues, sorted by key.",
+        "IssueQuerier label filtering matches an issue when its label map contains the selected key=value pair.",
+        "Legacy rows whose serialized labels is a JSON array deserialize to an empty map without throwing (no data migration; no EF migration or ModelSnapshot change).",
+        "`dotnet build` succeeds for the server solution; all updated/new backend tests pass via `dotnet test` (IssueDomainSpecs for set/remove/replace/validation/no-op-event, IssueQuerierSpecs for key=value filtering, a tolerant-deserialize spec, and API route/create-update validation tests)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A green-building server that creates, updates, queries, and lists Issue labels as a key-value map, with backend unit/integration tests passing.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the only build-green seam: the string[] to Dictionary type change breaks compilation across IssueInfo, IssueReadModel, IssueQuerier, IssueGrain, IIssueGrain, UpdateIssueData, and server tests, so all C# adaptations must land together. Mirror the existing AgentSessionMetadata IReadOnlyDictionary<string,string> + WithLabel pattern (Sessions/Domain/AgentSession.cs:42-70). The grain internally can call SetLabel/RemoveLabel; the HTTP contract is full-replacement PATCH (design D5)."
+    },
+    {
+      "id": "T-002",
+      "title": "Web UI: key-value label editor and board filter",
+      "spec": "specs/web-ui/spec.md#Issue Create/Edit label editor accepts key and value",
+      "description": "Adapt the Web UI to the key-value label model. Covers: entities/issue/model/types.ts labels type to Record<string,string>; kanban-board/model/board-query.ts BoardQueryState.labels entries as key=value tokens and applyBoardFilters matching issue.labels[k] === v; api/client.ts getLabels (keys) and useLabels; Create/Edit Issue dialogs replaced from flat chip toggles to a key+value editor with pre-submit validation; entities/issue/@x/events.ts IssueLabelsChanged payload shape; widgets/issue-event-timeline describe rendering of key=value. Also satisfies the web-ui delta scenarios (REQ-WUI-198-002, REQ-WUI-209-003, and the new editor requirement).",
+      "acceptanceCriteria": [
+        "Issue label type in the Web client is a key-value map (Record<string,string>); getLabels returns distinct keys.",
+        "The Create Issue and Edit Issue dialogs provide a key+value label editor (not flat chip toggles); adding a label submits {key: value}.",
+        "The editor blocks submission with a clear inline error for an invalid key (uppercase/whitespace/leading-trailing dash/empty) or an empty value.",
+        "Board label filtering matches an issue when its label map contains every selected key=value token; the filter derives selectable key=value pairs from the loaded issues client-side.",
+        "Board query URL serialization continues to round-trip label (key=value) filters.",
+        "The Issue event timeline renders label changes in key=value form from the IssueLabelsChanged payload.",
+        "`npm run typecheck` (or the repo's web typecheck) and the web test suite pass, including updated CreateIssueDialog.test.tsx, kanban-grouping.test.ts, and describe.test.ts, plus a new editor-validation test and a board key=value filter test."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A Web UI that creates/edits issues with key+value labels and filters the board by key=value, with web unit/component tests passing.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 for the key-value HTTP contract (POST/PATCH labels object, GET /api/labels keys) and the IssueLabelsChanged map payload. Do not depend on the CLI task. Keep BoardQueryState.labels as string[] but treat each entry as a key=value token (split on the first '=' only) per design D7."
+    },
+    {
+      "id": "T-003",
+      "title": "CLI: key=value label flags for issue create/update/list",
+      "spec": "specs/cli-interface/spec.md#Server API 扩展",
+      "description": "Adapt the CLI label option to the key-value model. Covers: the LabelOption consumers in MohistCliCommands.Issue.cs (create/update/list) parse -l tokens as key=value (set) or -key (remove; unambiguous because keys cannot start with '-'); reject malformed tokens (-l =x, -l key= empty value, invalid key) with a clear error and exit code 1; build the resulting full label map by applying the +/- delta against the issue's current labels and send it via the full-replacement PATCH; mo issue list label filter accepts key=value; mo label list shows distinct keys. Also satisfies the local-issue-store CLI delta scenarios and the cli-interface Server API delta.",
+      "acceptanceCriteria": [
+        "`mo issue create \"t\" -l stream=frontend` creates an issue with labels {stream: frontend}; multiple -l flags are accepted.",
+        "`mo issue update <id> -l stream=backend` upserts the stream key; `-l -stream` removes the stream key (idempotent if absent).",
+        "Malformed tokens (e.g. -l =x, -l key= empty value, -l Bad-Key uppercase) print a clear validation error and exit with code 1.",
+        "`mo issue list -l stream=frontend` filters by the key=value pair; `mo label list` prints the distinct label keys used in the project, sorted.",
+        "Issue list/show output renders labels in key=value form.",
+        "The CLI builds and CLI command tests pass, covering set, remove, invalid-rejection exit code, and list filtering."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A CLI that accepts key=value label flags for create/update/list and removes labels by key, with CLI tests passing.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 for the key-value HTTP contract. Independent of the Web task (T-002), so both may run after T-001. The CLI uses read-modify-write at the client (apply +/- delta against current labels, send full map via PATCH) per design D6; the read-modify-write race is accepted for this single-user dev tool."
+    }
+  ]
+}

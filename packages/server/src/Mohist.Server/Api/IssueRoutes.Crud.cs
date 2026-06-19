@@ -4,6 +4,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
+using IssueDomain = Mohist.Server.Issue.Domain;
 
 namespace Mohist.Server.Api;
 
@@ -15,14 +16,17 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             string? stage,
-            string? label,
+            string[]? label,
             string? priority,
             bool? archived,
             bool? all,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var list = await issuesQuery.ListAsync(project.Id, project, stage, label, priority, archived, all);
+            if (TryValidateLabelFilters(label, out var labelError) is false)
+                return ApiResults.BadRequest(labelError!, "invalid_label");
+
+            var list = await issuesQuery.ListWithLabelFiltersAsync(project.Id, project, stage, label, priority, archived, all);
             return ApiResults.Ok(list);
         });
 
@@ -38,6 +42,9 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest("title is required");
 
             var project = GetRequiredProject(ctx);
+
+            if (TryValidateLabels(req.Labels, out var labelError) is false)
+                return ApiResults.BadRequest(labelError!, "invalid_label");
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
             if (resolution.HasProblem)
@@ -96,6 +103,9 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
+            if (TryValidateLabels(req.Labels, out var labelError) is false)
+                return ApiResults.BadRequest(labelError!, "invalid_label");
+
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
@@ -118,5 +128,54 @@ public static partial class IssueRoutes
             var info = await issuesQuery.GetAsync(project.Id, number);
             return ApiResults.Ok(info);
         });
+    }
+
+    internal static bool TryValidateLabels(Dictionary<string, string>? labels, out string? error)
+    {
+        if (labels is null) { error = null; return true; }
+        foreach (var (key, value) in labels)
+        {
+            try
+            {
+                IssueDomain.Issue.ValidateLabelKey(key);
+                IssueDomain.Issue.ValidateLabelValue(value);
+            }
+            catch (ArgumentException ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+        error = null;
+        return true;
+    }
+
+    internal static bool TryValidateLabelFilters(IReadOnlyList<string>? labels, out string? error)
+    {
+        if (labels is null || labels.Count == 0) { error = null; return true; }
+
+        foreach (var token in labels)
+        {
+            var idx = token.IndexOf('=');
+            if (idx < 0)
+            {
+                error = $"Issue label filter '{token}' is invalid; expected key=value";
+                return false;
+            }
+
+            try
+            {
+                IssueDomain.Issue.ValidateLabelKey(token[..idx]);
+                IssueDomain.Issue.ValidateLabelValue(token[(idx + 1)..]);
+            }
+            catch (ArgumentException ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
     }
 }

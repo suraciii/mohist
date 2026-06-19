@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data;
@@ -44,7 +45,50 @@ public class IssueStore : IStateStore<DomainIssue>
     public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
     public static DomainIssue? Deserialize(string json) =>
-        JSON.Deserialize<DomainIssue>(json);
+        Deserialize(json, out _);
+
+    public static DomainIssue? Deserialize(string json, out bool legacyLabelsDiscarded)
+    {
+        legacyLabelsDiscarded = false;
+        if (string.IsNullOrEmpty(json)) return null;
+
+        var (rewritten, discarded) = NormalizeLegacyLabels(json);
+        if (discarded) legacyLabelsDiscarded = true;
+        return JSON.Deserialize<DomainIssue>(rewritten);
+    }
+
+    private static (string Json, bool Discarded) NormalizeLegacyLabels(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("labels", out var labelsElement))
+                return (json, false);
+
+            if (labelsElement.ValueKind == JsonValueKind.Object)
+                return (json, false);
+
+            using var ms = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(ms))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (property.NameEquals("labels")) continue;
+                    property.WriteTo(writer);
+                }
+                writer.WritePropertyName("labels");
+                writer.WriteStartObject();
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+            }
+            return (System.Text.Encoding.UTF8.GetString(ms.ToArray()), true);
+        }
+        catch (JsonException)
+        {
+            return (json, false);
+        }
+    }
 
     public static string Serialize(DomainIssue issue) =>
         JSON.Serialize(issue);

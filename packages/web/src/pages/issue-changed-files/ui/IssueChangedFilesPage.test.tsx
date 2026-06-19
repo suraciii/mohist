@@ -54,7 +54,7 @@ const SAMPLE_ISSUE = {
   body: 'Description',
   status: 'in_progress' as const,
   stage: 'build' as const,
-  labels: [],
+  labels: {},
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   projectId: 'proj-1',

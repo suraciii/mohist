@@ -1,5 +1,6 @@
 import type { Issue } from '../../../entities/issue'
 import type { Column } from './kanban-grouping'
+import { parseLabelSearchParams, parseLabelToken, serializeLabelSearchParams } from '../../../entities/issue/model/labels'
 
 export type SortMode = 'priority' | 'number' | 'updated'
 
@@ -13,13 +14,12 @@ export interface BoardQueryState {
 export function parseBoardQuery(search: string): BoardQueryState {
   const params = new URLSearchParams(search)
   const priorities = params.get('priorities')
-  const labelParam = params.get('labels')
   const searchParam = params.get('search')
   const sortParam = params.get('sort')
 
   return {
     priorities: priorities ? priorities.split(',').filter(Boolean) : [],
-    labels: labelParam ? labelParam.split(',').filter(Boolean) : [],
+    labels: parseLabelSearchParams(params, search),
     search: searchParam ?? '',
     sort: (sortParam === 'priority' || sortParam === 'number' || sortParam === 'updated')
       ? sortParam
@@ -33,7 +33,7 @@ export function serializeBoardQuery(state: BoardQueryState): string {
     params.set('priorities', state.priorities.join(','))
   }
   if (state.labels.length > 0) {
-    params.set('labels', state.labels.join(','))
+    serializeLabelSearchParams(params, state.labels)
   }
   if (state.search) {
     params.set('search', state.search)
@@ -82,6 +82,16 @@ function sortIssues(issues: Issue[], mode: SortMode): Issue[] {
   })
 }
 
+export function issueMatchesLabelTokens(labels: Record<string, string> | undefined | null, tokens: string[]): boolean {
+  if (!tokens || tokens.length === 0) return true
+  const safeLabels = labels ?? {}
+  return tokens.every((token) => {
+    const parsed = parseLabelToken(token)
+    if (!parsed) return false
+    return safeLabels[parsed.key] === parsed.value
+  })
+}
+
 export function applyBoardFilters(
   issues: Issue[],
   state: BoardQueryState,
@@ -96,9 +106,7 @@ export function applyBoardFilters(
   }
 
   if (state.labels.length > 0) {
-    result = result.filter((issue) =>
-      state.labels.every((label) => issue.labels.includes(label)),
-    )
+    result = result.filter((issue) => issueMatchesLabelTokens(issue.labels, state.labels))
   }
 
   if (state.search.trim()) {

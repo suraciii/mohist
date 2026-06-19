@@ -40,7 +40,7 @@ public class IssueCreationSpecs
         return project;
     }
 
-    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? risk = null, bool isDraft = false)
+private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, IReadOnlyDictionary<string, string>? labels = null, string? priority = null, string? risk = null, bool isDraft = false)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueId = $"issue_{Guid.NewGuid():N}";
@@ -196,9 +196,18 @@ public class IssueCreationSpecs
     {
         var project = await SetupProjectAsync();
 
-        var issue = await CreateIssueAsync(project.Id, "Labeled", labels: ["bug", "urgent"], priority: "p0");
+        var issue = await CreateIssueAsync(
+            project.Id,
+            "Labeled",
+            labels: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["stream"] = "frontend",
+                ["priority"] = "p0",
+            },
+            priority: "p0");
 
-        Assert.Equal(["bug", "urgent"], issue.Labels);
+        Assert.Equal("frontend", issue.Labels["stream"]);
+        Assert.Equal("p0", issue.Labels["priority"]);
         Assert.Equal("p0", issue.Priority);
     }
 

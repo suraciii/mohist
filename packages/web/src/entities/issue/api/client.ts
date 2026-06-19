@@ -18,7 +18,7 @@ export function getIssue(number: number, projectId?: string | null) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`))
 }
 
-export function createIssue(data: { title: string; body?: string; attachmentIds?: string[]; labels?: string[]; model?: string; agentConfig?: Record<string, unknown>; priority?: string; risk?: string | null; workflowProfileId?: string | null; projectId?: string; repositoryName?: string }) {
+export function createIssue(data: { title: string; body?: string; attachmentIds?: string[]; labels?: Record<string, string>; model?: string; agentConfig?: Record<string, unknown>; priority?: string; risk?: string | null; workflowProfileId?: string | null; projectId?: string; repositoryName?: string }) {
   const { projectId, ...body } = data
   return request<Issue>(projectApiPath(projectId, '/issues'), {
     method: 'POST',
@@ -26,7 +26,7 @@ export function createIssue(data: { title: string; body?: string; attachmentIds?
   })
 }
 
-export function updateIssue(number: number, data: { title?: string; body?: string; attachmentIds?: string[]; addLabels?: string[]; removeLabels?: string[]; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) {
+export function updateIssue(number: number, data: { title?: string; body?: string; attachmentIds?: string[]; labels?: Record<string, string>; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`), {
     method: 'PATCH',
     body: JSON.stringify(data),
@@ -132,8 +132,8 @@ export function deleteComment(issueNumber: number, commentId: string, projectId?
   })
 }
 
-export function getLabels() {
-  return request<string[]>('/labels')
+export function getLabels(projectId?: string | null) {
+  return request<string[]>(projectApiPath(projectId, '/labels'))
 }
 
 export function getWorkflowYaml(workflowRunId: string) {

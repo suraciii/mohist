@@ -21,6 +21,24 @@ function getArray(payload: Record<string, unknown>, key: string): unknown[] {
   return []
 }
 
+function getLabelMap(payload: Record<string, unknown>, ...keys: string[]): Record<string, string> | null {
+  for (const key of keys) {
+    const value = payload[key]
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, string>
+    }
+  }
+  return null
+}
+
+function formatLabelMap(map: Record<string, string> | null): string {
+  if (!map) return ''
+  const entries = Object.keys(map)
+    .sort()
+    .map((k) => `${k}=${map[k]}`)
+  return entries.join(', ')
+}
+
 export function formatStageName(stage: string | null | undefined): string {
   if (!stage) return ''
   return stage
@@ -28,12 +46,6 @@ export function formatStageName(stage: string | null | undefined): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(' ')
-}
-
-function formatList(items: unknown[]): string {
-  return items
-    .filter((item): item is string => typeof item === 'string')
-    .join(', ')
 }
 
 function prettifyType(type: string): string {
@@ -50,7 +62,8 @@ export function describeEvent(type: string, payload: Record<string, unknown> = {
   const fromStage = formatStageName(getString(payload, 'from'))
   const toStage = formatStageName(getString(payload, 'to'))
   const stage = formatStageName(getString(payload, 'stage'))
-  const labels = formatList(getArray(payload, 'labels'))
+  const labels = formatLabelMap(getLabelMap(payload, 'labels', 'newLabels'))
+  const oldLabels = formatLabelMap(getLabelMap(payload, 'oldLabels'))
   const priority = getString(payload, 'priority') ?? ''
   const prerequisiteId = getString(payload, 'prerequisiteId') ?? ''
   const conflicts = getArray(payload, 'conflicts')
@@ -134,6 +147,9 @@ export function describeEvent(type: string, payload: Record<string, unknown> = {
       return 'Work completed'
 
     case 'com.mohist.issue.labels-changed':
+      if (labels && oldLabels) {
+        return `Issue labels changed from ${oldLabels} to ${labels}`
+      }
       return labels ? `Issue labeled ${labels}` : 'Issue labels changed'
 
     case 'com.mohist.issue.priority-changed':

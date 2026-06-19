@@ -9,7 +9,9 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import { extractAttachmentIds, updateIssue, useLabels } from '../../../entities/issue'
+import { extractAttachmentIds, updateIssue } from '../../../entities/issue'
+import { LabelEditor } from '../../../entities/issue/lib/label-editor'
+import type { LabelMap } from '../../../entities/issue/model/labels'
 import type { Issue } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
@@ -24,45 +26,34 @@ interface Props {
 export function EditIssueDialog({ open, onClose, issue }: Props) {
   const [title, setTitle] = useState(issue.title)
   const [body, setBody] = useState(issue.body ?? '')
-  const [labels, setLabels] = useState<string[]>(issue.labels)
+  const [labels, setLabels] = useState<LabelMap>(issue.labels ?? {})
   const [priority, setPriority] = useState<string>(issue.priority ?? 'p2')
   const queryClient = useQueryClient()
-  const { data: allLabels } = useLabels()
 
   useEffect(() => {
     if (open) {
       setTitle(issue.title)
       setBody(issue.body ?? '')
-      setLabels(issue.labels)
+      setLabels(issue.labels ?? {})
       setPriority(issue.priority ?? 'p2')
     }
   }, [open, issue])
 
   const mutation = useMutation({
-    mutationFn: () => {
-      const add = labels.filter((l) => !issue.labels.includes(l))
-      const remove = issue.labels.filter((l) => !labels.includes(l))
-      return updateIssue(issue.number, {
+    mutationFn: () =>
+      updateIssue(issue.number, {
         title,
         body: body || undefined,
         attachmentIds: extractAttachmentIds(body),
-        ...(add.length > 0 ? { addLabels: add } : {}),
-        ...(remove.length > 0 ? { removeLabels: remove } : {}),
+        labels,
         priority,
-      }, issue.projectId)
-    },
+      }, issue.projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       onClose()
     },
   })
-
-  function toggleLabel(label: string) {
-    setLabels((prev) =>
-      prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label],
-    )
-  }
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -93,29 +84,15 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
             />
           </div>
 
-          {allLabels && allLabels.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Labels</label>
-              <div className="flex flex-wrap gap-1.5">
-                {allLabels.map((label) => (
-                  <Button
-                    key={label}
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => toggleLabel(label)}
-                    className={`rounded-full ${
-                      labels.includes(label)
-                        ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
-                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                    }`}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Labels</label>
+            <LabelEditor
+              value={labels}
+              onChange={setLabels}
+              inputIdPrefix="edit-issue-label"
+              emptyHint="No labels yet — add a key+value pair to classify this issue."
+            />
+          </div>
 
           <div>
             <label className="block text-xs font-medium text-foreground mb-1">Priority</label>

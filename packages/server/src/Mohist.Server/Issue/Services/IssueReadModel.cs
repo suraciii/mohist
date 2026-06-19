@@ -18,7 +18,7 @@ public class IssueReadModel
     public string Health { get; set; } = "active";
     public string ProjectId { get; set; } = null!;
     public string? ProjectName { get; set; }
-    public string[] Labels { get; set; } = [];
+    public Dictionary<string, string> Labels { get; set; } = new(StringComparer.Ordinal);
     public string Priority { get; set; } = "p2";
     public string? Risk { get; set; }
     public string? Model { get; set; }

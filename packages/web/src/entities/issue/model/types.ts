@@ -157,7 +157,7 @@ export interface Issue {
   workflowProfileId?: string | null
   health: IssueHealth
   projectId: string
-  labels: string[]
+  labels: Record<string, string>
   createdAt: string
   updatedAt: string
   projectName?: string

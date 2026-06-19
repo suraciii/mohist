@@ -56,7 +56,7 @@ function makeIssue(): Issue {
     status: IssueStatus.Backlog,
     health: IssueHealth.Active,
     projectId: 'proj_scoped',
-    labels: [],
+    labels: {},
     isDraft: false,
     canStart: true,
     blocker: null,

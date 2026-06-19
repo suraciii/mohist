@@ -145,8 +145,8 @@ internal sealed class TableRenderer
     private void RenderIssueList(JsonNode? data)
     {
         var rows = AsArray(data);
-        var headers = new[] { "number", "title", "stage", "status", "priority", "state" };
-        var widths = new[] { 7, TitleSoftCap, 16, 12, 9, TitleSoftCap };
+var headers = new[] { "number", "title", "stage", "status", "priority", "state", "labels" };
+        var widths = new[] { 7, TitleSoftCap, 16, 12, 9, TitleSoftCap, TitleSoftCap };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
@@ -156,7 +156,8 @@ internal sealed class TableRenderer
             var stage = StringOf(row, "workflowStage");
             var status = StringOf(row, "status");
             var priority = StringOf(row, "priority");
-            var state = FormatIssueState(row);
+var state = FormatIssueState(row);
+            var labels = FormatLabels(row?["labels"]);
             cells.Add(new[]
             {
                 number,
@@ -165,6 +166,7 @@ internal sealed class TableRenderer
                 Truncate(status, 12),
                 Truncate(priority, 9),
                 Truncate(state, TitleSoftCap),
+                Truncate(labels, TitleSoftCap),
             });
         }
 
@@ -189,6 +191,7 @@ internal sealed class TableRenderer
             project = StringOf(data, "projectId");
         var updatedAt = StringOf(data, "updatedAt");
         var body = StringOf(data, "body");
+        var labels = FormatLabels(data["labels"]);
 
         _out.WriteLine($"number:   {number}");
         _out.WriteLine($"title:    {Truncate(title, TitleSoftCap)}");
@@ -197,6 +200,7 @@ internal sealed class TableRenderer
         _out.WriteLine($"priority: {priority}");
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
+        _out.WriteLine($"labels:   {labels}");
         if (!string.IsNullOrEmpty(body))
             _out.WriteLine($"body:     {Truncate(body, BodySoftCap)}");
         _out.WriteLine($"state:    {FormatIssueState(data)}");
@@ -223,6 +227,18 @@ internal sealed class TableRenderer
         var canStart = BoolOf(data, "canStart");
         if (canStart) return "ready";
         return "";
+    }
+
+    private static string FormatLabels(JsonNode? labels)
+    {
+        if (labels is not JsonObject obj || obj.Count == 0)
+            return "";
+        return string.Join(",", obj.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv =>
+            {
+                var value = kv.Value is null ? "" : (kv.Value.GetValue<string>() ?? "");
+                return string.Concat(kv.Key, "=", value);
+            }));
     }
 
     private void RenderWorkflowStatus(JsonNode? data)

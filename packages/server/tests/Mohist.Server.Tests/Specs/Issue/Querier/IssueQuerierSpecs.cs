@@ -37,7 +37,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Query me",
-            Labels = ["bug"],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" },
             Priority = "p1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
         };
@@ -51,7 +51,7 @@ public class IssueQuerierSpecs
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
 
-        var list = await service.ListAsync(project.Id, project, stage: "backlog", label: "bug");
+        var list = await service.ListAsync(project.Id, project, stage: "backlog", label: "stream=frontend");
 
         var item = Assert.Single(list);
         Assert.Equal("Query me", item.Title);
@@ -73,7 +73,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Id keyed issue",
-            Labels = ["feature"],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["module"] = "auth" },
             Priority = "p2",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
         };
@@ -116,7 +116,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Canonical title",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
         };
@@ -151,7 +151,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Progress issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             WorkflowRunId = "wf-run-1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.InProgress,
@@ -244,7 +244,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Orchestration issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             WorkflowRunId = "wf-run-orch-1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.InProgress,
@@ -326,7 +326,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Failed task issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             WorkflowRunId = "wf-run-fail-1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.InProgress,
@@ -408,7 +408,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Backlog issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
         };
 
@@ -440,7 +440,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Done issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             WorkflowRunId = "wf-run-done-1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Done,
@@ -488,7 +488,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Orchestration only issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             WorkflowRunId = "wf-run-nouser-1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.InProgress,
@@ -559,7 +559,7 @@ public class IssueQuerierSpecs
             ProjectId = project.Id,
             Number = 1,
             Title = "Approval waiting issue",
-            Labels = [],
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             WorkflowRunId = "wf-run-approval-1",
             Status = Mohist.Server.Issue.Domain.IssueStatus.InProgress,
@@ -625,5 +625,144 @@ public class IssueQuerierSpecs
 
         var item = Assert.Single(list);
         Assert.Null(item.WorkflowStageProgress);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ListAsync_FiltersByKeyValueLabel()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-kv-{Guid.NewGuid():N}", Name = "KV Project" };
+
+        var issueA = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_kv_a_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Stream frontend",
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["stream"] = "frontend",
+                ["module"] = "auth",
+            },
+            Priority = "p2",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+        var issueB = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_kv_b_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 2,
+            Title = "Stream backend",
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["stream"] = "backend",
+            },
+            Priority = "p2",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+
+        db.Issues.Add(new IssueRow { IssueId = issueA.Id, State = IssueStore.Serialize(issueA) });
+        db.Issues.Add(new IssueRow { IssueId = issueB.Id, State = IssueStore.Serialize(issueB) });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var frontendHits = await service.ListAsync(project.Id, project, label: "stream=frontend");
+        var frontendItem = Assert.Single(frontendHits);
+        Assert.Equal(issueA.Number, frontendItem.Number);
+
+        var backendHits = await service.ListAsync(project.Id, project, label: "stream=backend");
+        var backendItem = Assert.Single(backendHits);
+        Assert.Equal(issueB.Number, backendItem.Number);
+
+        var missingHits = await service.ListAsync(project.Id, project, label: "stream=missing");
+        Assert.Empty(missingHits);
+
+        var keyMissHits = await service.ListAsync(project.Id, project, label: "missing=anything");
+        Assert.Empty(keyMissHits);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ListAsync_WithMultipleKeyValueLabels_RequiresAllFilters()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-kv-multi-{Guid.NewGuid():N}", Name = "KV Multi Project" };
+
+        var match = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_kv_multi_match_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Frontend auth",
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["stream"] = "frontend",
+                ["module"] = "auth",
+            },
+            Priority = "p2",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+        var missingModule = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_kv_multi_miss_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 2,
+            Title = "Frontend only",
+            Labels = new Dictionary<string, string>(StringComparer.Ordinal) { ["stream"] = "frontend" },
+            Priority = "p2",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+
+        db.Issues.Add(new IssueRow { IssueId = match.Id, State = IssueStore.Serialize(match) });
+        db.Issues.Add(new IssueRow { IssueId = missingModule.Id, State = IssueStore.Serialize(missingModule) });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var listed = await service.ListWithLabelFiltersAsync(
+            project.Id,
+            project,
+            stage: null,
+            labels: ["stream=frontend", "module=auth"],
+            priority: null,
+            archived: null,
+            all: null);
+
+        var item = Assert.Single(listed);
+        Assert.Equal(match.Number, item.Number);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void ParseLabelFilter_SplitsOnFirstEquals()
+    {
+        var (key, value) = IssueQuerier.ParseLabelFilter("stream=frontend");
+        Assert.Equal("stream", key);
+        Assert.Equal("frontend", value);
+
+        var withEqualsInValue = IssueQuerier.ParseLabelFilter("k=v=w");
+        Assert.Equal("k", withEqualsInValue.Key);
+        Assert.Equal("v=w", withEqualsInValue.Value);
+
+        var noEquals = IssueQuerier.ParseLabelFilter("justatoken");
+        Assert.Null(noEquals.Key);
+        Assert.Equal("justatoken", noEquals.Value);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void LabelFilterTokens_SplitsCommaJoinedLegacyQuery()
+    {
+        Assert.Equal(
+            new[] { "stream=frontend", "module=auth" },
+            IssueQuerier.LabelFilterTokens("stream=frontend,module=auth"));
     }
 }

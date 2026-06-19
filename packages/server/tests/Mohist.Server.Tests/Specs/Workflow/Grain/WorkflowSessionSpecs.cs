@@ -181,7 +181,7 @@ public class WorkflowSessionSpecs
         {
             title = issueTitle,
             body = "track workflow session",
-            labels = Array.Empty<string>(),
+labels = new Dictionary<string, string>(StringComparer.Ordinal),
             priority = "p1",
             isDraft = false
         });

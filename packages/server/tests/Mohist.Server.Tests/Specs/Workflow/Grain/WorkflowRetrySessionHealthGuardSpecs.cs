@@ -307,7 +307,7 @@ public class WorkflowRetrySessionHealthGuardSpecs
         {
             title = $"Retry guard {Guid.NewGuid():N}",
             body = "track retry guard",
-            labels = Array.Empty<string>(),
+            labels = new Dictionary<string, string>(StringComparer.Ordinal),
             priority = "p1",
             projectId = project.Id,
             isDraft = false,

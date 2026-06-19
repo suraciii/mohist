@@ -345,7 +345,7 @@ public class IssueSessionApiSpecs
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
         var issueTitle = title ?? $"Session api {name}";
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = issueTitle, body = "track session", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id, isDraft = false });
+var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = issueTitle, body = "track session", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
 
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",

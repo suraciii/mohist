@@ -6,7 +6,7 @@ namespace Mohist.Server.Api;
 public record CreateIssueRequest(
     string Title,
     string? Body = null,
-    string[]? Labels = null,
+    Dictionary<string, string>? Labels = null,
     string? Priority = null,
     string? Model = null,
     Dictionary<string, object?>? AgentConfig = null,
@@ -20,7 +20,7 @@ public record CreateIssueRequest(
 public record UpdateIssueRequest(
     string? Title = null,
     string? Body = null,
-    string[]? Labels = null,
+    Dictionary<string, string>? Labels = null,
     string? Priority = null,
     string? Model = null,
     Dictionary<string, object?>? AgentConfig = null,
