@@ -1,8 +1,28 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
-const settingsTabs = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system'] as const
+const settingsTabs = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system', 'preferences'] as const
 const targetImpacts = new Set(['critical', 'serious'])
+type Theme = 'light' | 'dark'
+const themes: readonly Theme[] = ['light', 'dark'] as const
+
+/**
+ * Activate a theme before any page script runs. We use `addInitScript` so the
+ * `mohist:theme` value lands in `localStorage` before the inline pre-paint
+ * script in `index.html` reads it — the pre-paint script then applies the
+ * `.dark` class on `<html>` before first paint, eliminating the FOUC that an
+ * after-paint toggle would introduce. Theme choice: 'light' or 'dark'.
+ */
+async function applyTheme(page: Page, theme: Theme) {
+  await page.addInitScript((stored: string) => {
+    try {
+      window.localStorage.setItem('mohist:theme', stored)
+    } catch (_) {
+      // Storage unavailable; axe-core will run with whatever theme the
+      // browser defaulted to.
+    }
+  }, theme)
+}
 const project = {
   id: 'proj-a11y',
   name: 'a11y-project',
@@ -158,23 +178,62 @@ test.describe('Settings accessibility browser audit', () => {
     await mockSettingsApi(page)
   })
 
-  for (const tab of settingsTabs) {
-    test(`${settingsPath(tab)} has no critical or serious color-contrast violations`, async ({ page }) => {
-      await gotoSettingsTab(page, tab)
+  for (const theme of themes) {
+    for (const tab of settingsTabs) {
+      test(`${settingsPath(tab)} (${theme}) has no critical or serious color-contrast violations`, async ({ page }) => {
+        await applyTheme(page, theme)
+        await gotoSettingsTab(page, tab)
 
+        const results = await new AxeBuilder({ page })
+          .include('main, [data-slot="sidebar-inset"], body')
+          .withRules(['color-contrast'])
+          .analyze()
+
+        const unmet = results.violations.filter((violation) => targetImpacts.has(violation.impact ?? ''))
+        expect(unmet).toEqual([])
+      })
+
+      test(`${settingsPath(tab)} (${theme}) has no critical or serious full-scan violations`, async ({ page }) => {
+        await applyTheme(page, theme)
+        await gotoSettingsTab(page, tab)
+
+        const results = await new AxeBuilder({ page }).analyze()
+        const unmet = results.violations.filter((violation) => targetImpacts.has(violation.impact ?? ''))
+        expect(unmet).toEqual([])
+      })
+    }
+  }
+
+  for (const theme of themes) {
+    test(`open settings search dialog (${theme}) has no critical or serious violations and exposes the modal contract`, async ({ page }) => {
+      await applyTheme(page, theme)
+      await gotoSettingsTab(page, 'agent')
+
+      // Open the search dialog with the ⌘K keystroke. The handler is bound
+      // locally on the Settings page; this is the same path the unit
+      // coverage uses, lifted into the browser audit so axe-core can scan
+      // the resulting modal.
+      await page.keyboard.press('Meta+K')
+      const input = page.getByTestId('settings-search-input')
+      await expect(input).toBeVisible()
+      await expect(input).toBeFocused()
+
+      const dialog = page.locator('[data-slot="dialog-content"]')
+      await expect(dialog).toBeVisible()
+
+      // The dialog must satisfy the modal-dialog contract that the Settings
+      // accessibility spec mandates: `aria-modal="true"` and a labelled-by
+      // reference to a visible title element.
+      await expect(dialog).toHaveAttribute('aria-modal', 'true')
+      await expect(dialog).toHaveAttribute('aria-labelledby', /.+/)
+
+      // Limit the scan to the open dialog so axe-core does not flag issues
+      // on the underlying Settings tab (which is covered by the per-tab
+      // tests above).
       const results = await new AxeBuilder({ page })
-        .include('main, [data-slot="sidebar-inset"], body')
-        .withRules(['color-contrast'])
+        .include('[data-slot="dialog-content"]')
         .analyze()
 
-      const unmet = results.violations.filter((violation) => targetImpacts.has(violation.impact ?? ''))
-      expect(unmet).toEqual([])
-    })
-
-    test(`${settingsPath(tab)} has no critical or serious full-scan violations`, async ({ page }) => {
-      await gotoSettingsTab(page, tab)
-
-      const results = await new AxeBuilder({ page }).analyze()
       const unmet = results.violations.filter((violation) => targetImpacts.has(violation.impact ?? ''))
       expect(unmet).toEqual([])
     })

@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Project } from '../../../entities/project'
 import { ProjectProvider } from '../../../entities/project'
+import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { SettingsPage } from './SettingsPage'
 
 const useRepositoriesMock = vi.fn()
@@ -49,11 +50,14 @@ function renderSettings(initialEntry = '/settings/repositories') {
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-selected" initialProjects={projects}>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <Routes>
-            <Route path="/settings/:section" element={<SettingsPage />} />
-          </Routes>
-        </MemoryRouter>
+        <SidebarProvider>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+              <Route path="/settings/:section" element={<SettingsPage />} />
+              <Route path="/:projectName/settings/:section" element={<SettingsPage />} />
+            </Routes>
+          </MemoryRouter>
+        </SidebarProvider>
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -116,5 +120,44 @@ describe('SettingsPage', () => {
     renderSettings('/settings/repositories')
 
     expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
+  })
+
+  it('renders a navigable Preferences tab and resolves /settings/preferences', () => {
+    renderSettings('/settings/preferences')
+
+    expect(screen.getByTestId('settings-tab-preferences')).toBeInTheDocument()
+    expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
+    expect(screen.getByTestId('preferences-shortcuts-card')).toBeInTheDocument()
+  })
+
+  it('exposes the Preferences tab trigger alongside the other six Settings tabs', () => {
+    renderSettings('/settings/ai')
+
+    for (const key of [
+      'settings-tab-ai',
+      'settings-tab-agent',
+      'settings-tab-repositories',
+      'settings-tab-workflows',
+      'settings-tab-templates',
+      'settings-tab-system',
+      'settings-tab-preferences',
+    ]) {
+      expect(screen.getByTestId(key)).toBeInTheDocument()
+    }
+  })
+
+  it('navigates to the Preferences tab from another Settings tab via the trigger', () => {
+    renderSettings('/settings/ai')
+
+    fireEvent.click(screen.getByTestId('settings-tab-preferences'))
+
+    expect(screen.getByTestId('preferences-theme-card')).toBeInTheDocument()
+    expect(screen.getByTestId('preferences-shortcuts-card')).toBeInTheDocument()
+  })
+
+  it('redirects an invalid section to the Coder Agent tab', () => {
+    renderSettings('/settings/not-a-real-section')
+
+    expect(screen.getByTestId('settings-onboarding-banner')).toBeInTheDocument()
   })
 })

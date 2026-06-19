@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Settings interactive elements meet minimum touch-target size
 
 Every interactive element rendered on the Settings tabs (including the Preferences tab) and within the settings search dialog — buttons, links, tab triggers, clickable chips, the Preferences theme-selector options, and the search result `CommandItem` rows — SHALL provide a pointer hit area of at least 44×44 CSS pixels (WCAG 2.5.5), including padding. Where a control's visual size is smaller than 44px, the hit area SHALL be extended via padding so the total clickable region meets the minimum. Settings section files SHALL NOT apply fixed height classes that cap interactive controls below 44px (e.g. `h-7`, `h-8` on buttons).
@@ -23,16 +25,6 @@ Every interactive element rendered on the Settings tabs (including the Preferenc
 
 - **WHEN** the Preferences theme-selector options or the settings search `CommandItem` result rows are rendered
 - **THEN** each option/row's clickable hit area SHALL be at least 44×44 CSS pixels including padding
-
-### Requirement: Settings Add Repository form stays legible on narrow viewports
-
-The Repositories tab's Add Repository form SHALL keep its Name, Base Branch, and Git URL inputs and their associated labels fully visible and uncrowded at a 375px viewport width. Labels SHALL NOT be clipped and inputs SHALL NOT overflow or collapse in a way that prevents accurate data entry.
-
-#### Scenario: 375px viewport form layout is usable
-
-- **WHEN** the Add Repository form is rendered at a 375px CSS viewport width
-- **THEN** the Name and Base Branch inputs SHALL both remain visible with their labels
-- **AND** no label SHALL be truncated and no input SHALL overflow the viewport horizontally
 
 ### Requirement: Settings keyboard navigation reaches all interactive elements in DOM order
 
@@ -138,22 +130,6 @@ Every form input rendered on the Settings tabs (including the Preferences tab) S
 - **THEN** it SHALL be programmatically associated with a text label (e.g. "Theme") via `<label htmlFor>`/`id` or `aria-labelledby`
 - **AND** assistive technology SHALL announce it as the theme control
 
-### Requirement: Settings mutation feedback is announced to assistive technology
-
-Success and failure feedback from Settings mutations SHALL be announced to assistive technology via an `aria-live` region. This SHALL be satisfied either by the toast component providing `role="status"`/`aria-live` on its announcements, or by an `aria-live` (polite) region within the active Section that surfaces mutation outcomes. The mechanism SHALL NOT require modifying the shared toast/Dialog/Select component internals beyond a minimal attribute patch; a deeper shared-component refactor is out of scope.
-
-#### Scenario: Successful mutation is announced
-
-- **WHEN** a Settings mutation succeeds (e.g. a model update, a repository add, a log level change)
-- **THEN** the success feedback SHALL be announced through a `role="status"`/`aria-live` toast or a Section-level `aria-live` region
-- **AND** a screen reader user SHALL receive notice that the action succeeded
-
-#### Scenario: Failed mutation is announced
-
-- **WHEN** a Settings mutation fails (e.g. a backend rejection or network error)
-- **THEN** the failure feedback SHALL be announced through an `aria-live` region or assertive live region appropriate for errors
-- **AND** a screen reader user SHALL receive notice that the action failed
-
 ### Requirement: Settings folding and dialog state is exposed to assistive technology
 
 Folding/disclosure controls on the Settings tabs (including the Preferences tab) (e.g. the Stage Model Overrides disclosure) SHALL expose their expanded/collapsed state via `aria-expanded`. Any modal dialog rendered on the Settings surface — including the settings search dialog — SHALL expose `aria-modal="true"` while open, SHALL be labelled via `aria-labelledby` referencing a visible dialog title, and SHALL trap keyboard focus within the dialog while open. The ModelSelect popover SHALL move focus into its search input when opened. Note: the Template Editor is currently an inline `CardSection` panel, not a modal dialog; the settings search dialog IS a modal dialog and the modal-dialog requirement applies to it.
@@ -209,19 +185,3 @@ The Settings surface SHALL include automated accessibility regression coverage u
 - **WHEN** the existing Settings test suite runs after the accessibility pass
 - **THEN** `SettingsPage.test.tsx` and the section unit tests SHALL pass
 - **AND** no test SHALL have been weakened to accommodate an a11y-only change
-
-### Requirement: Settings accessibility pass preserves functional behavior and API contracts
-
-The accessibility and responsiveness pass SHALL NOT change Settings functional behavior, persisted data, or backend API contracts. Changes SHALL be confined to presentation attributes (classNames, ARIA attributes, heading elements) and the addition of regression tests. The HTTP API routes (`/api/config`, `/api/agent-runtime`, `/api/system/info`, repository and workflow profile endpoints) SHALL remain unchanged in request/response shape.
-
-#### Scenario: No backend or data-model impact
-
-- **WHEN** the change is reviewed
-- **THEN** there SHALL be no changes to HTTP API routes, request/response shapes, or persisted Settings data models
-- **AND** the change SHALL be confined to frontend presentation and tests
-
-#### Scenario: No new component library or shared-component refactor
-
-- **WHEN** the change is reviewed
-- **THEN** no component library SHALL be replaced (shadcn/Radix/Base UI retained)
-- **AND** the shared toast, Dialog, and Select components SHALL NOT be refactored beyond a minimal attribute patch

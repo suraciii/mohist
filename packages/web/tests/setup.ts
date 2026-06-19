@@ -25,3 +25,24 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 if (typeof window !== 'undefined' && !window.innerWidth) {
   Object.defineProperty(window, 'innerWidth', { writable: true, value: 1280 })
 }
+
+if (typeof window !== 'undefined' && !window.ResizeObserver) {
+  class ResizeObserverPolyfill {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(window, 'ResizeObserver', {
+    writable: true,
+    value: ResizeObserverPolyfill,
+  })
+}
+
+if (typeof window !== 'undefined' && typeof window.Element !== 'undefined' && !window.Element.prototype.scrollIntoView) {
+  window.Element.prototype.scrollIntoView = function scrollIntoView() {}
+}
+
+if (typeof window !== 'undefined' && !window.requestAnimationFrame) {
+  window.requestAnimationFrame = (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16) as unknown as number
+  window.cancelAnimationFrame = (handle: number) => clearTimeout(handle)
+}

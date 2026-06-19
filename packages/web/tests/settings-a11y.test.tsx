@@ -9,7 +9,7 @@ import type { Project } from '../src/entities/project'
 import { ProjectProvider } from '../src/entities/project'
 import { SettingsPage } from '../src/pages/settings/ui/SettingsPage'
 
-const settingsTabs = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system'] as const
+const settingsTabs = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system', 'preferences'] as const
 const focusableSelector = [
   'a[href]',
   'button',

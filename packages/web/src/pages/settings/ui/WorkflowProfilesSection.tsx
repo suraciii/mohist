@@ -3,11 +3,17 @@ import { ArrowLeftIcon } from 'lucide-react'
 import { useWorkflowProfiles, useWorkflowProfile } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { CardSection } from '../../../shared/ui/components/card-section'
+import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
 // Isolated until workflow profile list data can provide per-profile stages.
 export const DEFAULT_WORKFLOW_STAGES = ['plan', 'build', 'check', 'integrate'] as const
+
+// Workflows has no configurable fields (profiles are read-only with per-row
+// view-detail actions); the search registry keeps an empty array so the tab
+// is still discoverable but exposes nothing to filter on.
+export const WORKFLOW_DESCRIPTORS: SettingsSearchEntry[] = []
 
 function YamlViewer({ yaml }: { yaml: string }) {
   return (

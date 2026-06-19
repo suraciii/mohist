@@ -8,6 +8,7 @@ import { useIsMobile } from "@/shared/hooks/use-mobile"
 import { Button } from "@/shared/ui/components/button"
 import { Separator } from "@/shared/ui/components/separator"
 import { Skeleton } from "@/shared/ui/components/skeleton"
+import { registerShortcutHandler } from "@/features/settings-search/keyboard-shortcuts"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
@@ -85,6 +86,15 @@ function SidebarProvider({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [toggleSidebar])
+
+  // The sidebar owns the ⌘B / Ctrl+B keystroke (see the effect above). It
+  // also advertises the binding through the settings-search shortcut
+  // registry so the Preferences "Keyboard shortcuts" reference can list it
+  // truthfully and the unit test can resolve every advertised id to a
+  // real handler. Registration is per-mount and unregisters on teardown.
+  React.useEffect(() => {
+    return registerShortcutHandler("sidebar-toggle", toggleSidebar)
   }, [toggleSidebar])
 
   const state = open ? "expanded" : "collapsed"

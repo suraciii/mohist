@@ -5,12 +5,34 @@ import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
+import type { SettingsSearchEntry } from '@/features/settings-search'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
 const STAGE_OVERRIDES_ID = 'settings-stage-model-overrides'
+export const REVEAL_STAGE_MODEL_OVERRIDES_EVENT = 'mohist:settings:reveal-stage-model-overrides'
 const DEFAULT_MODEL_LABEL_ID = 'settings-default-model-label'
+
+export const AI_SETTINGS_DESCRIPTORS: SettingsSearchEntry[] = [
+  {
+    tab: 'ai',
+    label: 'Default Coder Agent Model',
+    description: 'Passed to opencode when workflow tasks run.',
+    placeholder: 'Opencode default',
+    focusTargetId: 'settings-default-model',
+  },
+  ...STAGES.map(
+    (stage): SettingsSearchEntry => ({
+      tab: 'ai',
+      label: `${stage} stage model`,
+      description: `Override the coder agent model used for the ${stage} stage.`,
+      placeholder: 'Default',
+      focusTargetId: `settings-stage-model-${stage}`,
+      revealEvent: REVEAL_STAGE_MODEL_OVERRIDES_EVENT,
+    }),
+  ),
+]
 
 export function AiSettingsSection() {
   const { isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
@@ -25,6 +47,14 @@ export function AiSettingsSection() {
   useEffect(() => {
     if (stageModelsData?.stageModels) setLocalStageModels(stageModelsData.stageModels)
   }, [stageModelsData])
+
+  useEffect(() => {
+    function revealStageOverrides() {
+      setStageOverridesOpen(true)
+    }
+    window.addEventListener(REVEAL_STAGE_MODEL_OVERRIDES_EVENT, revealStageOverrides)
+    return () => window.removeEventListener(REVEAL_STAGE_MODEL_OVERRIDES_EVENT, revealStageOverrides)
+  }, [])
 
   const coderModels = useMemo(() => {
     return (availableModelIds ?? [])
@@ -75,6 +105,7 @@ export function AiSettingsSection() {
             </div>
             <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
             <ModelSelect
+              id="settings-default-model"
               value={opencodeModelData?.model ?? null}
               placeholder="Opencode default"
               models={coderModels}
@@ -108,6 +139,7 @@ export function AiSettingsSection() {
               <div key={stage} className="space-y-1">
                 <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
                 <ModelSelect
+                  id={`settings-stage-model-${stage}`}
                   value={localStageModels[stage] ?? null}
                   placeholder="Default"
                   models={coderModels}

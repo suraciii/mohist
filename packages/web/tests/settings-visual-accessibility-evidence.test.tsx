@@ -7,10 +7,12 @@ import type { Project } from '../src/entities/project'
 import { ProjectProvider } from '../src/entities/project'
 import { AgentSettingsSection } from '../src/pages/settings/ui/AgentSettingsSection'
 import { AiSettingsSection } from '../src/pages/settings/ui/AiSettingsSection'
+import { PreferencesSection } from '../src/pages/settings/ui/PreferencesSection'
 import { RepositoriesSection } from '../src/pages/settings/ui/RepositoriesSection'
 import { SystemSettingsSection } from '../src/pages/settings/ui/SystemSettingsSection'
 import { TemplatesSection } from '../src/pages/settings/ui/TemplatesSection'
 import { WorkflowProfilesSection } from '../src/pages/settings/ui/WorkflowProfilesSection'
+import { SidebarProvider } from '../src/shared/ui/components/sidebar'
 
 const useRepositoriesMock = vi.fn()
 const useAddRepositoryMock = vi.fn()
@@ -102,6 +104,7 @@ let artifacts: Record<string, string> = {}
 const beforeSummaries: Record<string, string> = {
   ai: 'Before: External Coder Agent used a hand-rolled rounded-md border bg-muted card and local h3 page title.',
   agent: 'Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens.',
+  preferences: 'Before: Preferences tab did not exist. The tab is new for Settings 2.0; page title is rendered by SettingsSection and cards are CardSection instances.',
   repositories: 'Before: Repository rows used rounded-lg border bg-card/50 and included hardcoded text-gray-500.',
   workflows: 'Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens.',
   templates: 'Before: Template rows and editor used rounded-lg border bg-card/50 or bg-card/60 wrappers.',
@@ -111,6 +114,7 @@ const beforeSummaries: Record<string, string> = {
 const sections = [
   ['ai', <AiSettingsSection />],
   ['agent', <AgentSettingsSection />],
+  ['preferences', <PreferencesSection />],
   ['repositories', <RepositoriesSection projectId={project.id} />],
   ['workflows', <WorkflowProfilesSection />],
   ['templates', <TemplatesSection />],
@@ -184,7 +188,7 @@ function renderEvidenceSection(section: React.ReactElement) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={project.id} initialProjects={[project]}>
-        {section}
+        <SidebarProvider>{section}</SidebarProvider>
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -314,6 +318,9 @@ describe('settings visual accessibility evidence', () => {
       'ai-before.txt',
       'ai-visual-diff.txt',
       'contrast-audit.json',
+      'preferences-after.html',
+      'preferences-before.txt',
+      'preferences-visual-diff.txt',
       'repositories-after.html',
       'repositories-before.txt',
       'repositories-visual-diff.txt',
