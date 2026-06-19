@@ -1,0 +1,87 @@
+{
+  "project": "mohist-local",
+  "description": "Fix the Epic board read model (priority ordering, Health-based progress counting, startability-aware nextIssue) and its presentation (group collapse, status-conditional card text, in-progress+next display, current-activity listing, Markdown description).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix Epic progress read model: Health-based counts, startable nextIssue, enriched DTOs",
+      "spec": "specs/epic-tracking/spec.md#Projected Epic Progress",
+      "description": "Rework EpicProgress.Build into a single pure function that derives blocked/active sets from issue Health (not Status), selects nextIssue as the highest-priority startable issue (CanStart, no Blocker) with a NextIssueReason fallback when none is startable, and keeps ReadyToMarkDone purely delivered-count-based. Extend LinkedIssueDto with optional CanStart/StartBlocker (populated from IssueInfo in EpicQuerier.GetLinkedIssuesAsync; left default in EpicGrain.BuildLinkedIssueDtosAsync), introduce EpicProgressIssueDto(Id, Number, Title, Health) for the now-enriched BlockedIssues/ActiveIssues, and add NextIssueReason to EpicProgressDto. Update the test DTO mirrors in EpicLifecycleSpecs.cs/EpicApiSpecs.cs and add a mark-done regression test.",
+      "acceptanceCriteria": [
+        "Test asserts: when linked issues have Health 'active'/'blocked', progress.activeIssues/blockedIssues contain those issues (non-empty) — previously always empty due to the Status-vs-Health bug.",
+        "Test asserts: nextIssue is the highest-priority startable issue (P0 chosen before P4); a non-startable issue inserted first is NOT selected.",
+        "Test asserts: when undelivered work remains but no issue is startable, NextIssue is null and NextIssueReason is populated with a reason derived from the blocker (e.g. 'Waiting on #N').",
+        "Test asserts: each active/blocked entry carries {id, number, title, health}.",
+        "Regression test asserts IsReadyToMarkDone/CountUndelivered remain correct (true iff all linked issues delivered) after the EpicProgress.Build change.",
+        "EpicGrain.BuildLinkedIssueDtosAsync compiles without loading prerequisite data (new LinkedIssueDto fields left default).",
+        "`dotnet build` and the Epic test suite (EpicLifecycleSpecs, EpicApiSpecs) pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated EpicProgress.cs, EpicDtos.cs, EpicQuerier.cs (GetLinkedIssuesAsync), EpicGrain.cs (BuildLinkedIssueDtosAsync); updated/new server tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Central design constraint: EpicProgress.Build is shared by the read path (full runtime Health/CanStart via IssueInfo) and the grain mark-done path (IssueStatus-only Health, no CanStart). Keep ReadyToMarkDone delivered-count-only so the grain path is unaffected. Decision 1-4 in design.md."
+    },
+    {
+      "id": "T-002",
+      "title": "Server-side Epic list ordering by priority then updatedAt",
+      "spec": "specs/epic-tracking/spec.md#Epic List Ordering",
+      "description": "In EpicQuerier.ListAsync replace OrderBy(CreatedAt) with: Epic priority ordinal ascending (p0=0 ... p4=4, unknown=9), then UpdatedAt descending. Keep status grouping (Active/Done/Closed) intact so the frontend renders in server-supplied order without re-sorting.",
+      "acceptanceCriteria": [
+        "Test asserts: within a status group, a p0 epic precedes a p2 epic.",
+        "Test asserts: equal-priority epics are ordered by more recent UpdatedAt first.",
+        "Test asserts: the list read model returns epics already ordered, so a consumer rendering in array order shows priority order.",
+        "`dotnet build` and the Epic list/read-model tests pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated EpicQuerier.cs (ListAsync ordering) with a priority-ordinal helper; new/updated ordering tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Touches EpicQuerier.cs (different method from T-001); runs after T-001 by priority. Decision 5 in design.md. Frontend already renders groups in received array order, so no frontend change is needed for ordering itself."
+    },
+    {
+      "id": "T-003",
+      "title": "Epic list page: group collapse, status-conditional card text, in-progress + next display",
+      "spec": "specs/epic-board/spec.md#Epic List Group Collapse",
+      "description": "Update the shared frontend EpicProgress contract in entities/epic/model/types.ts (blockedIssues/activeIssues become {id,number,title,health}[]; add nextIssueReason) and the API mapping. Then on EpicListPage: Active section expanded by default, Done/Closed collapsed by default with an expand/collapse control; card status text branches by epic status (Active shows next/ready, Done shows a completion phrase, Closed shows a closed phrase — 'Ready to mark done' only for Active); card shows an in-progress line (from activeIssues) alongside the next line (nextIssue or nextIssueReason), degrading gracefully when either is empty.",
+      "acceptanceCriteria": [
+        "Component/DOM test: Active section is visible by default; Done and Closed sections are collapsed by default and expand/collapse on user action.",
+        "Test asserts: a Done or Closed epic card does NOT show 'Ready to mark done'; shows a completion/closed phrase respectively.",
+        "Test asserts: an Active card with both an in-flight issue and a startable next issue shows both; when either is absent the card degrades without implying work that does not exist.",
+        "Type contract matches the enriched server DTO (object arrays for active/blocked, nextIssueReason present).",
+        "Web typecheck (`npm run typecheck` or project equivalent) and the epic list page tests pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated entities/epic/model/types.ts + API client mapping; updated EpicListPage.tsx (group collapse, status-branched card text, in-progress + next display); list page tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Owns the shared frontend EpicProgress type update so T-004 can build on it. Maps to epic-board requirements: Epic List Group Collapse, Status-Conditional Epic Card Text, Epic Card In-Progress and Next Display."
+    },
+    {
+      "id": "T-004",
+      "title": "Epic detail page: Markdown description, current-activity listing, next-issue reason",
+      "spec": "specs/epic-board/spec.md#Epic Detail Current Activity Listing",
+      "description": "On EpicDetailPage replace the whitespace-pre-wrap description <p> with the shared MarkdownReader (imported from @/shared/ui, as in IssueDetailPage). Rework the 'Current Activity' magnet from a bare count into a listing of concrete activeIssues and blockedIssues entries with health coloring and Link navigation to each issue, with an empty state when nothing is in flight. Show nextIssueReason in the Next Issue magnet when nextIssue is null but a reason exists.",
+      "acceptanceCriteria": [
+        "Test asserts: an epic description containing Markdown headings/lists/emphasis renders as formatted content via MarkdownReader, with raw markers (##, list prefixes, **) not shown as literal text.",
+        "Test asserts: 'Current Activity' lists the concrete in-flight issues (number, title, health color) with navigation, and reflects non-zero activity instead of a constant '0 blocked, 0 active'.",
+        "Test asserts: 'Current Activity' shows an empty-state message when there are no active/blocked issues.",
+        "Test asserts: the Next Issue magnet shows the human-readable reason when nextIssue is null due to no startable issue.",
+        "Web typecheck and the epic detail page tests pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated EpicDetailPage.tsx (MarkdownReader description, current-activity listing, next-reason display); detail page tests.",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": false,
+      "notes": "Depends on T-001 for the enriched progress DTO/NextIssueReason and on T-003 for the shared frontend EpicProgress type update. Maps to epic-board requirements: Epic Detail Current Activity Listing, Epic Description Rendered as Markdown."
+    }
+  ]
+}

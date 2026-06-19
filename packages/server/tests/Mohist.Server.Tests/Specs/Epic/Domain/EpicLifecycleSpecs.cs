@@ -348,8 +348,11 @@ public class EpicLifecycleSpecs
     private sealed record IssueDto(int Number, string Id, int[] PrerequisiteNumbers, string Status, string Health, string? WorkflowRunId);
     private sealed record EpicDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
     private sealed record EpicDetailDto(string Id, string Status, LinkedIssueDto[] LinkedIssues, EpicProgressDto Progress);
-    private sealed record LinkedIssueDto(string Id, int Number, string Title, string Status);
-    private sealed record EpicProgressDto(int DeliveredCount, int TotalIssueCount, string[] BlockedIssues, string[] ActiveIssues, bool ReadyToMarkDone);
+    private sealed record LinkedIssueDto(string Id, int Number, string Title, string Status, string Stage, string Health, string? Priority, bool CanStart = false, StartBlockerDto? StartBlocker = null);
+    private sealed record StartBlockerDto(string Kind);
+    private sealed record EpicProgressDto(int DeliveredCount, int TotalIssueCount, EpicProgressIssueDto[] BlockedIssues, EpicProgressIssueDto[] ActiveIssues, EpicNextIssueDto? NextIssue, string? NextIssueReason, bool ReadyToMarkDone);
+    private sealed record EpicProgressIssueDto(string Id, int Number, string Title, string Health);
+    private sealed record EpicNextIssueDto(string Id, int Number, string Title);
     private sealed record ConflictEnvelope(bool Success, string? Code = null, string? Error = null, ConflictDetailsDto? Details = null);
     private sealed record ConflictDetailsDto(string CurrentStatus, string RequestedStatus, int UndeliveredCount);
 }

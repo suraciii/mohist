@@ -1,42 +1,4 @@
-# OpenSpec Capability: epic-tracking
-
-### Requirement: Epic Domain Model
-
-System SHALL model an Epic as a named, described, prioritized long-running goal container with `active`, `done`, and `closed` statuses.
-
-#### Scenario: Create active Epic
-
-- **WHEN** a user creates an Epic with title, description, and priority
-- **THEN** the system persists the Epic with status `active`
-- **AND** the Epic has timestamps suitable for list and detail display
-
-#### Scenario: Epic is not executable work
-
-- **WHEN** the system stores or reads Epics
-- **THEN** Epics are separate from issues
-- **AND** Epics do not have workflow stage, run state, worktree, branch, task execution, or check execution fields
-
-### Requirement: Primary Epic Issue Membership
-
-System SHALL allow an Epic to link existing issues while enforcing that an issue belongs to at most one primary Epic in the first version.
-
-#### Scenario: Add issue to Epic
-
-- **WHEN** a user adds an existing issue to an existing Epic
-- **THEN** the issue appears in the Epic linked issue list
-- **AND** the issue workflow state is unchanged
-
-#### Scenario: Remove issue from Epic
-
-- **WHEN** a user removes a linked issue from an Epic
-- **THEN** only the Epic membership is removed
-- **AND** the issue workflow state, prerequisite data, and worktree data are unchanged
-
-#### Scenario: Reject duplicate primary membership
-
-- **WHEN** a user adds an issue that already belongs to another Epic
-- **THEN** the system rejects the add operation with a clear error identifying the existing Epic
-- **AND** the existing membership is preserved
+## MODIFIED Requirements
 
 ### Requirement: Projected Epic Progress
 
@@ -96,27 +58,7 @@ Each entry in the active and blocked issue sets SHALL carry the issue's identity
 - **AND** the active and blocked sets are empty
 - **AND** no issue workflow data is created or changed
 
-### Requirement: Epic Lifecycle
-
-System SHALL let users explicitly mark an Epic done or close it without automatically completing it from issue progress.
-
-#### Scenario: Mark Epic done
-
-- **WHEN** a user marks an Epic done
-- **THEN** only the Epic status changes to `done`
-- **AND** linked issues are not modified
-
-#### Scenario: Close Epic
-
-- **WHEN** a user closes an Epic
-- **THEN** only the Epic status changes to `closed`
-- **AND** linked issues are not modified
-
-#### Scenario: No automatic completion
-
-- **WHEN** all linked issues are delivered
-- **THEN** the system does not automatically mark the Epic done
-- **AND** the projected next state can indicate ready to mark done
+## ADDED Requirements
 
 ### Requirement: Epic List Ordering
 

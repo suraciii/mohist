@@ -26,7 +26,6 @@ vi.mock('../../../entities/project', async (importOriginal) => {
     useProject: mocks.useProject,
   }
 })
-
 vi.mock('../../../entities/issue', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useIssues: mocks.useIssues,
@@ -44,7 +43,6 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useUpdateEpic: mocks.useUpdateEpic,
   }
 })
-
 const epic = {
   id: 'epic-12345678',
   title: 'Epic title',
@@ -56,9 +54,10 @@ const epic = {
   progress: {
     deliveredCount: 1,
     totalIssueCount: 2,
-    blockedIssues: ['issue-2'],
+    blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
     activeIssues: [],
     nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+    nextIssueReason: null,
     readyToMarkDone: false,
   },
   linkedIssues: [
@@ -183,6 +182,7 @@ describe('EpicDetailPage lifecycle guards', () => {
         blockedIssues: [],
         activeIssues: [],
         nextIssue: null,
+        nextIssueReason: null,
         readyToMarkDone: false,
       },
       linkedIssues: [],
@@ -218,8 +218,12 @@ describe('EpicDetailPage lifecycle guards', () => {
           deliveredCount: 1,
           totalIssueCount: 3,
           blockedIssues: [],
-          activeIssues: ['issue-2', 'issue-3'],
+          activeIssues: [
+            { id: 'issue-2', number: 2, title: 'Active issue', health: 'active' },
+            { id: 'issue-3', number: 3, title: 'Backlog issue', health: 'active' },
+          ],
           nextIssue: { id: 'issue-2', number: 2, title: 'Active issue' },
+          nextIssueReason: null,
           readyToMarkDone: false,
         },
         linkedIssues: [
@@ -245,9 +249,10 @@ describe('EpicDetailPage lifecycle guards', () => {
         progress: {
           deliveredCount: 1,
           totalIssueCount: 2,
-          blockedIssues: ['issue-2'],
+          blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
           activeIssues: [],
           nextIssue: { id: 'issue-2', number: 2, title: 'Blocked issue' },
+          nextIssueReason: null,
           readyToMarkDone: false,
         },
         linkedIssues: [
@@ -274,6 +279,7 @@ describe('EpicDetailPage lifecycle guards', () => {
           blockedIssues: [],
           activeIssues: [],
           nextIssue: null,
+          nextIssueReason: null,
           readyToMarkDone: true,
         },
         linkedIssues: [
@@ -379,6 +385,7 @@ describe('EpicDetailPage lifecycle guards', () => {
           blockedIssues: [],
           activeIssues: [],
           nextIssue: null,
+          nextIssueReason: null,
           readyToMarkDone: true,
         },
         linkedIssues: [
@@ -399,13 +406,14 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         status: EpicStatus.Closed,
-        progress: {
+progress: {
           deliveredCount: 1,
           totalIssueCount: 1,
           blockedIssues: [],
           activeIssues: [],
           nextIssue: null,
-          readyToMarkDone: false,
+          nextIssueReason: null,
+          readyToMarkDone: true,
         },
         linkedIssues: [
           { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
@@ -431,14 +439,15 @@ const numberedEpic = {
   status: 'active',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
-  progress: {
-    deliveredCount: 0,
-    totalIssueCount: 1,
-    blockedIssues: [],
-    activeIssues: ['issue-1'],
-    nextIssue: { id: 'issue-1', number: 1, title: 'Active issue' },
-    readyToMarkDone: false,
-  },
+progress: {
+          deliveredCount: 1,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
   linkedIssues: [
     { id: 'issue-1', number: 1, title: 'Active issue', status: 'in_progress', stage: 'build', priority: 'p1' },
   ],
@@ -652,14 +661,15 @@ describe('EpicDetailPage edit flow', () => {
       status: 'active',
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
-      progress: {
-        deliveredCount: 0,
-        totalIssueCount: 0,
-        blockedIssues: [],
-        activeIssues: [],
-        nextIssue: null,
-        readyToMarkDone: true,
-      },
+progress: {
+    deliveredCount: 0,
+    totalIssueCount: 1,
+    blockedIssues: [],
+    activeIssues: [{ id: 'issue-1', number: 1, title: 'Active issue', health: 'active' }],
+    nextIssue: { id: 'issue-1', number: 1, title: 'Active issue' },
+    nextIssueReason: null,
+    readyToMarkDone: false,
+  },
       linkedIssues: [
         { id: 'issue-1', number: 1, title: 'Member issue', status: 'in_progress', stage: 'build', priority: 'p2' },
       ],
@@ -793,5 +803,299 @@ describe('EpicDetailPage edit flow', () => {
     fireEvent.click(screen.getByTestId('edit-epic-button'))
 
     expect(screen.getByText('Update failed: invalid priority')).toBeTruthy()
+  })
+})
+
+describe('EpicDetailPage markdown description', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  const markdownDescription = [
+    '## Goal',
+    '',
+    'Ship the epic board fix with:',
+    '',
+    '- priority ordering',
+    '- **accurate** progress',
+    '- and *next* issue',
+    '',
+    'See [the design](./design.md).',
+  ].join('\n')
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: markdownDescription,
+      priority: 'p1',
+      status: EpicStatus.Active,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders headings, lists, and emphasis as formatted content via MarkdownReader', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+
+    renderPage()
+
+    const container = screen.getByTestId('epic-description')
+    expect(container.querySelector('.markdown-reader')).toBeTruthy()
+
+    const heading = screen.getByRole('heading', { name: 'Goal' })
+    expect(heading).toBeTruthy()
+    expect(heading.tagName).toBe('H4')
+    expect(container.textContent).not.toContain('## Goal')
+    expect(container.textContent).not.toContain('- priority ordering')
+
+    const listItems = container.querySelectorAll('li')
+    expect(listItems.length).toBe(3)
+
+    const boldNodes = container.querySelectorAll('strong')
+    const emphasisNodes = container.querySelectorAll('em')
+    expect(boldNodes.length).toBeGreaterThan(0)
+    expect(emphasisNodes.length).toBeGreaterThan(0)
+    expect(container.textContent).not.toContain('**accurate**')
+  })
+
+  it('renders a plain description readably through MarkdownReader without spurious formatting', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({ description: 'Just a plain description with no markdown.' }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const container = screen.getByTestId('epic-description')
+    expect(container.querySelector('.markdown-reader')).toBeTruthy()
+    expect(container.textContent).toContain('Just a plain description with no markdown.')
+    expect(container.querySelectorAll('h1, h2, h3, h4, h5, h6').length).toBe(0)
+  })
+})
+
+describe('EpicDetailPage current activity listing', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: EpicStatus.Active,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 2,
+        blockedIssues: [{ id: 'issue-2', number: 2, title: 'Blocked issue', health: 'blocked' }],
+        activeIssues: [{ id: 'issue-1', number: 1, title: 'Active issue', health: 'active' }],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [
+        { id: 'issue-1', number: 1, title: 'Active issue', status: 'in_progress', stage: 'build', priority: 'p1' },
+        { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress', stage: 'build', priority: 'p2' },
+      ],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('lists concrete in-flight issues with number, title, and health coloring, and offers navigation', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+
+    renderPage()
+
+    const list = screen.getByTestId('current-activity-list')
+    expect(list.getAttribute('data-active-count')).toBe('1')
+    expect(list.getAttribute('data-blocked-count')).toBe('1')
+
+    const entries = screen.getAllByTestId('current-activity-entry')
+    expect(entries.length).toBe(2)
+
+    const blocked = entries.find(entry => entry.getAttribute('data-health') === 'blocked')
+    const active = entries.find(entry => entry.getAttribute('data-health') === 'active')
+    expect(blocked).toBeTruthy()
+    expect(active).toBeTruthy()
+
+    expect(blocked?.textContent).toContain('#2')
+    expect(blocked?.textContent).toContain('Blocked issue')
+    expect(blocked?.getAttribute('href')).toContain('/issues/2')
+
+    expect(active?.textContent).toContain('#1')
+    expect(active?.textContent).toContain('Active issue')
+    expect(active?.getAttribute('href')).toContain('/issues/1')
+
+    expect(screen.queryByText(/0 blocked, 0 active/i)).toBeNull()
+  })
+
+  it('reflects real activity instead of a constant zero for both active and blocked counts', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 3,
+          blockedIssues: [
+            { id: 'issue-3', number: 3, title: 'Stuck issue', health: 'blocked' },
+          ],
+          activeIssues: [
+            { id: 'issue-1', number: 1, title: 'Active issue', health: 'active' },
+            { id: 'issue-2', number: 2, title: 'Another active issue', health: 'active' },
+          ],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const list = screen.getByTestId('current-activity-list')
+    expect(list.getAttribute('data-active-count')).toBe('2')
+    expect(list.getAttribute('data-blocked-count')).toBe('1')
+
+    const entries = screen.getAllByTestId('current-activity-entry')
+    expect(entries.length).toBe(3)
+
+    expect(screen.queryByText(/0 blocked, 0 active/i)).toBeNull()
+  })
+
+  it('shows an empty-state message when no active or blocked issues are in flight', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        progress: {
+          deliveredCount: 1,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: true,
+        },
+        linkedIssues: [
+          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const empty = screen.getByTestId('current-activity-empty')
+    expect(empty.textContent).toMatch(/no current activity/i)
+    expect(screen.queryByTestId('current-activity-list')).toBeNull()
+    expect(screen.queryByTestId('current-activity-entry')).toBeNull()
+  })
+})
+
+describe('EpicDetailPage next issue reason display', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: EpicStatus.Active,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 1,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: 'Waiting on #5',
+        readyToMarkDone: false,
+      },
+      linkedIssues: [
+        { id: 'issue-1', number: 1, title: 'Pending issue', status: 'in_progress', stage: 'build', priority: 'p1' },
+      ],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('shows the human-readable reason in the Next Issue magnet when nextIssue is null', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+
+    renderPage()
+
+    const reason = screen.getByTestId('next-issue-reason')
+    expect(reason.textContent).toBe('Waiting on #5')
+    expect(screen.queryByTestId('mark-epic-done')).toBeTruthy()
   })
 })

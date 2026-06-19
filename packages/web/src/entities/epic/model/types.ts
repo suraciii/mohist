@@ -19,12 +19,20 @@ export interface Epic {
   updatedAt: string
 }
 
+export interface EpicProgressIssue {
+  id: string
+  number: number
+  title: string
+  health: IssueHealth
+}
+
 export interface EpicProgress {
   deliveredCount: number
   totalIssueCount: number
-  blockedIssues: string[]
-  activeIssues: string[]
+  blockedIssues: EpicProgressIssue[]
+  activeIssues: EpicProgressIssue[]
   nextIssue: { id: string; number: number; title: string } | null
+  nextIssueReason: string | null
   readyToMarkDone: boolean
 }
 
