@@ -169,6 +169,33 @@ stages:
               Fix the build-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
             agent: ${{ vars.agent }}
+      - name: verify
+        title: Build & full test suite
+        uses: core/script
+        with:
+          run: |
+            npm ci
+            dotnet test Mohist.sln --nologo
+            npm run -w packages/web typecheck
+            npm run -w packages/web test:run
+            npm run -w packages/runner typecheck
+            npm run -w packages/runner test -- --no-file-parallelism
+          timeout: 1500000
+        repairLimit: 2
+        repairTask:
+          id: fix-tests
+          title: Fix failing tests/build
+          uses: mohist/acp-agent
+          with:
+            session: build
+            prompt: |
+              The verify check failed: the project did not build, typecheck, or its
+              tests did not pass. Read the check output to see the exact failures.
+              Fix them at the root cause — prefer correcting code or tests over
+              weakening assertions. Re-run the same commands from the check to
+              confirm all suites (server dotnet tests, web typecheck + tests,
+              runner typecheck + tests) pass before finishing.
+            agent: ${{ vars.agent }}
 
   - stage: check
     requiresApproval: true
