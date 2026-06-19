@@ -40,6 +40,46 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task DispatchedCheckRunnerIdDerivesFromWorkflowClaim()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+        var (taskWork, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, taskWork.WorkId, "completed");
+
+        var (checkWork, _) = await PollWorkAnyAsync();
+        var run = await LoadRunAsync(checkWork.WorkflowRunId);
+        var check = run.Stages.Single().Checks.Single();
+
+        Assert.Equal(runnerId, run.Claim!.RunnerId);
+        Assert.Equal(checkWork.WorkId, check.DispatchWorkId);
+        Assert.Equal(run.Claim.RunnerId, check.DispatchRunnerId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task CheckResultFromRunnerOutsideWorkflowClaimIsIgnored()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+        var (taskWork, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, taskWork.WorkId, "completed");
+        var (checkWork, _) = await PollWorkAnyAsync();
+        var otherRunnerId = await RegisterRunnerAsync();
+
+        await workflow.ReportResultAsync(otherRunnerId, checkWork.WorkId, new WorkResult("pass", Output: "[]"));
+
+        var run = await LoadRunAsync(checkWork.WorkflowRunId);
+        var check = run.Stages.Single().Checks.Single();
+        Assert.Equal(StageCheckStatus.Pending, check.Status);
+        Assert.Equal(runnerId, run.Claim!.RunnerId);
+        Assert.Equal(checkWork.WorkId, check.DispatchWorkId);
+        Assert.Equal(run.Claim.RunnerId, check.DispatchRunnerId);
+        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task Reactivation_WithDispatchedCheckAndOfflineRunner_ClearsAndRequeuesCheck()
     {
         var workflow = await StartWorkflowAsync(SingleStage());

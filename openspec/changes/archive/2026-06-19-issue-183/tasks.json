@@ -1,0 +1,67 @@
+{
+  "project": "mohist-local",
+  "description": "Make the WorkflowRun domain model explicit (single-runner claim invariant, status independence, peer-level session association) and eliminate misleading naming in the querier and grain.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Express workflow-run domain model invariants (single-runner claim + status independence)",
+      "spec": "specs/workflow-run/spec.md#single-runner-claim-invariant",
+      "description": "Make the two workflow-run-internal invariants explicit in code. Add doc comments to the WorkflowRunStatus and TaskRunStatus enums stating they are independent state machines that do not derive each other, and to WorkflowClaimInfo/WorkflowRun.Claim stating the single-runner invariant. Add a new WorkflowRunInvariantSpecs.cs under Specs/Workflow/Domain with unit tests: a second runner claim is rejected while one exists; a Running TaskRun.RunnerId equals Claim.RunnerId; a Running WorkflowRun with no Running TaskRun stays Running (Running-divergence); Paused/Stopped/AwaitingApproval only result from workflow-level commands. FailTask's task-failure to run-failure propagation is documented as an event-driven policy reaction and left unchanged (design D4).",
+      "acceptanceCriteria": [
+        "Doc comments on WorkflowRunStatus and TaskRunStatus enums declare the two state machines are independent and do not derive each other",
+        "Doc comment on WorkflowClaimInfo / WorkflowRun.Claim declares the single-runner invariant (one runner per run for the whole lifecycle)",
+        "WorkflowRunInvariantSpecs.cs exists under Specs/Workflow/Domain and contains passing tests for: second claim rejected, Running task RunnerId == Claim.RunnerId, Running run with no Running task stays Running, and Paused/Stopped/AwaitingApproval originate only from workflow-level commands",
+        "A test documents that task-failure to run-failure (FailTask) is a policy reaction, not a status derivation",
+        "dotnet test for the workflow domain specs passes with no regressions"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Domain/Run/* doc comments + packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Domain/WorkflowRunInvariantSpecs.cs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Pure domain-level change; no behavior change, only explicitness. Follow the test style of TaskLifecycleSpecs.cs (WorkflowRun.Create + Start, unit-trait tagged). Scope the status-independence tests to non-terminal task transitions plus Running-divergence and command-result provenance; FailTask propagation stays as-is per design D4. This task satisfies TWO spec requirements: specs/workflow-run/spec.md#single-runner-claim-invariant (primary, cited in spec field) and specs/workflow-run/spec.md#workflowrun-status-and-taskrun-status-are-independent-state-machines."
+    },
+    {
+      "id": "T-002",
+      "title": "Eliminate session-ownership naming in AgentSessionQuerier and document peer-level association",
+      "spec": "specs/workflow-run/spec.md#agentsession-is-a-peer-aggregate-associated-by-task-reference",
+      "description": "Remove the implication that a WorkflowRun owns agent sessions. Rename the private static method WorkflowRunOwnsSession (and its single call site in ReconcileActiveSessionsAsync) to IsSessionAssociatedWithRun. Add an XML doc comment on the method stating the session is associated by reference via TaskRun (never owned) and that the check relies on the single-runner claim invariant (Claim.RunnerId == session.RunnerId) as its basis. Add a class-level doc comment on AgentSessionQuerier stating AgentSession is a peer aggregate associated with a WorkflowRun only by TaskRun references.",
+      "acceptanceCriteria": [
+        "WorkflowRunOwnsSession is renamed to IsSessionAssociatedWithRun across its definition and call site",
+        "No method name, field name, or comment in AgentSessionQuerier implies a WorkflowRun owns an AgentSession",
+        "A repo-wide search confirms no remaining method name, field name, or comment anywhere in packages/server/src implies a WorkflowRun owns an AgentSession (the only prior instance was WorkflowRunOwnsSession)",
+        "Method doc comment cites the single-runner claim invariant as the basis for the association judgment",
+        "Class-level doc comment states AgentSession is a peer aggregate associated by TaskRun reference",
+        "dotnet build succeeds and the existing server test suite is green (no regression)"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs (renamed method + doc comments)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The method consumes AgentSessionRecord (a persistence DTO), so it stays in the querier rather than moving into the WorkflowRun domain aggregate. The association contract is asserted at the domain level via T-001's single-runner invariant test; a querier DB integration test is deferred (design D3). Depends on T-001 because the method's doc comment cites the single-runner invariant that T-001 makes explicit and testable; it is a documentation dependency, not a hard build dependency."
+    },
+    {
+      "id": "T-003",
+      "title": "Clarify workflow grain cached runner-identity role",
+      "spec": "specs/workflow-run/spec.md#cached-runner-identity-has-an-explicitly-declared-role",
+      "description": "Make the role of the workflow grain's cached runner-identity field unambiguous. Rename the _lastRunnerId field to _lastKnownRunnerId and add a doc comment declaring it a non-authoritative cache of the most recent runner used for recovery/reconciliation when the authoritative Claim is absent; it is NOT part of the claim domain model, does not represent an active claim, and is distinct from the authoritative WorkflowRun.Claim.RunnerId. Update all references (_lastRunnerId usages). No signature or behavior change to GetClaimedRunnerIdAsync.",
+      "acceptanceCriteria": [
+        "_lastRunnerId is renamed to _lastKnownRunnerId across all usages in WorkflowGrain.cs",
+        "Doc comment declares the field a non-authoritative recovery cache distinct from Claim.RunnerId and not an active claim",
+        "WorkflowRun.IsClaimed remains false without a Claim (no behavior change)",
+        "GetClaimedRunnerIdAsync signature is unchanged, so RunnerGrain consumer and existing tests are unaffected",
+        "dotnet build succeeds and existing grain tests (WorkflowStateSpecs, WorkflowLeaseActivationSpecs) are green"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Grains/WorkflowGrain.cs (renamed field + doc comment)",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "ReleaseClaim() currently has no callers, so the ?? _lastKnownRunnerId fallback is effectively redundant with Claim?.RunnerId today; do NOT remove it (removal is a behavior change and out of scope). The redundancy is flagged in design.md Open Questions as a separate follow-up. Depends on T-001 because the field's doc comment references the authoritative Claim.RunnerId and the single-runner invariant that T-001 documents; it is a documentation dependency, not a hard build dependency."
+    }
+  ]
+}

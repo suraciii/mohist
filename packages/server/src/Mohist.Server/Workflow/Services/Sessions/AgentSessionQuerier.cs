@@ -12,6 +12,15 @@ using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Workflow.Services.Sessions;
 
+/// <summary>
+/// Queries <see cref="AgentSession"/> records in the context of workflow runs.
+/// </summary>
+/// <remarks>
+/// <see cref="AgentSession"/> is a peer-level aggregate root, NOT a child of <see cref="WorkflowRun"/>.
+/// The association between a session and a workflow run is by reference only — a <see cref="TaskRun"/>
+/// refers to a session and the run is the aggregate root that contains that task.
+/// No ownership relationship exists.
+/// </remarks>
 public class AgentSessionQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -551,7 +560,7 @@ public class AgentSessionQuerier
                 continue;
             }
 
-            if (WorkflowRunOwnsSession(run, activeSession))
+            if (IsSessionAssociatedWithRun(run, activeSession))
                 allowedSessionIds.Add(activeSession.Session.Id);
         }
 
@@ -586,7 +595,21 @@ public class AgentSessionQuerier
         return runs;
     }
 
-    private static bool WorkflowRunOwnsSession(WorkflowRun run, AgentSessionRecord session)
+    /// <summary>
+    /// Determines whether <paramref name="session"/> is associated with <paramref name="run"/>
+    /// by reference through a <see cref="TaskRun"/>, not by ownership.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AgentSession"/> is a peer aggregate, never owned by <see cref="WorkflowRun"/>.
+    /// The association is established through a <see cref="TaskRun"/> session reference and
+    /// relies on the single-runner claim invariant: if the run is claimed, the session MUST
+    /// belong to the same runner (<see cref="WorkflowClaimInfo.RunnerId"/> == session.RunnerId)
+    /// and the task identified by <see cref="AgentSessionQueryMetadataKeys.WorkId"/> (if running)
+    /// MUST match the session's work item (the task whose reference links them).
+    /// When the run has no claim yet (<see cref="WorkflowRun.ClaimedBy"/> is null), any active
+    /// session known by workflow-run-id is provisionally accepted.
+    /// </remarks>
+    private static bool IsSessionAssociatedWithRun(WorkflowRun run, AgentSessionRecord session)
     {
         if (run.ClaimedBy is null) return true;
 

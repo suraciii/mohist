@@ -26,7 +26,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private static readonly TimeSpan WorkHeartbeatReminderDueTime = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan WorkHeartbeatReminderPeriod = TimeSpan.FromMinutes(1);
     private WorkflowRun? _run;
-    private string? _lastRunnerId;
+    /// <summary>
+    /// Non-authoritative cache of the most recent runner identity, retained for
+    /// recovery/reconciliation when the authoritative <see cref="WorkflowRun.Claim"/> is absent.
+    /// This is grain infrastructure state, NOT part of the claim domain model, and does NOT
+    /// represent an active claim. The authoritative runner identity is always
+    /// <c>_run.Claim.RunnerId</c>. When no <see cref="WorkflowRun.Claim"/> exists,
+    /// <see cref="WorkflowRun.IsClaimed"/> remains <c>false</c> regardless of this field's value.
+    /// </summary>
+    private string? _lastKnownRunnerId;
     private bool _runDirty;
     private IGrainReminder? _workHeartbeatReminder;
     private readonly HashSet<string> _announcedWaitingLocks = [];
@@ -65,7 +73,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         _run = await _runStore.LoadAsync(GrainKey);
 
-        _lastRunnerId = _run?.Claim?.RunnerId;
+        _lastKnownRunnerId = _run?.Claim?.RunnerId;
         await EnsureWorkHeartbeatAsync();
         await RunCoreAsync();
     }
@@ -286,7 +294,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         else
         {
             _run.ClaimBy(runnerId, DateTimeOffset.UtcNow);
-            _lastRunnerId = runnerId;
+            _lastKnownRunnerId = runnerId;
             await SaveRunAsync();
         }
 
@@ -450,7 +458,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public Task<string?> GetClaimedRunnerIdAsync()
     {
-        return Task.FromResult(_run?.Claim?.RunnerId ?? _lastRunnerId);
+        return Task.FromResult(_run?.Claim?.RunnerId ?? _lastKnownRunnerId);
     }
 
     public Task<string?> GetCurrentWorkIdAsync()
@@ -913,7 +921,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             }
             await SaveRunAsync();
         }
-        _lastRunnerId = runnerId;
+        _lastKnownRunnerId = runnerId;
         return dispatch;
     }
 
