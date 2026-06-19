@@ -73,6 +73,73 @@ public class EpicApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task EpicList_OrdersByPriorityWithinStatusGroup()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-order-pri-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var higherPriority = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Should be first (p0)", description = "alpha", priority = "p2", projectId = project.Id });
+        var lowerPriority = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Should be second (p2)", description = "beta", priority = "p2", projectId = project.Id });
+
+        await _client.PatchDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{higherPriority.Id}", new { priority = "p0" });
+
+        var list = await _client.GetDataAsync<EpicWithProgressDto[]>($"/api/projects/{project.Id}/epics");
+
+        Assert.Equal(2, list.Length);
+        Assert.Equal(higherPriority.Id, list[0].Id);
+        Assert.Equal("p0", list[0].Priority);
+        Assert.Equal(lowerPriority.Id, list[1].Id);
+        Assert.Equal("p2", list[1].Priority);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicList_OrdersByRecentUpdatedAtWhenPrioritiesMatch()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-order-upd-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var older = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Older (p2)", description = "alpha", priority = "p2", projectId = project.Id });
+        var newer = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Newer (p2)", description = "beta", priority = "p2", projectId = project.Id });
+
+        await Task.Delay(15);
+        var updatedNewer = await _client.PatchDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{newer.Id}", new { title = "Newer (renamed)" });
+
+        var list = await _client.GetDataAsync<EpicWithProgressDto[]>($"/api/projects/{project.Id}/epics");
+
+        Assert.Equal(2, list.Length);
+        Assert.Equal(newer.Id, list[0].Id);
+        Assert.Equal(older.Id, list[1].Id);
+        Assert.True(
+            DateTimeOffset.Parse(list[0].UpdatedAt) > DateTimeOffset.Parse(list[1].UpdatedAt),
+            $"Expected newer epic UpdatedAt to be more recent. List[0]={list[0].UpdatedAt}, List[1]={list[1].UpdatedAt}");
+        Assert.True(DateTimeOffset.Parse(updatedNewer.UpdatedAt) > DateTimeOffset.Parse(older.UpdatedAt));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicList_ReturnsOrderedArraySoConsumerCanRenderInServerSuppliedOrder()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-order-arr-{Guid.NewGuid():N}" });
+
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var p2CreatedFirst = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Created first but p2", description = "alpha", priority = "p2", projectId = project.Id });
+        var p0CreatedLater = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Created later but p0", description = "beta", priority = "p2", projectId = project.Id });
+
+        await _client.PatchDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{p0CreatedLater.Id}", new { priority = "p0" });
+
+        var list = await _client.GetDataAsync<EpicWithProgressDto[]>($"/api/projects/{project.Id}/epics");
+
+        Assert.Equal(2, list.Length);
+        Assert.Equal(p0CreatedLater.Id, list[0].Id);
+        Assert.Equal(p2CreatedFirst.Id, list[1].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task EpicDetail_PreservesIdLookupAndExposesNumber()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-detail-{Guid.NewGuid():N}" });
@@ -321,7 +388,7 @@ public class EpicApiSpecs
 
     private sealed record ProjectDto(string Id);
     private sealed record EpicDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
-    private sealed record EpicWithProgressDto(string Id, int? Number);
+    private sealed record EpicWithProgressDto(string Id, int? Number, string Priority, string UpdatedAt);
     private sealed record EpicDetailDto(string Id, int? Number, string Title, string Description, string Status, LinkedIssueDto[] LinkedIssues);
     private sealed record LinkedIssueDto(string Id);
     private sealed record IssueDto(int Number, string Id, PrimaryEpicDto? PrimaryEpic);

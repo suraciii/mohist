@@ -10,7 +10,7 @@ import {
   useMarkEpicDone,
   useRemoveEpicIssue,
 } from '../../../entities/epic'
-import { EpicStatus, type LinkedIssue } from '../../../entities/epic'
+import { EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
 import { EditEpicDialog } from '../../../features/edit-epic'
 import { ApiError } from '../../../shared/api/client'
 import { Button } from '@/shared/ui/components/button'
@@ -26,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/shared/ui/components/dialog'
+import { MarkdownReader } from '@/shared/ui'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -129,6 +130,67 @@ function getCandidateUnavailableReason(issue: Issue): string | null {
 
 function isCandidateSelectable(issue: Issue): boolean {
   return getCandidateUnavailableReason(issue) === null
+}
+
+interface CurrentActivityEntryProps {
+  issue: EpicProgressIssue
+  toProjectPath: (path: string) => string
+}
+
+function CurrentActivityEntry({ issue, toProjectPath }: CurrentActivityEntryProps) {
+  const tone = issueStatusTone(issue.health)
+  const healthLabel = toTitleCase(issue.health)
+  return (
+    <Link
+      to={toProjectPath(`/issues/${issue.number}`)}
+      data-testid="current-activity-entry"
+      data-health={issue.health}
+      className="flex items-baseline gap-2 rounded px-2 py-1 -mx-2 text-sm text-foreground/80 hover:bg-background"
+    >
+      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone}`}>
+        {healthLabel}
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-medium text-blue-600">#{issue.number}</span>
+        <span className="ml-1.5 text-muted-foreground">{issue.title}</span>
+      </span>
+    </Link>
+  )
+}
+
+function CurrentActivityList({
+  active,
+  blocked,
+}: {
+  active: EpicProgressIssue[]
+  blocked: EpicProgressIssue[]
+}) {
+  const toProjectPath = useProjectPath()
+  const total = active.length + blocked.length
+  if (total === 0) {
+    return (
+      <div
+        className="mt-2 text-sm text-muted-foreground"
+        data-testid="current-activity-empty"
+      >
+        No current activity.
+      </div>
+    )
+  }
+  return (
+    <ul
+      className="mt-2 flex flex-col gap-1"
+      data-testid="current-activity-list"
+      data-active-count={active.length}
+      data-blocked-count={blocked.length}
+    >
+      {[...blocked, ...active].map(issue => (
+        <li key={issue.id}>
+          <CurrentActivityEntry issue={issue} toProjectPath={toProjectPath} />
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 interface EpicIssueSelectorProps {
@@ -382,7 +444,14 @@ export function EpicDetailPage() {
               <PriorityBadge priority={epic.priority} />
             </div>
             <h1 className="mt-2 text-2xl font-bold text-foreground">{epic.title}</h1>
-            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground/80">{epic.description}</p>
+            {epic.description && (
+              <div
+                className="mt-3 text-sm leading-6 text-foreground/80"
+                data-testid="epic-description"
+              >
+                <MarkdownReader content={epic.description} baseHeadingLevel={3} />
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -436,15 +505,23 @@ export function EpicDetailPage() {
               </Link>
             ) : epic.progress.readyToMarkDone ? (
               <div className="mt-2 text-sm font-medium text-green-700">Ready to mark done</div>
+            ) : epic.progress.nextIssueReason ? (
+              <div
+                className="mt-2 text-sm text-foreground/80"
+                data-testid="next-issue-reason"
+              >
+                {epic.progress.nextIssueReason}
+              </div>
             ) : (
               <div className="mt-2 text-sm text-muted-foreground">No linked issues yet</div>
             )}
           </div>
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current Activity</div>
-            <div className="mt-2 text-sm text-foreground/80">
-              {epic.progress.blockedIssues.length} blocked, {epic.progress.activeIssues.length} active
-            </div>
+            <CurrentActivityList
+              active={epic.progress.activeIssues}
+              blocked={epic.progress.blockedIssues}
+            />
           </div>
         </div>
       </Card>

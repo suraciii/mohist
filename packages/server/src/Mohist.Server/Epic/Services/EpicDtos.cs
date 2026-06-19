@@ -1,3 +1,4 @@
+using Mohist.Server.Issue.Services;
 using Orleans;
 
 namespace Mohist.Server.Epic.Services;
@@ -16,12 +17,19 @@ public sealed record EpicDto(
 public sealed record EpicProgressDto(
     int DeliveredCount,
     int TotalIssueCount,
-    IReadOnlyList<string> BlockedIssues,
-    IReadOnlyList<string> ActiveIssues,
+    IReadOnlyList<EpicProgressIssueDto> BlockedIssues,
+    IReadOnlyList<EpicProgressIssueDto> ActiveIssues,
     EpicNextIssueDto? NextIssue,
+    string? NextIssueReason,
     bool ReadyToMarkDone);
 
 public sealed record EpicNextIssueDto(string Id, int Number, string Title);
+
+public sealed record EpicProgressIssueDto(
+    string Id,
+    int Number,
+    string Title,
+    string Health);
 
 public sealed record EpicWithProgressDto(
     string Id,
@@ -41,7 +49,9 @@ public sealed record LinkedIssueDto(
     string Status,
     string Stage,
     string Health,
-    string? Priority);
+    string? Priority,
+    bool CanStart = false,
+    IssueStartBlockerDto? StartBlocker = null);
 
 public sealed record EpicDetailDto(
     string Id,

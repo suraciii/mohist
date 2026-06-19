@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEpics } from '../../../entities/epic'
-import { EpicStatus, type EpicWithProgress } from '../../../entities/epic'
+import { EpicStatus, type EpicProgress, type EpicWithProgress } from '../../../entities/epic'
 import { EpicCreateDialog } from '../../../features/create-epic'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
@@ -38,6 +38,41 @@ function StatusBadge({ status }: { status: EpicStatus }) {
     <Badge className={colors[status]}>
       {labels[status]}
     </Badge>
+  )
+}
+
+function statusText(status: EpicStatus, progress: EpicProgress): React.ReactNode {
+  if (status === EpicStatus.Done) {
+    return <span className="text-blue-700 font-medium">Completed</span>
+  }
+  if (status === EpicStatus.Closed) {
+    return <span className="text-muted-foreground font-medium">Closed</span>
+  }
+  const inProgress = progress.activeIssues[0]
+  const next = progress.nextIssue
+  const nextReason = progress.nextIssueReason
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {inProgress && (
+        <span className="text-muted-foreground" data-testid="epic-card-in-progress">
+          In progress: <span className="text-foreground/80 font-medium">#{inProgress.number}</span>
+          <span className="text-muted-foreground ml-1">{inProgress.title}</span>
+        </span>
+      )}
+      {next ? (
+        <span className="text-muted-foreground" data-testid="epic-card-next">
+          Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
+          <span className="text-muted-foreground ml-1">{next.title}</span>
+        </span>
+      ) : nextReason ? (
+        <span className="text-muted-foreground" data-testid="epic-card-next">{nextReason}</span>
+      ) : progress.readyToMarkDone ? (
+        <span className="text-green-600 font-medium" data-testid="epic-card-ready">Ready to mark done</span>
+      ) : (
+        <span className="text-muted-foreground">No linked issues</span>
+      )}
+    </div>
   )
 }
 
@@ -88,19 +123,49 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
 
       <div className="mt-3 flex items-center justify-between">
         <div className="text-sm">
-          {progress.nextIssue ? (
-            <span className="text-muted-foreground">
-              Next: <span className="text-foreground/80 font-medium">#{progress.nextIssue.number}</span>
-              <span className="text-muted-foreground ml-1">{progress.nextIssue.title}</span>
-            </span>
-          ) : progress.readyToMarkDone ? (
-            <span className="text-green-600 font-medium">Ready to mark done</span>
-          ) : (
-            <span className="text-muted-foreground">No linked issues</span>
-          )}
+          {statusText(epic.status, progress)}
         </div>
       </div>
     </Card>
+  )
+}
+
+interface EpicSectionProps {
+  title: string
+  epics: EpicWithProgress[]
+  defaultExpanded: boolean
+  testIdPrefix: string
+}
+
+function EpicSection({ title, epics, defaultExpanded, testIdPrefix }: EpicSectionProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+
+  return (
+    <section data-testid={testIdPrefix}>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          {title} ({epics.length})
+        </h2>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setExpanded(prev => !prev)}
+          aria-expanded={expanded}
+          data-testid={`${testIdPrefix}-toggle`}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          {expanded ? 'Collapse' : 'Expand'}
+        </Button>
+      </div>
+      {expanded && (
+        <div className="grid gap-4">
+          {epics.map(epic => (
+            <EpicCard key={epic.id} epic={epic} />
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -142,36 +207,30 @@ export function EpicListPage() {
       ) : (
         <div className="space-y-8">
           {activeEpics.length > 0 && (
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Active</h2>
-              <div className="grid gap-4">
-                {activeEpics.map(epic => (
-                  <EpicCard key={epic.id} epic={epic} />
-                ))}
-              </div>
-            </section>
+            <EpicSection
+              title="Active"
+              epics={activeEpics}
+              defaultExpanded={true}
+              testIdPrefix="epic-section-active"
+            />
           )}
 
           {doneEpics.length > 0 && (
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Done</h2>
-              <div className="grid gap-4">
-                {doneEpics.map(epic => (
-                  <EpicCard key={epic.id} epic={epic} />
-                ))}
-              </div>
-            </section>
+            <EpicSection
+              title="Done"
+              epics={doneEpics}
+              defaultExpanded={false}
+              testIdPrefix="epic-section-done"
+            />
           )}
 
           {closedEpics.length > 0 && (
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Closed</h2>
-              <div className="grid gap-4">
-                {closedEpics.map(epic => (
-                  <EpicCard key={epic.id} epic={epic} />
-                ))}
-              </div>
-            </section>
+            <EpicSection
+              title="Closed"
+              epics={closedEpics}
+              defaultExpanded={false}
+              testIdPrefix="epic-section-closed"
+            />
           )}
         </div>
       )}

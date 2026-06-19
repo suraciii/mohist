@@ -23,12 +23,27 @@ public class EpicQuerier
         var rows = await db.Epics.AsNoTracking()
             .Where(e => e.ProjectId == projectId)
             .ToListAsync();
-        rows = rows.OrderBy(e => e.CreatedAt).ToList();
+        rows = OrderByPriorityThenUpdatedAt(rows).ToList();
         var result = new List<EpicWithProgressDto>();
         foreach (var epic in rows)
             result.Add(await ToWithProgressAsync(db, epic));
         return result;
     }
+
+    private static IEnumerable<EpicRow> OrderByPriorityThenUpdatedAt(IEnumerable<EpicRow> epics) =>
+        epics
+            .OrderBy(e => PriorityRank(e.Priority))
+            .ThenByDescending(e => e.UpdatedAt);
+
+    internal static int PriorityRank(string? priority) => priority switch
+    {
+        "p0" => 0,
+        "p1" => 1,
+        "p2" => 2,
+        "p3" => 3,
+        "p4" => 4,
+        _ => 9,
+    };
 
     public async Task<EpicDetailDto?> GetAsync(string projectId, string epicId)
     {
@@ -80,7 +95,9 @@ public class EpicQuerier
                     Status: issue.Status,
                     Stage: issue.WorkflowStage ?? "",
                     Health: issue.Health,
-                    Priority: issue.Priority)
+                    Priority: issue.Priority,
+                    CanStart: issue.CanStart,
+                    StartBlocker: issue.Blocker)
                 : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
