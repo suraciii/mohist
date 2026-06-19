@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { __testing__ } from '../src/app/providers/LiveTaskProvider'
 import { dispatchRebaseEvent, onRebaseEvent } from '../src/entities/issue/model/rebase-events'
 import { LiveTaskProvider } from '../src/app/providers/LiveTaskProvider'
+import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
@@ -165,9 +166,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -203,9 +206,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -255,9 +260,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -304,9 +311,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -330,9 +339,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -362,9 +373,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -392,9 +405,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -423,9 +438,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -453,9 +470,11 @@ describe('LiveTaskProvider transcript routing', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
-          <LiveTaskProvider>
+          <RuntimeToastHost>
+            <LiveTaskProvider>
             <LiveTaskProbe />
-          </LiveTaskProvider>
+            </LiveTaskProvider>
+          </RuntimeToastHost>
         </ProjectProvider>
       </QueryClientProvider>,
     )

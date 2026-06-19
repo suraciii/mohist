@@ -269,7 +269,7 @@ describe('useCoderSessions live event handling', () => {
       expect(result.current.sessions.length).toBe(1)
     })
 
-    dispatchAgentEvent('agent_usage_update', {
+    dispatchAgentEvent('usage.updated', {
       issueId: '1',
       projectId: TEST_PROJECT.id,
       coderSessionId: 'session-1',
@@ -308,7 +308,7 @@ describe('useCoderSessions live event handling', () => {
       expect(result.current.sessions.length).toBe(1)
     })
 
-    dispatchAgentEvent('agent_usage_update', {
+    dispatchAgentEvent('usage.updated', {
       issueId: '1',
       projectId: TEST_PROJECT.id,
       coderSessionId: 'session-unknown',
@@ -336,7 +336,7 @@ describe('useCoderSessions live event handling', () => {
       expect(result.current.sessions.length).toBe(1)
     })
 
-    dispatchAgentEvent('agent_usage_update', {
+    dispatchAgentEvent('usage.updated', {
       issueId: '1',
       projectId: TEST_PROJECT.id,
       coderSessionId: 'session-1',

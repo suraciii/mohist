@@ -608,8 +608,14 @@ public class InfoCollectorVerboseSpecs
             Path.Combine(repoDir, ".mohist", "cli-state.json"),
             """{ "activeProjectId": "proj_1" }""");
 
+        var skillAssetRoot = Path.Combine(repoDir, ".mohist", "cli", "skill-data");
+        fs.AddDirectory(Path.Combine(skillAssetRoot, "mohist"));
+        fs.AddFile(
+            Path.Combine(skillAssetRoot, "mohist", "SKILL.md"),
+            "---\nname: mohist\ndescription: Mohist operations\n---\n");
+
         var collector = new InfoCollector(fs, commands, api, env,
-            isSystemdAvailable: () => true, skillAssetService: new SkillAssetService(fs));
+            isSystemdAvailable: () => true, skillAssetService: new SkillAssetService(fs, skillAssetRoot));
 
         var result = await collector.CollectAsync(verbose: true);
 

@@ -318,7 +318,12 @@ public class WorkflowArtifactUploadRouteSpecs
         }
         finally
         {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            // NOTE: the runner is intentionally left registered for the life of
+            // the work item. Unregistering here would notify the workflow of a
+            // lost runner and fail the in-flight task (runner-lost), which would
+            // tear down the active work item before the caller can upload. The
+            // runner uses a per-test unique id, so leaving it registered does
+            // not leak across tests.
         }
     }
 }

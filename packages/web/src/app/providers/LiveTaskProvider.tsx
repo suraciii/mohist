@@ -121,6 +121,7 @@ function normalizeTranscriptDetail(
 ): Record<string, unknown> {
   const agentSessionId = readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
   const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
+  const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
   const normalized: Record<string, unknown> = {
     ...candidate,
     ...(innerPayload ?? {}),
@@ -156,6 +157,9 @@ function normalizeTranscriptDetail(
   if (normalized.coderSessionId === undefined) {
     normalized.coderSessionId = sessionId
   }
+  if (normalized.executionId === undefined) {
+    normalized.executionId = workId
+  }
   return normalized
 }
 
@@ -186,6 +190,21 @@ function unwrapTranscriptEnvelope(rawData: unknown): { eventName: string; payloa
     eventName,
     payload: candidate,
     detail: normalizeTranscriptDetail(candidate, eventName),
+  }
+}
+
+function routeTranscriptEventName(name: string): string {
+  switch (name) {
+    case 'message.delta':
+      return 'coder_text_chunk'
+    case 'reasoning.delta':
+      return 'coder_thought_chunk'
+    case 'tool_call.started':
+    case 'tool_call.updated':
+    case 'tool_call.completed':
+      return 'coder_tool_call'
+    default:
+      return name
   }
 }
 
@@ -423,6 +442,9 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           eventName === 'tool_call.started' ||
           eventName === 'tool_call.updated' ||
           eventName === 'tool_call.completed' ||
+          eventName === 'coder_text_chunk' ||
+          eventName === 'coder_thought_chunk' ||
+          eventName === 'coder_tool_call' ||
           eventName === 'coder_session_started' ||
           eventName === 'coder_session_completed' ||
           eventName === 'coder_session_failed' ||
@@ -668,13 +690,14 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
     (rawData: unknown) => {
       const transcript = unwrapTranscriptEnvelope(rawData)
       if (!transcript) return
-      if (isAgentDetailEvent(transcript.eventName)) {
+      const routedName = routeTranscriptEventName(transcript.eventName)
+      if (isAgentDetailEvent(routedName)) {
         dispatchAgentEvent(
-          transcript.eventName,
-          transcript.detail as AgentDetailEventMap[typeof transcript.eventName],
+          routedName,
+          transcript.detail as AgentDetailEventMap[typeof routedName],
         )
       }
-      handleEvent(transcript.eventName, transcript.payload, { dispatchAgentDetail: false })
+      handleEvent(routedName, transcript.payload, { dispatchAgentDetail: false })
     },
     [handleEvent],
   )

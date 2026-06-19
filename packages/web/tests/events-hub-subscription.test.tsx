@@ -49,12 +49,20 @@ const signalr = vi.hoisted(() => {
       return builder
     }),
     LogLevel: { Warning: 'Warning' },
+    HubConnectionState: {
+      Connected: 'Connected',
+      Reconnecting: 'Reconnecting',
+      Connecting: 'Connecting',
+      Disconnected: 'Disconnected',
+      Disconnecting: 'Disconnecting',
+    },
   }
 })
 
 vi.mock('@microsoft/signalr', () => ({
   HubConnectionBuilder: signalr.HubConnectionBuilder,
   LogLevel: signalr.LogLevel,
+  HubConnectionState: signalr.HubConnectionState,
 }))
 
 afterEach(() => {

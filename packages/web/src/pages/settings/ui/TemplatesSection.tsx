@@ -149,7 +149,7 @@ function TemplateRow({
           </div>
           <div className="text-sm font-medium text-foreground">{template.displayName}</div>
           {template.description && (
-            <p className="text-xs text-foreground/85 line-clamp-2">{template.description}</p>
+            <p className="text-xs text-muted-foreground line-clamp-2">{template.description}</p>
           )}
           <TagChips tags={template.tags} />
         </div>
