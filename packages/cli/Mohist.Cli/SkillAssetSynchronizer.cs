@@ -33,15 +33,6 @@ internal sealed class SkillAssetSynchronizer
             return 1;
         }
 
-        var sourceManifest = Path.Combine(sourceDir, SkillAssetManifest.FileName);
-        if (!_fileSystem.Exists(sourceManifest))
-        {
-            _err.WriteLine(
-                $"Source skill-data at '{sourceDir}' is missing {SkillAssetManifest.FileName}. " +
-                "Aborting managed asset sync.");
-            return 1;
-        }
-
         var parentDir = Path.GetDirectoryName(managedDir);
         if (!string.IsNullOrWhiteSpace(parentDir))
             _fileSystem.CreateDirectory(parentDir);
@@ -55,25 +46,10 @@ internal sealed class SkillAssetSynchronizer
 
             await CopyDirectoryAsync(sourceDir, tempDir);
 
-            var tempManifest = Path.Combine(tempDir, SkillAssetManifest.FileName);
-            if (!_fileSystem.Exists(tempManifest))
+            if (!TryValidatePreparedSkills(tempDir, out var validationError))
             {
-                _err.WriteLine(
-                    $"Prepared skill-data at '{tempDir}' is missing {SkillAssetManifest.FileName}. " +
-                    "Aborting managed asset sync.");
+                _err.WriteLine($"Prepared skill-data at '{tempDir}' is invalid: {validationError}");
                 return 1;
-            }
-
-            foreach (var skillName in SkillAssetService.BuiltInSkillNames)
-            {
-                var skillFile = Path.Combine(tempDir, skillName, "SKILL.md");
-                if (!_fileSystem.Exists(skillFile))
-                {
-                    _err.WriteLine(
-                        $"Prepared skill-data at '{tempDir}' is missing '{skillName}/SKILL.md'. " +
-                        "Aborting managed asset sync.");
-                    return 1;
-                }
             }
 
             if (_fileSystem.DirectoryExists(managedDir))
@@ -118,6 +94,31 @@ internal sealed class SkillAssetSynchronizer
             await using var sourceStream = _fileSystem.OpenRead(sourceFile);
             await using var destStream = _fileSystem.OpenWrite(destFile);
             await sourceStream.CopyToAsync(destStream);
+        }
+    }
+
+    private bool TryValidatePreparedSkills(string preparedDir, out string? error)
+    {
+        error = null;
+
+        try
+        {
+            var hasSkill = _fileSystem
+                .EnumerateFiles(preparedDir, "SKILL.md", SearchOption.AllDirectories)
+                .Any();
+
+            if (!hasSkill)
+            {
+                error = "no '*/SKILL.md' found";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
         }
     }
 }

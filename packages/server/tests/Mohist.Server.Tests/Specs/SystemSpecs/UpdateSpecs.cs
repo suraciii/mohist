@@ -652,7 +652,7 @@ public class UpdateSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task UpdateRunner_WhenRunnerDoesNotReconnect_ReportsNotReconnectedEvenWhenManifestMatches()
+    public async Task UpdateRunner_WhenRunnerDoesNotReconnect_ReportsNotReconnectedEvenWhenBuildInfoMatches()
     {
         var files = new FakeFileSystem();
         WriteRunnerUnit(files, "/units");
@@ -691,7 +691,7 @@ public class UpdateSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task UpdateRunner_WhenRunnerDoesNotReconnectAndManifestStale_ReportsStaleRuntime()
+    public async Task UpdateRunner_WhenRunnerDoesNotReconnectAndBuildInfoStale_ReportsStaleRuntime()
     {
         var files = new FakeFileSystem();
         WriteRunnerUnit(files, "/units");
@@ -1344,7 +1344,7 @@ public class UpdateSpecs
                 commands);
             var systemInfo = HealthySystemInfoJson();
             // Use a separate temp root for the user home so the managed skill
-            // assets are not present (no manifest.json at ~/.mohist/cli/skill-data).
+            // assets are not present.
             var emptyHome = Path.Combine(Path.GetTempPath(), $"mohist-verify-skills-home-{Guid.NewGuid():N}");
             Directory.CreateDirectory(emptyHome);
             try
@@ -1739,13 +1739,13 @@ public class UpdateSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task CheckManagedSkillAssets_WhenManifestPresent_ReportsPass()
+    public async Task CheckManagedSkillAssets_WhenSkillFilePresent_ReportsPass()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-skills-pass-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
         files.AddFile(
-            Path.Combine(tempRoot, ".mohist", "cli", "skill-data", "manifest.json"),
-            "{}");
+            Path.Combine(tempRoot, ".mohist", "cli", "skill-data", "mohist", "SKILL.md"),
+            "---\nname: mohist\ndescription: test\n---\n\n# mohist\n");
         var commands = new FakeCommandExecutor();
         var installer = new SystemdServiceInstaller(
             new StringWriter(),
@@ -1782,7 +1782,7 @@ public class UpdateSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task CheckManagedSkillAssets_WhenManifestMissing_ReportsWarn()
+    public async Task CheckManagedSkillAssets_WhenSkillFilesMissing_ReportsWarn()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-check-skills-warn-{Guid.NewGuid():N}");
         var files = new FakeFileSystem();
@@ -2322,9 +2322,6 @@ public class UpdateSpecs
         files.AddDirectory(Path.Combine(sourceRoot, "mohist"));
         files.AddDirectory(Path.Combine(sourceRoot, "mohist-explore"));
         files.AddFile(
-            Path.Combine(sourceRoot, "manifest.json"),
-            "{\"schemaVersion\":1,\"cliVersion\":\"1.0.0\",\"gitHash\":\"test\",\"skills\":[\"mohist\",\"mohist-explore\"]}");
-        files.AddFile(
             Path.Combine(sourceRoot, "mohist", "SKILL.md"),
             "---\nname: mohist\ndescription: test\n---\n\n# mohist\n");
         files.AddFile(
@@ -2349,7 +2346,6 @@ public class UpdateSpecs
     private static void AssertManagedSkillAssetsSynced(FakeFileSystem files, string tempRoot)
     {
         var managedRoot = Path.Combine(tempRoot, ".mohist", "cli", "skill-data");
-        Assert.True(files.HasFile(Path.Combine(managedRoot, "manifest.json")), $"Expected manifest at {managedRoot}");
         Assert.True(files.HasFile(Path.Combine(managedRoot, "mohist", "SKILL.md")), "Expected mohist SKILL.md");
         Assert.True(files.HasFile(Path.Combine(managedRoot, "mohist-explore", "SKILL.md")), "Expected mohist-explore SKILL.md");
         var mohistSkillsDir = Path.Combine(tempRoot, ".mohist", "skills");

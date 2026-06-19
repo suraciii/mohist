@@ -11,6 +11,7 @@ public sealed class SkillsInstallSpecs
 {
     private readonly FakeFileSystem _files = new();
     private readonly MockEnvironmentVariableProvider _environment = new();
+    private string? _assetRoot;
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
@@ -275,6 +276,7 @@ public sealed class SkillsInstallSpecs
         sourceRoot = Path.GetFullPath(sourceRoot);
         var targetRoot = Path.Combine("/tmp", $"skills-install-assets-{Guid.NewGuid():N}");
         _files.AddDirectory(targetRoot);
+        _assetRoot = targetRoot;
 
         if (Directory.Exists(sourceRoot))
         {
@@ -284,12 +286,6 @@ public sealed class SkillsInstallSpecs
                 _files.AddFile(Path.Combine(targetRoot, relative), File.ReadAllText(file));
             }
         }
-
-        SkillAssetManifest.Write(
-            targetRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
 
         var resolver = new SkillAssetRootResolver(
             _files,
@@ -336,7 +332,7 @@ public sealed class SkillsInstallSpecs
         var content = _files.ReadAllText(path);
         Assert.Contains("---", content);
         Assert.Contains($"name: {name}", content);
-        Assert.Contains($"description: {DescriptionFor(name)}", content);
+        Assert.Contains($"description: {ReadPackagedDescription(name)}", content);
         Assert.Contains($"mo skills get {name}", content);
         Assert.DoesNotContain("<artifact", content);
     }
@@ -346,15 +342,16 @@ public sealed class SkillsInstallSpecs
         Assert.True(_files.HasFile(path), $"Expected full Hermes skill at '{path}'.");
         var content = _files.ReadAllText(path);
         Assert.Contains($"name: {name}", content);
-        Assert.Contains($"description: {DescriptionFor(name)}", content);
+        Assert.Contains($"description: {ReadPackagedDescription(name)}", content);
         Assert.Contains("---", content);
         Assert.DoesNotContain("This Mohist-managed discovery stub keeps local agent skill installs lightweight and version-matched.", content);
     }
 
-    private static string DescriptionFor(string name) => name switch
+    private string ReadPackagedDescription(string name)
     {
-        "mohist" => "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。",
-        "mohist-explore" => "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 \"提炼需求\"、\"写 PRD\"、\"沉淀 issue\"、\"需求文档\"、\"探索\"、\"完善 issue\"。",
-        _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
-    };
+        var skillFile = Path.Combine(_assetRoot!, name, "SKILL.md");
+        var content = _files.ReadAllText(skillFile);
+        var line = content.Split('\n').First(l => l.StartsWith("description:", StringComparison.Ordinal));
+        return line["description:".Length..].Trim();
+    }
 }

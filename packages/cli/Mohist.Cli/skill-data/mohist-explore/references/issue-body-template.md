@@ -2,7 +2,9 @@
 
 Use this template when producing an issue body from `mohist-explore`. This is **pure content** — no frontmatter, no workflow id, no risk field. Those are added by the `mohist` skill at issue-creation time. This template captures only what the three voices produced.
 
-The sections must appear in this exact order. Each is a level-2 (`##`) heading.
+User Voice, Product Shape, Acceptance Criteria, and Non-Goals are always present, in this order. **Domain Model is optional** — include it only when the requirement touches a non-trivial business domain (invariants, lifecycle rules, cross-aggregate constraints); omit it for pure technical corrections with no complex business scenario. When present, Domain Model sits between Product Shape and Acceptance Criteria. Each section is a level-2 (`##`) heading.
+
+Write every section in product/domain language. The body must not cite source paths, file names, line numbers, or symbol names.
 
 ## Template
 
@@ -17,15 +19,17 @@ to capture the real intent.>
 ## Product Shape
 
 <The PM translation: the target product form — what the user will see or be able
-to do. State the boundary (what is in scope) and cite what you observed in the
-current product (pages, commands, flows). Make trade-offs explicit.>
+to do, written in product language. State the boundary (what is in scope). Do NOT
+cite source paths, file names, or symbol names — describe the product form. Make
+trade-offs explicit.>
 
 ## Domain Model
 
-<The domain expert translation: the key concepts, invariants, and constraints that
-shape the solution — just enough for the Plan stage to understand the problem.
-Cite the code paths and data models inspected. Do NOT prescribe implementation
-(files, functions, tables, task steps).>
+<Optional. Include only when the requirement touches a non-trivial business domain
+— invariants, lifecycle rules, or cross-aggregate constraints. Omit for pure
+technical corrections with no complex business scenario. State the key concepts,
+invariants, and constraints in the domain's own vocabulary. Do NOT cite source
+paths, files, symbols, or line numbers. Do NOT prescribe implementation.>
 
 ## Acceptance Criteria
 
@@ -54,20 +58,18 @@ prose.
 ## Product Shape
 
 Surface a `low / medium / high` risk selector in the create-issue dialog,
-alongside the existing title and body fields. The selector should pre-fill from
-the body's frontmatter `risk` field when one exists, and let the user override it
-before submitting. Explored the dialog at `packages/web/src/issues/CreateIssueDialog.*`:
-the `Issue` model already exposes `risk?: string | null`, but the dialog never
-binds it. Out of scope: risk validation rules on the server (beyond the existing
-enum check), and how risk renders on the issue detail page.
+alongside the existing title and body fields. The selector pre-fills from the
+body's frontmatter `risk` value when one is present, and lets the user override
+it before submitting. Out of scope: server-side risk validation rules beyond the
+existing enum check, and how risk renders on the issue detail page.
 
 ## Domain Model
 
-`Issue.Risk` is an optional enum (`low | medium | high`) persisted on the issue
-aggregate. The invariant is that risk, once set, flows into the workflow profile
-selection at plan time — so the create dialog must commit a value the workflow
-engine can read. The create-issue API endpoint already accepts `risk` in the
-request body; the gap is purely in the Web UI binding. No schema change needed.
+Risk is an optional attribute on an issue (`low | medium | high`). The invariant
+is that risk, once set, feeds into workflow profile selection at plan time — so
+the create dialog must commit a value the workflow engine can later read. The
+create-issue endpoint already accepts risk in its request body; the gap is purely
+in the Web UI binding. No data-model change needed.
 
 ## Acceptance Criteria
 
@@ -87,9 +89,11 @@ request body; the gap is purely in the Web UI binding. No schema change needed.
 
 Before handing the PRD to the `mohist` skill to create the issue, confirm:
 
-- [ ] The five `##` sections appear in order: User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals.
+- [ ] Sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is present only when the requirement has a non-trivial business domain.
 - [ ] User Voice is the user's need, not a solution. The user can recognize it as their own.
-- [ ] Product Shape names a clear boundary and at least one real non-goal.
-- [ ] Domain Model stays in the problem space — no prescribed files, functions, or task breakdown.
+- [ ] Product Shape names a clear boundary and at least one real non-goal, written in product language.
+- [ ] Domain Model (if present) stays in the problem space, in domain language — no prescribed files, functions, or task breakdown.
+- [ ] The PRD body contains no source paths, file names, line numbers, or symbol names.
+- [ ] The prose is literal and concise — no metaphors, no anthropomorphism, no fancy jargon; concepts use the product's own vocabulary.
 - [ ] Acceptance Criteria are observable from the user perspective, not implementation checks.
 - [ ] The PRD contains no frontmatter and no workflow/risk fields — `mohist` owns those.

@@ -147,7 +147,7 @@ When assigning priority, use lowercase (`p0`–`p3`):
 - [ ] `recommended_workflow` is populated (best match or `mohist/default`).
 - [ ] `recommended_workflow_reason` references the matched `suitable_for` tags or states the fallback.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.
-- [ ] The body's five sections appear in order: User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals.
+- [ ] The body's sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional (omit for pure technical changes).
 - [ ] The user has confirmed the recommendation and body summary before `mo issue create` runs.
 
 ## Creating epics

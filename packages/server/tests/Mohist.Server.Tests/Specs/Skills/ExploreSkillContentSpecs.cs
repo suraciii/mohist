@@ -96,11 +96,6 @@ public sealed class ExploreSkillContentSpecs
         var environment = new MockEnvironmentVariableProvider();
         var isolatedRoot = Path.Combine("/tmp", $"mohist-explore-content-{Guid.NewGuid():N}", "skill-data");
         CopyDirectory(SkillDataRoot, isolatedRoot, files);
-        SkillAssetManifest.Write(
-            isolatedRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            SkillAssetService.BuiltInSkillNames.ToArray(),
-            files);
 
         var resolver = new SkillAssetRootResolver(
             files,
@@ -122,20 +117,20 @@ public sealed class ExploreSkillContentSpecs
     }
 
     [Fact]
-    public void PackagedExploreSkill_ManifestListsExploreAndMohistFilesExist()
+    public void PackagedSkillData_ContainsMohistAndExploreSkills()
     {
-        var manifestPath = Path.Combine(SkillDataRoot, SkillAssetManifest.FileName);
+        var skills = Directory.GetDirectories(SkillDataRoot)
+            .Select(Path.GetFileName)
+            .Where(name => File.Exists(Path.Combine(SkillDataRoot, name!, "SKILL.md")))
+            .ToList();
 
-        Assert.True(File.Exists(manifestPath), $"Manifest missing at '{manifestPath}'.");
-        var read = SkillAssetManifest.TryRead(SkillDataRoot);
-        Assert.True(read.IsFound, read.Error ?? "Manifest could not be read.");
-        Assert.Contains("mohist", read.Data!.Skills);
-        Assert.Contains("mohist-explore", read.Data!.Skills);
+        Assert.Contains("mohist", skills);
+        Assert.Contains("mohist-explore", skills);
 
-        foreach (var skill in read.Data!.Skills)
+        foreach (var skill in skills)
         {
-            var skillFile = Path.Combine(SkillDataRoot, skill, "SKILL.md");
-            Assert.True(File.Exists(skillFile), $"Manifest lists '{skill}' but '{skillFile}' is missing.");
+            var skillFile = Path.Combine(SkillDataRoot, skill!, "SKILL.md");
+            Assert.True(File.Exists(skillFile), $"Skill dir '{skill}' is missing '{skillFile}'.");
         }
     }
 

@@ -163,11 +163,6 @@ public sealed class SkillsContentSpecs
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
         WriteSkill(managedRoot, "mohist-explore", "managed explore body");
-        SkillAssetManifest.Write(
-            managedRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
         using var stdout = new StringWriter();
         using var jsonStdout = new StringWriter();
         var resolver = new SkillAssetRootResolver(
@@ -200,11 +195,6 @@ public sealed class SkillsContentSpecs
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
         WriteSkill(managedRoot, "mohist-explore", "managed explore body");
-        SkillAssetManifest.Write(
-            managedRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
         var resolver = new SkillAssetRootResolver(
             _files,
             _environment,
@@ -243,11 +233,6 @@ public sealed class SkillsContentSpecs
                 _files.AddFile(Path.Combine(siblingRoot, relative), File.ReadAllText(file));
             }
         }
-        SkillAssetManifest.Write(
-            siblingRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
 
         using var stdout = new StringWriter();
         var resolver = new SkillAssetRootResolver(
@@ -268,18 +253,9 @@ public sealed class SkillsContentSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
-    public async Task Get_FailsWithRepairGuidance_WhenManagedCacheIsIncompatible()
+    public async Task Get_FailsWithRepairGuidance_WhenNoAssetRootIsResolvable()
     {
         var userHome = Path.Combine("/tmp", $"user-home-{Guid.NewGuid():N}");
-        var managedRoot = Path.Combine(userHome, ".mohist", "cli", "skill-data");
-        _files.AddDirectory(managedRoot);
-        WriteSkill(managedRoot, "mohist", "stale mohist body");
-        WriteSkill(managedRoot, "mohist-explore", "stale explore body");
-        SkillAssetManifest.Write(
-            managedRoot,
-            new SkillAssetBuildIdentity("0.0.0-stale", "deadbeef"),
-            new[] { "mohist", "mohist-explore" },
-            _files);
 
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -310,11 +286,6 @@ public sealed class SkillsContentSpecs
         _files.AddDirectory(overrideRoot);
         WriteSkill(overrideRoot, "mohist", "override mohist");
         WriteSkill(overrideRoot, "mohist-explore", "override explore");
-        SkillAssetManifest.Write(
-            overrideRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
         using var listStdout = new StringWriter();
         using var getStdout = new StringWriter();
         using var pathStdout = new StringWriter();
@@ -431,11 +402,6 @@ public sealed class SkillsContentSpecs
             }
         }
 
-        SkillAssetManifest.Write(
-            targetRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
         return targetRoot;
     }
 
@@ -445,11 +411,6 @@ public sealed class SkillsContentSpecs
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
         WriteSkill(managedRoot, "mohist-explore", "managed explore body");
-        SkillAssetManifest.Write(
-            managedRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            _files);
         return managedRoot;
     }
 

@@ -1,20 +1,9 @@
-using System.Text;
-
 namespace Mohist.Cli;
 
 internal sealed class SkillAssetService
 {
-    private static readonly IReadOnlyList<BuiltInSkillDefinition> BuiltIns =
-    [
-        new("mohist", "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。"),
-        new("mohist-explore", "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 \"提炼需求\"、\"写 PRD\"、\"沉淀 issue\"、\"需求文档\"、\"探索\"、\"完善 issue\"。"),
-    ];
-
-    internal static IReadOnlyList<string> BuiltInSkillNames =>
-        BuiltIns.Select(skill => skill.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
-
-    private readonly SkillAssetRootResolution _resolution;
     private readonly IFileSystem _fileSystem;
+    private readonly SkillAssetRootResolution _resolution;
     private readonly string? _assetRoot;
 
     public SkillAssetService()
@@ -43,7 +32,7 @@ internal sealed class SkillAssetService
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(resolver);
         _fileSystem = fileSystem;
-        _resolution = resolver.Resolve(BuiltInSkillNames);
+        _resolution = resolver.Resolve();
         _assetRoot = _resolution.AssetRoot;
     }
 
@@ -62,20 +51,25 @@ internal sealed class SkillAssetService
     }
 
     internal SkillAssetService(IFileSystem fileSystem, string? overrideAssetRoot)
-        : this(fileSystem, BuildTestOnlyResolution(fileSystem, overrideAssetRoot))
+        : this(fileSystem, BuildResolution(fileSystem, overrideAssetRoot))
     {
     }
 
-    private static SkillAssetRootResolution BuildTestOnlyResolution(IFileSystem fileSystem, string? overrideAssetRoot)
+    private static SkillAssetRootResolution BuildResolution(IFileSystem fileSystem, string? overrideAssetRoot)
     {
         var resolvedRoot = string.IsNullOrWhiteSpace(overrideAssetRoot)
             ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "skill-data"))
             : Path.GetFullPath(overrideAssetRoot);
 
-        return SkillAssetRootResolution.Selected(
-            resolvedRoot,
-            SkillAssetRootSource.Override,
-            SkillAssetManifestValidation.Valid());
+        if (!fileSystem.DirectoryExists(resolvedRoot))
+        {
+            return SkillAssetRootResolution.Failed(
+                resolvedRoot,
+                SkillAssetRootSource.Override,
+                $"Skill asset root '{resolvedRoot}' does not exist.");
+        }
+
+        return SkillAssetRootResolution.Selected(resolvedRoot, SkillAssetRootSource.Override);
     }
 
     public string? AssetRoot => _assetRoot;
@@ -85,60 +79,87 @@ internal sealed class SkillAssetService
     public string? ResolverDiagnostic => _resolution.DiagnosticSummary;
 
     public IReadOnlyList<BuiltInSkillMetadata> ListVisibleSkills() =>
-        BuiltIns
+        DiscoverSkills()
             .OrderBy(skill => skill.Name, StringComparer.Ordinal)
             .Select(skill => new BuiltInSkillMetadata(skill.Name, skill.Description))
             .ToArray();
 
     public SkillAssetReadResult GetSkill(string name, bool includeSupplementaryFiles)
     {
-        var definition = BuiltIns.FirstOrDefault(skill => string.Equals(skill.Name, name, StringComparison.Ordinal));
-        if (definition is null)
-            return SkillAssetReadResult.Fail($"Unknown Mohist built-in skill '{name}'.");
+        if (string.IsNullOrWhiteSpace(name))
+            return SkillAssetReadResult.Fail("A built-in skill name is required.");
 
         if (_assetRoot is null)
-            return SkillAssetReadResult.Fail(BuildUnresolvedDiagnostic(definition.Name));
+            return SkillAssetReadResult.Fail(BuildUnresolvedDiagnostic(name));
 
-        var skillDirectory = Path.Combine(_assetRoot, definition.Name);
-        var skillFile = Path.Combine(skillDirectory, "SKILL.md");
+        var skill = DiscoverSkills().FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.Ordinal));
+        if (skill is null)
+            return SkillAssetReadResult.Fail($"Unknown Mohist built-in skill '{name}'.");
 
+        var skillFile = Path.Combine(skill.Directory, "SKILL.md");
         if (!_fileSystem.Exists(skillFile))
-            return SkillAssetReadResult.Fail(BuildMissingAssetDiagnostic(definition.Name, skillFile));
+            return SkillAssetReadResult.Fail(BuildMissingAssetDiagnostic(skill.Name, skillFile));
 
         var content = _fileSystem.ReadAllText(skillFile);
-        if (!TryReadFrontmatter(content, out var frontmatterName, out var frontmatterDescription))
-            return SkillAssetReadResult.Fail($"Built-in skill asset '{definition.Name}' has invalid AgentSkills frontmatter.");
-
-        if (!string.Equals(frontmatterName, definition.Name, StringComparison.Ordinal))
-            return SkillAssetReadResult.Fail($"Built-in skill asset '{definition.Name}' has mismatched frontmatter name '{frontmatterName}'.");
-
-        if (!string.Equals(frontmatterDescription, definition.Description, StringComparison.Ordinal))
-            return SkillAssetReadResult.Fail($"Built-in skill asset '{definition.Name}' has mismatched frontmatter description.");
 
         var supplementaryFiles = includeSupplementaryFiles
-            ? EnumerateSupplementaryFiles(skillDirectory).ToArray()
+            ? EnumerateSupplementaryFiles(skill.Directory).ToArray()
             : Array.Empty<SkillSupplementaryFile>();
 
         return SkillAssetReadResult.Success(new BuiltInSkillContent(
-            definition.Name,
-            definition.Description,
-            skillDirectory,
+            skill.Name,
+            skill.Description,
+            skill.Directory,
             content,
             supplementaryFiles));
+    }
+
+    private List<DiscoveredSkill> DiscoverSkills()
+    {
+        var skills = new List<DiscoveredSkill>();
+
+        if (string.IsNullOrWhiteSpace(_assetRoot) || !_fileSystem.DirectoryExists(_assetRoot))
+            return skills;
+
+        var rootFull = Path.GetFullPath(_assetRoot);
+
+        IEnumerable<string> skillFiles;
+        try
+        {
+            skillFiles = _fileSystem.EnumerateFiles(rootFull, "SKILL.md", SearchOption.AllDirectories);
+        }
+        catch
+        {
+            return skills;
+        }
+
+        foreach (var file in skillFiles)
+        {
+            var parentDir = Path.GetDirectoryName(file);
+            if (parentDir is null)
+                continue;
+
+            // Only accept SKILL.md that is a direct child of a skill directory under root:
+            //   <root>/<skillName>/SKILL.md
+            var grandparent = Path.GetDirectoryName(parentDir);
+            if (!string.Equals(grandparent, rootFull, StringComparison.Ordinal))
+                continue;
+
+            var content = _fileSystem.ReadAllText(file);
+            if (TryReadFrontmatter(content, out var frontmatterName, out var frontmatterDescription)
+                && !string.IsNullOrWhiteSpace(frontmatterName))
+            {
+                skills.Add(new DiscoveredSkill(frontmatterName!, frontmatterDescription ?? string.Empty, parentDir));
+            }
+        }
+
+        return skills;
     }
 
     private string BuildMissingAssetDiagnostic(string skillName, string skillFile)
     {
         const string repairGuidance = "Repair by running 'mo update' or 'scripts/install-mo.sh'.";
-        var message = $"Built-in skill asset '{skillName}' is missing SKILL.md at '{skillFile}'.";
-        var resolverMessage = _resolution.DiagnosticSummary;
-        if (string.IsNullOrWhiteSpace(resolverMessage))
-            return $"{message} {repairGuidance}";
-
-        if (resolverMessage.Contains("mo update", StringComparison.Ordinal))
-            return $"{message} {resolverMessage}";
-
-        return $"{message} {resolverMessage} {repairGuidance}";
+        return $"Built-in skill asset '{skillName}' is missing SKILL.md at '{skillFile}'. {repairGuidance}";
     }
 
     private string BuildUnresolvedDiagnostic(string skillName)
@@ -201,6 +222,8 @@ internal sealed class SkillAssetService
 
         return false;
     }
+
+    private sealed record DiscoveredSkill(string Name, string Description, string Directory);
 }
 
 internal sealed record BuiltInSkillMetadata(string Name, string Description);
@@ -220,5 +243,3 @@ internal sealed record SkillAssetReadResult(bool Found, string? Error, BuiltInSk
 
     public static SkillAssetReadResult Fail(string error) => new(false, error, null);
 }
-
-internal sealed record BuiltInSkillDefinition(string Name, string Description);

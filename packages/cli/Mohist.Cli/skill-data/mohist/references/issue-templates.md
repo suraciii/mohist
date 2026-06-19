@@ -1,6 +1,6 @@
 # Mohist Issue Body Template (frontmatter + three-voice content)
 
-Use this template when creating a Mohist issue. The file is the only contract between the PRD content (produced by `mohist-explore`) and the CLI: it MUST start with the frontmatter block, followed by the five structured sections in the exact order shown. Write the file to a temp path (for example `issue-body.md`) and hand it to `mo issue create <title> --body-file issue-body.md`.
+Use this template when creating a Mohist issue. The file is the only contract between the PRD content (produced by `mohist-explore`) and the CLI: it MUST start with the frontmatter block, followed by the structured sections in the order shown. Domain Model is optional — include it only when the requirement has a non-trivial business domain; otherwise omit the whole section. Write the file to a temp path (for example `issue-body.md`) and hand it to `mo issue create <title> --body-file issue-body.md`.
 
 ## Frontmatter fields
 
@@ -30,14 +30,16 @@ product or technical terms.>
 ## Product Shape
 
 <The PM translation: the target product form — what the user will see or be able
-to do. State the boundary. Cite what you observed in the current product (pages,
-commands, flows). Make trade-offs explicit.>
+to do, written in product language. State the boundary. Do NOT cite source paths,
+file names, or symbol names. Make trade-offs explicit.>
 
 ## Domain Model
 
-<The domain expert translation: key concepts, invariants, and constraints — just
-enough for the Plan stage to understand the problem. Cite code paths inspected. Do
-NOT prescribe implementation (files, functions, tables).>
+<Optional. Include only when the requirement touches a non-trivial business domain
+— invariants, lifecycle rules, or cross-aggregate constraints. Omit for pure
+technical corrections. State key concepts, invariants, and constraints in the
+domain's own vocabulary. Do NOT cite source paths, files, symbols, or line
+numbers. Do NOT prescribe implementation.>
 
 ## Acceptance Criteria
 
@@ -73,19 +75,17 @@ prose.
 
 Surface a `low / medium / high` risk selector in the create-issue dialog,
 alongside the existing title and body fields. The selector pre-fills from the
-body's frontmatter `risk` field when one exists, and lets the user override it
-before submitting. Explored the dialog at `packages/web/src/issues/`: the `Issue`
-model already exposes `risk?: string | null`, but the dialog never binds it. Out
-of scope: server-side risk validation beyond the existing enum check, and how risk
-renders on the issue detail page.
+body's frontmatter `risk` value when one is present, and lets the user override
+it before submitting. Out of scope: server-side risk validation rules beyond the
+existing enum check, and how risk renders on the issue detail page.
 
 ## Domain Model
 
-`Issue.Risk` is an optional enum (`low | medium | high`) persisted on the issue
-aggregate. The invariant is that risk, once set, flows into workflow profile
-selection at plan time — so the create dialog must commit a value the workflow
-engine can read. The create-issue API endpoint already accepts `risk` in the
-request body; the gap is purely in the Web UI binding. No schema change needed.
+Risk is an optional attribute on an issue (`low | medium | high`). The invariant
+is that risk, once set, feeds into workflow profile selection at plan time — so
+the create dialog must commit a value the workflow engine can later read. The
+create-issue endpoint already accepts risk in its request body; the gap is purely
+in the Web UI binding. No data-model change needed.
 
 ## Acceptance Criteria
 
@@ -107,5 +107,6 @@ request body; the gap is purely in the Web UI binding. No schema change needed.
 - [ ] All three required fields are present and non-empty.
 - [ ] `risk` is exactly one of `low`, `medium`, `high`.
 - [ ] `recommended_workflow` is a real id (or `mohist/default`).
-- [ ] The five `##` sections appear in order: User Voice, Product Shape, Domain Model, Acceptance Criteria, Non-Goals.
+- [ ] Sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional.
+- [ ] The body contains no source paths, file names, line numbers, or symbol names.
 - [ ] User has confirmed the workflow, risk, and a body summary before running `mo issue create --body-file`.

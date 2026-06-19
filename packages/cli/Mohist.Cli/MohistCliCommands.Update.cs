@@ -644,14 +644,10 @@ internal sealed class SourceCodeUpdater
             }
 
             var versionOutput = stdout.Trim();
-            var identity = SkillAssetManifest.ResolveCurrentBuildIdentity();
-            if (!string.IsNullOrWhiteSpace(identity.GitHash)
-                && versionOutput.Contains(identity.GitHash, StringComparison.OrdinalIgnoreCase) is false
-                && versionOutput.Contains(identity.Version ?? string.Empty, StringComparison.OrdinalIgnoreCase) is false
-                && !string.IsNullOrWhiteSpace(versionOutput))
+            if (string.IsNullOrWhiteSpace(versionOutput))
             {
                 return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Warn,
-                    $"Installed mo reports '{versionOutput}', but source HEAD build identity is '{identity.Version}+{identity.GitHash}'. The CLI may be stale.");
+                    "mo --version reported an empty version string.");
             }
 
             return new RuntimeCheckResult("CLI binary", RuntimeCheckOutcome.Pass,
@@ -770,15 +766,32 @@ internal sealed class SourceCodeUpdater
     {
         await Task.CompletedTask;
         var assetRoot = ResolveManagedSkillAssetRoot();
-        var manifestPath = Path.Combine(assetRoot, SkillAssetManifest.FileName);
-        if (!_fileSystem.Exists(manifestPath))
+        if (!_fileSystem.DirectoryExists(assetRoot))
         {
             return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Warn,
                 $"Managed skill assets are missing at '{assetRoot}'. Run 'mo skills install' to restore.");
         }
 
+        try
+        {
+            var hasSkill = _fileSystem
+                .EnumerateFiles(assetRoot, "SKILL.md", SearchOption.AllDirectories)
+                .Any();
+
+            if (!hasSkill)
+            {
+                return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Warn,
+                    $"Managed skill assets at '{assetRoot}' contain no skill. Run 'mo skills install' to restore.");
+            }
+        }
+        catch (Exception ex)
+        {
+            return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Warn,
+                $"Failed to inspect managed skill assets at '{assetRoot}': {ex.Message}");
+        }
+
         return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Pass,
-            $"Manifest present at '{manifestPath}'");
+            $"Skill assets present at '{assetRoot}'");
     }
 
     private async Task<SystemInfoSnapshot?> TryGetSystemInfoAsync(CancellationToken token)

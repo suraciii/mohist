@@ -16,9 +16,6 @@ SOURCE_SKILL_DATA="$PUBLISH_DIR/skill-data"
 MANAGED_PARENT="${HOME}/.mohist/cli"
 MANAGED_SKILL_DATA="$MANAGED_PARENT/skill-data"
 
-# 同步时必须存在的内置 skill 名称（与 Mohist.Cli 的 BuiltInSkillNames 保持一致）
-BUILTIN_SKILL_NAMES=("mohist" "mohist-explore")
-
 echo "Installing Mohist CLI (mo)..."
 echo "Repository: $REPO_ROOT"
 echo "Install directory: $INSTALL_DIR"
@@ -76,11 +73,6 @@ if [ ! -d "$SOURCE_SKILL_DATA" ]; then
     exit 1
 fi
 
-if [ ! -f "$SOURCE_SKILL_DATA/manifest.json" ]; then
-    echo "Error: Source skill-data at '$SOURCE_SKILL_DATA' is missing manifest.json. Aborting managed asset sync." >&2
-    exit 1
-fi
-
 mkdir -p "$MANAGED_PARENT"
 
 if ! TEMP_SKILL_DATA=$(mktemp -d -p "$MANAGED_PARENT" "skill-data.tmp.XXXXXX"); then
@@ -94,19 +86,11 @@ if ! cp -R "$SOURCE_SKILL_DATA/." "$TEMP_SKILL_DATA/"; then
     exit 1
 fi
 
-# 验证临时目录的 manifest.json 存在
-if [ ! -f "$TEMP_SKILL_DATA/manifest.json" ]; then
-    echo "Error: Prepared skill-data at '$TEMP_SKILL_DATA' is missing manifest.json. Aborting managed asset sync." >&2
+# 验证临时目录中至少存在一个 skill（任意 */SKILL.md）
+if ! ls -1 "$TEMP_SKILL_DATA"/*/SKILL.md >/dev/null 2>&1; then
+    echo "Error: Prepared skill-data at '$TEMP_SKILL_DATA' contains no '*/SKILL.md'. Aborting managed asset sync." >&2
     exit 1
 fi
-
-# 验证临时目录中每个内置 skill 的 SKILL.md 存在
-for skill_name in "${BUILTIN_SKILL_NAMES[@]}"; do
-    if [ ! -f "$TEMP_SKILL_DATA/$skill_name/SKILL.md" ]; then
-        echo "Error: Prepared skill-data at '$TEMP_SKILL_DATA' is missing '$skill_name/SKILL.md'. Aborting managed asset sync." >&2
-        exit 1
-    fi
-done
 
 # 替换现有的 managed skill-data 目录
 if [ -d "$MANAGED_SKILL_DATA" ]; then

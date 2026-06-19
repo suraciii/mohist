@@ -37,11 +37,6 @@ public sealed class SkillsCliRuntimeSpecs
         files.AddFile(
             Path.Combine(overrideRoot, "mohist-explore", "SKILL.md"),
             $"---\nname: mohist-explore\ndescription: {DescriptionFor("mohist-explore")}\n---\n\n# explore\n");
-        SkillAssetManifest.Write(
-            overrideRoot,
-            SkillAssetManifest.ResolveCurrentBuildIdentity(),
-            new[] { "mohist", "mohist-explore" },
-            files);
         environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = overrideRoot;
 
         var (exitCode, stdout, stderr) = await InvokeSkillsAsync(files, environment, "skills", "get", "mohist");

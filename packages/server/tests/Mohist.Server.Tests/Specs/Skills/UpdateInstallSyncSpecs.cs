@@ -20,7 +20,7 @@ public sealed class UpdateInstallSyncSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task UpdateCliAsync_SynchronizesPublishedSkillData_IntoManagedCacheWithManifestAndBuiltInSkills()
+    public async Task UpdateCliAsync_SynchronizesPublishedSkillData_IntoManagedCacheWithBuiltInSkills()
     {
         var tempRoot = NewIsolatedRoot("update-basic");
         WritePackagedSkillAssets(tempRoot);
@@ -35,14 +35,8 @@ public sealed class UpdateInstallSyncSpecs
 
         Assert.Equal(0, exitCode);
         var managedRoot = Path.Combine(tempRoot, ".mohist", "cli", "skill-data");
-        Assert.True(_files.HasFile(Path.Combine(managedRoot, "manifest.json")));
         Assert.True(_files.HasFile(Path.Combine(managedRoot, "mohist", "SKILL.md")));
         Assert.True(_files.HasFile(Path.Combine(managedRoot, "mohist-explore", "SKILL.md")));
-
-        var readManifest = SkillAssetManifest.TryRead(managedRoot, _files);
-        Assert.True(readManifest.IsFound);
-        Assert.Contains("mohist", readManifest.Data!.Skills);
-        Assert.Contains("mohist-explore", readManifest.Data.Skills);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -61,11 +55,6 @@ public sealed class UpdateInstallSyncSpecs
             "---\nname: mohist\ndescription: STALE\n---\n\n# STALE\n");
         _files.AddFile(Path.Combine(managedRoot, "stale-skill", "SKILL.md"), "STALE SKILL");
         _files.AddFile(Path.Combine(managedRoot, "stale.txt"), "stale-marker");
-        SkillAssetManifest.Write(
-            managedRoot,
-            new SkillAssetBuildIdentity("0.0.0-stale", "deadbeef"),
-            new[] { "mohist", "mohist-explore", "stale-skill" },
-            _files);
 
         var commands = new FakeCommandExecutor();
         var (updater, _) = BuildUpdater(commands, tempRoot);
@@ -83,11 +72,6 @@ public sealed class UpdateInstallSyncSpecs
 
         var mohistBody = _files.ReadAllText(Path.Combine(managedRoot, "mohist", "SKILL.md"));
         Assert.DoesNotContain("STALE", mohistBody);
-
-        var manifest = SkillAssetManifest.TryRead(managedRoot, _files);
-        Assert.True(manifest.IsFound);
-        Assert.DoesNotContain("stale-skill", manifest.Data!.Skills);
-        Assert.NotEqual("0.0.0-stale", manifest.Data.Version);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -186,8 +170,7 @@ public sealed class UpdateInstallSyncSpecs
             new MockEnvironmentVariableProvider(),
             getOverrideAssetRoot: () => null,
             getManagedAssetRoot: null,
-            getUserHome: () => tempRoot,
-            getBuildIdentity: SkillAssetManifest.ResolveCurrentBuildIdentity);
+            getUserHome: () => tempRoot);
         var service = new SkillAssetService(files, _environment, resolver);
 
         Assert.Equal(SkillAssetRootSource.ManagedCache, service.AssetRootSource);
@@ -222,12 +205,6 @@ public sealed class UpdateInstallSyncSpecs
         _files.AddFile(
             Path.Combine(publishSource, "mohist-explore", "SKILL.md"),
             BuildSkillMarkdown("mohist-explore"));
-        var identity = SkillAssetManifest.ResolveCurrentBuildIdentity();
-        SkillAssetManifest.Write(
-            publishSource,
-            identity,
-            new[] { "mohist", "mohist-explore" },
-            _files);
     }
 
     private static string BuildSkillMarkdown(string name) =>
