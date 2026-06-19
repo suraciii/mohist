@@ -1,5 +1,5 @@
-import type { AgentStatus } from '../../../entities/agent'
-import { IssueHealth, WorkflowStage, type Issue } from '../../../entities/issue'
+import type { AgentStatus } from '../../agent'
+import { IssueHealth, WorkflowStage, type Issue } from '..'
 
 export interface AttentionItem {
   issueNumber: number
@@ -63,4 +63,4 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
   return items
 }
 
-export { deriveAttentionItems }
+export { deriveAttentionItems, isIntegrateFailure }
