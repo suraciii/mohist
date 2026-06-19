@@ -13,11 +13,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task StopAsync(string? reason = null);
 
     Task ApproveAsync();
-    // Legacy reject entry point. The grain implementation now routes
-    // through the feedback loop. Kept for back-compat with any external
-    // integration that still calls this method. Prefer RequestChangesAsync
-    // for new code.
-    Task RejectAsync(string? reason = null);
     Task<string> RequestChangesAsync(string body);
     Task RetryAsync();
     Task RerunAsync();

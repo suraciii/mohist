@@ -61,7 +61,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
 #pragma warning disable CS0618
-        await workflow.RejectAsync("bad");
+        await workflow.RequestChangesAsync("bad");
 #pragma warning restore CS0618
 
         // The legacy reject path now routes through the feedback loop,

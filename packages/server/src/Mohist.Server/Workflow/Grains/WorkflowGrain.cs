@@ -38,8 +38,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private string? _lastKnownRunnerId;
     private bool _runDirty;
     private IGrainReminder? _workHeartbeatReminder;
-    private readonly HashSet<string> _announcedWaitingLocks = [];
-    private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IWorkflowRunStore _runStore;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly WorkflowProfileManager _profileManager;
@@ -186,22 +184,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var events = _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
-    }
-
-    // Legacy reject entry point. Kept for back-compat with any external
-    // integration that still calls this method; the implementation now
-    // routes through the feedback loop rather than failing the workflow.
-    // Prefer RequestChangesAsync for new code.
-    public async Task RejectAsync(string? reason = null)
-    {
-        EnsureRun();
-        if (string.IsNullOrWhiteSpace(reason))
-            throw new InvalidOperationException("Reject reason is required");
-
-        _log.LogWarning(
-            "Workflow {Id} received legacy RejectAsync(reason); routing through RequestChangesAsync",
-            GrainKey);
-        await RequestChangesAsync(reason!);
     }
 
     public async Task<string> RequestChangesAsync(string body)
@@ -686,18 +668,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
         var lockGrain = GrainFactory.GetGrain<IWorkflowStageLockGrain>(key);
         var result = await lockGrain.AcquireSequentialAsync(new StageLockRequest(GrainKey, stage, resource, projectId));
-        var eventKey = $"{stage}:{resource}";
 
-        if (!result.Acquired)
-        {
-            _announcedWaitingLocks.Add(eventKey);
-            return false;
-        }
-
-        _announcedWaitingLocks.Remove(eventKey);
-        _announcedAcquiredLocks.Add(eventKey);
-
-        return true;
+        return result.Acquired;
     }
 
     private async Task ReleaseCurrentStageLocksAsync(string reason)
@@ -717,9 +689,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
         var lockGrain = GrainFactory.GetGrain<IWorkflowStageLockGrain>(key);
         var result = await lockGrain.ReleaseAsync(new StageLockOwner(GrainKey, stage));
-        var eventKey = $"{stage}:{resource}";
-        _announcedWaitingLocks.Remove(eventKey);
-        _announcedAcquiredLocks.Remove(eventKey);
 
         if (!result.Released) return;
 
@@ -1268,7 +1237,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             }
             else
             {
-                var repairTasks = ResolveRepairTasks(stageDef, cr);
+                var repairTasks = ResolveRepairTasks(stageDef, cr.Name, cr);
                 actions.Add(repairTasks is not null
                     ? new(cr, "repair", repairTasks)
                     : new(cr, "fail"));
@@ -1280,15 +1249,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return _run!.ProcessCheckResults(actions);
     }
 
-    private IReadOnlyList<TaskDefinition>? ResolveRepairTasks(StageDefinition? stageDef, CheckResult cr)
+    private IReadOnlyList<TaskDefinition>? ResolveRepairTasks(
+        StageDefinition? stageDef,
+        string checkName,
+        CheckResult? result = null,
+        bool enforceLimit = true)
     {
-        var checkDef = stageDef?.Checks.Find(c => c.Name == cr.Name);
+        var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
         if (checkDef?.OnFailure?.Repair is not { } repair) return null;
 
-        var repairCount = _run!.GetRepairCount(cr.Name);
-        if (repairCount >= repair.Limit) return null;
+        if (enforceLimit)
+        {
+            var repairCount = _run!.GetRepairCount(checkName);
+            if (repairCount >= repair.Limit) return null;
+        }
 
-        return BuildRepairTasks(cr.Name, repair, cr);
+        return BuildRepairTasks(checkName, repair, result);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>?> TryScheduleRequestedCheckRepairAsync()
@@ -1302,20 +1278,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         var definition = await LoadEffectiveDefinitionAsync();
         var stageDef = definition.Stages.Find(s => s.Stage == failure.Stage);
-        var repairTasks = ResolveRequestedCheckRepairTasks(stageDef, failure.CheckName);
+        var repairTasks = ResolveRepairTasks(stageDef, failure.CheckName, enforceLimit: false);
         if (repairTasks is null)
             return null;
 
         ClearDispatchedChecks();
         return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
-    }
-
-    private IReadOnlyList<TaskDefinition>? ResolveRequestedCheckRepairTasks(StageDefinition? stageDef, string checkName)
-    {
-        var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
-        if (checkDef?.OnFailure?.Repair is not { } repair) return null;
-
-        return BuildRepairTasks(checkName, repair);
     }
 
     private IReadOnlyList<TaskDefinition> BuildRepairTasks(string checkName, CheckFailureRepair repair, CheckResult? result = null)
