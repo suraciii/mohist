@@ -194,7 +194,7 @@ public class AgentSessionQuerier
                 Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
-                ct))
+                ct: ct))
             .ToList();
         sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
 
@@ -259,6 +259,81 @@ public class AgentSessionQuerier
         }
 
         return result;
+    }
+
+    public async Task<AgentUsageTimeseriesDto> GetUsageTimeseriesAsync(string projectId, CancellationToken ct = default)
+    {
+        var rangeTo = DateTime.UtcNow.Date.AddDays(1);
+        var rangeFrom = rangeTo.AddDays(-7);
+
+        var sessions = await _sessionQuery.ListByLabelsAsync(
+            Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionQueryOrder.CreatedAscending,
+            from: rangeFrom,
+            to: rangeTo,
+            ct: ct);
+
+        var buckets = new UsageBucketData[7];
+        for (var i = 0; i < 7; i++)
+            buckets[i] = new UsageBucketData(rangeFrom.AddDays(i), rangeFrom.AddDays(i + 1));
+
+        foreach (var record in sessions)
+        {
+            var usage = AgentSessionJsonHelper.Usage(record.Session);
+            if (!HasUsage(usage)) continue;
+
+            var createdAt = record.Session.Status.CreatedAt;
+            var bucketIndex = (int)(createdAt.Date - rangeFrom.Date).Days;
+            if (bucketIndex < 0 || bucketIndex >= 7) continue;
+
+            var bucket = buckets[bucketIndex];
+            bucket.InputTokens += usage.InputTokens ?? 0;
+            bucket.OutputTokens += usage.OutputTokens ?? 0;
+            bucket.TotalTokens += usage.TotalTokens ?? 0;
+            bucket.CostAmount += usage.CostAmount ?? 0d;
+            bucket.CostCurrency ??= usage.CostCurrency;
+        }
+
+        return new AgentUsageTimeseriesDto(
+            rangeFrom,
+            rangeTo,
+            "day",
+            buckets.Select(b => b.ToDto()).ToList());
+    }
+
+    private static bool HasUsage(AgentUsageSummary usage)
+    {
+        return usage.InputTokens.HasValue
+            || usage.OutputTokens.HasValue
+            || usage.TotalTokens.HasValue
+            || usage.CostAmount.HasValue;
+    }
+
+    private sealed class UsageBucketData
+    {
+        private readonly DateTime _bucketStart;
+        private readonly DateTime _bucketEnd;
+
+        public long InputTokens;
+        public long OutputTokens;
+        public long TotalTokens;
+        public double CostAmount;
+        public string? CostCurrency;
+
+        public UsageBucketData(DateTime bucketStart, DateTime bucketEnd)
+        {
+            _bucketStart = bucketStart;
+            _bucketEnd = bucketEnd;
+        }
+
+        public UsageBucketDto ToDto() => new(
+            _bucketStart,
+            _bucketEnd,
+            InputTokens,
+            OutputTokens,
+            TotalTokens,
+            CostAmount,
+            CostCurrency);
     }
 
     private static async Task<Dictionary<string, TranscriptEventProjection>> LoadLatestEventsAsync(

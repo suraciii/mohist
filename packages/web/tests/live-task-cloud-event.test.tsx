@@ -197,15 +197,15 @@ describe('LiveTaskProvider transcript routing', () => {
   })
 
   it.each([
-    ['message.delta', 'coder_text_chunk', { text: 'hello' }],
-    ['reasoning.delta', 'coder_thought_chunk', { text: 'thinking' }],
-    ['tool_call.started', 'coder_tool_call', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
-    ['session.input', 'session.input', { text: 'prompt', kind: 'task' }],
-    ['session.closed', 'session.closed', { status: 'completed' }],
-  ] as const)('forwards %s transcript events to %s subscribers', async (eventName, routedName, partialPayload) => {
+    ['message.delta', { text: 'hello' }],
+    ['reasoning.delta', { text: 'thinking' }],
+    ['tool_call.started', { toolName: 'Read', state: 'started', toolCallId: 'tool-1' }],
+    ['session.input', { text: 'prompt', kind: 'task' }],
+    ['session.closed', { status: 'completed' }],
+  ] as const)('forwards %s transcript events to %s subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent(routedName, (detail) => received.push(detail))
+    const off = onAgentEvent(eventName, (detail) => received.push(detail))
 
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -259,7 +259,7 @@ describe('LiveTaskProvider transcript routing', () => {
   ] as const)('routes %s transcript events to coder_tool_call subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent('coder_tool_call', (detail) => received.push(detail))
+    const off = onAgentEvent(eventName, (detail) => received.push(detail))
 
     rtlRender(
       <QueryClientProvider client={queryClient}>

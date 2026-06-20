@@ -164,6 +164,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await ClearExecutableStateAsync(reason ?? "stopped");
         var events = new List<WorkflowEvent>(stopEvents);
 
+        // Clearing the running task in ClearExecutableStateAsync can re-trigger
+        // EnsureWorkHeartbeatAsync via the On(TaskFailed) handler before the
+        // run is transitioned to Stopped above, which may re-dispatch the
+        // next pending work (e.g. a check). Strip any new dispatch now that
+        // the workflow is terminally stopped so GetCurrentWorkIdAsync() reports
+        // no active work.
+        ClearDispatchedChecks();
+        await SaveRunAsync();
+
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
         await CommitAsync([new WorkflowRunStopped()], reason);
     }

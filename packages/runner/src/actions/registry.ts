@@ -899,3 +899,35 @@ function numberAtString(value: unknown, path: string[]) {
   }, value)
   return typeof found === "number" ? String(found) : undefined
 }
+
+//
+// Backward-compatible aliases for merge pipeline tests
+//
+
+type ConflictResolverRunner = (context: ActionContext) => Promise<ActionResult>
+
+let conflictResolverRunner: ConflictResolverRunner = acpAgentAction
+
+export function setMergeGitRunnerForTest(runner: GitRunner | null) {
+  setDeliveryGitRunnerForTest(runner)
+}
+
+export function setMergeConflictResolverForTest(runner: ConflictResolverRunner | null) {
+  conflictResolverRunner = runner ?? acpAgentAction
+}
+
+export async function mergeAction(context: ActionContext): Promise<ActionResult> {
+  const prepareCtx: ActionContext = {
+    ...context,
+    with: {
+      ...(context.with as Record<string, unknown>),
+      baseBranch: stringInput(context.with, "baseBranch") ?? stringInput(context.with, "target") ?? "main",
+      remote: stringInput(context.with, "remote") ?? "origin",
+    },
+  }
+  const prepareResult = await prepareAction(prepareCtx)
+  if (prepareResult.status === "failure") return prepareResult
+
+  const publishResult = await publishAction(context)
+  return publishResult
+}

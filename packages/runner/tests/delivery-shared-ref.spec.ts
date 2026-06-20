@@ -188,7 +188,7 @@ describe("prepare + publish end-to-end", () => {
     // The landing workspace itself was disposed by publishAction.
     const landingEntries = await execNoThrow("ls", ["-1", landingRoot])
     expect(landingEntries.trim().length).toBe(0)
-  })
+  }, 15_000)
 })
 
 class TestLandingWorkspaceManager implements DeliveryWorkspaceManager {

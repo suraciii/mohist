@@ -26,6 +26,7 @@ const signalr = vi.hoisted(() => {
     HubConnectionBuilder: vi.fn(function HubConnectionBuilder() {
       return builder
     }),
+    HubConnectionState: { Connected: 'Connected', Reconnecting: 'Reconnecting', Disconnected: 'Disconnected', Connecting: 'Connecting', Disconnecting: 'Disconnecting' },
     LogLevel: { Warning: 'Warning' },
     HubConnectionState: {
       Connected: 'Connected',
@@ -39,6 +40,7 @@ const signalr = vi.hoisted(() => {
 
 vi.mock('@microsoft/signalr', () => ({
   HubConnectionBuilder: signalr.HubConnectionBuilder,
+  HubConnectionState: signalr.HubConnectionState,
   LogLevel: signalr.LogLevel,
 HubConnectionState: signalr.HubConnectionState,
 }))
