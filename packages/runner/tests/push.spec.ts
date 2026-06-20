@@ -1,49 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest"
-import {
-  publishAction,
-  setDeliveryGitRunnerForTest,
-  setDeliveryExistsCheckerForTest,
-  setDeliveryWorkspaceManagerForTest,
-} from "../src/actions/registry.js"
-import type { LandingWorkspaceInfo } from "../src/runtime/workspace.js"
-import type { DeliveryWorkspaceManager } from "../src/actions/registry.js"
-import type { ActionContext, JsonObject, WorkItem } from "../src/core/types.js"
+import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
+import type { ActionContext, JsonObject } from "../src/core/types.js"
 
-type WorkspaceCall = { workDir: string; args: string[] }
+type GitCall = { workDir: string; args: string[] }
 
 const WORKSPACE_PATH = "/workspace"
-const LANDING_PATH = "/landing/wr-push-1"
+const PROJECT_PATH = "/project-checkout"
 
 afterEach(() => {
-  setDeliveryGitRunnerForTest(null)
-  setDeliveryExistsCheckerForTest(null)
-  setDeliveryWorkspaceManagerForTest(null)
+  setPushGitRunnerForTest(null)
 })
 
-function installLandingWorkspace(landingOverrides: Partial<LandingWorkspaceInfo> = {}) {
-  const landing: LandingWorkspaceInfo = {
-    path: LANDING_PATH,
-    runId: "wr-push-1",
-    runBranch: "mohist/run-wr-push-1",
-    baseBranch: "main",
-    gitUrl: "https://example.com/repo.git",
-    ...landingOverrides,
-  }
-  const manager: DeliveryWorkspaceManager = {
-    createLandingWorkspace: async (_work, _signal) => landing,
-    disposeLandingWorkspace: async (target, _signal) => {
-      const path = typeof target === "string" ? target : target.path
-      return { path, disposed: true }
-    },
-  }
-  setDeliveryWorkspaceManagerForTest(manager)
-  return landing
-}
-
-function installGit(respond: (call: WorkspaceCall, history: WorkspaceCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
-  const calls: WorkspaceCall[] = []
-  setDeliveryGitRunnerForTest(async (workDir, args) => {
-    const record: WorkspaceCall = { workDir, args: [...args] }
+function installGit(respond: (call: GitCall, history: GitCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
+  const calls: GitCall[] = []
+  setPushGitRunnerForTest(async (workDir, args) => {
+    const record: GitCall = { workDir, args: [...args] }
     calls.push(record)
     return await respond(record, calls)
   })
@@ -58,30 +29,31 @@ function fail(stderr: string) {
   return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
 }
 
-function workspaceCalls(calls: WorkspaceCall[]) {
+function workspaceCalls(calls: GitCall[]) {
   return calls.filter((c) => c.workDir === WORKSPACE_PATH).map((c) => c.args.join(" "))
-}
-
-function landingCalls(calls: WorkspaceCall[]) {
-  return calls.filter((c) => c.workDir === LANDING_PATH).map((c) => c.args.join(" "))
 }
 
 function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wr-push-1",
-    workId: "integrate:publish.1",
+    workId: "integrate:push.1",
     workType: "task",
     stage: "integrate",
-    title: "Publish changes",
-    uses: "mohist/publish",
+    title: "Push prepared commit",
+    uses: "mohist/push",
     with: withOverrides,
     variables: {
       project: { path: WORKSPACE_PATH },
       issue: { title: "Push action issue", number: 99 },
       repository: {
         gitUrl: "https://example.com/repo.git",
-        baseBranch: "main",
+        baseBranch: "master",
         name: "master",
+      },
+      workspace: {
+        path: WORKSPACE_PATH,
+        branch: "mo/issue-99",
+        changeDir: null,
       },
       mohist: { runId: "wr-push-1" },
       ...variables,
@@ -92,270 +64,290 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
   }
 }
 
-describe("mohist/push (now part of publish, landing-workspace scoped)", () => {
-  it("PushHappensInLandingWorkspace_NotInWorkflowWorkspace", async () => {
-    installLandingWorkspace()
+describe("mohist/push", () => {
+  it("FastForwardPush_AdvancesRemoteTargetViaRefspec", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
           return ok("source-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "rev-parse origin/main":
-          return ok("remote-head-sha\n")
-        case "checkout -B main origin/main":
-          return ok("Switched to branch 'main'")
-        case "status --porcelain":
-          return ok("")
-        case "merge-base --is-ancestor origin/main mo/issue-99":
-          return ok("")
-        case "merge --squash mo/issue-99":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m Push action issue (#99) -m mo/issue-99 into main":
-          return ok("[main def456] Push action issue (#99)")
-        case "rev-parse HEAD":
-          return ok("def456\n")
-        case "push origin main":
-          return ok("To https://example.com/repo.git\n   remote-head-sha..def456  main -> main")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await publishAction(context({
-      source: "mo/issue-99",
-      target: "main",
-      message: "Complete issue #99",
-    }))
+    const result = await pushAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    // The push must be issued against the landing workspace path, never
-    // the workflow workspace. (The push is the user-visible deliverable;
-    // it is now scoped to the landing workspace so the workflow workspace
-    // never leaves the run branch.)
-    expect(landingCalls(calls)).toContain("push origin main")
-    expect(workspaceCalls(calls)).not.toContain("push origin main")
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse mo/issue-99",
+      "push origin mo/issue-99:master",
+    ])
     expect(output).toMatchObject({
-      kind: "publish",
-      target: "main",
+      kind: "push",
+      status: "completed",
+      source: "mo/issue-99",
+      target: "master",
+      remote: "origin",
+      refspec: "mo/issue-99:master",
+      landedCommit: "source-sha",
       pushed: true,
-      landedCommit: "def456",
       failureKind: null,
     })
   })
 
-  it("PushRejectedAsNonFastForward_ClassifiesAsBaseMovedAndResetsLandingWorkspace", async () => {
-    installLandingWorkspace()
-    const calls = installGit(async () => fail(""))
-    setDeliveryGitRunnerForTest(async (workDir, args) => {
-      const command = args.join(" ")
-      calls.push({ workDir, args: [...args] })
+  it("ProjectPathDiffers_UsesBoundWorkspacePath", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
           return ok("source-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "rev-parse origin/main":
-          return ok("remote-head-sha\n")
-        case "checkout -B main origin/main":
-          return ok("Switched to branch 'main'")
-        case "status --porcelain":
-          return ok("")
-        case "merge-base --is-ancestor origin/main mo/issue-99":
-          return ok("")
-        case "merge --squash mo/issue-99":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m Push action issue (#99) -m mo/issue-99 into main":
-          return ok("[main def456] Push action issue (#99)")
-        case "rev-parse HEAD":
-          return ok("def456\n")
-        case "push origin main":
-          return fail("To https://example.com/repo.git\n ! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs")
-        case "reset --hard remote-head-sha":
-          return ok("HEAD is now at remote-head-sha")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await publishAction(context({
-      source: "mo/issue-99",
-      target: "main",
-      message: "Complete issue #99",
-    }))
+    const result = await pushAction(context({}, { project: { path: PROJECT_PATH } }))
     const output = JSON.parse(result.output ?? "{}")
 
-    expect(result.status).toBe("failure")
-    // Push attempted against the landing workspace, then rollback reset
-    // hit the landing workspace, never the workflow workspace.
-    expect(workspaceCalls(calls)).not.toContain("push origin main")
-    expect(workspaceCalls(calls)).not.toContain("reset --hard remote-head-sha")
-    expect(landingCalls(calls)).toContain("push origin main")
-    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
-    expect(output).toMatchObject({
-      kind: "publish",
-      pushed: false,
-      landedCommit: "def456",
-      failureKind: "base-moved",
-    })
+    expect(result.status).toBe("success")
+    expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH])
+    expect(calls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
+    expect(output.workDir).toBe(WORKSPACE_PATH)
   })
 
-  it("PushFailsTransientAuthError_ClassifiesAsRetrySafeNotBaseMoved", async () => {
-    installLandingWorkspace()
-    const calls = installGit(async () => fail(""))
-    setDeliveryGitRunnerForTest(async (workDir, args) => {
-      const command = args.join(" ")
-      calls.push({ workDir, args: [...args] })
+  it("FastForwardPush_NoCheckoutOrCloneOrWorktreeMutation", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
           return ok("source-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "rev-parse origin/main":
-          return ok("remote-head-sha\n")
-        case "checkout -B main origin/main":
-          return ok("Switched to branch 'main'")
-        case "status --porcelain":
-          return ok("")
-        case "merge-base --is-ancestor origin/main mo/issue-99":
-          return ok("")
-        case "merge --squash mo/issue-99":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m Push action issue (#99) -m mo/issue-99 into main":
-          return ok("[main def456] Push action issue (#99)")
-        case "rev-parse HEAD":
-          return ok("def456\n")
-        case "push origin main":
-          return fail("fatal: could not read Username for 'https://example.com': terminal prompts disabled\nfatal: Authentication failed for 'https://example.com/repo.git/'")
-        case "reset --hard remote-head-sha":
-          return ok("HEAD is now at remote-head-sha")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await publishAction(context({
-      source: "mo/issue-99",
-      target: "main",
-      message: "Complete issue #99",
-    }))
+    await pushAction(context())
+
+    const workspaceCmdSet = new Set(workspaceCalls(calls))
+    // No checkout, no clone, no reset, no merge, no commit, no status
+    // mutation — push is a ref-only operation.
+    for (const forbidden of [
+      "checkout master",
+      "checkout -B master",
+      "checkout -B master origin/master",
+      "clone",
+      "reset --hard",
+      "merge --squash",
+      "commit -m",
+      "fetch origin master",
+      "status --porcelain",
+      "merge-base",
+      "worktree",
+    ]) {
+      expect(workspaceCmdSet.has(forbidden)).toBe(false)
+    }
+  })
+
+  it("NonFastForwardRejection_ClassifiesAsBaseMoved", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push origin mo/issue-99:master":
+          return fail("To https://example.com/repo.git\n ! [rejected]        master -> master (non-fast-forward)\nerror: failed to push some refs to 'https://example.com/repo.git'\nhint: Updates were rejected because the tip of your current branch is behind\nhint: its remote counterpart. Integrate the remote changes before pushing again.")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(landingCalls(calls)).toContain("reset --hard remote-head-sha")
     expect(output).toMatchObject({
-      kind: "publish",
+      kind: "push",
+      status: "failed",
+      source: "mo/issue-99",
+      target: "master",
+      remote: "origin",
+      landedCommit: "source-sha",
       pushed: false,
-      landedCommit: "def456",
+      failureKind: "base-moved",
+    })
+    expect(result.message).toContain("base branch moved")
+  })
+
+  it("RejectedWithFetchFirstHint_ClassifiesAsBaseMoved", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push origin mo/issue-99:master":
+          return fail("To https://example.com/repo.git\n ! [rejected]        master -> master (fetch first)\nerror: failed to push some refs")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("base-moved")
+  })
+
+  it("TransientAuthError_ClassifiesAsRetrySafe", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push origin mo/issue-99:master":
+          return fail("fatal: could not read Username for 'https://example.com': terminal prompts disabled\nfatal: Authentication failed for 'https://example.com/repo.git/'")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "push",
+      landedCommit: "source-sha",
+      pushed: false,
       failureKind: "retry-safe",
     })
   })
 
-  it("PushTargetsConfiguredRemote_NotWorkflowWorkspaceOrigin", async () => {
-    installLandingWorkspace()
-    const calls = installGit(async () => fail(""))
-    setDeliveryGitRunnerForTest(async (workDir, args) => {
-      const command = args.join(" ")
-      calls.push({ workDir, args: [...args] })
+  it("SourceResolveFails_ClassifiesAsRetrySafeWithNullCommit", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
-          return ok("source-sha\n")
-        case "fetch upstream main":
-          return ok("")
-        case "rev-parse upstream/main":
-          return ok("remote-head-sha\n")
-        case "checkout -B main upstream/main":
-          return ok("Switched to branch 'main'")
-        case "status --porcelain":
-          return ok("")
-        case "merge-base --is-ancestor upstream/main mo/issue-99":
-          return ok("")
-        case "merge --squash mo/issue-99":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m Push action issue (#99) -m mo/issue-99 into main":
-          return ok("[main def456] Push action issue (#99)")
-        case "rev-parse HEAD":
-          return ok("def456\n")
-        case "push upstream main":
-          return ok("To upstream\n   remote-head-sha..def456  main -> main")
+          return fail("fatal: ambiguous argument 'mo/issue-99'")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await publishAction(context({
-      remote: "upstream",
-      source: "mo/issue-99",
-      target: "main",
-      message: "Complete issue #99",
-    }))
+    const result = await pushAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "push",
+      landedCommit: null,
+      pushed: false,
+      failureKind: "retry-safe",
+    })
+  })
+
+  it("ExplicitRemoteOption_PushesAgainstConfiguredRemote", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push upstream mo/issue-99:master":
+          return ok("To upstream\n   base-sha..source-sha  mo/issue-99 -> master")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ remote: "upstream" }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
-    // Push targets the configured `upstream` remote, not the workflow
-    // workspace's local origin. The push is issued against the landing
-    // workspace path.
-    expect(landingCalls(calls)).toContain("push upstream main")
-    expect(landingCalls(calls)).toContain("fetch upstream main")
-    expect(landingCalls(calls)).toContain("checkout -B main upstream/main")
-    expect(landingCalls(calls)).not.toContain("merge --ff-only upstream/main")
-    expect(workspaceCalls(calls)).not.toContain("push upstream main")
+    expect(workspaceCalls(calls)).toContain("push upstream mo/issue-99:master")
+    expect(workspaceCalls(calls)).not.toContain("push origin mo/issue-99:master")
     expect(output).toMatchObject({
-      kind: "publish",
+      remote: "upstream",
+      refspec: "mo/issue-99:master",
       pushed: true,
-      landedCommit: "def456",
       failureKind: null,
     })
   })
 
-  it("NoCheckoutOrPushHitsWorkflowWorkspace_BranchStable", async () => {
-    installLandingWorkspace()
-    const calls = installGit(async () => fail(""))
-    setDeliveryGitRunnerForTest(async (workDir, args) => {
-      const command = args.join(" ")
-      calls.push({ workDir, args: [...args] })
+  it("ExplicitSourceOption_PushesThatRefAsSource", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
       switch (command) {
-        case "rev-parse mo/issue-99":
-          return ok("source-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "rev-parse origin/main":
-          return ok("remote-head-sha\n")
-        case "checkout -B main origin/main":
-          return ok("Switched to branch 'main'")
-        case "status --porcelain":
-          return ok("")
-        case "merge-base --is-ancestor origin/main mo/issue-99":
-          return ok("")
-        case "merge --squash mo/issue-99":
-          return ok("Squash commit -- not updating HEAD")
-        case "commit -m Push action issue (#99) -m mo/issue-99 into main":
-          return ok("[main def456] Push action issue (#99)")
-        case "rev-parse HEAD":
-          return ok("def456\n")
-        case "push origin main":
-          return ok("To https://example.com/repo.git\n   remote-head-sha..def456  main -> main")
+        case "rev-parse custom-source":
+          return ok("custom-sha\n")
+        case "push origin custom-source:master":
+          return ok("To https://example.com/repo.git\n   base-sha..custom-sha  custom-source -> master")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    await publishAction(context({
-      source: "mo/issue-99",
-      target: "main",
-      message: "Complete issue #99",
-    }))
+    const result = await pushAction(context({ source: "custom-source" }))
+    const output = JSON.parse(result.output ?? "{}")
 
-    // Branch-stability invariant: no `checkout <baseBranch>`,
-    // `merge --squash`, `commit`, or `push` was issued against the
-    // workflow workspace. The only operation against the workflow
-    // workspace is the read-only source-anchor check.
-    const workspaceCmdSet = new Set(workspaceCalls(calls))
-    expect(workspaceCmdSet.has("checkout -B main origin/main")).toBe(false)
-    expect(workspaceCmdSet.has("merge --squash mo/issue-99")).toBe(false)
-    expect(workspaceCmdSet.has("commit -m Push action issue (#99) -m mo/issue-99 into main")).toBe(false)
-    expect(workspaceCmdSet.has("push origin main")).toBe(false)
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toContain("rev-parse custom-source")
+    expect(workspaceCalls(calls)).toContain("push origin custom-source:master")
+    expect(output).toMatchObject({
+      source: "custom-source",
+      landedCommit: "custom-sha",
+      pushed: true,
+    })
+  })
+
+  it("NoLandingClone_CreatesNone", async () => {
+    let landingCloneAttempted = false
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("source-sha\n")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master")
+        default:
+          if (command.startsWith("clone")) landingCloneAttempted = true
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await pushAction(context())
+
+    expect(landingCloneAttempted).toBe(false)
+  })
+
+  it("PushResult_RecordsLandedCommitAndPushOccurred", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("abc123def456\n")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n   base-sha..abc123def456  mo/issue-99 -> master")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    // Single push owner: the landed commit and the push-occurred flag both
+    // come from this action. Downstream renderers read `landedCommit` and
+    // `pushed` directly from the JSON output.
+    expect(output.landedCommit).toBe("abc123def456")
+    expect(output.pushed).toBe(true)
+    expect(result.status).toBe("success")
   })
 })

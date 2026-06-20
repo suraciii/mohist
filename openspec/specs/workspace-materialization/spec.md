@@ -97,22 +97,28 @@ A workflow workspace that is missing, corrupt, or identity-mismatched at dispatc
 - **THEN** CLI, API, and UI failure surfaces SHALL present the failure as a workflow workspace-materialization failure
 - **AND** the failure category SHALL be distinguishable from ordinary task execution failure
 
-### Requirement: mohist/prepare operates inside the bound workflow workspace
+### Requirement: mohist/rebase operates inside the bound workflow workspace
 
-`mohist/prepare` SHALL run its fetch and rebase against the existing bound workflow workspace on its `workspace.branch`. It SHALL NOT trigger workflow workspace creation, repository cloning, or workflow-start materialization. A run that has not yet bound a workflow workspace SHALL fail prepare as a workspace-missing infrastructure failure rather than materialize a workspace on demand.
+`mohist/rebase` SHALL run its fetch, rebase, conflict resolution, and optional squash against the existing bound workflow workspace on its `workspace.branch`. It SHALL NOT trigger workflow workspace creation, repository cloning, or workflow-start materialization. A run that has not yet bound a workflow workspace SHALL fail rebase as a workspace-missing infrastructure failure rather than materialize a workspace on demand. The unified `mohist/rebase` action SHALL serve both the manual `POST /{number}/rebase` endpoint and the Integrate `integrate:rebase` task, differing only by input parameters (for example `remote` and `squash`).
 
-#### Scenario: Prepare uses the bound workspace without materializing
+#### Scenario: Rebase uses the bound workspace without materializing
 
-- **WHEN** `integrate:prepare` runs for a run that owns a bound workflow workspace
-- **THEN** `mohist/prepare` SHALL fetch the remote base ref and rebase inside the bound workflow workspace
+- **WHEN** `integrate:rebase` runs for a run that owns a bound workflow workspace
+- **THEN** `mohist/rebase` SHALL fetch the remote base ref and rebase inside the bound workflow workspace
 - **AND** it SHALL NOT run `git clone` to create or recover the workflow workspace
 - **AND** it SHALL leave the workflow workspace on its `workspace.branch`
 
-#### Scenario: Prepare without a bound workspace fails as infrastructure
+#### Scenario: Rebase without a bound workspace fails as infrastructure
 
-- **WHEN** `mohist/prepare` runs for a run whose workflow workspace is missing or unbound
-- **THEN** prepare SHALL fail with a workspace-missing infrastructure failure
-- **AND** it SHALL NOT materialize a workflow workspace as a side effect of prepare
+- **WHEN** `mohist/rebase` runs for a run whose workflow workspace is missing or unbound
+- **THEN** rebase SHALL fail with a workspace-missing infrastructure failure
+- **AND** it SHALL NOT materialize a workflow workspace as a side effect of rebase
+
+#### Scenario: Manual and integrate rebase share one action
+
+- **WHEN** the manual `POST /{number}/rebase` endpoint and the `integrate:rebase` task each invoke rebase
+- **THEN** both SHALL resolve to the same unified `mohist/rebase` action
+- **AND** they SHALL differ only by their input parameters, not by separate rebase implementations
 
 ### Requirement: Hardened runner-owned repository cache handling
 

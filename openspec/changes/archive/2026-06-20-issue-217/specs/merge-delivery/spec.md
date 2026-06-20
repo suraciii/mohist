@@ -1,50 +1,24 @@
-# OpenSpec Capability: merge-delivery
+## REMOVED Requirements
 
-### Requirement: Delivery failures are classified into actionable kinds
+### Requirement: Integrate delivery is prepare then publish
 
-A failed `integrate:rebase` or `integrate:push` task SHALL report a failure kind that tells the user the nature of the problem and implies the next action. The delivery SHALL distinguish at least four failure kinds: a failure that is safe to retry as-is, a failure caused by the base branch having moved so the branch needs preparing again, a failure caused by a conflict that needs attention, and a branch-invariant violation caused by the workspace leaving the expected run branch. A branch-invariant violation SHALL be attributed to the runner or action, not to issue work. The `integrate:rebase` task SHALL report `conflict` and `retry-safe` kinds; the `integrate:push` task SHALL report `base-moved` and `retry-safe` kinds.
+**Reason:** The two-task `integrate:prepare` → `integrate:publish` delivery model is replaced by an on-workspace `integrate:rebase` → `integrate:push` flow. The `mohist/prepare` and `mohist/publish` actions are deleted, and the disposable landing clone that publish relied on is removed.
 
-#### Scenario: Retry-safe failure kind is reported
+**Migration:** `integrate:prepare` is replaced by `integrate:rebase` (unified rebase action with `remote=origin` and `squash=true`), and `integrate:publish` is replaced by `integrate:push` (a fast-forward `git push origin <runBranch>:<baseBranch>`). See the ADDED "Integrate delivery is rebase then push" requirement.
 
-- **WHEN** a delivery task fails for a transient reason unrelated to base movement, conflicts, or branch stability
-- **THEN** the failure SHALL be reported with a retry-safe kind
-- **AND** the indicated user action SHALL be to retry without re-preparing
+### Requirement: Prepare reconciles the issue branch with the base branch
 
-#### Scenario: Base-moved failure kind requires a re-rebase
+**Reason:** The `mohist/prepare` action is deleted. Its remote-fetch rebase and conflict-resolution behavior is absorbed into the unified `mohist/rebase` action, which also performs the squash that publish used to own.
 
-- **WHEN** `integrate:push` fails because the base branch moved after the rebase, producing a non-fast-forward push
-- **THEN** the failure SHALL be reported with a base-moved kind
-- **AND** the indicated next action SHALL be to rebase the branch again before pushing
+**Migration:** Rebase + conflict resolution now live in the ADDED "Rebase reconciles and squashes the run branch onto the base branch" requirement, executed by `integrate:rebase` on the single workflow workspace.
 
-#### Scenario: Conflict failure kind requires attention
+### Requirement: Publish lands one commit and pushes to the remote
 
-- **WHEN** `integrate:rebase` fails because a conflict could not be resolved
-- **THEN** the failure SHALL be reported with a conflict kind
-- **AND** the indicated next action SHALL be that the conflict needs attention
+**Reason:** The `mohist/publish` action and its isolated landing clone are deleted. The single-commit outcome is now produced by the rebase task's squash, and the remote landing is produced by a fast-forward push.
 
-#### Scenario: Branch-invariant violation failure kind is reported
+**Migration:** Landing one commit is split into rebase's squash (ADDED "Rebase reconciles and squashes the run branch onto the base branch") and push's fast-forward remote update (ADDED "Push fast-forwards the prepared run branch to the remote base"), executed by `integrate:push`.
 
-- **WHEN** a delivery task observes the workflow workspace on a branch other than `workspace.branch`
-- **THEN** the failure SHALL be reported with a branch-invariant-violation kind
-- **AND** the failure SHALL be attributed to the runner or action rather than to issue work
-- **AND** the failure SHALL be distinct from retry-safe, base-moved, and conflict kinds
-
-### Requirement: Failed delivery leaves a clean workspace
-
-A failed `integrate:rebase` or `integrate:push` SHALL leave the workflow workspace clean AND on its `workspace.branch` before the task reports failure: no in-progress rebase or merge SHALL remain, no conflict markers or partial resolution state SHALL be left behind, and the workspace SHALL be on `workspace.branch` rather than the base branch. Because both delivery tasks operate on the single workflow workspace without a landing clone, there SHALL be no secondary landing workspace to clean up.
-
-#### Scenario: Failed rebase leaves no rebase in progress
-
-- **WHEN** `integrate:rebase` fails
-- **THEN** no in-progress rebase or merge SHALL remain in the workspace
-- **AND** the working tree SHALL be clean of conflict markers and partial resolution state
-- **AND** the workspace SHALL remain on `workspace.branch`
-
-#### Scenario: Failed push leaves the workspace on the run branch
-
-- **WHEN** `integrate:push` fails after attempting to push
-- **THEN** the workflow workspace SHALL be left clean and on `workspace.branch` before the failure is reported
-- **AND** the push task SHALL NOT have checked out the base branch or left the workspace in a landing-clone state
+## ADDED Requirements
 
 ### Requirement: Integrate delivery is rebase then push
 
@@ -111,3 +85,51 @@ The `integrate:push` task SHALL land the prepared issue changes on the base bran
 - **THEN** the workflow workspace SHALL remain on `workspace.branch` for the entire push task
 - **AND** push SHALL NOT run `git checkout <baseBranch>` inside the workflow workspace
 - **AND** push SHALL NOT create an isolated landing clone or mutate the workspace's working tree
+
+## MODIFIED Requirements
+
+### Requirement: Delivery failures are classified into actionable kinds
+
+A failed `integrate:rebase` or `integrate:push` task SHALL report a failure kind that tells the user the nature of the problem and implies the next action. The delivery SHALL distinguish at least four failure kinds: a failure that is safe to retry as-is, a failure caused by the base branch having moved so the branch needs preparing again, a failure caused by a conflict that needs attention, and a branch-invariant violation caused by the workspace leaving the expected run branch. A branch-invariant violation SHALL be attributed to the runner or action, not to issue work. The `integrate:rebase` task SHALL report `conflict` and `retry-safe` kinds; the `integrate:push` task SHALL report `base-moved` and `retry-safe` kinds.
+
+#### Scenario: Retry-safe failure kind is reported
+
+- **WHEN** a delivery task fails for a transient reason unrelated to base movement, conflicts, or branch stability
+- **THEN** the failure SHALL be reported with a retry-safe kind
+- **AND** the indicated user action SHALL be to retry without re-preparing
+
+#### Scenario: Base-moved failure kind requires a re-rebase
+
+- **WHEN** `integrate:push` fails because the base branch moved after the rebase, producing a non-fast-forward push
+- **THEN** the failure SHALL be reported with a base-moved kind
+- **AND** the indicated next action SHALL be to rebase the branch again before pushing
+
+#### Scenario: Conflict failure kind requires attention
+
+- **WHEN** `integrate:rebase` fails because a conflict could not be resolved
+- **THEN** the failure SHALL be reported with a conflict kind
+- **AND** the indicated next action SHALL be that the conflict needs attention
+
+#### Scenario: Branch-invariant violation failure kind is reported
+
+- **WHEN** a delivery task observes the workflow workspace on a branch other than `workspace.branch`
+- **THEN** the failure SHALL be reported with a branch-invariant-violation kind
+- **AND** the failure SHALL be attributed to the runner or action rather than to issue work
+- **AND** the failure SHALL be distinct from retry-safe, base-moved, and conflict kinds
+
+### Requirement: Failed delivery leaves a clean workspace
+
+A failed `integrate:rebase` or `integrate:push` SHALL leave the workflow workspace clean AND on its `workspace.branch` before the task reports failure: no in-progress rebase or merge SHALL remain, no conflict markers or partial resolution state SHALL be left behind, and the workspace SHALL be on `workspace.branch` rather than the base branch. Because both delivery tasks operate on the single workflow workspace without a landing clone, there SHALL be no secondary landing workspace to clean up.
+
+#### Scenario: Failed rebase leaves no rebase in progress
+
+- **WHEN** `integrate:rebase` fails
+- **THEN** no in-progress rebase or merge SHALL remain in the workspace
+- **AND** the working tree SHALL be clean of conflict markers and partial resolution state
+- **AND** the workspace SHALL remain on `workspace.branch`
+
+#### Scenario: Failed push leaves the workspace on the run branch
+
+- **WHEN** `integrate:push` fails after attempting to push
+- **THEN** the workflow workspace SHALL be left clean and on `workspace.branch` before the failure is reported
+- **AND** the push task SHALL NOT have checked out the base branch or left the workspace in a landing-clone state

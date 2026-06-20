@@ -226,7 +226,7 @@ describe("WorkspaceManager", () => {
   it("ServerSuppliedPath_VerifySurfacesMissingWhenWorkspaceDirectoryDoesNotExist", async () => {
     // T-002 contract: a dispatch against a missing workspace path
     // must be reported as `workspace-missing` and is NEVER recovered
-    // by re-cloning. `mohist/prepare` against a missing / unbound
+    // by re-cloning. `mohist/rebase` against a missing / unbound
     // workspace fails as workspace-missing rather than
     // materializing on demand.
     const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
@@ -252,6 +252,362 @@ describe("WorkspaceManager", () => {
   })
 })
 
+// T-003: workspace health gate. The gate is the runner's only crash
+// self-healing mechanism once the disposable landing workspace is
+// removed (T-005). The tests below exercise the gate end-to-end with
+// real git state: they materialize a workflow workspace, plant a
+// residual mid-rebase-crash fixture (`.git/rebase-merge` + conflict
+// markers), and verify the next `verify()` / `materialize()` call
+// self-heals the workspace so a subsequent dispatch succeeds without
+// any manual `git checkout` or `rebase --abort`.
+//
+// The crash-safety invariant is the "committed work survives a
+// mid-rebase crash" scenario from the workspace-health-gate spec: the
+// run branch ref does not move while a rebase is in progress (git
+// only advances the ref on rebase success), so `git reset --hard
+// <runBranch>` after the abort rolls the work tree back without
+// discarding the agent's commits that were already on the run branch.
+describe("WorkspaceManager health gate (T-003)", () => {
+  it("Verify_RecoversFromMidRebaseCrashAndPreservesRunBranchRef", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-health-gate-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const item = work("wr-crash", "issue-crash", repo)
+
+    // Materialize the workflow workspace normally.
+    const workspace = await manager.materialize(item, signal)
+    expect(workspace.path).toBe(join(runnerRoot, "mohist-local", "workspaces", "issue-9"))
+
+    // The agent commits work to the run branch. This commit is the
+    // payload we expect to survive a mid-rebase crash.
+    const runBranch = "mohist/run-wr-crash"
+    await writeFile(join(workspace.path, "agent.txt"), "agent work\n")
+    await git(workspace.path, "add", ".")
+    await git(workspace.path, "commit", "-m", "agent commit on run branch")
+
+    const runShaBefore = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaBefore.length).toBeGreaterThan(0)
+
+    // Simulate a base-branch advance: write a conflicting change to
+    // `master` in the workspace so a `git rebase master` against the
+    // run branch's commit hits a merge conflict. This mirrors what
+    // `mohist/rebase` (with `remote=origin` unset) sees during
+    // integrate; the rebase target can be a local `master` ref in
+    // real flows (e.g. remote=origin + fetch, with `master` already
+    // mirrored locally).
+    await git(workspace.path, "checkout", "master")
+    await writeFile(join(workspace.path, "agent.txt"), "conflicting master change\n")
+    await git(workspace.path, "add", ".")
+    await git(workspace.path, "commit", "-m", "conflicting master commit")
+    await git(workspace.path, "checkout", runBranch)
+
+    // Snapshot the run branch ref before the rebase crash. The
+    // rebase will fail; the ref MUST still be at this SHA afterwards.
+    const runShaPreRebase = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaPreRebase).toBe(runShaBefore)
+
+    // Run a real `git rebase master` that will conflict, leaving the
+    // workspace in a mid-rebase state (detached HEAD, residual
+    // `.git/rebase-merge` directory, conflict markers in agent.txt).
+    // We do not abort; we leave the residual state exactly as a
+    // crashed runner would.
+    const rebase = await runCommand("git", ["-C", workspace.path, "rebase", "master"], workspace.path, new AbortController().signal)
+    expect(rebase.exitCode).not.toBe(0)
+
+    // Sanity-check: the workspace is in a mid-rebase state.
+    const rebaseMergePath = join(workspace.path, ".git", "rebase-merge")
+    expect(exists(rebaseMergePath)).toBe(true)
+    const agentTxt = await readFile(join(workspace.path, "agent.txt"), "utf8")
+    expect(agentTxt).toContain("<<<<<<<")
+    expect(agentTxt).toContain("=======")
+    expect(agentTxt).toContain(">>>>>>>")
+
+    // The run branch ref is unchanged after a failed rebase — this
+    // is the safety invariant the gate relies on. Document it in
+    // the test so any future git behavior change here is caught.
+    const runShaAfterFailedRebase = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaAfterFailedRebase).toBe(runShaBefore)
+
+    // Now consume the workspace through verify(). This is the
+    // dispatch-time entry that the gate must guard. The verify
+    // path returns successfully (no WorkspaceMissingError /
+    // WorkspaceCorruptError / WorkspaceBranchMismatchError) because
+    // the gate healed the residual state.
+    const verified = await manager.verify(item, signal)
+    expect(verified.path).toBe(workspace.path)
+    expect(verified.branch).toBe(runBranch)
+
+    // The workspace is on the run branch (the gate's checkout step).
+    const branch = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(branch).toBe(runBranch)
+
+    // The work tree is clean: no conflict markers, no unmerged
+    // entries, no in-progress rebase state. A subsequent task
+    // dispatch would see a clean worktree and proceed.
+    expect(exists(rebaseMergePath)).toBe(false)
+    const applyPath = join(workspace.path, ".git", "rebase-apply")
+    expect(exists(applyPath)).toBe(false)
+    const finalAgentTxt = await readFile(join(workspace.path, "agent.txt"), "utf8")
+    expect(finalAgentTxt).not.toContain("<<<<<<<")
+    expect(finalAgentTxt).not.toContain("=======")
+    expect(finalAgentTxt).not.toContain(">>>>>>>")
+    expect(finalAgentTxt).toBe("agent work\n")
+    const status = (await runCommand("git", ["-C", workspace.path, "status", "--porcelain"], ".", signal)).stdout.trim()
+    expect(status).toBe("")
+
+    // The run branch ref still points at the agent's original
+    // commit. The gate's `reset --hard` aligns the work tree to
+    // the run branch ref without moving the ref itself; the
+    // agent's work is fully preserved at runShaBefore.
+    const runShaAfterRecovery = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaAfterRecovery).toBe(runShaBefore)
+
+    // A subsequent verify() call (simulating the next task
+    // dispatch) is a no-op for the gate: the workspace is already
+    // clean, so the gate detects no residual state and just
+    // returns. The dispatch-time branch check still passes.
+    const second = await manager.verify(item, signal)
+    expect(second.path).toBe(workspace.path)
+    expect(second.branch).toBe(runBranch)
+    const statusAfterSecond = (await runCommand("git", ["-C", workspace.path, "status", "--porcelain"], ".", signal)).stdout.trim()
+    expect(statusAfterSecond).toBe("")
+  })
+
+  it("Materialize_RecoversFromMidRebaseCrashBeforeAnyCacheRepair", async () => {
+    // The T-003 acceptance criteria call out that the gate must
+    // run in `materialize()` as well, not just `verify()`. This test
+    // exercises the materialize() entry specifically: it sets up a
+    // workspace with a residual `rebase-merge` and then re-runs
+    // materialize() (as a restart / recovery path would) and
+    // confirms the gate heals the workspace before the cache
+    // pipeline is touched.
+    const root = await mkdtemp(join(tmpdir(), "mohist-health-gate-mat-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const item = work("wr-crash-mat", "issue-crash-mat", repo)
+    const workspace = await manager.materialize(item, signal)
+    const runBranch = "mohist/run-wr-crash-mat"
+
+    // Set up a mid-rebase-crash fixture: commit agent work, advance
+    // master, run a failing rebase. The result is the same residual
+    // state as the verify() test above.
+    await writeFile(join(workspace.path, "agent.txt"), "agent work\n")
+    await git(workspace.path, "add", ".")
+    await git(workspace.path, "commit", "-m", "agent commit")
+    const runShaBefore = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+
+    await git(workspace.path, "checkout", "master")
+    await writeFile(join(workspace.path, "agent.txt"), "conflicting master\n")
+    await git(workspace.path, "add", ".")
+    await git(workspace.path, "commit", "-m", "conflicting master")
+    await git(workspace.path, "checkout", runBranch)
+    const rebase = await runCommand("git", ["-C", workspace.path, "rebase", "master"], workspace.path, new AbortController().signal)
+    expect(rebase.exitCode).not.toBe(0)
+    expect(exists(join(workspace.path, ".git", "rebase-merge"))).toBe(true)
+
+    // Re-materialize. The gate at the entry of materialize() must
+    // detect and abort the residual rebase state. After recovery,
+    // the workspace is on the run branch, clean, and the run
+    // branch ref is preserved.
+    const rematerialized = await manager.materialize(item, signal)
+    expect(rematerialized.path).toBe(workspace.path)
+    expect(rematerialized.branch).toBe(runBranch)
+
+    const branch = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(branch).toBe(runBranch)
+    expect(exists(join(workspace.path, ".git", "rebase-merge"))).toBe(false)
+    const status = (await runCommand("git", ["-C", workspace.path, "status", "--porcelain"], ".", signal)).stdout.trim()
+    expect(status).toBe("")
+    const runShaAfter = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaAfter).toBe(runShaBefore)
+  })
+
+  it("Verify_CleanWorkspacePassesThroughGateUnchanged", async () => {
+    // T-003 acceptance: "A workspace with no residual state SHALL
+    // pass through the health gate unchanged." This test exercises
+    // a freshly-materialized workspace and asserts verify() works
+    // without the gate touching anything.
+    const root = await mkdtemp(join(tmpdir(), "mohist-health-gate-clean-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const item = work("wr-clean", "issue-clean", repo)
+    const workspace = await manager.materialize(item, signal)
+    const runBranch = "mohist/run-wr-clean"
+    const runShaBefore = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+
+    // Workspace is clean. Verify must succeed without any reset.
+    const verified = await manager.verify(item, signal)
+    expect(verified.path).toBe(workspace.path)
+    expect(verified.branch).toBe(runBranch)
+
+    const runShaAfter = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaAfter).toBe(runShaBefore)
+    const status = (await runCommand("git", ["-C", workspace.path, "status", "--porcelain"], ".", signal)).stdout.trim()
+    expect(status).toBe("")
+  })
+
+  it("Verify_RecoversFromResidualMergeHeadState", async () => {
+    // The acceptance criteria cover `MERGE_HEAD` and
+    // `CHERRY_PICK_HEAD` too. This test plants a residual merge
+    // state file and verifies the gate uses `git merge --abort` to
+    // heal it.
+    const root = await mkdtemp(join(tmpdir(), "mohist-health-gate-merge-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const item = work("wr-merge", "issue-merge", repo)
+    const workspace = await manager.materialize(item, signal)
+    const runBranch = "mohist/run-wr-merge"
+    const runShaBefore = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+
+    // Simulate a residual merge state by writing a MERGE_HEAD
+    // marker. We do not start a real merge — the gate's contract
+    // is to detect the marker and call `git merge --abort`,
+    // which will no-op (exit non-zero) when there is no in-progress
+    // merge. The subsequent `reset --hard` is the authoritative
+    // recovery, and the gate treats the abort as best-effort.
+    await writeFile(join(workspace.path, ".git", "MERGE_HEAD"), runShaBefore + "\n")
+    expect(exists(join(workspace.path, ".git", "MERGE_HEAD"))).toBe(true)
+
+    const verified = await manager.verify(item, signal)
+    expect(verified.path).toBe(workspace.path)
+    expect(verified.branch).toBe(runBranch)
+    expect(exists(join(workspace.path, ".git", "MERGE_HEAD"))).toBe(false)
+
+    const branch = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(branch).toBe(runBranch)
+    const runShaAfter = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaAfter).toBe(runShaBefore)
+  })
+
+  it("Verify_RecoversFromResidualCherryPickHeadState", async () => {
+    // The acceptance scenarios also cover `CHERRY_PICK_HEAD`. Plant
+    // a residual cherry-pick state and verify the gate uses
+    // `git cherry-pick --abort` to heal it, then re-aligns the
+    // workspace to the run branch.
+    const root = await mkdtemp(join(tmpdir(), "mohist-health-gate-cherry-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const item = work("wr-cherry", "issue-cherry", repo)
+    const workspace = await manager.materialize(item, signal)
+    const runBranch = "mohist/run-wr-cherry"
+    const runShaBefore = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+
+    // Plant a residual cherry-pick marker. We do not start a real
+    // cherry-pick — the gate's contract is to detect the marker
+    // and call `git cherry-pick --abort`, which will no-op (exit
+    // non-zero) when there is no in-progress cherry-pick. The
+    // subsequent `reset --hard` is the authoritative recovery, and
+    // the gate treats the abort as best-effort.
+    await writeFile(join(workspace.path, ".git", "CHERRY_PICK_HEAD"), runShaBefore + "\n")
+    expect(exists(join(workspace.path, ".git", "CHERRY_PICK_HEAD"))).toBe(true)
+
+    const verified = await manager.verify(item, signal)
+    expect(verified.path).toBe(workspace.path)
+    expect(verified.branch).toBe(runBranch)
+    expect(exists(join(workspace.path, ".git", "CHERRY_PICK_HEAD"))).toBe(false)
+
+    const branch = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(branch).toBe(runBranch)
+    const runShaAfter = (await runCommand(
+      "git",
+      ["-C", workspace.path, "rev-parse", `refs/heads/${runBranch}`],
+      ".",
+      signal,
+    )).stdout.trim()
+    expect(runShaAfter).toBe(runShaBefore)
+  })
+})
+
 describe("WorkspaceManager.slugify", () => {
   // Item-5: the workspace path slug must stay in sync with the C#
   // MohistWorkspaceLayout.Slug helper. The server-side table is pinned in
@@ -267,206 +623,6 @@ describe("WorkspaceManager.slugify", () => {
     ["", "project"],
   ])("slugify(%j) === %j", (input, expected) => {
     expect(slugify(input)).toBe(expected)
-  })
-})
-
-describe("WorkspaceManager landing workspaces", () => {
-  it("CreateLandingWorkspace_ClonesSharedAndExposesBaseAndRunBranchRefs", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    const workspace = await manager.ensure(work("wr-land-1", "issue-1", repo), signal)
-    // Advance the run branch with a commit so the landing clone must see
-    // both the base branch ref and the prepared run branch ref.
-    await writeFile(join(workspace.path, "draft.txt"), "draft\n")
-    await git(workspace.path, "add", ".")
-    await git(workspace.path, "commit", "-m", "issue work")
-
-    const landing = await manager.createLandingWorkspace(work("wr-land-1", "issue-1", repo), signal)
-    expect(landing.runBranch).toBe("mohist/run-wr-land-1")
-    expect(landing.baseBranch).toBe("master")
-    expect(landing.gitUrl).toBe(repo)
-    expect(landing.path.startsWith(join(runnerRoot, "mohist-local", "landing", "wr-land-1-"))).toBe(true)
-    expect(landing.path).not.toBe(workspace.path)
-
-    // The landing clone is a separate working tree and not the workspace.
-    expect(exists(join(landing.path, ".git"))).toBe(true)
-    expect(landing.path).not.toBe(workspace.path)
-
-    // Both refs visible: the base branch (master) and the run branch
-    // (mohist/run-wr-land-1).
-    const baseRef = await runCommand("git", ["-C", landing.path, "rev-parse", "--verify", "refs/heads/master"], ".", signal)
-    expect(baseRef.exitCode).toBe(0)
-    const runRef = await runCommand("git", ["-C", landing.path, "rev-parse", "--verify", "refs/heads/mohist/run-wr-land-1"], ".", signal)
-    expect(runRef.exitCode).toBe(0)
-
-    // The landing workspace was created with `git clone --shared`, so its
-    // .git/objects/info/alternates should reference the workspace path.
-    const alternates = await readFile(join(landing.path, ".git", "objects", "info", "alternates"), "utf8").catch(() => "")
-    expect(alternates).toContain(workspace.path)
-
-    await manager.disposeLandingWorkspace(landing, signal)
-  })
-
-  it("CreateLandingWorkspace_ResetsOriginToConfiguredGitUrl", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    await manager.ensure(work("wr-land-2", "issue-2", repo), signal)
-    const landing = await manager.createLandingWorkspace(work("wr-land-2", "issue-2", repo), signal)
-
-    // The landing workspace's origin must be the configured repository
-    // gitUrl, not the bare cache or the workspace path. This is what
-    // lets publish push to the real upstream from the landing workspace.
-    const remote = await runCommand("git", ["-C", landing.path, "remote", "get-url", "origin"], ".", signal)
-    expect(remote.exitCode).toBe(0)
-    expect(remote.stdout.trim()).toBe(repo)
-
-    await manager.disposeLandingWorkspace(landing, signal)
-  })
-
-  it("DisposeLandingWorkspace_RmRfDoesNotCorruptWorkflowWorkspace", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    const workspace = await manager.ensure(work("wr-land-3", "issue-3", repo), signal)
-    await writeFile(join(workspace.path, "keep.txt"), "keep me\n")
-    await git(workspace.path, "add", ".")
-    await git(workspace.path, "commit", "-m", "issue work")
-
-    const landing = await manager.createLandingWorkspace(work("wr-land-3", "issue-3", repo), signal)
-    expect(exists(landing.path)).toBe(true)
-
-    const result = await manager.disposeLandingWorkspace(landing, signal)
-    expect(result.disposed).toBe(true)
-    expect(exists(landing.path)).toBe(false)
-
-    // After disposing the landing workspace, the workflow workspace must
-    // be unaffected: same path, same branch, same working tree, same
-    // commit history, and the run branch must still point at the
-    // committed work.
-    const head = await runCommand("git", ["-C", workspace.path, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
-    expect(head.exitCode).toBe(0)
-    expect(head.stdout.trim()).toBe("mohist/run-wr-land-3")
-    expect(await readFile(join(workspace.path, "keep.txt"), "utf8")).toBe("keep me\n")
-    const runSha = await runCommand("git", ["-C", workspace.path, "rev-parse", "HEAD"], ".", signal)
-    expect(runSha.exitCode).toBe(0)
-
-    // The workspace's object store is intact: the run branch ref is
-    // still resolvable, and a fresh clone --shared can be made from it
-    // (would fail with a corrupt object store).
-    const refCheck = await runCommand("git", ["-C", workspace.path, "rev-parse", "--verify", "refs/heads/mohist/run-wr-land-3"], ".", signal)
-    expect(refCheck.exitCode).toBe(0)
-    expect(refCheck.stdout.trim()).toBe(runSha.stdout.trim())
-  })
-
-  it("Materialize_PrunesStaleLandingDirsFromPriorCrashedRun", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    // First run materializes the workflow workspace.
-    await manager.materialize(work("wr-prune-1", "issue-p", repo), signal)
-    const firstLanding = await manager.createLandingWorkspace(work("wr-prune-1", "issue-p", repo), signal)
-    expect(exists(firstLanding.path)).toBe(true)
-
-    // Simulate a crashed run: the landing directory is left behind
-    // and NOT disposed. The next materialize() for the same runId
-    // must remove it. (Under T-002, the once-per-run contract means
-    // a normal subsequent ensure() would verify-only and skip the
-    // landing prune — but a deliberate re-materialize, e.g. after a
-    // crash recovery / restart, exercises the prune path.)
-    const second = await manager.materialize(work("wr-prune-1", "issue-p", repo), signal)
-    expect(exists(firstLanding.path)).toBe(false)
-
-    // The workflow workspace is intact.
-    const head = await runCommand("git", ["-C", second.path, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
-    expect(head.exitCode).toBe(0)
-    expect(head.stdout.trim()).toBe("mohist/run-wr-prune-1")
-
-    // A subsequent create for the same run creates a fresh landing dir.
-    const newLanding = await manager.createLandingWorkspace(work("wr-prune-1", "issue-p", repo), signal)
-    expect(newLanding.path).not.toBe(firstLanding.path)
-    expect(exists(newLanding.path)).toBe(true)
-    await manager.disposeLandingWorkspace(newLanding, signal)
-  })
-
-  it("Materialize_PruneLandingWorkspaces_RemovesOnlyMatchingRunIdDirectories", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    // Two distinct runIds. Create landing dirs for each by directly
-    // placing directories at the expected path.
-    const itemA = work("wr-prune-A", "issue-A", repo)
-    const itemB = work("wr-prune-B", "issue-B", repo)
-    await manager.materialize(itemA, signal)
-    await manager.materialize(itemB, signal)
-
-    const landingRootA = join(runnerRoot, "mohist-local", "landing")
-    const staleA = join(landingRootA, "wr-prune-A-leftover")
-    const staleB = join(landingRootA, "wr-prune-B-leftover")
-    await runCommand("mkdir", ["-p", staleA], ".", signal)
-    await runCommand("mkdir", ["-p", staleB], ".", signal)
-    // write a marker file so deleteDirectory is meaningful
-    await writeFile(join(staleA, "leftover.txt"), "x")
-    await writeFile(join(staleB, "leftover.txt"), "x")
-
-    // Re-materialize run A — only A's leftover must be removed.
-    await manager.materialize(itemA, signal)
-    expect(exists(staleA)).toBe(false)
-    expect(exists(staleB)).toBe(true)
-
-    // Re-materialize run B — now B's leftover is removed.
-    await manager.materialize(itemB, signal)
-    expect(exists(staleB)).toBe(false)
-  })
-
-  it("CreateLandingWorkspace_RespectsSuppliedWorkspacePath", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    const suppliedWorkspacePath = join(runnerRoot, "supplied", "workspaces", "issue-9")
-    const item = work("wr-supplied-landing", "issue-s", repo)
-    ;(item.variables as Record<string, unknown>).workspace = { path: suppliedWorkspacePath, branch: "mohist/run-wr-supplied-landing", changeDir: null }
-    const workspace = await manager.ensure(item, signal)
-    expect(workspace.path).toBe(suppliedWorkspacePath)
-
-    const landing = await manager.createLandingWorkspace(item, signal)
-    expect(landing.path).not.toBe(suppliedWorkspacePath)
-    expect(landing.path.startsWith(join(runnerRoot, "mohist-local", "landing", "wr-supplied-landing-"))).toBe(true)
-
-    // Origin reset still happens for the supplied-path scenario.
-    const remote = await runCommand("git", ["-C", landing.path, "remote", "get-url", "origin"], ".", signal)
-    expect(remote.exitCode).toBe(0)
-    expect(remote.stdout.trim()).toBe(repo)
-
-    await manager.disposeLandingWorkspace(landing, signal)
-  })
-
-  it("DisposeLandingWorkspace_OfMissingPathIsIdempotent", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-landing-"))
-    const manager = new WorkspaceManager(join(root, "runner"))
-    const signal = new AbortController().signal
-    const missing = join(root, "runner", "mohist-local", "landing", "wr-missing-leftover")
-    const result = await manager.disposeLandingWorkspace(missing, signal)
-    expect(result.disposed).toBe(true)
   })
 })
 
@@ -618,7 +774,7 @@ describe("WorkspaceManager hardened cache", () => {
 
     // Tear down the workspace so its alternates reference is gone.
     // The reference scan must see an empty workspaces/ directory and
-    // an empty (or missing) landing/ directory and allow replacement.
+    // an empty workspaces/ directory and allow replacement.
     await runCommand("rm", ["-rf", join(runnerRoot, "mohist-local", "workspaces")], ".", signal)
     expect(exists(first.path)).toBe(false)
 
@@ -642,43 +798,6 @@ describe("WorkspaceManager hardened cache", () => {
     // The freshly-materialized workspace was cloned from the
     // new-origin cache and contains the new repo's content.
     expect(await readFile(join(result.path, "README.md"), "utf8")).toBe("base\n")
-  })
-
-  it("Replacement_BlockedWhenLandingWorkspaceReferencesCacheTransitively", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-cache-hardening-"))
-    const sourceA = await createRepo(root, "sourceA")
-    const sourceB = await createRepo(root, "sourceB")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    // Materialize the workflow workspace + a landing workspace. The
-    // landing workspace is a `--shared` clone whose alternates point
-    // at the workflow workspace, which itself points at the cache —
-    // so the reference scan must follow the chain and find a
-    // transitive reference.
-    await manager.materialize(work("wr-land-block", "issue-land-block", sourceA), signal)
-    const landing = await manager.createLandingWorkspace(work("wr-land-block", "issue-land-block", sourceA), signal)
-    const cachePath = join(runnerRoot, "repos", "project-1", "master")
-    const landingAlternates = await readFile(join(landing.path, ".git", "objects", "info", "alternates"), "utf8")
-    // sanity-check: the landing alternates point at the workflow
-    // workspace, not the cache directly. The runner must follow this
-    // chain to detect the transitive reference.
-    expect(landingAlternates).toContain(join(runnerRoot, "mohist-local", "workspaces"))
-
-    // Move cache origin to sourceB so the runner sees a mismatch.
-    await runCommand("git", ["-C", cachePath, "remote", "set-url", "origin", sourceB], ".", signal)
-
-    // Strip the marker so planResolution() routes through materialize
-    // again on the next call (T-002 once-per-run contract).
-    const { rm: rmMarker } = await import("node:fs/promises")
-    await rmMarker(join(landing.path, "..", "..", "workspaces", "issue-land-block", ".mohist", "workspace.json"), { force: true })
-
-    // The work item still declares the original sourceA, so the
-    // runner sees an identity mismatch and must refuse replacement
-    // because the landing workspace transitively references the cache.
-    await expect(manager.materialize(work("wr-land-block", "issue-land-block", sourceA), signal)).rejects.toBeInstanceOf(CacheReplacementBlockedError)
-    expect(exists(cachePath)).toBe(true)
   })
 
   it("FirstMaterialization_CloneFailureIsFatal", async () => {
