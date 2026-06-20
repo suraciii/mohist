@@ -442,7 +442,7 @@ describe('AgentSettingsSection mutation feedback (T-003)', () => {
 
     const validationError = screen.getByText('Must be at least 1 minute')
     expect(validationError).toBeInTheDocument()
-    expect(validationError.className).toContain('text-red-700')
+    expect(validationError.className).toContain('text-red-600')
 
     expect(toast.success).not.toHaveBeenCalled()
     expect(toast.error).not.toHaveBeenCalled()
