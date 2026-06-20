@@ -126,9 +126,9 @@ public sealed class SkillsCommandBehaviorSpecs
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(installRepo.ExitCode == 0, $"skills install failed\nstdout:\n{installRepo.Stdout}\n\nstderr:\n{installRepo.Stderr}");
             AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist", "SKILL.md"), "mohist");
-            AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-create-epic", "SKILL.md"), "mohist-create-epic");
-            AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-create-issue", "SKILL.md"), "mohist-create-issue");
-            AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
+            Assert.False(Directory.Exists(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-create-epic")), "Repository install must not write mohist-create-epic stub.");
+            Assert.False(Directory.Exists(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-create-issue")), "Repository install must not write mohist-create-issue stub.");
+            Assert.False(Directory.Exists(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-explore")), "Repository install must not write mohist-explore stub.");
             Assert.False(Directory.Exists(Path.Combine(installRepoRoot, ".claude", "skills")), "Repository install must not write to .claude.");
             Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills")), "Repository install must not write to Hermes.");
 
@@ -141,9 +141,9 @@ public sealed class SkillsCommandBehaviorSpecs
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(installClaude.ExitCode == 0, $"skills install --claude failed\nstderr:\n{installClaude.Stderr}");
             AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist", "SKILL.md"), "mohist");
-            AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-create-epic", "SKILL.md"), "mohist-create-epic");
-            AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-create-issue", "SKILL.md"), "mohist-create-issue");
-            AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
+            Assert.False(Directory.Exists(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-create-epic")), "Claude install must not write mohist-create-epic stub.");
+            Assert.False(Directory.Exists(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-create-issue")), "Claude install must not write mohist-create-issue stub.");
+            Assert.False(Directory.Exists(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-explore")), "Claude install must not write mohist-explore stub.");
             Assert.False(Directory.Exists(Path.Combine(installClaudeRoot, ".agents", "skills")), "Claude install must not write to .agents.");
             Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills")), "Claude install must not write to Hermes.");
 
@@ -153,14 +153,11 @@ public sealed class SkillsCommandBehaviorSpecs
                 installRoot,
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(installHermes.ExitCode == 0, $"skills install --hermes failed\nstdout:\n{installHermes.Stdout}\n\nstderr:\n{installHermes.Stderr}");
-            AssertFullPackagedHermesSkill(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md"), "mohist");
-            AssertFullPackagedHermesSkill(Path.Combine(hermesHome, "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-epic", "SKILL.md")), "Hermes install must package mohist-create-epic.");
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-issue", "SKILL.md")), "Hermes install must package mohist-create-issue.");
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-issue", "references", "issue-templates.md")));
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-epic", "references", "epic-templates.md")));
+            AssertDiscoveryStubOnly(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md"), "mohist");
+            Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills", "mohist-explore")), "Hermes install must not write mohist-explore stub.");
+            Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills", "mohist-create-epic")), "Hermes install must not write mohist-create-epic stub.");
+            Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills", "mohist-create-issue")), "Hermes install must not write mohist-create-issue stub.");
             Assert.Contains("/mohist", installHermes.Stdout + installHermes.Stderr, StringComparison.Ordinal);
-            Assert.Contains("/mohist-explore", installHermes.Stdout + installHermes.Stderr, StringComparison.Ordinal);
             Assert.Contains("reload/reset", installHermes.Stdout + installHermes.Stderr, StringComparison.Ordinal);
             Assert.False(Directory.Exists(Path.Combine(installRoot, ".agents", "skills")), "Hermes install must not write to .agents.");
             Assert.False(Directory.Exists(Path.Combine(installRoot, ".claude", "skills")), "Hermes install must not write to .claude.");
@@ -255,19 +252,6 @@ public sealed class SkillsCommandBehaviorSpecs
         Assert.DoesNotContain("Use this skill for current Mohist .NET backend", content, StringComparison.Ordinal);
         Assert.DoesNotContain("references/issue-templates.md", content, StringComparison.Ordinal);
         Assert.DoesNotContain("templates/", content, StringComparison.Ordinal);
-    }
-
-    private static void AssertFullPackagedHermesSkill(string path, string name)
-    {
-        Assert.True(File.Exists(path), $"Expected full Hermes skill at '{path}'.");
-        var content = File.ReadAllText(path);
-        Assert.Contains($"name: {name}", content);
-        Assert.Contains("---", content);
-        Assert.DoesNotContain("This Mohist-managed discovery stub keeps local agent skill installs lightweight and version-matched.", content, StringComparison.Ordinal);
-        if (name == "mohist")
-            Assert.Contains("Use this skill for current Mohist .NET backend", content, StringComparison.Ordinal);
-        else
-            Assert.Contains("Use this skill to **distill** a fuzzy idea into a clear", content, StringComparison.Ordinal);
     }
 
     private static string[] SplitLines(string value) =>
