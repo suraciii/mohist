@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth, WorkflowStage, type AttachmentInfo, type RecoveryProjection } from '../../../entities/issue'
-import { addComment, addPrerequisite, closeIssue, commentAttachmentContentPath, deleteComment, extractAttachmentIds, forceStopIssue, issueAttachmentContentPath, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue } from '../../../entities/issue'
+import { addComment, addPrerequisite, closeIssue, commentAttachmentContentPath, deleteComment, extractAttachmentIds, forceStopIssue, issueAttachmentContentPath, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue, updateIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
@@ -247,6 +247,14 @@ export function IssueDetailPage() {
       if (err.message.includes('waiting for')) {
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       }
+    },
+  })
+
+  const markReadyMutation = useMutation({
+    mutationFn: () => updateIssue(issueNumber, { isDraft: false }, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
   })
 
@@ -967,13 +975,18 @@ export function IssueDetailPage() {
                             This issue has not been marked ready yet. Mark it ready to enable Start.
                           </p>
                           <Button
-                            data-testid="start-button"
-                            disabled
+                            data-testid="mark-ready-button"
+                            onClick={() => markReadyMutation.mutate()}
+                            disabled={markReadyMutation.isPending}
                             className="w-full mt-2"
-                            title="This issue is still a draft"
                           >
-                            Still a draft
+                            {markReadyMutation.isPending ? 'Marking ready...' : 'Mark ready'}
                           </Button>
+                          {markReadyMutation.error && (
+                            <p className="mt-2 text-xs text-red-600">
+                              {markReadyMutation.error.message}
+                            </p>
+                          )}
                         </div>
                       ) : issue.blocker?.kind === 'waiting-for' ? (
                         <div

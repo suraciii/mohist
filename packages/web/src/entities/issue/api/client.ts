@@ -26,7 +26,7 @@ export function createIssue(data: { title: string; body?: string; attachmentIds?
   })
 }
 
-export function updateIssue(number: number, data: { title?: string; body?: string; attachmentIds?: string[]; labels?: Record<string, string>; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) {
+export function updateIssue(number: number, data: { title?: string; body?: string; attachmentIds?: string[]; labels?: Record<string, string>; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null; isDraft?: boolean }, projectId?: string | null) {
   return request<Issue>(projectApiPath(projectId, `/issues/${number}`), {
     method: 'PATCH',
     body: JSON.stringify(data),

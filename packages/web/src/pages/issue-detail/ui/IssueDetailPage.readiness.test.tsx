@@ -25,6 +25,7 @@ const mockUseWorkflowYaml = vi.fn()
 const mockUseAgentStatus = vi.fn()
 const mockUseIssue = vi.fn()
 const mockStartIssue = vi.fn()
+const mockUpdateIssue = vi.fn()
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()
@@ -36,6 +37,7 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
     useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
     startIssue: (...args: unknown[]) => mockStartIssue(...args),
+    updateIssue: (...args: unknown[]) => mockUpdateIssue(...args),
   }
 })
 
@@ -101,6 +103,7 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
     mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
     mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
     mockStartIssue.mockResolvedValue({})
+    mockUpdateIssue.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -133,7 +136,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
     expect(screen.queryByTestId('draft-pill')).not.toBeInTheDocument()
   })
 
-  it('disables the Start control with a "still a draft" reason for a draft issue', async () => {
+  it('renders a Mark ready control for a draft issue', async () => {
+    mockUpdateIssue.mockResolvedValue({})
     mockUseIssue.mockReturnValue({
       data: makeIssue({ isDraft: true, canStart: false, blocker: { kind: 'draft' } }),
       isLoading: false,
@@ -145,8 +149,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
     await waitFor(() => expect(screen.getByTestId('start-readiness')).toBeInTheDocument())
     const readiness = screen.getByTestId('start-readiness')
     expect(readiness).toHaveAttribute('data-blocker', 'draft')
-    const startButton = screen.getByTestId('start-button')
-    expect(startButton).toBeDisabled()
+    const markReadyButton = screen.getByTestId('mark-ready-button')
+    expect(markReadyButton).not.toBeDisabled()
     expect(readiness.textContent).toMatch(/still a draft/i)
   })
 
@@ -187,8 +191,8 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
     expect(startButton).toHaveTextContent(/^Start$/)
   })
 
-  it('surfaces the actionable server rejection when start is attempted', async () => {
-    mockStartIssue.mockRejectedValue(new Error('Issue #201 is still a draft; mark it ready before starting.'))
+  it('calls updateIssue to mark a draft issue ready when Mark ready is clicked', async () => {
+    mockUpdateIssue.mockResolvedValue({})
     mockUseIssue.mockReturnValue({
       data: makeIssue({ isDraft: true, canStart: false, blocker: { kind: 'draft' } }),
       isLoading: false,
@@ -197,8 +201,9 @@ describe('IssueDetailPage - draft indicator and Start control', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByTestId('start-button')).toBeInTheDocument())
-    expect(screen.getByTestId('start-button')).toBeDisabled()
+    await waitFor(() => expect(screen.getByTestId('mark-ready-button')).toBeInTheDocument())
+    screen.getByTestId('mark-ready-button').click()
+    await waitFor(() => expect(mockUpdateIssue).toHaveBeenCalledWith(201, { isDraft: false }, 'proj-1'))
   })
 })
 
