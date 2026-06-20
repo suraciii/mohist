@@ -19,7 +19,7 @@
 |---|---|
 | **Workflow**（核心，最受尊重） | stage / task / check / workflow run / profile / decision / gate / **artifact**（产出归此） |
 | **Issue** | issue / epic / status / prerequisite / priority / risk / draft / done |
-| **Project Space** | project / repository / isolation / variable / default branch |
+| **Project Space** | project / repository / isolation / variable / default branch / **prompt（project-scoped 资源，issue 为子 scope）** |
 | **Agent** | agent / coder / job / session（痕迹）—— 叶子 |
 | **Runner** | resource / heartbeat / lease / registration（纯 server 端） |
 | **Skill·Explore** | 需求探索 → 产出 issue（价值链入口） |
@@ -48,6 +48,10 @@
 
 补充：Web 同时**只读消费** Workflow 的 artifact 与 Agent 的 session（各自 OHS 暴露，Web 遵奉），是 #8 的细化，非新上下文。
 
+**Prompts 属于 Project Space 上下文**（project-scoped，唯一可配置层；内置 .prompt 只是 loader fallback；详见 [`prompt-management.md`](prompt-management.md)）。两点架构约束：
+- **Workflow 只用 key 引用 prompt**（`WorkflowDefinition` 里的字符串），不依赖 prompt 解析——零耦合。
+- **prompt 文本由执行方（runner）在执行那一刻按需解析**（lazy、只取一条、扛大 prompt），契合"执行事实与状态裁判分离"。
+
 ## Context Map
 
 ```
@@ -73,13 +77,15 @@
   │   │ Generic  │   │  Agent   │◄──(#6 defs)──┘ (leaf)              ││
   │   │Label/User│   │(defs+会话)│  session 回流▲                     ││
   │   └──────────┘   └──────────┘              │                     ││
-  └─────────────────────────────┬──────────────┼─────────────────────┘
+   └─────────────────────────────┬──────────────┼─────────────────────┘
      (#8/#9 OHS+PL HTTP API)    │              │
             ┌───────────────────┴───┐    ┌─────▼──────────────┐
             ▼                       ▼    │ runner 进程 (TS)   │ 非上下文
         ┌──────┐               ┌──────┐  │ 纯技术执行器        │ (Agent Runner)
-        │ Web  │               │ CLI  │  │ #6 调 Agent / #7 心跳│
-        └──────┘               └──────┘  └────────────────────┘
+        │ Web  │               │ CLI  │  │ #6 Agent / #7 心跳  │
+        └──────┘               └──────┘  │ 执行时按 key 取     │
+                                        │ project 的 prompt   │
+                                        └────────────────────┘
 ```
 
 ## 不变量（硬约束）
