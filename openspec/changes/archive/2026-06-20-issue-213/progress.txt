@@ -1,0 +1,149 @@
+# Issue 213 Progress
+
+## Codebase Patterns
+
+- **Runner entity / hooks**: `entities/runner` exports `useRunners()` (`packages/web/src/entities/runner/api/queries.ts:6`), `RunnerStatusRow` (`entities/runner/model/types.ts:20`), and `getRunners`. `useRunners()` reads `projectId` from `useProject()` and sets `enabled: !!projectId`, so the runner query is **automatically suppressed** when no project is selected — components should rely on that rather than short-circuiting manually. Query key is `['runners', projectId]` with a 5s `refetchInterval`.
+- **Runner widget shape**: `widgets/runner-status` exports `RunnerList` and `RunnerListCard`. `RunnerList` renders rows inline (id, kind, status badge, scope badge, hostname, heartbeat freshness, capacity `used/total slots`) and its own `RunnerEmptyState` when `rows.length === 0`. It hides capacity when `row.capacity` is null (does **not** show `0/0 slots`). `RunnerListCard` wraps it with a TanStack Query call.
+- **Project route scope**: `App.tsx:55` mounts `ProjectRouteScope` under `/:projectName`, with child routes for `issues`, `activity`, `runners`, `settings/...`, etc. `primaryNav` entries in `AppSidebar.tsx` get prefixed with the project name via `useProjectPath()` at render time, so nav items just hold the project-relative `to`.
+- **Test runner**: vitest hangs in `vitest run` mode in this repo's default config — use `npx vitest run --no-watch <path>` with `timeout` shell wrapper, or pipe output to a file. `basic` reporter isn't installed; use default reporter or `verbose`.
+- **Vitest test environment**: Web tests are jsdom-based and declare it via `// @vitest-environment jsdom` at the top of the file. They expect `@testing-library/jest-dom` and React Query `QueryClientProvider` to be wrapped manually per test.
+- **Pre-existing test failures (orthogonal to T-001)**: `MarkdownReader.test.tsx` (4 ResizeObserver teardown failures) and `AgentSettingsSection.test.tsx` (1 field-level validation test). Confirmed by `git stash` baseline run — not caused by T-001 work.
+- **CLI `IEnvironmentVariableProvider` seam**: `MohistCliCommands.RunAsync(http, args, output, error, fileSystem, executor, environment, standardInput)` accepts an `IEnvironmentVariableProvider?` parameter (defaults to `SystemEnvironmentVariableProvider.Instance`). It is registered in the built `ServiceProvider` so commands can resolve it via `provider.GetService<IEnvironmentVariableProvider>()`. Server-side tests that build their own `ServiceCollection` (e.g. `SkillsCommandRegistrationSpecs.BuildRootCommand`) do not register it — when adding new commands that resolve it, use `provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance` so the missing registration is non-fatal.
+- **CLI `MohistCli.Api.RunnerScopeFilter` enum**: lives on `MohistCliApi` so the renderer, command, and tests can all share the same scope vocabulary. Filter strings ("all"/"global"/"project") are parsed in `RunnerCommands.ParseScopeFilter` with `OrdinalIgnoreCase` and the server payload is filtered by `scope.type` (string compare) client-side.
+- **TableRenderer color gating**: `TableRenderer.Render(JsonNode?, TableShape, bool colorEnabled = true)` — the `colorEnabled` flag is honored only by `RenderRunnerList`; all other shapes ignore it. The status cell is the only one that embeds ANSI escapes (`\u001b[32midle\u001b[0m`, `\u001b[34mbusy\u001b[0m`, `\u001b[33mstale\u001b[0m`, `\u001b[2moffline\u001b[0m`). When the cell exceeds the column width, `Truncate` cuts raw chars — so the `status` column needs `≥ 16` chars to fit `ESC[2mofflineESC[0m` without truncating the reset. Keep that in mind for any future colored cell.
+
+## Task T-001: Web: dedicated Runners page with scope filter and status summary bar
+
+- **What was implemented**
+  - New `RunnersPage` at `packages/web/src/pages/runners/ui/RunnersPage.tsx` composing the existing `useRunners()` hook (5s polling), `RunnerList` widget, and a page-level scope filter (`all` / `global` / `project`, default `all`). The page renders `RunnerStatusSummaryBar` (idle/busy/stale/offline counts derived from the scope-filtered rows, all four labels always rendered, zero shown explicitly) and either the filtered `RunnerList`, a `RunnerEmptyState` with the `npx mohist runner` start hint, or a `NoProjectState` when no project is selected.
+  - New `RunnersPage.test.tsx` covering: routing test-id presence, no-project state, no-project no-query case, empty state (with start hint and without), scope-filter defaults and per-option behavior, summary bar counts (one per status, explicit zeros, scope-aware updates), offline/stale visibility, missing-capacity rendering, hostname/kind/scope badge, and used/total capacity display.
+  - New `/runners` route registered under `ProjectRouteScope` in `packages/web/src/app/App.tsx:63`, alongside the existing `activity` route.
+  - New `runners` entry in `primaryNav` (`packages/web/src/widgets/app-shell/ui/AppSidebar.tsx:46`) using `ServerIcon` from `lucide-react`.
+  - Updated `AppSidebar.test.tsx` canonical-navigation-order assertion to include `nav-runners` between `nav-activity` and `nav-epics`.
+
+- **Files changed**
+  - `packages/web/src/app/App.tsx` (route added)
+  - `packages/web/src/widgets/app-shell/ui/AppSidebar.tsx` (nav entry + icon import)
+  - `packages/web/src/widgets/app-shell/ui/AppSidebar.test.tsx` (canonical-order updated)
+  - `packages/web/src/pages/runners/ui/RunnersPage.tsx` (new)
+  - `packages/web/src/pages/runners/ui/RunnersPage.test.tsx` (new)
+
+- **Learnings for future tasks**
+  - **Decisions**
+    - The skeleton `RunnersPage.tsx` + `RunnersPage.test.tsx` already existed in the workspace at task start (placed by an earlier setup phase). The task was to validate it against the acceptance criteria, complete anything missing, and wire the route + nav. No production-logic rewrites were needed — the skeleton's filterByScope/countByStatus/scope bar/empty state matched the spec verbatim.
+    - Status derivation is server-side (`RunnerStatusView.status` is `idle` | `busy` | `stale` | `offline`). The page never re-derives status; it only counts and filters what `useRunners()` returns.
+    - Scope filtering happens client-side over the already-returned rows (`scope.type === 'global' | 'project'`). No new endpoint, no query-param changes.
+    - No-project case: rely on `useRunners()` being `enabled: !!projectId`. The page renders `NoProjectState` instead of `RunnerEmptyState` so the start-command hint does not mislead users who haven't picked a project yet.
+    - Missing capacity: leverage `RunnerList`'s existing behavior — it does not render a capacity block at all when `row.capacity` is null. The "unavailable rather than 0 used slots" requirement is satisfied implicitly by the widget; the test asserts no `0/0 slots` text is present.
+  - **Gotchas discovered**
+    - `vitest run` in the web package hangs indefinitely under the default reporter when invoked through `npm run test:run`. The fix is to bypass `npm` and call `npx vitest run --no-watch <path>` directly, or to pipe to a file with an outer `timeout` guard. The hang reproduces even before any local changes (confirmed via `git stash`).
+    - `vitest --reporter=basic` errors out (no `basic` reporter installed). Use the default reporter or `--reporter=verbose`.
+    - Adding `nav-runners` between `nav-activity` and `nav-epics` breaks the existing `AppSidebar.test.tsx` "canonical navigation order" assertion. That assertion must be updated to keep the test green — it's the only nav-order test affected.
+  - **Patterns / API shapes established**
+    - **RunnerStatusSummaryBar** component shape: emits a `data-testid="runners-summary-bar"` container with a `data-scope-counts={JSON.stringify(counts)}` attribute (handy for future tests that want all four counts in one assertion), and a per-status row with `data-testid="runners-summary-{status}-count"`. Always renders all four `STATUS_KEYS` so zero counts are visible.
+    - **ScopeFilterBar** component shape: `role="group" aria-label="Runner scope filter"`, one `data-testid="runners-scope-{key}"` button per option, with `aria-pressed` reflecting the active selection.
+    - **RunnerEmptyState / NoProjectState** shape: dedicated `data-testid` per state so future tests can assert mutually exclusive states.
+    - Page-level scope filter uses a local `useState<ScopeFilter>('all')` — no URL sync, no localStorage. The page reuses the existing TanStack Query key, so concurrent pages (Activity's badge query, Runners page) share one network request.
+  - **Cross-task invariants**
+    - `RunnerStatusRow.status` is the single source of truth for runner status; both the summary bar and `RunnerList`'s `RunnerStatusBadge` read it as-is. Any future task adding a fifth visual state to the row widget must not introduce client-side re-derivation — the spec requirement "shared four-value status taxonomy" (spec.md line 166) forbids it.
+    - The runners-page query key `['runners', projectId]` must stay stable; T-003 will reuse the same key from `useRunnerSummary()` for the Activity badge.
+    - The `Runners` nav entry sits between `Activity` and `Epics` in `primaryNav`. T-003 (Activity page) does not need to touch `AppSidebar` unless it changes nav order again.
+
+## Task T-002: CLI: `mo runner list` subcommand with scope filter and color-coded status
+
+- **What was implemented**
+  - New `list` subcommand under the existing `mo runner` group (`packages/cli/Mohist.Cli/MohistCliCommands.Server.cs` → `RunnerCommands.BuildList`). Wires `MohistCliCommands.ProjectRefOption()` (`--project`/`--project-id`), `MohistCliCommands.OutputOption()` (`-o table|json`), and a new `--scope all|global|project` option (default `all`). Resolves the project via `api.ResolveProjectIdAsync`, validates the output mode, computes `colorEnabled` from `Console.IsOutputRedirected` AND `NO_COLOR`, then calls a new `api.PrintRunnerListAsync(...)`.
+  - New `MohistCliApi.PrintRunnerListAsync(projectId, RunnerScopeFilter scope, string mode, bool colorEnabled)` method (in `MohistCliApi.cs`). This is the dedicated fetch+filter+render flow per design D4: it `GET`s `/api/projects/{id}/runners`, extracts `data.runners`, filters by `scope.type` client-side, and renders. JSON mode emits the filtered array verbatim (empty `[]` for the JSON empty case). Table mode with zero rows prints "No runners connected" + "Start a runner: npx mohist runner" hint.
+  - New `MohistCliApi.TableShape.RunnerList` enum entry. `TableRenderer.RenderRunnerList(JsonNode? data, bool colorEnabled)` renders the 7-column table (id, kind, status, scope, capacity, heartbeat, hostname) with color-gated status cell. Capacity renders as `used/total slots` when present and `-` when null (no `0/0` for missing capacity per acceptance). Heartbeat renders a relative age ("3m ago") matching the web's `formatHeartbeatAge`. The status column is the only place ANSI escapes are embedded.
+  - `MohistCliApi.RunnerScopeFilter` enum (`All`, `Global`, `Project`) added so the command, API, and renderer share one vocabulary.
+  - `RunnerCommands.Build` now resolves `IEnvironmentVariableProvider` from the DI provider with a `SystemEnvironmentVariableProvider.Instance` fallback (so server-side `SkillsCommandRegistrationSpecs.BuildRootCommand`, which builds its own `ServiceCollection` without that service, still works).
+  - 16 xUnit tests in `packages/cli/tests/Mohist.Cli.Tests/CliRunnerCommandSpecs.cs` covering: `mo runner --help` lists `list`; default scope returns both global and project runners; `--scope global` filters out project; `--scope project` filters out global; `--project <name>` overrides project; full column set present; missing capacity renders `-` not `0/0`; `NO_COLOR` set → no escapes; `colorEnabled: true` → 4 distinct ANSI codes per status; `-o json` → valid JSON, no color, no borders; empty result → start hint, no empty table; `--scope project` empty JSON → `[]`; server down → standard "Server is not running" + non-zero; invalid `--scope` → error, no API call; no active project → standard error; `colorEnabled: false` via direct API call → no escapes.
+
+- **Files changed**
+  - `packages/cli/Mohist.Cli/MohistCliApi.cs` (new `TableShape.RunnerList` enum entry, new `RunnerScopeFilter` enum, new `PrintRunnerListAsync` method, new `RunnerStartHint` constant)
+  - `packages/cli/Mohist.Cli/TableRenderer.cs` (new `RenderRunnerList` method + `FormatScope`/`FormatCapacity`/`FormatHeartbeat`/`ColorizeStatus` helpers + ANSI constants; `Render` dispatch extended to accept `bool colorEnabled`)
+  - `packages/cli/Mohist.Cli/MohistCliCommands.Server.cs` (new `BuildList` + `ParseScopeFilter`; `RunnerCommands.Build` resolves `IEnvironmentVariableProvider`)
+  - `packages/cli/tests/Mohist.Cli.Tests/CliRunnerCommandSpecs.cs` (new — 16 tests)
+
+- **Learnings for future tasks**
+  - **Decisions**
+    - The dedicated fetch+filter+render flow is in `MohistCliApi.PrintRunnerListAsync`, not the generic `PrintWithOutputAsync`. Per design D4 the generic helper has no pre-render transform step, and scope filtering is a data concern that must run before the renderer sees the array.
+    - Scope filtering is purely client-side over `data.runners[i].scope.type`. No new query param, no new endpoint — consistent with the Web page's existing `filterByScope` behavior.
+    - `RunnerScopeFilter` lives on `MohistCliApi` (not in the command or renderer) so all three layers reference the same enum and tests can pass it without re-parsing the string.
+    - Status derivation stays server-side. The renderer reads `status` as a string, colorizes it, and never re-derives. This satisfies the spec's "shared four-value status taxonomy" requirement.
+    - Capacity rendering: `null` capacity → `-`. `RunnerStatusView.capacity` is nullable, and the design notes (Risks) call out that the CLI must mirror the Web's "unavailable rather than 0 used slots" behavior. Confirmed via test.
+  - **Gotchas discovered**
+    - **`Truncate` cuts ANSI escapes mid-sequence** — `TableRenderer.Truncate(value, softCap)` slices by char count, so a colored status like `\u001b[2moffline\u001b[0m` (15 chars) gets truncated if the column width is ≤14. The status column was bumped from 12 to 16 chars to fit `offline` (the longest) with escapes. If a future colored cell is added, account for the escape length when sizing the column.
+    - **`Console.IsOutputRedirected` is always `true` under xunit** — the xunit test runner captures `Console.Out`, so any test of the command-path `colorEnabled` decision will see `IsOutputRedirected == true` and never emit colors. Two test strategies were used: (a) full command-path tests for the `NO_COLOR` case (which is controlled by the env provider and bypasses the redirect check), and (b) direct `MohistCliApi.PrintRunnerListAsync(..., colorEnabled: true)` calls to verify the colored renderer's ANSI emission regardless of `Console` state. The direct-API test is the only one that proves the color codes are present in the table-mode output.
+    - **Server tests build their own `ServiceCollection`** — `Mohist.Server.Tests/Specs/Skills/SkillsCommandRegistrationSpecs.BuildRootCommand` constructs a `ServiceCollection` and never registers `IEnvironmentVariableProvider`. Resolving it via `GetRequiredService` crashes those tests. Use `provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance` for any new command that needs env access.
+    - **`Mohist.sln` does not include `Mohist.Cli.Tests`** — the project is not in the .sln file, so `npm test` (which runs `dotnet test Mohist.sln`) does not run the CLI tests. CLI tests must be invoked separately: `dotnet test packages/cli/tests/Mohist.Cli.Tests`. The build (`dotnet build Mohist.sln`) does pick up the CLI project, so `TreatWarningsAsErrors` lint is enforced via that path.
+  - **Patterns / API shapes established**
+    - **`MohistCliApi.PrintRunnerListAsync(projectId, scope, mode, colorEnabled)`** — signature. Returns `0` on success, `1` for missing project / server down / scope error. JSON mode emits the filtered array verbatim (always, even when empty `[]`). Table mode with zero rows prints the start hint and returns `0`; table mode with rows delegates to `TableRenderer` with `colorEnabled`.
+    - **`TableRenderer.RenderRunnerList` column set** — `id` (IdSoftCap=24), `kind` (12), `status` (16), `scope` (16), `capacity` (14), `heartbeat` (18), `hostname` (TitleSoftCap=60). Headers are the lowercase form. `scope` resolves to `global`, the project name, the project id, or `project` (in that preference order). `capacity` formats as `"<used>/<total> slots"` or `-` when the input is null. `heartbeat` formats as `"<n>s ago"` / `"<n>m ago"` / `"<n>h ago"` / `"<n>d ago"`, or `unknown` when `lastHeartbeatAt` is null/invalid.
+    - **`colorEnabled` parameter is plumbed end-to-end**: the command decides based on `Console.IsOutputRedirected` AND `NO_COLOR` env, the API forwards it to the renderer, the renderer only uses it for the status cell. Other cells stay plain. This keeps the gating decision in one place while letting tests control it directly.
+    - **Test data fixture shape**: `CliRunnerCommandSpecs.Runner(id, kind, hostname, status, scopeType, capacity, projectId?, lastHeartbeatAt?)` builds a complete `RunnerStatusView`-shaped object so tests cover the same wire format the server emits.
+- **Cross-task invariants**
+     - The four-status taxonomy (`idle` / `busy` / `stale` / `offline`) is the contract boundary shared with the Web page (T-001) and the server. The CLI renderer must not invent a fifth visual value or re-derive a status from runtime fields.
+     - `--scope project` correctness depends on the server's `ListEligibleRunnersAsync(projectId)` invariant that no foreign-project runners leak. The CLI does not double-filter by `projectId`; it trusts the server. (A defensive server test exists at `RunnerRegistrySpecs.ListEligibleRunnersAsync_OtherProjectRunner_IsExcluded`.)
+     - The runner start hint text (`npx mohist runner`) is shared with the Web widget and the Runners page. Keep all three in sync if the runner bootstrap command ever changes.
+
+## Task T-003: Web: delegate runner listing from the Activity page to the Runners page
+
+- **What was implemented**
+  - Removed the `<RunnerListCard />` `<section>` from `ActivityPage.tsx` and replaced it with a small right-aligned link (`data-testid="activity-runners-link"`, label "View runners" + chevron) routed to `toProjectPath('/runners')` via `useProjectPath()`. The page is now session-only: Active / Waiting / Recent sections + status bar + Runners link.
+  - Repointed all three `navigate(...)` calls in `widgets/runner-status/ui/RunnerSummary.tsx` from `'/activity'` to `'/runners'` (stale/offline branch, busy branch, idle branch). The non-clickable "No runner" empty span remains non-navigating because there is nothing to link to.
+  - Updated `ActivityPage.test.tsx` with 11 tests grouped into three describe blocks: delegation (no embedded list / Runners link / badge present in three runner states), badge navigation (idle / busy / stale-offline → `/runners`, plus a defensive "not `/activity`" assertion), and session-only content (section headers + no embedded "Runners" heading). Mocks `useRunnerSummary` and `useAgentActivity` so the page renders deterministically.
+
+- **Files changed**
+  - `packages/web/src/pages/activity/ui/ActivityPage.tsx` (drop `RunnerListCard` section, drop its import, add `Link` + `useProjectPath` imports, add runners link, replace section with link wrapper)
+  - `packages/web/src/widgets/runner-status/ui/RunnerSummary.tsx` (three `toProjectPath('/activity')` → `toProjectPath('/runners')`)
+  - `packages/web/src/pages/activity/ui/ActivityPage.test.tsx` (new — 11 tests, replaces the prior file)
+
+- **Learnings for future tasks**
+  - **Decisions**
+    - The link is positioned right-aligned above the section list so it reads as a "see more" affordance without competing with the section headers. SVG chevron is inlined to match the existing icon-free dependency boundary in the page (no `lucide-react` import).
+    - Used `useProjectPath()` (consistent with T-001's RunnersPage and the rest of the app shell) rather than hardcoding `/runners`, so the link keeps working under `ProjectRouteScope` for any project name.
+    - The "No runner" empty span stays non-clickable (no `navigate`), since there is no per-runner destination and the link in the page body already points users to the Runners page. Clicking the empty span would be a no-op.
+    - Test strategy: a single `LocationProbe` rendered alongside `<ActivityPage />` reads `useLocation().pathname` after `fireEvent.click` on the badge. This avoids re-rendering the entire router or pulling in the real `App.tsx` route tree, while still proving the navigation target string.
+    - The "no embedded runner list" assertion uses four independent negative queries: `runners-empty-state`, `runners-summary-bar`, `runners-page` testids (which the Runners page renders) AND the literal row id `r1`. This catches both the widget being present and the testid-shaped fragments leaking in.
+  - **Gotchas discovered**
+    - `vitest run` invoked from the repo root hangs / fails with "Vitest failed to find the current suite" because the root `vitest` config does not set up the web package's jsdom test environment. Run from `packages/web/` (where `vitest.config.ts` lives): `cd packages/web && npx vitest run --no-watch <path>`.
+    - When the `useRunnerSummary` mock returns a fully-populated summary, `RunnerSummaryBadge` resolves to one of three clickable `<button>` variants. `screen.getByRole('button')` returns the (single) badge button — there's no other button in the page tree. Using `getAllByRole` was avoided to keep the test brittle-free against future widget additions.
+    - `useAgentActivity` must be mocked too: the page calls `useActivityCards()` which composes session + waiting lists. Without the mock the hook returns `undefined` and the component crashes during the badge-retention tests that pre-populate runner rows but not sessions. The mock shape matches `useAgentActivity`'s return signature (`{ data, isLoading }`).
+  - **Patterns / API shapes established**
+    - **Page-level cross-link shape**: a small right-aligned `Link` with `data-testid` named after the destination page (`activity-runners-link`) plus a chevron SVG, scoped to the page via `useProjectPath()`. Future pages that need to cross-link to siblings (e.g. issues ↔ activity) can adopt the same pattern for consistency.
+    - **Badge click test pattern**: `LocationProbe` + `useLocation` + `MemoryRouter` is the cheapest way to assert `navigate()` targets from a component without booting the real route tree. Reusable for any widget that calls `useNavigate()`.
+  - **Cross-task invariants**
+    - The Runners nav entry (T-001) is the single source of truth for reaching `/runners`. The Activity page link does not duplicate the nav entry — it provides a contextual call-to-action from the session view.
+    - The runner overview badge in the status bar must keep navigating to `/runners` (not back to `/activity`) for as long as the embedded list is gone. Any future task adding per-page navigation must not re-point the badge.
+    - `RunnerSummaryBadge` remains the only place that exposes a clickable runner summary on the Activity page; the new "View runners" link is a textual CTA, not a badge replacement.
+
+## Task T-003: Web: delegate runner listing from the Activity page to the Runners page
+
+- **What was implemented**
+  - Removed the embedded `<RunnerListCard />` section from `ActivityPage.tsx` and replaced it with a small `View runners` link (`data-testid="activity-runners-link"`) pointing at `toProjectPath('/runners')` (project-scoped, computed via `useProjectPath()`).
+  - Repointed all three navigation targets in `RunnerSummary.tsx` (idle / busy / stale-offline branches) from `/activity` to `/runners`. The summary badge now navigates to the new Runners page when activated from any of its three states. The empty-rows branch (no runners at all) is still a non-clickable div with the start-command hint, matching the original behavior.
+  - Updated `ActivityPage.test.tsx` to cover the new shape: no embedded list (no `runners-empty-state` / `runners-summary-bar` / `runners-page` / runner-id / `Loading...` present), Runners link present with correct `href`, badge retained across all three states (idle / busy / stale-offline), and explicit negative test that the badge does NOT navigate to `/activity`. Session-only content (Active / Waiting / Recent section headers + no `Runners` Card heading) is also reasserted.
+  - The Activity page still wraps `<RunnerSummaryBadge />` inside the `<StatusBar>`, so the badge remains the global quick indicator from the proposal.
+
+- **Files changed**
+  - `packages/web/src/pages/activity/ui/ActivityPage.tsx` (drop `<RunnerListCard />`, add Runners link)
+  - `packages/web/src/widgets/runner-status/ui/RunnerSummary.tsx` (three `navigate` calls repointed)
+  - `packages/web/src/pages/activity/ui/ActivityPage.test.tsx` (new tests for delegation + badge target)
+
+- **Learnings for future tasks**
+  - **Decisions**
+    - The Runners link is a plain `react-router-dom` `<Link>` with `data-testid="activity-runners-link"` so the spec's "renders a link that navigates to the project-scoped `/runners` route" requirement is asserted directly via `getByTestId` + `toHaveAttribute('href', '/TestProject/runners')`. No button-as-link was needed.
+    - The link is placed inside the same `<div className="max-w-3xl mx-auto ...">` container as the section blocks, anchored at the top with a right-aligned `flex justify-end` wrapper. This positions it as an out-of-flow affordance above the session sections without crowding them.
+    - The badge's empty-rows branch was intentionally left as a non-clickable div (unchanged) — the original behavior already shows the start hint and there is no navigation to repoint.
+  - **Gotchas discovered**
+    - The three `navigate` calls live in separate branches of `RunnerSummary.tsx` (one per visual state); the repoint must touch all three. Missing one would leave a state where clicking the badge still routes to `/activity` — verified by the explicit negative test `navigates to /runners (not /activity) when any badge is activated`.
+    - `useProjectPath()` is the canonical helper for resolving project-scoped nav targets (already used by the badge's other route calls). It must be called inside `ActivityPage` too — it's a hook, not a pure helper, so it can only be invoked inside the component body, not at module scope.
+    - The original test fixture used `getRunnerBadgeButton()` via `screen.getByRole('button')`. The Runner link is an anchor (`tagName === 'a'`), not a button, so it does not collide with that selector.
+  - **Patterns / API shapes established**
+    - **Activity Runners link shape**: `data-testid="activity-runners-link"` on a `<Link>` whose `to` is `useProjectPath()('/runners')`. Renders "View runners" with a chevron SVG. Tests assert both presence and `href` value.
+    - **Activity page negative-test pattern**: the "no embedded list" test queries by `runners-empty-state`, `runners-summary-bar`, `runners-page`, runner id, and `Loading...` — any future widget leaking those test-ids into Activity would fail the test, catching accidental re-embedding.
+  - **Cross-task invariants**
+    - The Activity page still does NOT issue any runner query (no `useRunners`/`useRunnerSummary` direct call); it only renders the badge, which internally uses `useRunnerSummary` — so the `enabled: !!projectId` guard from T-001 still protects against queries when no project is selected.
+    - The repointed badge target `/runners` depends on the T-001 route registration in `App.tsx:63` and the `runners` nav entry in `AppSidebar.tsx:46`. Do not remove the nav entry — the badge would still navigate, but the sidebar would silently lose its primary-nav affordance.
+    - The `View runners` link text is the only copy change in this task. Keep it in sync with the Runners page's own labels if rebranded later.

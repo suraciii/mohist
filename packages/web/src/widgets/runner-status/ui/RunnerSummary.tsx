@@ -34,7 +34,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   if (!hasConnectedCapacity) {
     return (
       <button
-        onClick={() => navigate(toProjectPath('/activity'))}
+        onClick={() => navigate(toProjectPath('/runners'))}
         className="flex items-center gap-2 text-xs hover:underline text-left"
       >
         <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
@@ -52,7 +52,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   if (connectedBusyCount > 0) {
     return (
       <button
-        onClick={() => navigate(toProjectPath('/activity'))}
+        onClick={() => navigate(toProjectPath('/runners'))}
         className="flex items-center gap-2 text-xs hover:underline text-left"
       >
         <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-blue-100 text-blue-700">
@@ -70,7 +70,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
 
   return (
     <button
-      onClick={() => navigate(toProjectPath('/activity'))}
+      onClick={() => navigate(toProjectPath('/runners'))}
       className="flex items-center gap-2 text-xs hover:underline text-left"
     >
       <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-green-100 text-green-700">

@@ -115,6 +115,7 @@ internal static class RunnerCommands
     {
         var runner = new Command("runner", "Runner management");
         var installer = provider.GetRequiredService<IServiceInstaller>();
+        var environment = provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance;
 
         runner.Subcommands.Add(BuildInstall(installer));
         runner.Subcommands.Add(BuildSystemd("start", installer.StartRunnerAsync, installer));
@@ -123,8 +124,72 @@ internal static class RunnerCommands
         runner.Subcommands.Add(BuildSystemd("status", installer.StatusRunnerAsync, installer));
         runner.Subcommands.Add(BuildLogs(installer));
         runner.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallRunnerAsync, installer));
+        runner.Subcommands.Add(BuildList(api, environment));
 
         return runner;
+    }
+
+    private static Command BuildList(MohistCliApi api, IEnvironmentVariableProvider environment)
+    {
+        var cmd = new Command("list", "List runners");
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var scopeOpt = new Option<string>("--scope")
+        {
+            Description = "Filter runners by scope (all, global, project)",
+            DefaultValueFactory = _ => "all",
+        };
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(scopeOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var scopeRaw = ctx.GetValue(scopeOpt) ?? "all";
+            var output = ctx.GetValue(outputOpt);
+            return ListAsync();
+
+            async Task<int> ListAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var scope = ParseScopeFilter(scopeRaw);
+                if (scope is null)
+                {
+                    api.Error.WriteLine($"--scope must be 'all', 'global', or 'project' (got '{scopeRaw}')");
+                    return 1;
+                }
+
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+
+                var colorEnabled = !Console.IsOutputRedirected
+                    && string.IsNullOrEmpty(environment.GetEnvironmentVariable("NO_COLOR"));
+
+                return await api.PrintRunnerListAsync(resolvedProjectId, scope.Value, mode, colorEnabled);
+            }
+        });
+        return cmd;
+    }
+
+    private static MohistCliApi.RunnerScopeFilter? ParseScopeFilter(string raw)
+    {
+        if (string.Equals(raw, "all", StringComparison.OrdinalIgnoreCase))
+            return MohistCliApi.RunnerScopeFilter.All;
+        if (string.Equals(raw, "global", StringComparison.OrdinalIgnoreCase))
+            return MohistCliApi.RunnerScopeFilter.Global;
+        if (string.Equals(raw, "project", StringComparison.OrdinalIgnoreCase))
+            return MohistCliApi.RunnerScopeFilter.Project;
+        return null;
     }
 
     private static Command BuildInstall(IServiceInstaller installer)

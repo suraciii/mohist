@@ -18,7 +18,7 @@ internal sealed class TableRenderer
         _activeProjectId = activeProjectId;
     }
 
-    public void Render(JsonNode? data, MohistCliApi.TableShape shape)
+    public void Render(JsonNode? data, MohistCliApi.TableShape shape, bool colorEnabled = true)
     {
         switch (shape)
         {
@@ -75,6 +75,9 @@ internal sealed class TableRenderer
                 break;
             case MohistCliApi.TableShape.IssueTemplateShow:
                 RenderIssueTemplateShow(data);
+                break;
+            case MohistCliApi.TableShape.RunnerList:
+                RenderRunnerList(data, colorEnabled);
                 break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
@@ -802,6 +805,114 @@ internal sealed class TableRenderer
             return;
         foreach (var row in cells)
             _out.WriteLine(string.Join("  ", row.Select((c, i) => c.PadRight(widths[i]))).TrimEnd());
+    }
+
+    private void RenderRunnerList(JsonNode? data, bool colorEnabled)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No runners connected");
+            _out.WriteLine("Start a runner: npx mohist runner");
+            return;
+        }
+
+        var headers = new[] { "id", "kind", "status", "scope", "capacity", "heartbeat", "hostname" };
+        var widths = new[] { IdSoftCap, 12, 16, 16, 14, 18, TitleSoftCap };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            var id = StringOf(obj, "id");
+            var kind = StringOf(obj, "kind");
+            var status = StringOf(obj, "status");
+            var scope = FormatScope(obj["scope"]);
+            var capacity = FormatCapacity(obj["capacity"]);
+            var heartbeat = FormatHeartbeat(obj);
+            var hostname = StringOf(obj, "hostname");
+            cells.Add(new[]
+            {
+                Truncate(id, IdSoftCap),
+                Truncate(kind, 12),
+                Truncate(colorEnabled ? ColorizeStatus(status) : status, 16),
+                Truncate(scope, 16),
+                Truncate(capacity, 14),
+                Truncate(heartbeat, 18),
+                Truncate(hostname, TitleSoftCap),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private static string FormatScope(JsonNode? scopeNode)
+    {
+        if (scopeNode is not JsonObject scope) return "";
+        var type = StringOf(scope, "type");
+        if (string.Equals(type, "global", StringComparison.OrdinalIgnoreCase))
+            return "global";
+        if (string.Equals(type, "project", StringComparison.OrdinalIgnoreCase))
+        {
+            var projectId = StringOf(scope, "projectId");
+            var projectName = StringOf(scope, "projectName");
+            if (!string.IsNullOrWhiteSpace(projectName)) return projectName;
+            if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
+            return "project";
+        }
+        return type;
+    }
+
+    private static string FormatCapacity(JsonNode? capacityNode)
+    {
+        if (capacityNode is null) return "-";
+        if (capacityNode is not JsonObject capacity) return "-";
+        var used = NumberOf(capacity, "usedSlots");
+        var total = NumberOf(capacity, "totalSlots");
+        if (string.IsNullOrEmpty(used) && string.IsNullOrEmpty(total))
+            return "-";
+        if (string.IsNullOrEmpty(used)) used = "0";
+        if (string.IsNullOrEmpty(total)) total = "0";
+        return $"{used}/{total} slots";
+    }
+
+    private static string FormatHeartbeat(JsonNode? row)
+    {
+        if (row is not JsonObject obj) return "unknown";
+        var lastHeartbeatAt = obj["lastHeartbeatAt"];
+        if (lastHeartbeatAt is null) return "unknown";
+        if (lastHeartbeatAt is JsonValue jv && jv.TryGetValue<string>(out var raw))
+        {
+            if (string.IsNullOrWhiteSpace(raw) || raw == "null") return "unknown";
+        }
+        var dateString = StringOf(obj, "lastHeartbeatAt");
+        if (string.IsNullOrWhiteSpace(dateString)) return "unknown";
+        if (!DateTimeOffset.TryParse(dateString, out var heartbeatAt)) return "unknown";
+        var age = DateTimeOffset.UtcNow - heartbeatAt.ToUniversalTime();
+        if (age < TimeSpan.Zero) age = TimeSpan.Zero;
+        if (age.TotalSeconds < 60) return $"{Math.Max(0, (int)age.TotalSeconds)}s ago";
+        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+
+    internal const string AnsiReset = "\u001b[0m";
+    internal const string AnsiGreen = "\u001b[32m";
+    internal const string AnsiBlue = "\u001b[34m";
+    internal const string AnsiYellow = "\u001b[33m";
+    internal const string AnsiDim = "\u001b[2m";
+
+    internal static string ColorizeStatus(string status)
+    {
+        if (string.Equals(status, "idle", StringComparison.OrdinalIgnoreCase))
+            return string.Concat(AnsiGreen, status, AnsiReset);
+        if (string.Equals(status, "busy", StringComparison.OrdinalIgnoreCase))
+            return string.Concat(AnsiBlue, status, AnsiReset);
+        if (string.Equals(status, "stale", StringComparison.OrdinalIgnoreCase))
+            return string.Concat(AnsiYellow, status, AnsiReset);
+        if (string.Equals(status, "offline", StringComparison.OrdinalIgnoreCase))
+            return string.Concat(AnsiDim, status, AnsiReset);
+        return status;
     }
 
     private static JsonArray AsArray(JsonNode? data)

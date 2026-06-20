@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { StatusBar } from '../../../shared/ui/StatusBar'
 import { ActiveSessionCard, WaitingCard, RecentCard, UsageSnapshotLabel, useActivityCards, useActivityUsageSnapshot } from '../../../widgets/coder-session'
-import { RunnerSummaryBadge, RunnerListCard } from '../../../widgets/runner-status'
+import { RunnerSummaryBadge } from '../../../widgets/runner-status'
+import { useProjectPath } from '../../../entities/project'
 
 function EmptySection({ message }: { message: string }) {
   return (
@@ -23,6 +25,7 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
 export function ActivityPage() {
   const { activeCards, recentCards, waitingCards, statusCounts, slotUsage } = useActivityCards()
   const usageSnapshot = useActivityUsageSnapshot()
+  const toProjectPath = useProjectPath()
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -45,9 +48,18 @@ export function ActivityPage() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-4 md:px-6 space-y-6">
-          <section>
-            <RunnerListCard />
-          </section>
+          <div className="flex justify-end">
+            <Link
+              to={toProjectPath('/runners')}
+              data-testid="activity-runners-link"
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+            >
+              View runners
+              <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+              </svg>
+            </Link>
+          </div>
 
           <section>
             <UsageSnapshotLabel snapshot={usageSnapshot} />
