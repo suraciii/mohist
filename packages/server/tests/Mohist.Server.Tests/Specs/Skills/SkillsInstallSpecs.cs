@@ -28,8 +28,9 @@ public sealed class SkillsInstallSpecs
         Assert.Equal(0, exitCode);
         var agentsDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist", "SKILL.md");
         AssertStub(agentsDir, "mohist");
-        var exploreDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore", "SKILL.md");
-        AssertStub(exploreDir, "mohist-explore");
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore")));
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-create-epic")));
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-create-issue")));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -65,9 +66,11 @@ public sealed class SkillsInstallSpecs
 
         Assert.Equal(0, exitCode);
         AssertStub(Path.Combine(_files.Cwd, ".claude", "skills", "mohist", "SKILL.md"), "mohist");
-        AssertStub(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-explore")));
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-create-epic")));
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-create-issue")));
         Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist", "SKILL.md")));
-        Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore", "SKILL.md")));
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore")));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -114,7 +117,7 @@ public sealed class SkillsInstallSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task Install_HermesTarget_CopiesFullPackagedSkillData()
+    public async Task Install_HermesTarget_WritesEntryDiscoveryStub()
     {
         var hermesHome = Path.Combine("/tmp", $"hermes-home-{Guid.NewGuid():N}");
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
@@ -130,18 +133,15 @@ public sealed class SkillsInstallSpecs
 
             Assert.Equal(0, exitCode);
             var mohistSkill = Path.Combine(hermesHome, "skills", "mohist", "SKILL.md");
-            var exploreSkill = Path.Combine(hermesHome, "skills", "mohist-explore", "SKILL.md");
-            AssertFullPackagedSkill(mohistSkill, "mohist");
-            AssertFullPackagedSkill(exploreSkill, "mohist-explore");
-            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist-create-issue", "references", "issue-templates.md")));
-            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist-create-epic", "references", "epic-templates.md")));
+            AssertStub(mohistSkill, "mohist");
+            Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills", "mohist-explore")));
+            Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills", "mohist-create-epic")));
+            Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills", "mohist-create-issue")));
             Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills", "mohist-po")));
 
             var output = stdout.ToString();
             Assert.Contains("mohist: created", output);
-            Assert.Contains("mohist-explore: created", output);
             Assert.Contains("/mohist", output);
-            Assert.Contains("/mohist-explore", output);
             Assert.Contains("reload/reset", output);
         }
         finally
@@ -177,7 +177,9 @@ public sealed class SkillsInstallSpecs
 
             Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md")));
             Assert.Contains("mohist: updated", secondOutput);
-            Assert.Contains("mohist-explore: updated", secondOutput);
+            Assert.DoesNotContain("mohist-explore:", secondOutput);
+            Assert.DoesNotContain("mohist-create-epic:", secondOutput);
+            Assert.DoesNotContain("mohist-create-issue:", secondOutput);
             Assert.NotEqual(Path.GetFullPath(defaultHermesRoot), Path.GetFullPath(Path.Combine(hermesHome, "skills")));
         }
         finally
@@ -336,16 +338,6 @@ public sealed class SkillsInstallSpecs
         Assert.Contains($"description: {ReadPackagedDescription(name)}", content);
         Assert.Contains($"mo skills get {name}", content);
         Assert.DoesNotContain("<artifact", content);
-    }
-
-    private void AssertFullPackagedSkill(string path, string name)
-    {
-        Assert.True(_files.HasFile(path), $"Expected full Hermes skill at '{path}'.");
-        var content = _files.ReadAllText(path);
-        Assert.Contains($"name: {name}", content);
-        Assert.Contains($"description: {ReadPackagedDescription(name)}", content);
-        Assert.Contains("---", content);
-        Assert.DoesNotContain("This Mohist-managed discovery stub keeps local agent skill installs lightweight and version-matched.", content);
     }
 
     private string ReadPackagedDescription(string name)
