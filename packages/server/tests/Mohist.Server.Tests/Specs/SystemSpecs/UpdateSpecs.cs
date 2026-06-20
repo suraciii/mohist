@@ -48,12 +48,19 @@ public class UpdateSpecs
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
+            var managedCli = Path.Combine(tempRoot, ".local", "share", "mohist", "cli", "mo").Replace('\\', '/');
+            var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
             Assert.Equal(0, exitCode);
             Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
             Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
             Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
+            Assert.Equal(managedCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
             Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
             Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
+            Assert.Equal(managedCli, commands.ExecutedCommands[3].Args[1]);
+            Assert.Equal("chmod", commands.ExecutedCommands[4].FileName);
+            Assert.Equal("+x", commands.ExecutedCommands[4].Args[0]);
+            Assert.Equal(wrapper, commands.ExecutedCommands[4].Args[1]);
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
             Assert.Contains(commands.ExecutedCommands, c =>
@@ -90,14 +97,15 @@ public class UpdateSpecs
         {
             var commands = new FakeCommandExecutor();
             var stdout = new StringWriter();
+            var stderr = new StringWriter();
             var installer = new SystemdServiceInstaller(
                 stdout,
-                new StringWriter(),
+                stderr,
                 files,
                 commands);
             var updater = new SourceCodeUpdater(
                 stdout,
-                new StringWriter(),
+                stderr,
                 installer,
                 commands,
                 files,
@@ -142,7 +150,6 @@ public class UpdateSpecs
         {
 
             var commands = new FakeCommandExecutor();
-            commands.SetNextStdout("/home/user/.local/bin/mo\n");
             var installer = new SystemdServiceInstaller(
                 new StringWriter(),
                 new StringWriter(),
@@ -164,15 +171,20 @@ public class UpdateSpecs
 
             var exitCode = await updater.UpdateCliAsync(tempRoot, dryRun: false);
 
+            var managedCli = Path.Combine(tempRoot, ".local", "share", "mohist", "cli", "mo").Replace('\\', '/');
+            var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
             Assert.Equal(0, exitCode);
-            Assert.Equal("sh", commands.ExecutedCommands[0].FileName);
-            Assert.Equal(new[] { "-lc", "command -v mo" }, commands.ExecutedCommands[0].Args);
-            Assert.Equal("dotnet", commands.ExecutedCommands[1].FileName);
-            Assert.Equal("publish", commands.ExecutedCommands[1].Args[0]);
-            Assert.Equal("cp", commands.ExecutedCommands[2].FileName);
-            Assert.Equal("chmod", commands.ExecutedCommands[3].FileName);
-            Assert.Equal("mv", commands.ExecutedCommands[4].FileName);
-            Assert.Equal("/home/user/.local/bin/mo", commands.ExecutedCommands[4].Args[1]);
+            Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
+            Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
+            Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
+            Assert.Equal(managedCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
+            Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
+            Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
+            Assert.Equal(managedCli, commands.ExecutedCommands[3].Args[1]);
+            Assert.Equal("chmod", commands.ExecutedCommands[4].FileName);
+            Assert.Equal("+x", commands.ExecutedCommands[4].Args[0]);
+            Assert.Equal(wrapper, commands.ExecutedCommands[4].Args[1]);
+            Assert.Equal($"#!/bin/sh{Environment.NewLine}exec \"{managedCli}\" \"$@\"{Environment.NewLine}", files.ReadAllText(wrapper));
             AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
@@ -1906,7 +1918,7 @@ public class UpdateSpecs
 
     private static string HealthySystemInfoJson(string runningGitHash = "abc123", string runnerStatus = "active")
     {
-        return $"{{\"running\":{{\"gitHash\":\"{runningGitHash}\"}},\"services\":{{\"runner\":\"{runnerStatus}\"}}}}";
+        return $"{{\"success\":true,\"data\":{{\"running\":{{\"gitHash\":\"{runningGitHash}\"}},\"services\":{{\"runner\":\"{runnerStatus}\"}}}}}}";
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -2269,7 +2281,7 @@ public class UpdateSpecs
     }
 
     private const string DefaultSystemInfoJson =
-        "{\"running\":{\"gitHash\":\"testsha\"},\"services\":{\"runner\":\"active\"}}";
+        "{\"success\":true,\"data\":{\"running\":{\"gitHash\":\"testsha\"},\"services\":{\"runner\":\"active\"}}}";
 
     private sealed record ResponseSpec(
         HttpStatusCode StatusCode,

@@ -46,14 +46,14 @@ internal sealed class RealFileSystem : IFileSystem
 
     public Task<string> ReadAllTextAsync(string path) => File.ReadAllTextAsync(path, Encoding.UTF8);
 
-    public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents);
+    public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents, new UTF8Encoding(false));
 
     public async Task WriteAllTextAsync(string path, string contents)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
-        await File.WriteAllTextAsync(path, contents, Encoding.UTF8);
+        await File.WriteAllTextAsync(path, contents, new UTF8Encoding(false));
     }
 
     public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) =>

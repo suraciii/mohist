@@ -193,8 +193,8 @@ Workflow 里的 `prompts.proposal` 等模板可以在 Settings → Templates 里
 mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 ```
 
-完整变量列表看 `design/workflow-template-variables.md`。
+完整变量列表看 `design/workflow-profile.md`。
 
 ---
 
-对应源码：`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`、`design/workflow-template-variables.md`。
+对应源码：`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`、`design/workflow-profile.md`。
