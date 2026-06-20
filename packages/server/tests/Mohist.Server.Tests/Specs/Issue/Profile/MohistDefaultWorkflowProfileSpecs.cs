@@ -124,25 +124,25 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
 
-        var prepare = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:prepare");
-        var publish = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:publish");
+        var rebase = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:rebase");
+        var push = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:push");
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:prepare", "integrate:publish" }, integrateIds);
+        Assert.Equal(new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push" }, integrateIds);
         Assert.DoesNotContain("integrate:merge", integrateIds);
-        Assert.Equal("mohist/prepare", prepare.Uses);
-        var prepareWithJson = JsonSerializer.Serialize(prepare.With);
-        Assert.Contains("${{ repository.baseBranch }}", prepareWithJson);
-        Assert.Contains("\"conflictResolver\"", prepareWithJson);
-        Assert.Contains("Resolve prepare conflicts", prepareWithJson);
-        Assert.Equal("mohist/publish", publish.Uses);
-        var publishWithJson = JsonSerializer.Serialize(publish.With);
-        Assert.Contains("workspace.branch", publishWithJson);
-        Assert.Contains("repository.baseBranch", publishWithJson);
-        Assert.Contains("Complete issue #${{ issue.number }}", publishWithJson);
+        Assert.Equal("mohist/rebase", rebase.Uses);
+        var rebaseWithJson = JsonSerializer.Serialize(rebase.With);
+        Assert.Contains("${{ repository.baseBranch }}", rebaseWithJson);
+        Assert.Contains("\"conflictResolver\"", rebaseWithJson);
+        Assert.Contains("Resolve rebase conflicts", rebaseWithJson);
+        Assert.Contains("Complete issue #${{ issue.number }}", rebaseWithJson);
+        Assert.Equal("mohist/push", push.Uses);
+        var pushWithJson = JsonSerializer.Serialize(push.With);
+        Assert.Contains("workspace.branch", pushWithJson);
+        Assert.Contains("repository.baseBranch", pushWithJson);
         var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:prepare", "integrate:publish"], integrateTaskIds);
+        Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push"], integrateTaskIds);
         foreach (var task in definition.Stages[3].Tasks)
         {
             Assert.NotEqual("mohist/merge", task.Uses);
@@ -909,18 +909,12 @@ public class MohistDefaultWorkflowProfileSpecs
 
     private static void AssertSinglePushOwnerInvariant(StageDefinition integrate)
     {
-        var pushTasks = integrate.Tasks
-            .Where(t => t.Id.EndsWith(":push", StringComparison.Ordinal))
-            .Select(t => t.Id)
-            .ToList();
-        Assert.True(pushTasks.Count == 0, $"Integrate stage must not declare push tasks: {string.Join(", ", pushTasks)}");
-
         var deliveryTasks = integrate.Tasks
             .Where(t => t.Id.EndsWith(":publish", StringComparison.Ordinal)
                         || t.Id.EndsWith(":push", StringComparison.Ordinal))
             .Select(t => t.Id)
             .ToList();
-        Assert.Equal(new[] { "integrate:publish" }, deliveryTasks);
+        Assert.Equal(new[] { "integrate:push" }, deliveryTasks);
     }
 
     private static void AssertArtifactPaths(TaskDefinition task, params string[] expectedPathSuffixes)

@@ -37,6 +37,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     /// </summary>
     private string? _lastKnownRunnerId;
     private bool _runDirty;
+    private bool _heartbeatEnsuredThisCommit;
     private string? _dispatchedWorkId;
     private IGrainReminder? _workHeartbeatReminder;
     private readonly IWorkflowRunStore _runStore;
@@ -375,6 +376,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task EnsureWorkHeartbeatAsync()
     {
+        if (_heartbeatEnsuredThisCommit) return;
+        _heartbeatEnsuredThisCommit = true;
+
         if (await FailLostRunningTasksAsync())
             return;
 
@@ -1010,8 +1014,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             await SaveRunAsync(events);
         }
 
+        _heartbeatEnsuredThisCommit = false;
         foreach (var e in events)
             await On(e, reason);
+        _heartbeatEnsuredThisCommit = false;
     }
 
     private Task On(WorkflowEvent e, string? reason = null) =>
