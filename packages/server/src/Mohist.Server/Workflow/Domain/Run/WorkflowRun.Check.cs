@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain;
 
@@ -120,7 +121,7 @@ public static partial class WorkflowRunExtensions
     {
         JsonElement? resultJson = result is null
             ? null
-            : JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
+            : JSON.DeserializeElement(JSON.Serialize(result));
         var repairWith = repairTask.With is not null
             ? new Dictionary<string, JsonElement?>(repairTask.With)
             : new Dictionary<string, JsonElement?>();

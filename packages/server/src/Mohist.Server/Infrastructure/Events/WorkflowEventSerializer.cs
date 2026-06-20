@@ -7,7 +7,7 @@ namespace Mohist.Server.Infrastructure.Events;
 
 internal static class WorkflowEventSerializer
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 
     public static string Type(WorkflowEvent payload) => Unwrap(payload).GetType().Name;
 

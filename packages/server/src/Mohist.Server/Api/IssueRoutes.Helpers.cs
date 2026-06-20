@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
@@ -120,7 +120,7 @@ public static partial class IssueRoutes
             };
         }
 
-        return JsonSerializer.Serialize(with, WorkflowVariableJson.Options);
+        return JSON.Serialize(with);
     }
 
     internal static async Task<IssueWorkflowProfileResponse?> BuildIssueWorkflowProfileResponseAsync(

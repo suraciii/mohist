@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.SystemInfo;
 
@@ -66,7 +67,6 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
 {
     public const string HomeEnvironmentVariable = "HOME";
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _statePath;
     private readonly string _lockPath;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -98,7 +98,7 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
                 return null;
 
             await using var stream = File.OpenRead(_statePath);
-            return await JsonSerializer.DeserializeAsync<SystemUpdateJobState>(stream, JsonOptions, cancellationToken);
+            return await JsonSerializer.DeserializeAsync<SystemUpdateJobState>(stream, JSON.Options, cancellationToken);
         }
         finally
         {
@@ -157,7 +157,7 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
             var tempPath = _statePath + ".tmp";
             await using (var stream = File.Create(tempPath))
             {
-                await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, state, JSON.Options, cancellationToken);
             }
 
             File.Move(tempPath, _statePath, overwrite: true);
@@ -185,7 +185,7 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
             var tempPath = _statePath + ".tmp";
             await using (var stream = File.Create(tempPath))
             {
-                await JsonSerializer.SerializeAsync(stream, next, JsonOptions, cancellationToken);
+                await JsonSerializer.SerializeAsync(stream, next, JSON.Options, cancellationToken);
             }
 
             File.Move(tempPath, _statePath, overwrite: true);
@@ -203,7 +203,7 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
             return null;
 
         await using var stream = File.OpenRead(_statePath);
-        return await JsonSerializer.DeserializeAsync<SystemUpdateJobState>(stream, JsonOptions, cancellationToken);
+        return await JsonSerializer.DeserializeAsync<SystemUpdateJobState>(stream, JSON.Options, cancellationToken);
     }
 
     private bool TryCreateLockFile(string jobId)

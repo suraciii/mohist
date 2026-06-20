@@ -1,8 +1,8 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -67,7 +67,7 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
             workspace,
             agentConfig,
             prompts);
-        return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+        return JSON.Serialize(variables);
     }
 
     public Dictionary<string, Dictionary<string, string>>? BuildStageVariables(Domain.Issue issue, Dictionary<string, Dictionary<string, object?>>? globalStageAgentConfigs = null)
@@ -103,14 +103,14 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
 
         sections["vars"] = sections.TryGetValue("vars", out var existingVars)
             ? MergeVarsJson(existingVars, agentConfig)
-            : JsonSerializer.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options);
+            : JSON.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig });
     }
 
     private static string MergeVarsJson(string existingJson, Dictionary<string, object?> agentConfig)
     {
         try
         {
-            var vars = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson, WorkflowVariableJson.Options)
+            var vars = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson, JSON.Options)
                 ?? new Dictionary<string, object?>(StringComparer.Ordinal);
             var existingAgent = vars.TryGetValue("agent", out var value)
                 ? NormalizeJsonValue(value) as Dictionary<string, object?>
@@ -120,11 +120,11 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
                 : new Dictionary<string, object?>(existingAgent, StringComparer.Ordinal);
             MergeAgentConfig(existingAgent, agentConfig);
             vars["agent"] = existingAgent;
-            return JsonSerializer.Serialize(vars, WorkflowVariableJson.Options);
+            return JSON.Serialize(vars);
         }
         catch
         {
-            return JsonSerializer.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options);
+            return JSON.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig });
         }
     }
 
@@ -147,8 +147,8 @@ public abstract class MohistIssueWorkflowProfileBase : IIssueWorkflowProfile
             JsonValueKind.Number when element.TryGetDouble(out var d) => d,
             JsonValueKind.True => true,
             JsonValueKind.False => false,
-            JsonValueKind.Object => JsonSerializer.Deserialize<Dictionary<string, object?>>(element.GetRawText(), WorkflowVariableJson.Options),
-            JsonValueKind.Array => JsonSerializer.Deserialize<object?[]>(element.GetRawText(), WorkflowVariableJson.Options),
+            JsonValueKind.Object => JsonSerializer.Deserialize<Dictionary<string, object?>>(element.GetRawText(), JSON.Options),
+            JsonValueKind.Array => JsonSerializer.Deserialize<object?[]>(element.GetRawText(), JSON.Options),
             _ => null,
         },
         _ => value,

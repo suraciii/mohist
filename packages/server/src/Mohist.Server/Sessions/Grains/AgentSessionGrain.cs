@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -219,7 +220,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         };
         if (!string.IsNullOrWhiteSpace(summary))
             payload["summary"] = summary;
-        return JsonSerializer.Serialize(payload);
+        return JSON.Serialize(payload);
     }
 
     private static string BuildCompactionEventPayload(
@@ -240,7 +241,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         };
         if (!string.IsNullOrWhiteSpace(summary))
             payload["summary"] = summary;
-        return JsonSerializer.Serialize(payload);
+        return JSON.Serialize(payload);
     }
 
     private async Task PersistRecoveryAsync(
@@ -365,7 +366,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         JsonElement payload;
         try
         {
-            payload = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+            payload = JSON.DeserializeElement(payloadJson);
         }
         catch
         {
@@ -411,7 +412,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         JsonElement payload;
         try
         {
-            payload = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+            payload = JSON.DeserializeElement(payloadJson);
         }
         catch
         {
@@ -454,7 +455,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (!ContextHealthClassifier.ShouldEmitUpdate(previousStatus, previousPercent, percent))
             return null;
 
-        var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+        var payload = JSON.Serialize(new Dictionary<string, object?>
         {
             ["healthStatus"] = newStatus,
             ["contextWindowSize"] = usage.ContextWindowSize,
@@ -515,7 +516,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             JsonElement payload;
             try
             {
-                payload = JsonSerializer.Deserialize<JsonElement>(row.PayloadJson);
+                payload = JSON.DeserializeElement(row.PayloadJson);
             }
             catch (Exception ex)
             {
@@ -750,7 +751,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         AgentSessionRuntimeEventInput runtimeEvent,
         DateTime now)
     {
-        var payload = JsonSerializer.Deserialize<JsonElement>(runtimeEvent.PayloadJson);
+        var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
         return runtimeEvent.Type switch
         {
             RuntimeEventTypes.SessionLiveness => session.RecordActivity(now),

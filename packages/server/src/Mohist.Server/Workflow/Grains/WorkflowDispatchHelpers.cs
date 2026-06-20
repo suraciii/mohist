@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
@@ -14,7 +15,7 @@ internal static class WorkflowDispatchHelpers
 
         var effective = resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object
             ? resolved.Vars.Value
-            : JsonSerializer.Deserialize<JsonElement>("{}");
+            : JSON.DeserializeElement("{}");
 
         if (resolved.Stages is not null
             && !string.IsNullOrWhiteSpace(stage)
@@ -22,7 +23,7 @@ internal static class WorkflowDispatchHelpers
             && stageVars.Vars.HasValue
             && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
         {
-            var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
+            var stageOverlay = JSON.DeserializeElement(JSON.Serialize(stageVars.Vars.Value));
             effective = DeepMergeSkippingNulls(effective, stageOverlay) ?? stageOverlay;
         }
 
@@ -43,7 +44,7 @@ internal static class WorkflowDispatchHelpers
         using var baseDoc = JsonDocument.Parse(@base.Value.GetRawText());
         using var overlayDoc = JsonDocument.Parse(overlay.Value.GetRawText());
         var merged = MergeObjectsSkippingNulls(baseDoc.RootElement, overlayDoc.RootElement);
-        return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(merged, WorkflowVariableJson.Options));
+        return JSON.DeserializeElement(JSON.Serialize(merged));
     }
 
     internal static Dictionary<string, object?> MergeObjectsSkippingNulls(JsonElement @base, JsonElement overlay)
@@ -102,7 +103,7 @@ internal static class WorkflowDispatchHelpers
             }
             current[segments[^1]] = JsonElementToObject(value.Clone());
         }
-        return JsonSerializer.SerializeToElement(root, WorkflowVariableJson.Options);
+        return JSON.SerializeToElement(root);
     }
 
     internal static Dictionary<string, JsonElement?> JsonElementToDictionary(JsonElement element)
@@ -121,7 +122,7 @@ internal static class WorkflowDispatchHelpers
         IReadOnlyDictionary<string, JsonElement> runtimeVariables)
     {
         var runtimeElement = BuildRuntimeVariablesElement(runtimeVariables);
-        var payloadElement = JsonSerializer.SerializeToElement(payload, WorkflowVariableJson.Options);
+        var payloadElement = JSON.SerializeToElement(payload);
         var merged = DeepMergeSkippingNulls(payloadElement, runtimeElement) ?? payloadElement;
         return JsonElementToDictionary(merged);
     }
@@ -243,5 +244,5 @@ internal static class WorkflowDispatchHelpers
     }
 
     internal static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
-        with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
+        with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with, JSON.Options) : null;
 }

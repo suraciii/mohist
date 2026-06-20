@@ -36,10 +36,7 @@ public sealed class CloudEvent
         Extensions = extensions ?? new Dictionary<string, string>();
     }
 
-    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = false,
-    };
+    public static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 }
 
 public sealed class CloudEvent<TData> where TData : class

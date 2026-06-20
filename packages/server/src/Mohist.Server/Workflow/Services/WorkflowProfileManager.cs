@@ -433,13 +433,7 @@ public class WorkflowProfileManager
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
         {
-            return JsonSerializer.Deserialize<WorkflowDefinition>(
-                json,
-                new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                });
+            return JsonSerializer.Deserialize<WorkflowDefinition>(json, Mohist.Server.Infrastructure.JSON.Options);
         }
         catch
         {

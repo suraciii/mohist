@@ -136,7 +136,11 @@ public static class MohistServiceRegistration
         services.AddSingleton<RunnerConnectionTracker>();
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
         services.AddScoped<RunnerStatusService>();
-        services.AddSignalR();
+        services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
+        {
+            CopyJsonOptions(JSON.Options, o.SerializerOptions);
+        });
+        services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options);
 
         return services;
     }
@@ -178,5 +182,18 @@ public static class MohistServiceRegistration
             ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(MohistWorkspaceLayout.RunnerRootEnvironmentVariable)
             ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(MohistWorkspaceLayout.WorkspaceRootEnvironmentVariable);
         return string.IsNullOrWhiteSpace(configured) ? null : configured;
+    }
+
+    private static void CopyJsonOptions(System.Text.Json.JsonSerializerOptions source, System.Text.Json.JsonSerializerOptions target)
+    {
+        target.DefaultIgnoreCondition = source.DefaultIgnoreCondition;
+        target.PropertyNameCaseInsensitive = source.PropertyNameCaseInsensitive;
+        target.Encoder = source.Encoder;
+
+        target.Converters.Clear();
+        foreach (var converter in source.Converters)
+        {
+            target.Converters.Add(converter);
+        }
     }
 }

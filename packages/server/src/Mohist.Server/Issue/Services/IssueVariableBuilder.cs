@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -58,7 +58,7 @@ public static class IssueVariableBuilder
             ? VariableBundle.Empty
             : FromRoot(new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
             {
-                ["agent"] = JsonSerializer.SerializeToElement(agentConfig, WorkflowVariableJson.Options),
+                ["agent"] = JSON.SerializeToElement(agentConfig),
             });
 
         return Build(userDefaults, VariableBundle.Empty, workflowRunId, issue, project, workspace);
@@ -76,10 +76,10 @@ public static class IssueVariableBuilder
         var root = ToRootDictionary(bundle);
         root["vars"] = bundle.Vars.HasValue && bundle.Vars.Value.ValueKind == JsonValueKind.Object
             ? bundle.Vars.Value.Clone()
-            : JsonSerializer.Deserialize<JsonElement>("{}");
+            : JSON.DeserializeElement("{}");
 
         if (prompts is not null)
-            root["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options);
+            root["prompts"] = JSON.SerializeToElement(prompts);
 
         return root;
     }
@@ -101,58 +101,51 @@ public static class IssueVariableBuilder
     {
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
-            ["mohist"] = JsonSerializer.SerializeToElement(
-                new { system = "mohist", runId = workflowRunId },
-                WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(
+            ["mohist"] = JSON.SerializeToElement(
+                new { system = "mohist", runId = workflowRunId }),
+            ["issue"] = JSON.SerializeToElement(
                 new
                 {
                     id = issue.Id,
                     number = issue.Number,
                     title = issue.Title,
                     body = issue.Body ?? string.Empty,
-                },
-                WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(
+                }),
+            ["project"] = JSON.SerializeToElement(
                 new
                 {
                     id = project.Id,
                     name = project.Name,
-                },
-                WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(
+                }),
+            ["repository"] = JSON.SerializeToElement(
                 new
                 {
                     name = project.RepositoryName,
                     gitUrl = project.RepositoryGitUrl,
                     baseBranch = project.RepositoryBaseBranch,
-                },
-                WorkflowVariableJson.Options),
-            ["openspecChangeName"] = JsonSerializer.SerializeToElement(
-                MohistDefaultWorkflowProjection.ChangeName(issue.Number),
-                WorkflowVariableJson.Options),
-            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(
-                MohistDefaultWorkflowProjection.ChangeDir(issue.Number),
-                WorkflowVariableJson.Options),
-            ["workspace"] = JsonSerializer.SerializeToElement(
+                }),
+            ["openspecChangeName"] = JSON.SerializeToElement(
+                MohistDefaultWorkflowProjection.ChangeName(issue.Number)),
+            ["openspecChangeDir"] = JSON.SerializeToElement(
+                MohistDefaultWorkflowProjection.ChangeDir(issue.Number)),
+            ["workspace"] = JSON.SerializeToElement(
                 new
                 {
                     path = workspace.Path,
                     branch = workspace.Branch,
                     changeDir = workspace.ChangeDir,
-                },
-                WorkflowVariableJson.Options),
+                }),
         };
 
-        var varsJson = JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
-        var varsElement = JsonSerializer.Deserialize<JsonElement>(varsJson);
+        var varsJson = JSON.Serialize(variables);
+        var varsElement = JSON.DeserializeElement(varsJson);
         return new VariableBundle(varsElement);
     }
 
     private static VariableBundle FromRoot(Dictionary<string, JsonElement?> variables)
     {
-        var varsJson = JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
-        var varsElement = JsonSerializer.Deserialize<JsonElement>(varsJson);
+        var varsJson = JSON.Serialize(variables);
+        var varsElement = JSON.DeserializeElement(varsJson);
         return new VariableBundle(varsElement);
     }
 

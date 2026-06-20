@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 
@@ -79,7 +80,7 @@ public static class AgentSessionSummaryBuilder
         if (closed is null) return null;
         try
         {
-            var payload = JsonSerializer.Deserialize<JsonElement>(closed.PayloadJson);
+            var payload = JSON.DeserializeElement(closed.PayloadJson);
             if (payload.ValueKind != JsonValueKind.Object) return null;
             var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
             var reason = AgentSessionJsonHelper.GetStringProp(payload, "failureReason");
@@ -132,7 +133,7 @@ public static class AgentSessionSummaryBuilder
     {
         try
         {
-            var payload = JsonSerializer.Deserialize<JsonElement>(part.PayloadJson);
+            var payload = JSON.DeserializeElement(part.PayloadJson);
             if (payload.ValueKind != JsonValueKind.Object) return null;
             return AgentSessionJsonHelper.GetStringProp(payload, "title")
                 ?? AgentSessionJsonHelper.GetStringProp(payload, "toolName");
@@ -147,7 +148,7 @@ public static class AgentSessionSummaryBuilder
     {
         try
         {
-            var payload = JsonSerializer.Deserialize<JsonElement>(part.PayloadJson);
+            var payload = JSON.DeserializeElement(part.PayloadJson);
             if (payload.ValueKind != JsonValueKind.Object) return null;
             return AgentSessionJsonHelper.GetStringProp(payload, "status")
                 ?? AgentSessionJsonHelper.GetStringProp(payload, "state");

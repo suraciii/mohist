@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.Api;
@@ -42,7 +42,7 @@ public static class LogsRoutes
                 bytesRead += System.Text.Encoding.UTF8.GetByteCount(line) + 1;
                 try
                 {
-                    var json = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(line);
+                    var json = JSON.DeserializeElement(line);
                     lines.Add(json);
                 }
                 catch

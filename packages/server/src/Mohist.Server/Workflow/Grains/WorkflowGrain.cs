@@ -662,8 +662,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             case "task":
                 var t = (WorkflowWork.TaskData)work.Data;
                 var taskWith = t.With is not null
-                    ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
-                    : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
+                    ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JSON.SerializeToElement(t.Title) }
+                    : new Dictionary<string, JsonElement?> { ["title"] = JSON.SerializeToElement(t.Title) };
                 return await MakeDispatchAsync(new WorkDispatchRequest(
                     work.Stage, t.Id, "task", t.Title, t.Uses, taskWith,
                     t.Artifacts, t.Outputs), runnerId, markRunning);

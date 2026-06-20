@@ -88,12 +88,7 @@ public class AgentSessionStore : IAgentSessionStore
 
 public static class AgentSessionJson
 {
-    public static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
+    public static readonly JsonSerializerOptions JsonOptions = Mohist.Server.Infrastructure.JSON.Options;
 
     public static AgentSession? Deserialize(AgentSessionRow row)
     {

@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
@@ -216,7 +216,7 @@ public class ProjectGrain : Grain, IProjectGrain
         var entry = await db.Projects.FindAsync(GrainKey);
         if (entry is null) return;
 
-        entry.RepositoriesJson = JsonSerializer.Serialize(_project!.Repositories);
+        entry.RepositoriesJson = JSON.Serialize(_project!.Repositories);
         entry.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
     }
@@ -305,6 +305,6 @@ public class ProjectGrain : Grain, IProjectGrain
         if (values is null || values.Count == 0)
             return null;
 
-        return JsonSerializer.SerializeToElement(values, WorkflowVariableJson.Options);
+        return JSON.SerializeToElement(values);
     }
 }

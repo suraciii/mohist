@@ -1,6 +1,6 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -15,23 +15,6 @@ public class WorkflowQuerier
     private readonly IDbContextFactory<MohistDbContext> _db;
     private readonly WorkflowProfileManager _profileManager;
     private readonly IWorkflowArtifactQuerier _artifactQuerier;
-
-    private static readonly JsonSerializerOptions RunJsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNameCaseInsensitive = true,
-        Converters =
-        {
-            new UnknownFailureReasonJsonConverter(),
-            new JsonStringEnumConverter()
-        }
-    };
-
-    private static readonly JsonSerializerOptions StorageJsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNameCaseInsensitive = true,
-    };
 
     public WorkflowQuerier(
         IDbContextFactory<MohistDbContext> db,
@@ -53,7 +36,7 @@ public class WorkflowQuerier
             .FirstOrDefaultAsync();
         if (runJson is null) return null;
 
-        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, RunJsonOptions);
+        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options);
         if (run is null) return null;
 
         var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
@@ -100,10 +83,7 @@ public class WorkflowQuerier
                     task.RequiredFiles,
                     task.Classification,
                     SessionName: task.SessionName,
-                    ArtifactSummaries: summaries,
-                    StartedAt: task.StartedAt,
-                    CompletedAt: task.CompletedAt,
-                    DurationMs: task.DurationMs);
+                    ArtifactSummaries: summaries);
             }
         }
     }
@@ -118,7 +98,7 @@ public class WorkflowQuerier
             .FirstOrDefaultAsync();
         if (runJson is null) return null;
 
-        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, RunJsonOptions);
+        var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options);
         return run?.Workspace;
     }
 
@@ -129,7 +109,7 @@ public class WorkflowQuerier
             return null;
 
         var varsJson = bundle.Vars.HasValue
-            ? JsonSerializer.Serialize(bundle.Vars.Value, RunJsonOptions)
+            ? JsonSerializer.Serialize(bundle.Vars.Value, JSON.Options)
             : "{}";
 
         Dictionary<string, Dictionary<string, string>>? stageMap = null;
@@ -139,8 +119,8 @@ public class WorkflowQuerier
             foreach (var (stage, stageVars) in bundle.Stages)
             {
                 if (!stageVars.Vars.HasValue) continue;
-                var stageVarsJson = JsonSerializer.Serialize(stageVars.Vars.Value, RunJsonOptions);
-                var inner = JsonSerializer.Deserialize<Dictionary<string, string>>(stageVarsJson, RunJsonOptions);
+                var stageVarsJson = JsonSerializer.Serialize(stageVars.Vars.Value, JSON.Options);
+                var inner = JsonSerializer.Deserialize<Dictionary<string, string>>(stageVarsJson, JSON.Options);
                 if (inner is not null) stageMap[stage] = inner;
             }
         }
@@ -163,7 +143,7 @@ public class WorkflowQuerier
             .FirstOrDefaultAsync();
 
         var run = runJson is not null
-            ? JsonSerializer.Deserialize<WorkflowRun>(runJson, RunJsonOptions)
+            ? JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options)
             : null;
         return run?.HasIncompleteTaskWithUses(uses) ?? false;
     }
@@ -177,38 +157,10 @@ public class WorkflowQuerier
             .FirstOrDefaultAsync();
 
         var run = runJson is not null
-            ? JsonSerializer.Deserialize<WorkflowRun>(runJson, RunJsonOptions)
+            ? JsonSerializer.Deserialize<WorkflowRun>(runJson, JSON.Options)
             : null;
         return run?.HasIncompleteTaskById(id) ?? false;
     }
 
     private sealed record VariablesDto(string Json, Dictionary<string, Dictionary<string, string>>? StageVariables);
-
-    private sealed class UnknownFailureReasonJsonConverter : JsonConverter<FailureReason>
-    {
-        public override FailureReason Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            if (reader.TokenType == JsonTokenType.String)
-            {
-                var value = reader.GetString();
-                return Enum.TryParse<FailureReason>(value, ignoreCase: true, out var reason)
-                    ? reason
-                    : FailureReason.TaskFailed;
-            }
-
-            if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var numeric))
-            {
-                return Enum.IsDefined(typeof(FailureReason), numeric)
-                    ? (FailureReason)numeric
-                    : FailureReason.TaskFailed;
-            }
-
-            return FailureReason.TaskFailed;
-        }
-
-        public override void Write(Utf8JsonWriter writer, FailureReason value, JsonSerializerOptions options)
-        {
-            writer.WriteStringValue(value.ToString());
-        }
-    }
 }

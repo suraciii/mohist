@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 
@@ -126,7 +127,7 @@ internal sealed class TranscriptAccumulator
         if (_pending is null)
             return;
 
-        var payload = JsonSerializer.Serialize(new Dictionary<string, object?>
+        var payload = JSON.Serialize(new Dictionary<string, object?>
         {
             ["text"] = _pending.Text.ToString(),
             ["sourceEventType"] = _pending.SourceEventType,

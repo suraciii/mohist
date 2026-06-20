@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Sessions.Services;
 
@@ -162,7 +163,7 @@ public static class ContextExhaustionClassifier
             var root = doc.RootElement;
             var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var prop in root.EnumerateObject())
-                dict[prop.Name] = JsonSerializer.Deserialize<object?>(prop.Value.GetRawText());
+                dict[prop.Name] = JsonSerializer.Deserialize<object?>(prop.Value.GetRawText(), JSON.Options);
             dict["failureCategory"] = result.Category;
             if (result.ContextUsagePercent is not null && !dict.ContainsKey("contextUsagePercent"))
                 dict["contextUsagePercent"] = result.ContextUsagePercent;
@@ -170,7 +171,7 @@ public static class ContextExhaustionClassifier
                 dict["contextExhaustion"] = result.IsExhausted;
             if (!dict.ContainsKey("contextExhaustionSuspected"))
                 dict["contextExhaustionSuspected"] = result.IsSuspected;
-            return JsonSerializer.Serialize(dict);
+            return JSON.Serialize(dict);
         }
         catch
         {

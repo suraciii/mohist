@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Grains;
@@ -339,10 +341,9 @@ public sealed class WorkflowArtifactUploadService
         DirectoryEnvelopeEnvelope? envelope;
         try
         {
-            envelope = System.Text.Json.JsonSerializer.Deserialize<DirectoryEnvelopeEnvelope>(bytes,
-                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            envelope = JsonSerializer.Deserialize<DirectoryEnvelopeEnvelope>(bytes, JSON.Options);
         }
-        catch (System.Text.Json.JsonException ex)
+        catch (JsonException ex)
         {
             throw new InvalidDataException(
                 $"Directory upload content is not a valid artifact envelope: {ex.Message}", ex);

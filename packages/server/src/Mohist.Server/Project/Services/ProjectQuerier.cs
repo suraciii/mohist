@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Infrastructure.Data.Project;
@@ -138,7 +139,7 @@ public class ProjectQuerier
     {
         Id = e.Id,
         Name = e.Name,
-        Repositories = JsonSerializer.Deserialize<List<RepositoryInfo>>(e.RepositoriesJson) ?? [],
+        Repositories = JsonSerializer.Deserialize<List<RepositoryInfo>>(e.RepositoriesJson, JSON.Options) ?? [],
         Variables = variables ?? ProjectVariablesBag.Empty,
         CreatedAt = e.CreatedAt.ToString("o"),
         UpdatedAt = e.UpdatedAt.ToString("o"),

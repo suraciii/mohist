@@ -1,7 +1,7 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Domain;
@@ -19,12 +19,6 @@ namespace Mohist.Server.Issue.Services;
 
 public class IssueQuerier
 {
-    private static readonly JsonSerializerOptions RunJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
-
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly ProjectQuerier _projects;
@@ -809,7 +803,7 @@ public class IssueQuerier
         if (!vars.Value.TryGetProperty("agent", out var agent) || agent.ValueKind != JsonValueKind.Object)
             return null;
 
-        return JsonSerializer.Deserialize<Dictionary<string, object?>>(agent.GetRawText(), RunJsonOptions);
+        return JsonSerializer.Deserialize<Dictionary<string, object?>>(agent.GetRawText(), JSON.Options);
     }
 
     private static string? ReadAgentModel(Dictionary<string, object?>? agentConfig)
@@ -839,7 +833,7 @@ public class IssueQuerier
 
     private static WorkflowRun? DeserializeRun(string json)
     {
-        try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
+        try { return JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options); }
         catch { return null; }
     }
 

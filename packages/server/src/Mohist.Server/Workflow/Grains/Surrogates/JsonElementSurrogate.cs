@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Orleans.Serialization;
 
 namespace Mohist.Server.Workflow.Grains.Surrogates;
@@ -13,7 +14,7 @@ public struct JsonElementSurrogate
 public sealed class JsonElementSurrogateConverter : IConverter<JsonElement, JsonElementSurrogate>
 {
     public JsonElement ConvertFromSurrogate(in JsonElementSurrogate surrogate) =>
-        JsonSerializer.Deserialize<JsonElement>(surrogate.RawJson);
+        JSON.DeserializeElement(surrogate.RawJson);
 
     public JsonElementSurrogate ConvertToSurrogate(in JsonElement value) => new()
     {

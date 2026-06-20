@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -452,7 +453,7 @@ public class AgentSessionQuerier
     {
         try
         {
-            var payload = JsonSerializer.Deserialize<JsonElement>(json);
+            var payload = JSON.DeserializeElement(json);
             if (payload.ValueKind == JsonValueKind.String) return payload.GetString() ?? string.Empty;
             if (payload.ValueKind != JsonValueKind.Object) return string.Empty;
             foreach (var key in new[] { "title", "toolName", "text", "message", "command" })
@@ -592,7 +593,7 @@ public class AgentSessionQuerier
         Sequence = part.Sequence,
         Type = part.Type,
         PayloadJson = part.Type is "text" or "reasoning"
-            ? JsonSerializer.Serialize(new { text = part.Text })
+            ? JSON.Serialize(new { text = part.Text })
             : part.PayloadJson,
         CreatedAt = part.LastSeenAt,
     };

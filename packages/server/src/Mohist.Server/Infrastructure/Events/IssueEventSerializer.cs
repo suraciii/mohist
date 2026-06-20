@@ -9,7 +9,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// </summary>
 internal static class IssueEventSerializer
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 
     /// <summary>
     /// Storage-facing type: the variant's CLR type name (matches the

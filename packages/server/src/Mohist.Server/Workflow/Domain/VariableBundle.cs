@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Orleans;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Workflow.Domain;
 
@@ -62,7 +63,7 @@ public sealed record VariableBundle(
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
 
     public JsonElement ToElement() =>
-        JsonSerializer.Deserialize<JsonElement>(ToJson());
+        JSON.DeserializeElement(ToJson());
 
     /// <summary>
     /// Set 语义 - 完整替换整个 bundle。
@@ -122,7 +123,7 @@ public sealed record VariableBundle(
             node[property.Name] = MergeNode(existing, property.Value);
         }
 
-        return JsonSerializer.Deserialize<JsonElement>(node.ToJsonString());
+        return JSON.DeserializeElement(node.ToJsonString());
     }
 
     private static JsonNode? MergeNode(JsonNode? existing, JsonElement overlay)
@@ -170,11 +171,7 @@ public sealed record VariableBundle(
         return result;
     }
 
-    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
+    public static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 }
 
 /// <summary>

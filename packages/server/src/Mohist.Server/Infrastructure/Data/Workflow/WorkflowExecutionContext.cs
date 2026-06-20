@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
@@ -12,7 +12,7 @@ public sealed record WorkflowExecutionContext(
     {
         var payload = ParseObject(Json);
         payload[section] = MergeSection(payload.TryGetValue(section, out var existing) ? existing : null, patchJson);
-        return new WorkflowExecutionContext(JsonSerializer.Serialize(payload, WorkflowVariableJson.Options), CopyStageVariables(StageVariables));
+        return new WorkflowExecutionContext(JSON.Serialize(payload), CopyStageVariables(StageVariables));
     }
 
     public WorkflowExecutionContext PatchStageSection(string stage, string section, string patchJson)
@@ -39,7 +39,7 @@ public sealed record WorkflowExecutionContext(
             if (merged is not null) return merged.Value;
         }
 
-        return JsonSerializer.Deserialize<JsonElement>(patchJson).Clone();
+        return JSON.DeserializeElement(patchJson).Clone();
     }
 
     private static JsonElement? DeepMerge(JsonElement existing, string overrideJson)
@@ -49,7 +49,7 @@ public sealed record WorkflowExecutionContext(
             if (existing.ValueKind != JsonValueKind.Object)
                 return null;
 
-            var overrideObj = JsonSerializer.Deserialize<JsonElement>(overrideJson);
+            var overrideObj = JSON.DeserializeElement(overrideJson);
             if (overrideObj.ValueKind != JsonValueKind.Object)
                 return null;
 
@@ -60,7 +60,7 @@ public sealed record WorkflowExecutionContext(
             foreach (var property in overrideObj.EnumerateObject())
                 merged[property.Name] = MergeNode(merged[property.Name], property.Value);
 
-            return JsonSerializer.Deserialize<JsonElement>(merged.ToJsonString());
+            return JSON.DeserializeElement(merged.ToJsonString());
         }
         catch
         {
@@ -84,7 +84,7 @@ public sealed record WorkflowExecutionContext(
     {
         try
         {
-            var existing = JsonSerializer.Deserialize<JsonElement>(existingJson);
+            var existing = JSON.DeserializeElement(existingJson);
             var merged = DeepMerge(existing, patchJson);
             return merged is not null
                 ? merged.Value.GetRawText()
@@ -96,7 +96,7 @@ public sealed record WorkflowExecutionContext(
         }
     }
 
-    private static string NormalizeJsonString(string json) => JsonSerializer.Deserialize<JsonElement>(json).GetRawText();
+    private static string NormalizeJsonString(string json) => JSON.DeserializeElement(json).GetRawText();
 
     private static Dictionary<string, Dictionary<string, string>>? CopyStageVariables(Dictionary<string, Dictionary<string, string>>? source)
     {
