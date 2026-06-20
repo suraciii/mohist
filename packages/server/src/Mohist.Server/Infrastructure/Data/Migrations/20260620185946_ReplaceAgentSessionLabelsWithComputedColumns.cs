@@ -13,69 +13,44 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             migrationBuilder.DropTable(
                 name: "AgentSessionLabels");
 
-            migrationBuilder.AddColumn<string>(
-                name: "LabelIssueNumber",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/issue-number\"')",
-                stored: true);
+            // SQLite refuses ALTER TABLE ADD COLUMN ... STORED, so add each label
+            // column as a plain nullable string, then AlterColumn to the STORED
+            // computed definition — AlterColumn triggers EF Core's automatic
+            // SQLite table rebuild, which emits CREATE TABLE ... AS (...) STORED.
+            var labelColumns = new (string Name, string Expression)[]
+            {
+                ("LabelIssueNumber", "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/issue-number\"')"),
+                ("LabelProjectId",   "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/project-id\"')"),
+                ("LabelSessionName", "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/session-name\"')"),
+                ("LabelSourceId",    "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-id\"')"),
+                ("LabelSourceKind",  "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-kind\"')"),
+                ("LabelStage",       "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/stage\"')"),
+                ("LabelWorkId",      "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-id\"')"),
+                ("LabelWorkType",    "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-type\"')"),
+            };
 
-            migrationBuilder.AddColumn<string>(
-                name: "LabelProjectId",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/project-id\"')",
-                stored: true);
+            foreach (var (name, _) in labelColumns)
+            {
+                migrationBuilder.AddColumn<string>(
+                    name: name,
+                    table: "AgentSessions",
+                    type: "TEXT",
+                    nullable: true);
+            }
 
-            migrationBuilder.AddColumn<string>(
-                name: "LabelSessionName",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/session-name\"')",
-                stored: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "LabelSourceId",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-id\"')",
-                stored: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "LabelSourceKind",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-kind\"')",
-                stored: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "LabelStage",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/stage\"')",
-                stored: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "LabelWorkId",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-id\"')",
-                stored: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "LabelWorkType",
-                table: "AgentSessions",
-                type: "TEXT",
-                nullable: true,
-                computedColumnSql: "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-type\"')",
-                stored: true);
+            foreach (var (name, expression) in labelColumns)
+            {
+                migrationBuilder.AlterColumn<string>(
+                    name: name,
+                    table: "AgentSessions",
+                    type: "TEXT",
+                    nullable: true,
+                    computedColumnSql: expression,
+                    stored: true,
+                    oldClrType: typeof(string),
+                    oldType: "TEXT",
+                    oldNullable: true);
+            }
 
             migrationBuilder.CreateIndex(
                 name: "IX_AgentSessions_LabelProjectId_CreatedAt",
