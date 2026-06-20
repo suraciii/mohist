@@ -17,6 +17,7 @@ import {
   setRebaseExistsCheckerForTest,
 } from "../src/actions/rebase.js"
 import type { LandingWorkspaceInfo } from "../src/runtime/workspace.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionContext, ActionResult, JsonObject, WorkItem } from "../src/core/types.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { DeliveryWorkspaceManager } from "../src/actions/registry.js"
@@ -116,7 +117,7 @@ function buildRegistry(handlers: Record<string, (ctx: ActionContext) => Promise<
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    { ensure: async () => ({ path: worktree.workDir, branch: worktree.branch, changeDir: null }) } as never,
+    verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch, changeDir: null }),
     connection as never,
     {} as never,
     null,
@@ -467,12 +468,10 @@ describe("Issue #112 regression — agent leftover never silently committed by d
           return gitOk("From origin\n * branch            master     -> FETCH_HEAD")
         case "rev-parse origin/master":
           return gitOk("base-sha\n")
-        case "checkout master":
+        case "checkout -B master origin/master":
           return gitOk("Switched to branch 'master'")
         case "status --porcelain":
           return gitOk("")
-        case "merge --ff-only origin/master":
-          return gitOk("Already up to date.")
         case "merge-base --is-ancestor origin/master mo/issue-112":
           return gitOk("")
         case "merge --squash mo/issue-112":
