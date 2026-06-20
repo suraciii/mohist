@@ -123,9 +123,9 @@ Prefer fewer dependencies — if two issues seem tightly coupled, re-check wheth
 Branch on the scope decision:
 
 - **Single issue:** assemble the three voices into one PRD using `references/issue-body-template.md`.
-- **Epic + issues:** write the epic description (Goal / Background / Non-goals / Scope — shape in the `mohist` skill's `references/epic-templates.md`), then one PRD per child issue using `references/issue-body-template.md`, each scoped to its own context + concern. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
+- **Epic + issues:** write the epic description (Goal / Background / Non-goals / Scope — shape in the `mohist-create-epic` skill's `references/epic-templates.md`), then one PRD per child issue using `references/issue-body-template.md`, each scoped to its own context + concern. Include the dependency list and suggested start order from the Scope stage so the epic can be advanced one issue at a time.
 
-The PRD content is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the `mohist` skill's job at creation time.
+The PRD content is pure content — it does not carry frontmatter, workflow recommendations, or risk ratings. Those are the create skills' job at creation time (`mohist-create-issue` / `mohist-create-epic`).
 
 Present the assembled output (single PRD, or epic description + issue PRDs) to the user for confirmation before anything is created.
 
@@ -144,7 +144,7 @@ Common backtrack triggers:
 
 ## Boundaries
 
-- Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist` skill's responsibility. This skill produces PRD *content*; `mohist` turns it into an issue.
+- Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist-create-issue` skill's responsibility. This skill produces PRD *content*; the create skills turn it into an issue or epic.
 - Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
 - The PRD body carries no source paths, file names, line numbers, or symbol names. You explore code to ground your understanding; the PRD itself is product-facing prose.
 - When splitting: never cut one problem along a layer seam (frontend vs backend); never over-split scattered trivial changes into many issues — bundle them. Otherwise follow the split rules above.
@@ -155,9 +155,9 @@ Common backtrack triggers:
 
 When the output is confirmed:
 
-- **Single issue:** point the user to the `mohist` skill — it adds frontmatter, recommends workflow/risk, and runs `mo issue create` after confirmation.
-- **Epic + issues:** point the user to the `mohist` skill — it creates the epic (`mo epic create`), creates each issue (`mo issue create`), links them (`mo epic link`), and sets prerequisites. The epic description and each issue PRD become the bodies; `mohist` owns all CLI mechanics.
+- **Single issue:** point the user to the `mohist-create-issue` skill — it adds frontmatter, recommends workflow/risk, classifies with labels, and runs `mo issue create` after confirmation.
+- **Epic + issues:** point the user to `mohist-create-epic` for the epic (`mo epic create`, link, prerequisites, lifecycle) and to `mohist-create-issue` for each child issue (`mo issue create`). The epic description and each issue PRD become the bodies; the create skills own all CLI mechanics.
 
-In both cases this skill produces only **content**; `mohist` owns the frontmatter and CLI execution.
+In both cases this skill produces only **content**; the create skills own the frontmatter and CLI execution.
 
-The issue PRD template is at `references/issue-body-template.md`. The epic description shape (Goal / Background / Non-goals / Scope) is in the `mohist` skill's `references/epic-templates.md`.
+The issue PRD template is at `references/issue-body-template.md`. The epic description shape (Goal / Background / Non-goals / Scope) is in the `mohist-create-epic` skill's `references/epic-templates.md`.

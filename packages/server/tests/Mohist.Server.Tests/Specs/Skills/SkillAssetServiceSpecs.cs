@@ -20,6 +20,8 @@ public sealed class SkillAssetServiceSpecs : IDisposable
         Assert.Collection(
             skills,
             skill => Assert.Equal("mohist", skill.Name),
+            skill => Assert.Equal("mohist-create-epic", skill.Name),
+            skill => Assert.Equal("mohist-create-issue", skill.Name),
             skill => Assert.Equal("mohist-explore", skill.Name));
         Assert.All(skills, skill => Assert.False(string.IsNullOrWhiteSpace(skill.Description)));
     }

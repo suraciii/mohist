@@ -133,7 +133,8 @@ public sealed class SkillsInstallSpecs
             var exploreSkill = Path.Combine(hermesHome, "skills", "mohist-explore", "SKILL.md");
             AssertFullPackagedSkill(mohistSkill, "mohist");
             AssertFullPackagedSkill(exploreSkill, "mohist-explore");
-            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist", "references", "issue-templates.md")));
+            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist-create-issue", "references", "issue-templates.md")));
+            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist-create-epic", "references", "epic-templates.md")));
             Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills", "mohist-po")));
 
             var output = stdout.ToString();
