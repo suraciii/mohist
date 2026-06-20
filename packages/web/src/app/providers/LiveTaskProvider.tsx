@@ -37,6 +37,21 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
+function routeTranscriptEventName(name: string): string {
+  switch (name) {
+    case 'message.delta':
+      return 'coder_text_chunk'
+    case 'reasoning.delta':
+      return 'coder_thought_chunk'
+    case 'tool_call.started':
+    case 'tool_call.updated':
+    case 'tool_call.completed':
+      return 'coder_tool_call'
+    default:
+      return name
+  }
+}
+
 /**
  * Map transcript event names to the legacy detail-event names that UI surfaces
  * (timeline, activity, session transcript) subscribe to. The producer emits the

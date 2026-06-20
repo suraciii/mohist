@@ -70,8 +70,31 @@ public sealed partial class Epic
         RecordEvent(new EpicUpdated(updatedTitle, updatedDescription, updatedPriority));
     }
 
+    public void Pause(string? reason, DateTime? now = null)
+    {
+        EnsureNotTerminal(EpicStatus.Paused);
+        if (_status is EpicStatus.Paused) return;
+        var oldStatus = _status;
+        _status = EpicStatus.Paused;
+        _pauseReason = reason;
+        Touch(now);
+        RecordEvent(new EpicStatusChanged(ToStatusName(oldStatus), ToStatusName(_status)));
+    }
+
+    public void Resume(DateTime? now = null)
+    {
+        if (_status is not EpicStatus.Paused) return;
+        var oldStatus = _status;
+        _status = EpicStatus.Active;
+        _pauseReason = null;
+        Touch(now);
+        RecordEvent(new EpicStatusChanged(ToStatusName(oldStatus), ToStatusName(_status)));
+    }
+
     public void MarkDone(IReadOnlySet<int> undeliveredLinkedNumbers, DateTime? now = null)
     {
+        if (_status is EpicStatus.Paused)
+            throw new EpicPausedCannotMarkDoneException(Id);
         EnsureNotTerminal(EpicStatus.Done);
         if (undeliveredLinkedNumbers.Count > 0)
             throw new EpicNotReadyToMarkDoneException(Id, undeliveredLinkedNumbers.Count);
@@ -120,6 +143,7 @@ public sealed partial class Epic
     private static string ToStatusName(EpicStatus status) => status switch
     {
         EpicStatus.Active => "active",
+        EpicStatus.Paused => "paused",
         EpicStatus.Done => "done",
         EpicStatus.Closed => "closed",
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),

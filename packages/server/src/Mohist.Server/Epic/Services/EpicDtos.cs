@@ -12,7 +12,8 @@ public sealed record EpicDto(
     [property: Id(4)] string Priority,
     [property: Id(5)] string Status,
     [property: Id(6)] string CreatedAt,
-    [property: Id(7)] string UpdatedAt);
+    [property: Id(7)] string UpdatedAt,
+    [property: Id(8)] string? PauseReason = null);
 
 public sealed record EpicProgressDto(
     int DeliveredCount,
@@ -40,7 +41,8 @@ public sealed record EpicWithProgressDto(
     string Status,
     string CreatedAt,
     string UpdatedAt,
-    EpicProgressDto Progress);
+    EpicProgressDto Progress,
+    string? PauseReason = null);
 
 public sealed record LinkedIssueDto(
     string Id,
@@ -63,4 +65,5 @@ public sealed record EpicDetailDto(
     string CreatedAt,
     string UpdatedAt,
     IReadOnlyList<LinkedIssueDto> LinkedIssues,
-    EpicProgressDto Progress);
+    EpicProgressDto Progress,
+    string? PauseReason = null);

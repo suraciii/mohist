@@ -32,7 +32,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("draft", "Draft", "spec/task")],
             [new("plan-ok", "Plan OK", "spec/check")]);
-        // The new task lifecycle (PR #140) requires a task to transition through
+// The new task lifecycle (PR #140) requires a task to transition through
         // Pending → Running → Completed. Mirror that here before completing the
         // draft task so the stage reaches AwaitingApproval.
         run.StartTask("draft.1", "runner-1");
@@ -219,7 +219,7 @@ public class ApprovalFeedbackSpecs
         var run = BuildAwaitingApprovalRun();
         run.RequestChanges("first revision");
 
-        // The apply-feedback runtime task added by RequestChanges needs to be
+// The apply-feedback runtime task added by RequestChanges needs to be
         // completed (Pending → Running → Completed) before the stage is ready
         // for approval again. Drive it through the full lifecycle and pass
         // the checks before asserting AwaitingApproval.
@@ -274,7 +274,7 @@ public class ApprovalFeedbackSpecs
         run.InitializeStage(
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]);
-        run.StartTask("compile.1", "runner-1");
+run.StartTask("compile.1", "runner-1");
         run.FailTask(new TaskResult("failed", "boom"));
 
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);

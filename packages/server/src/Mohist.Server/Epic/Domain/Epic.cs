@@ -9,6 +9,7 @@ public sealed partial class Epic
     private string _description = "";
     private EpicPriority _priority = EpicPriority.Default;
     private EpicStatus _status = EpicStatus.Active;
+    private string? _pauseReason;
     private DateTime _createdAt;
     private DateTime _updatedAt;
     private readonly Dictionary<string, int> _linkedIssueNumbers = new(StringComparer.Ordinal);
@@ -52,6 +53,12 @@ public sealed partial class Epic
     {
         get => _updatedAt;
         init => _updatedAt = value;
+    }
+
+    public string? PauseReason
+    {
+        get => _pauseReason;
+        init => _pauseReason = value;
     }
 
     [JsonIgnore]

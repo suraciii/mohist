@@ -34,6 +34,14 @@ public class EpicProgressSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public void IsTerminal_OnPaused_ReturnsFalse()
+    {
+        Assert.False(EpicProgress.IsTerminal(EpicStatus.Paused));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public void IsCompleted_OnDoneStatus_ReturnsTrue()
     {
         var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "done", Stage: "", Health: "active", Priority: "p2");

@@ -108,7 +108,7 @@ public class WorkflowRunContextExhaustionBlockSpecs
         var run = WorkflowRun.Create("wr-block-4", BuildDefinition());
         run.Start();
         run.InitializeStage(BuildDefinition().Stages[0].Tasks, BuildDefinition().Stages[0].Checks);
-        run.StartTask("work-1", "runner-1");
+run.StartTask("work-1", "runner-1");
         run.FailTask(new TaskResult("failed", "compile error"));
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: 95d, sessionId: null);
 

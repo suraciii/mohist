@@ -3,6 +3,7 @@ import { SidebarTrigger, useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
 import { PlusIcon } from 'lucide-react'
 import { useAgentStatus } from '../../../entities/agent'
+import { useEpic } from '../../../entities/epic'
 
 function usePageTitle(): string {
   const location = useLocation()
@@ -11,12 +12,17 @@ function usePageTitle(): string {
   const firstSegment = segments[0] ?? ''
   const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
 
+  const { data: epic, isLoading: epicLoading } = useEpic(params.id ?? '')
+
   if (firstSegment === 'issues') {
     return segments.length > 1 ? `Issue #${params.number ?? segments[1]}` : 'Issues'
   }
   if (firstSegment === 'activity') return 'Activity'
   if (firstSegment === 'epics') {
-    if (segments.length > 1) return `Epic #${params.id?.slice(0, 8) ?? ''}`
+    if (segments.length > 1) {
+      if (epicLoading) return 'Epic #\u2026'
+      return `Epic #${epic?.number ?? ''}`
+    }
     return 'Epics'
   }
   if (firstSegment === 'archived') return 'Archived'
@@ -30,7 +36,10 @@ function usePageTitle(): string {
   if (section === '/issues') return 'Issues'
   if (section.startsWith('/activity')) return 'Activity'
   if (section === '/epics') return 'Epics'
-  if (section.startsWith('/epics/')) return `Epic #${params.id?.slice(0, 8) ?? ''}`
+  if (section.startsWith('/epics/')) {
+    if (epicLoading) return 'Epic #\u2026'
+    return `Epic #${epic?.number ?? ''}`
+  }
   if (section.startsWith('/issues/')) {
     return `Issue #${params.number ?? section.split('/')[2]}`
   }

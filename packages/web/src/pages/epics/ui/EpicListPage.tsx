@@ -26,11 +26,13 @@ function PriorityBadge({ priority }: { priority: string }) {
 function StatusBadge({ status }: { status: EpicStatus }) {
   const colors: Record<EpicStatus, string> = {
     [EpicStatus.Active]: 'bg-green-100 text-green-700',
+    [EpicStatus.Paused]: 'bg-amber-100 text-amber-700',
     [EpicStatus.Done]: 'bg-blue-100 text-blue-700',
     [EpicStatus.Closed]: 'bg-gray-100 text-gray-700',
   }
   const labels: Record<EpicStatus, string> = {
     [EpicStatus.Active]: 'Active',
+    [EpicStatus.Paused]: 'Paused',
     [EpicStatus.Done]: 'Done',
     [EpicStatus.Closed]: 'Closed',
   }
@@ -80,10 +82,15 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { progress } = epic
+  const isPaused = epic.status === EpicStatus.Paused
 
   return (
     <Card
-      className="p-4 hover:border-muted-foreground/30 transition-colors cursor-pointer"
+      className={`p-4 transition-colors cursor-pointer ${
+        isPaused
+          ? 'opacity-60 hover:opacity-80'
+          : 'hover:border-muted-foreground/30'
+      }`}
       onClick={() => navigate(toProjectPath(`/epics/${epic.id}`))}
     >
       <div className="flex items-start justify-between gap-3">
@@ -174,6 +181,7 @@ export function EpicListPage() {
   const [showCreate, setShowCreate] = useState(false)
 
   const activeEpics = epics?.filter(e => e.status === EpicStatus.Active) ?? []
+  const pausedEpics = epics?.filter(e => e.status === EpicStatus.Paused) ?? []
   const doneEpics = epics?.filter(e => e.status === EpicStatus.Done) ?? []
   const closedEpics = epics?.filter(e => e.status === EpicStatus.Closed) ?? []
 
@@ -213,6 +221,17 @@ export function EpicListPage() {
               defaultExpanded={true}
               testIdPrefix="epic-section-active"
             />
+          )}
+
+          {pausedEpics.length > 0 && (
+            <section>
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Paused</h2>
+              <div className="grid gap-4">
+                {pausedEpics.map(epic => (
+                  <EpicCard key={epic.id} epic={epic} />
+                ))}
+              </div>
+            </section>
           )}
 
           {doneEpics.length > 0 && (

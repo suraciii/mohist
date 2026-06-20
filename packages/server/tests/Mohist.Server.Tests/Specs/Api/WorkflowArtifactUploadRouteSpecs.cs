@@ -49,47 +49,53 @@ public class WorkflowArtifactUploadRouteSpecs
     [Fact]
     public async Task UploadEndpoint_AcceptsMultipartAndReturnsUploadId()
     {
-        var (workflowRunId, workId) = await SetupActiveWorkAsync();
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var path = "review.md";
+            var payload = Encoding.UTF8.GetBytes("the actual review content");
+            using var form = BuildMultipart(path, payload, "text/markdown", "sha256:hash1", payload.LongLength);
 
-        var path = "review.md";
-        var payload = Encoding.UTF8.GetBytes("the actual review content");
-        using var form = BuildMultipart(path, payload, "text/markdown", "sha256:hash1", payload.LongLength);
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
 
-        using var response = await _fixture.Client.PostAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-            form);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var data = json.GetProperty("data");
+            var uploadId = data.GetProperty("uploadId").GetString()!;
+            Assert.StartsWith("artup_", uploadId);
+            Assert.Equal(workflowRunId, data.GetProperty("workflowRunId").GetString());
+            Assert.Equal(workId, data.GetProperty("workId").GetString());
+            Assert.Equal(path, data.GetProperty("path").GetString());
+            Assert.Equal("text/markdown", data.GetProperty("contentType").GetString());
+            Assert.Equal("sha256:hash1", data.GetProperty("contentHash").GetString());
+            Assert.Equal(payload.LongLength, data.GetProperty("size").GetInt64());
+            Assert.False(data.GetProperty("idempotent").GetBoolean());
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = json.GetProperty("data");
-        var uploadId = data.GetProperty("uploadId").GetString()!;
-        Assert.StartsWith("artup_", uploadId);
-        Assert.Equal(workflowRunId, data.GetProperty("workflowRunId").GetString());
-        Assert.Equal(workId, data.GetProperty("workId").GetString());
-        Assert.Equal(path, data.GetProperty("path").GetString());
-        Assert.Equal("text/markdown", data.GetProperty("contentType").GetString());
-        Assert.Equal("sha256:hash1", data.GetProperty("contentHash").GetString());
-        Assert.Equal(payload.LongLength, data.GetProperty("size").GetInt64());
-        Assert.False(data.GetProperty("idempotent").GetBoolean());
+            // Pending upload row exists, but no bound artifact yet.
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var pending = await db.WorkflowArtifactPendingUploads
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UploadId == uploadId);
+            Assert.NotNull(pending);
+            Assert.Equal(path, pending!.Path);
+            Assert.Equal("text/markdown", pending.ContentType);
+            Assert.Equal("sha256:hash1", pending.ContentHash);
+            Assert.Equal(payload.LongLength, pending.Size);
+            Assert.False(string.IsNullOrEmpty(pending.StoragePath));
 
-        // Pending upload row exists, but no bound artifact yet.
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var pending = await db.WorkflowArtifactPendingUploads
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UploadId == uploadId);
-        Assert.NotNull(pending);
-        Assert.Equal(path, pending!.Path);
-        Assert.Equal("text/markdown", pending.ContentType);
-        Assert.Equal("sha256:hash1", pending.ContentHash);
-        Assert.Equal(payload.LongLength, pending.Size);
-        Assert.False(string.IsNullOrEmpty(pending.StoragePath));
-
-        var bound = await db.WorkflowArtifacts
-            .AsNoTracking()
-            .Where(a => a.WorkflowRunId == workflowRunId)
-            .ToListAsync();
-        Assert.Empty(bound);
+            var bound = await db.WorkflowArtifacts
+                .AsNoTracking()
+                .Where(a => a.WorkflowRunId == workflowRunId)
+                .ToListAsync();
+            Assert.Empty(bound);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -97,39 +103,46 @@ public class WorkflowArtifactUploadRouteSpecs
     [Fact]
     public async Task UploadEndpoint_SameKeySameHashIsIdempotent()
     {
-        var (workflowRunId, workId) = await SetupActiveWorkAsync();
-        var path = "review.md";
-        var payload = Encoding.UTF8.GetBytes("identical content");
-
-        using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:stable", payload.LongLength))
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
         {
-            using var first = await _fixture.Client.PostAsync(
-                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                form);
-            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-            var firstJson = await first.Content.ReadFromJsonAsync<JsonElement>();
-            var firstId = firstJson.GetProperty("data").GetProperty("uploadId").GetString();
-            Assert.False(firstJson.GetProperty("data").GetProperty("idempotent").GetBoolean());
+            var path = "review.md";
+            var payload = Encoding.UTF8.GetBytes("identical content");
+
+            using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:stable", payload.LongLength))
+            {
+                using var first = await _fixture.Client.PostAsync(
+                    $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                    form);
+                Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+                var firstJson = await first.Content.ReadFromJsonAsync<JsonElement>();
+                var firstId = firstJson.GetProperty("data").GetProperty("uploadId").GetString();
+                Assert.False(firstJson.GetProperty("data").GetProperty("idempotent").GetBoolean());
+            }
+
+            using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:stable", payload.LongLength))
+            {
+                using var second = await _fixture.Client.PostAsync(
+                    $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                    form);
+                Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+                var secondJson = await second.Content.ReadFromJsonAsync<JsonElement>();
+                var secondId = secondJson.GetProperty("data").GetProperty("uploadId").GetString();
+                Assert.True(secondJson.GetProperty("data").GetProperty("idempotent").GetBoolean());
+                // Same id is returned, no second row created.
+                await using var scope = _fixture.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+                var rows = await db.WorkflowArtifactPendingUploads
+                    .AsNoTracking()
+                    .Where(p => p.WorkflowRunId == workflowRunId)
+                    .ToListAsync();
+                Assert.Single(rows);
+                Assert.Equal(secondId, rows[0].UploadId);
+            }
         }
-
-        using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:stable", payload.LongLength))
+        finally
         {
-            using var second = await _fixture.Client.PostAsync(
-                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                form);
-            Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-            var secondJson = await second.Content.ReadFromJsonAsync<JsonElement>();
-            var secondId = secondJson.GetProperty("data").GetProperty("uploadId").GetString();
-            Assert.True(secondJson.GetProperty("data").GetProperty("idempotent").GetBoolean());
-            // Same id is returned, no second row created.
-            await using var scope = _fixture.Services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            var rows = await db.WorkflowArtifactPendingUploads
-                .AsNoTracking()
-                .Where(p => p.WorkflowRunId == workflowRunId)
-                .ToListAsync();
-            Assert.Single(rows);
-            Assert.Equal(secondId, rows[0].UploadId);
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
 
@@ -138,39 +151,46 @@ public class WorkflowArtifactUploadRouteSpecs
     [Fact]
     public async Task UploadEndpoint_SameKeyDifferentHashReturnsConflict()
     {
-        var (workflowRunId, workId) = await SetupActiveWorkAsync();
-        var path = "review.md";
-        var payload = Encoding.UTF8.GetBytes("first");
-
-        using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:aaa", payload.LongLength))
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
         {
-            using var first = await _fixture.Client.PostAsync(
-                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                form);
-            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        }
+            var path = "review.md";
+            var payload = Encoding.UTF8.GetBytes("first");
 
-        var secondPayload = Encoding.UTF8.GetBytes("second");
-        using (var form = BuildMultipart(path, secondPayload, "text/markdown", "sha256:bbb", secondPayload.LongLength))
+            using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:aaa", payload.LongLength))
+            {
+                using var first = await _fixture.Client.PostAsync(
+                    $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                    form);
+                Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+            }
+
+            var secondPayload = Encoding.UTF8.GetBytes("second");
+            using (var form = BuildMultipart(path, secondPayload, "text/markdown", "sha256:bbb", secondPayload.LongLength))
+            {
+                using var conflict = await _fixture.Client.PostAsync(
+                    $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                    form);
+                Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+                var body = await conflict.Content.ReadFromJsonAsync<JsonElement>();
+                Assert.Equal("artifact_upload_conflict", body.GetProperty("code").GetString());
+                var details = body.GetProperty("details");
+                Assert.Equal("sha256:aaa", details.GetProperty("existingContentHash").GetString());
+                Assert.Equal("sha256:bbb", details.GetProperty("incomingContentHash").GetString());
+            }
+
+            // Original content is preserved.
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var row = await db.WorkflowArtifactPendingUploads
+                .AsNoTracking()
+                .FirstAsync(p => p.WorkflowRunId == workflowRunId);
+            Assert.Equal("sha256:aaa", row.ContentHash);
+        }
+        finally
         {
-            using var conflict = await _fixture.Client.PostAsync(
-                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                form);
-            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
-            var body = await conflict.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("artifact_upload_conflict", body.GetProperty("code").GetString());
-            var details = body.GetProperty("details");
-            Assert.Equal("sha256:aaa", details.GetProperty("existingContentHash").GetString());
-            Assert.Equal("sha256:bbb", details.GetProperty("incomingContentHash").GetString());
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
-
-        // Original content is preserved.
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.WorkflowArtifactPendingUploads
-            .AsNoTracking()
-            .FirstAsync(p => p.WorkflowRunId == workflowRunId);
-        Assert.Equal("sha256:aaa", row.ContentHash);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -202,20 +222,27 @@ public class WorkflowArtifactUploadRouteSpecs
     [Fact]
     public async Task UploadEndpoint_MissingPathFieldReturnsBadRequest()
     {
-        var (workflowRunId, workId) = await SetupActiveWorkAsync();
-        var form = new MultipartFormDataContent("----mohist-test-" + Guid.NewGuid().ToString("N"));
-        var bytes = Encoding.UTF8.GetBytes("x");
-        form.Add(new StringContent("text/plain"), "contentType");
-        form.Add(new StringContent("sha256:x"), "contentHash");
-        form.Add(new StringContent("1"), "size");
-        var stream = new ByteArrayContent(bytes);
-        stream.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
-        form.Add(stream, "content", "x.bin");
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var form = new MultipartFormDataContent("----mohist-test-" + Guid.NewGuid().ToString("N"));
+            var bytes = Encoding.UTF8.GetBytes("x");
+            form.Add(new StringContent("text/plain"), "contentType");
+            form.Add(new StringContent("sha256:x"), "contentHash");
+            form.Add(new StringContent("1"), "size");
+            var stream = new ByteArrayContent(bytes);
+            stream.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+            form.Add(stream, "content", "x.bin");
 
-        using var response = await _fixture.Client.PostAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-            form);
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -259,9 +286,11 @@ public class WorkflowArtifactUploadRouteSpecs
     /// Set up a workflow that has been started, claimed by a runner, and
     /// has had its first task polled — that is the only state in which
     /// <c>WorkflowGrain.GetActiveWorkAsync</c> returns a non-null view.
-    /// Returns <c>(workflowRunId, workId)</c> for the active task.
+    /// Returns <c>(workflowRunId, workId, runnerId)</c> for the active task.
+    /// The caller is responsible for unregistering the runner after
+    /// assertions to prevent the heartbeat from failing the task early.
     /// </summary>
-    private async Task<(string workflowRunId, string workId)> SetupActiveWorkAsync()
+    private async Task<(string workflowRunId, string workId, string runnerId)> SetupActiveWorkAsync()
     {
         var projectName = UniqueProjectName("art");
         var projectResponse = await _fixture.Client.PostAsJsonAsync(
@@ -312,10 +341,10 @@ public class WorkflowArtifactUploadRouteSpecs
             if (work is null) await Task.Delay(20);
         }
         Assert.NotNull(work);
-        // Note: the runner is intentionally left registered here. Unregistering
+// Note: the runner is intentionally left registered here. Unregistering
         // would fail the in-flight task via the runner-lost notification, which
         // would break the subsequent upload assertions that require an active
         // task. The runner is short-lived and torn down with the silo.
-        return (workflowRunId, work!.WorkId);
+        return (workflowRunId, work!.WorkId, runnerId);
     }
 }

@@ -3,6 +3,7 @@ using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
+using System.Net.Http.Json;
 
 namespace Mohist.Server.Api;
 
@@ -104,6 +105,8 @@ public static class EpicRoutes
             await SetStatusRouteAsync(context, id, "done", grains, queryService));
         group.MapPost("/{id}/close", async (HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService) =>
             await SetStatusRouteAsync(context, id, "closed", grains, queryService));
+        group.MapPost("/{id}/pause", PauseRouteAsync);
+        group.MapPost("/{id}/resume", ResumeRouteAsync);
 
         return app;
     }
@@ -130,9 +133,70 @@ public static class EpicRoutes
         {
             return ApiResults.Conflict(ex.Message, "EPIC_ALREADY_TERMINAL", new { currentStatus = ex.CurrentStatus, requestedStatus = ex.RequestedStatus });
         }
+        catch (EpicPausedCannotMarkDoneException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "EPIC_PAUSED_CANNOT_MARK_DONE");
+        }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
             return ApiResults.NotFound(ex.Message);
+        }
+    }
+
+    private static async Task<IResult> PauseRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    {
+        var pid = context.GetResolvedProject().Id;
+        var resolved = int.TryParse(id, out var number)
+            ? await queryService.GetByNumberAsync(pid, number)
+            : await queryService.GetAsync(pid, id);
+        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+        var body = await ReadPauseRequestAsync(context);
+        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        try
+        {
+            var dto = await grain.PauseAsync(body?.Reason);
+            return ApiResults.Ok(dto);
+        }
+        catch (EpicAlreadyTerminalException ex)
+        {
+            return ApiResults.Conflict(ex.Message, "EPIC_ALREADY_TERMINAL", new { currentStatus = ex.CurrentStatus, requestedStatus = ex.RequestedStatus });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return ApiResults.NotFound(ex.Message);
+        }
+    }
+
+    private static async Task<IResult> ResumeRouteAsync(HttpContext context, string id, IGrainFactory grains, EpicQuerier queryService)
+    {
+        var pid = context.GetResolvedProject().Id;
+        var resolved = int.TryParse(id, out var number)
+            ? await queryService.GetByNumberAsync(pid, number)
+            : await queryService.GetAsync(pid, id);
+        if (resolved is null) return ApiResults.NotFound($"Epic {id} not found");
+
+        var grain = grains.GetGrain<IEpicGrain>($"{pid}:{resolved.Id}");
+        try
+        {
+            var dto = await grain.ResumeAsync();
+            return ApiResults.Ok(dto);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
+        {
+            return ApiResults.NotFound(ex.Message);
+        }
+    }
+
+    private static async Task<PauseEpicRequest?> ReadPauseRequestAsync(HttpContext context)
+    {
+        try
+        {
+            return await context.Request.ReadFromJsonAsync<PauseEpicRequest>();
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -149,3 +213,4 @@ public static class EpicRoutes
 public record EpicCreateRequest(string Title, string? Description, string? Priority);
 public record EpicIssueRequest(string IssueId);
 public record UpdateEpicRequest(string? Title = null, string? Description = null, string? Priority = null);
+public record PauseEpicRequest(string? Reason = null);

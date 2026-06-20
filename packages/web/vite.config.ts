@@ -38,8 +38,10 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     globals: true,
     exclude: [
-      '**/*.a11y.spec.ts',
-      'node_modules/**',
+'**/*.a11y.spec.ts',
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/tests/a11y/**',
     ],
   },
 })
