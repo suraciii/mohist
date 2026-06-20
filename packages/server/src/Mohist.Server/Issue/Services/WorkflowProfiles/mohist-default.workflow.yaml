@@ -174,7 +174,7 @@ stages:
         uses: core/script
         with:
           run: ${{ vars.ci.verify }}
-          timeout: 1500000
+          timeout: 600000
         repairLimit: 2
         repairTask:
           id: fix-tests
@@ -267,6 +267,7 @@ stages:
           uses: mohist/rebase
           with:
             baseBranch: ${{ repository.baseBranch }}
+            remote: origin
             conflictResolver:
               title: Resolve rebase conflicts
               with:
