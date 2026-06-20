@@ -237,12 +237,6 @@ public class AgentUsageTimeseriesApiSpecs
             AgentSessionId = agentSessionId,
             RunnerId = "runner-test",
         });
-        db.AgentSessionLabels.Add(new AgentSessionLabelRow
-        {
-            SessionId = session.Id,
-            Key = AgentSessionQueryMetadataKeys.ProjectId,
-            Value = projectId,
-        });
         await db.SaveChangesAsync();
     }
 
@@ -271,12 +265,6 @@ public class AgentUsageTimeseriesApiSpecs
             CreatedAt = createdAt,
             Status = "opened",
             RunnerId = "runner-test",
-        });
-        db.AgentSessionLabels.Add(new AgentSessionLabelRow
-        {
-            SessionId = session.Id,
-            Key = AgentSessionQueryMetadataKeys.ProjectId,
-            Value = projectId,
         });
         await db.SaveChangesAsync();
     }

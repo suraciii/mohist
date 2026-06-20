@@ -24,7 +24,7 @@ public class DatabaseInitializationSpecs
         db.Database.Migrate();
 
         Assert.True(await TableExistsAsync(connection, "AgentSessions"));
-        Assert.True(await TableExistsAsync(connection, "AgentSessionLabels"));
+        Assert.False(await TableExistsAsync(connection, "AgentSessionLabels"));
         Assert.False(await TableExistsAsync(connection, "AgentSessionRuntimeEvents"));
         Assert.False(await TableExistsAsync(connection, "AgentSessionTranscriptSegments"));
         Assert.True(await TableExistsAsync(connection, "AgentSessionTranscriptTurns"));
@@ -33,8 +33,6 @@ public class DatabaseInitializationSpecs
         Assert.True(await TableExistsAsync(connection, "OrleansQuery"));
         Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
         Assert.True(await OrleansQueryExistsAsync(connection, "UpsertReminderRowKey"));
-        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionLabels_Key_Value_SessionId"));
-        Assert.False(await IndexIsUniqueAsync(connection, "IX_AgentSessionLabels_Key_Value_SessionId"));
         Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionTranscriptTurns_SessionId_Sequence"));
         Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionTranscriptParts_TurnId_Type_CorrelationKey"));
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));

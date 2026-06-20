@@ -97,24 +97,16 @@ public class WorkflowActivityQuerier
         var rows = await db.AgentSessions.AsNoTracking()
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync(ct);
-        var sessionIds = rows.Select(row => row.Id).ToArray();
-        var labels = await db.AgentSessionLabels.AsNoTracking()
-            .Where(label => sessionIds.Contains(label.SessionId))
-            .ToListAsync(ct);
-        var labelsBySession = labels
-            .GroupBy(label => label.SessionId, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => (IReadOnlyDictionary<string, string>)group.ToDictionary(label => label.Key, label => label.Value, StringComparer.Ordinal),
-                StringComparer.Ordinal);
 
-        var result = new List<AgentSessionRecord>();
+        var result = new List<AgentSessionRecord>(rows.Count);
         foreach (var row in rows)
         {
             var session = AgentSessionJson.Deserialize(row);
             if (session is null) continue;
-            labelsBySession.TryGetValue(row.Id, out var rowLabels);
-            result.Add(new AgentSessionRecord(row, session, rowLabels ?? new Dictionary<string, string>(StringComparer.Ordinal)));
+            result.Add(new AgentSessionRecord(
+                row,
+                session,
+                session.Metadata.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         return result;

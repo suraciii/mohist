@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -15,12 +14,10 @@ public interface IAgentSessionStore : IStateStore<AgentSession>
 public class AgentSessionStore : IAgentSessionStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly ILogger<AgentSessionStore> _log;
 
-    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory, ILogger<AgentSessionStore> log)
+    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        _log = log;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -73,37 +70,6 @@ public class AgentSessionStore : IAgentSessionStore
         else
         {
             db.Entry(existing).CurrentValues.SetValues(row);
-        }
-        await SyncLabelsAsync(db, key, state.Metadata.Labels, ct);
-    }
-
-    private async Task SyncLabelsAsync(
-        MohistDbContext db,
-        string sessionId,
-        IReadOnlyDictionary<string, string>? labels,
-        CancellationToken ct)
-    {
-        var existing = await db.AgentSessionLabels
-            .Where(label => label.SessionId == sessionId)
-            .ToListAsync(ct);
-        if (existing.Count > 0)
-            db.AgentSessionLabels.RemoveRange(existing);
-        if (labels is null)
-        {
-            _log.LogWarning(
-                "AgentSessionStore.SyncLabelsAsync received null labels for session {SessionId}; existing labels will be removed.",
-                sessionId);
-            return;
-        }
-        foreach (var (key, value) in labels)
-        {
-            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value)) continue;
-            db.AgentSessionLabels.Add(new AgentSessionLabelRow
-            {
-                SessionId = sessionId,
-                Key = key,
-                Value = value,
-            });
         }
     }
 

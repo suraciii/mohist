@@ -226,12 +226,9 @@ labels = new Dictionary<string, string>(StringComparer.Ordinal),
     private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        return await db.AgentSessionLabels
-            .Where(label => label.Key == AgentSessionQueryMetadataKeys.WorkflowRunId && label.Value == workflowRunId)
-            .Join(db.AgentSessionLabels.Where(label => label.Key == AgentSessionQueryMetadataKeys.SessionName && label.Value == sessionName),
-                left => left.SessionId,
-                right => right.SessionId,
-                (left, right) => left.SessionId)
+        return await db.AgentSessions
+            .Where(s => s.LabelSourceId == workflowRunId && s.LabelSessionName == sessionName)
+            .Select(s => s.Id)
             .SingleAsync();
     }
 
