@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
+import { startIssue } from '../../issue'
 import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, pauseEpic, removeEpicIssue, resumeEpic, updateEpic, type UpdateEpicInput } from './client'
 
 export function useEpics() {
@@ -64,6 +65,22 @@ export function useRemoveEpicIssue() {
       queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       toast.success('Issue removed from Epic')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useStartIssue() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<Awaited<ReturnType<typeof startIssue>>, Error, number>({
+    mutationFn: (number) => startIssue(number, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      toast.success('Issue started')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

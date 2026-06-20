@@ -8,10 +8,35 @@ import { EpicListPage } from './EpicListPage'
 
 const mockNavigate = vi.fn()
 
+const toastMocks = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+}))
+
+const startIssueMock = vi.hoisted(() => vi.fn())
+
 const mocks = vi.hoisted(() => ({
   useEpics: vi.fn(),
   useCreateEpic: vi.fn(),
+  useStartIssue: vi.fn(),
 }))
+
+const realEpicModule = await vi.importActual<typeof import('../../../entities/epic')>('../../../entities/epic')
+
+function passthroughStartIssue() {
+  mocks.useStartIssue.mockImplementation(((...args: unknown[]) =>
+    realEpicModule.useStartIssue(...(args as Parameters<typeof realEpicModule.useStartIssue>))) as ReturnType<
+    typeof mocks.useStartIssue
+  >)
+}
+
+vi.mock('sonner', () => ({
+  toast: toastMocks,
+}))
+
+const toastError = toastMocks.error
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
@@ -21,12 +46,21 @@ vi.mock('react-router-dom', async (importOriginal) => {
   }
 })
 
+vi.mock('../../../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue')>()
+  return {
+    ...actual,
+    startIssue: startIssueMock,
+  }
+})
+
 vi.mock('../../../entities/epic', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/epic')>()
   return {
     ...actual,
     useEpics: mocks.useEpics,
     useCreateEpic: mocks.useCreateEpic,
+    useStartIssue: mocks.useStartIssue,
   }
 })
 
@@ -168,6 +202,7 @@ function renderPage() {
 
 describe('EpicListPage group collapse', () => {
   const createMutate = vi.fn()
+  const startMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -177,6 +212,7 @@ describe('EpicListPage group collapse', () => {
       isLoading: false,
     })
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
 
   afterEach(() => {
@@ -238,6 +274,7 @@ describe('EpicListPage group collapse', () => {
 
 describe('EpicListPage status-conditional card text', () => {
   const createMutate = vi.fn()
+  const startMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -247,6 +284,7 @@ describe('EpicListPage status-conditional card text', () => {
       isLoading: false,
     })
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
 
   afterEach(() => {
@@ -298,11 +336,13 @@ describe('EpicListPage status-conditional card text', () => {
 
 describe('EpicListPage in-progress and next display', () => {
   const createMutate = vi.fn()
+  const startMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
 
   afterEach(() => {
@@ -363,12 +403,14 @@ describe('EpicListPage in-progress and next display', () => {
 
 describe('EpicListPage basic actions', () => {
   const createMutate = vi.fn()
+  const startMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockNavigate.mockClear()
     mocks.useEpics.mockReturnValue({ data: [activeWithBoth], isLoading: false })
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
 
   afterEach(() => {
@@ -477,11 +519,13 @@ describe('EpicListPage basic actions', () => {
 
 describe('EpicListPage numbered display', () => {
   const createMutate = vi.fn()
+  const startMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockNavigate.mockClear()
     mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
   })
 
   afterEach(() => {
@@ -523,5 +567,129 @@ describe('EpicListPage numbered display', () => {
 
     const numbers = screen.getAllByTestId('epic-number')
     expect(numbers[0]).toHaveTextContent('#epic-ac')
+  })
+})
+
+describe('EpicListPage next-issue inline Start', () => {
+  const createMutate = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockNavigate.mockClear()
+    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+    passthroughStartIssue()
+    startIssueMock.mockReset()
+    startIssueMock.mockResolvedValue({ issue: { number: 3 }, message: 'started' })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders a Start button next to the Next line when progress.nextIssue is present', () => {
+    mocks.useEpics.mockReturnValue({ data: [activeWithOnlyNext], isLoading: false })
+
+    renderPage()
+
+    const startButton = screen.getByTestId('epic-card-start')
+    expect(startButton).toBeTruthy()
+    expect(startButton.textContent).toBe('Start')
+    expect(startButton).not.toBeDisabled()
+    expect(screen.getByTestId('epic-card-next')).toHaveTextContent('Next: #3')
+  })
+
+  it('also renders a Start button when both an in-progress and a startable next issue are present', () => {
+    mocks.useEpics.mockReturnValue({ data: [activeWithBoth], isLoading: false })
+
+    renderPage()
+
+    expect(screen.getByTestId('epic-card-in-progress')).toHaveTextContent('In progress: #2')
+    expect(screen.getByTestId('epic-card-next')).toHaveTextContent('Next: #3')
+    const startButton = screen.getByTestId('epic-card-start')
+    expect(startButton).toBeTruthy()
+  })
+
+  it('does not render a Start button when only nextIssueReason is present and no startable next exists', () => {
+    mocks.useEpics.mockReturnValue({ data: [activeWithOnlyInProgress], isLoading: false })
+
+    renderPage()
+
+    expect(screen.getByTestId('epic-card-next')).toHaveTextContent('Waiting on #1')
+    expect(screen.queryByTestId('epic-card-start')).toBeNull()
+  })
+
+  it('does not render a Start button on a Ready-to-mark-done active epic', () => {
+    mocks.useEpics.mockReturnValue({ data: [activeReady], isLoading: false })
+
+    renderPage()
+
+    expect(screen.getByTestId('epic-card-ready')).toHaveTextContent('Ready to mark done')
+    expect(screen.queryByTestId('epic-card-start')).toBeNull()
+  })
+
+  it('does not render a Start button on an empty active epic with no linked work', () => {
+    mocks.useEpics.mockReturnValue({ data: [activeNoLinks], isLoading: false })
+
+    renderPage()
+
+    expect(screen.getByText('No linked issues')).toBeTruthy()
+    expect(screen.queryByTestId('epic-card-start')).toBeNull()
+  })
+
+  it('invokes startIssue(next.number) and does not navigate to the epic detail when Start is clicked', async () => {
+    mocks.useEpics.mockReturnValue({ data: [activeWithOnlyNext], isLoading: false })
+
+    renderPage()
+
+    const startButton = screen.getByTestId('epic-card-start')
+    fireEvent.click(startButton)
+
+    await waitFor(() => {
+      expect(startIssueMock).toHaveBeenCalledWith(3, null)
+    })
+    expect(startIssueMock).toHaveBeenCalledTimes(1)
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('calls stopPropagation on the click event so the card does not navigate', () => {
+    mocks.useEpics.mockReturnValue({ data: [activeWithOnlyNext], isLoading: false })
+
+    renderPage()
+
+    const startButton = screen.getByTestId('epic-card-start')
+    const stopPropagationSpy = vi.fn()
+    const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true })
+    Object.defineProperty(clickEvent, 'stopPropagation', { value: stopPropagationSpy, configurable: true })
+    startButton.dispatchEvent(clickEvent)
+
+    expect(stopPropagationSpy).toHaveBeenCalled()
+  })
+
+  it('disables the Start button for the clicked issue while the start mutation is pending', () => {
+    const startMutate = vi.fn()
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useEpics.mockReturnValue({ data: [activeWithOnlyNext], isLoading: false })
+
+    renderPage()
+
+    const startButton = screen.getByTestId('epic-card-start')
+    fireEvent.click(startButton)
+
+    expect(startButton).toBeDisabled()
+    expect(startButton.textContent).toBe('Starting...')
+  })
+
+  it('surfaces an error toast when the underlying startIssue call rejects', async () => {
+    const failure = new Error('Issue is still a draft')
+    startIssueMock.mockRejectedValueOnce(failure)
+    mocks.useEpics.mockReturnValue({ data: [activeWithOnlyNext], isLoading: false })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('epic-card-start'))
+
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith('Issue is still a draft')
+    })
   })
 })

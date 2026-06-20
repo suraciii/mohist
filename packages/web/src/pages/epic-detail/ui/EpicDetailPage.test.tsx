@@ -5,8 +5,32 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicStatus } from '../../../entities/epic'
+import type { LinkedIssue } from '../../../entities/epic'
 import { EpicDetailPage } from './EpicDetailPage'
 import { ApiError } from '../../../shared/api/client'
+
+function linkedIssue(overrides: Partial<LinkedIssue> & Pick<LinkedIssue, 'id' | 'number' | 'title'>): LinkedIssue {
+  return {
+    status: 'backlog' as LinkedIssue['status'],
+    stage: 'plan' as LinkedIssue['stage'],
+    health: 'active' as LinkedIssue['health'],
+    priority: 'p2',
+    canStart: true,
+    startBlocker: null,
+    ...overrides,
+  }
+}
+
+function issue(overrides: Record<string, unknown>) {
+  return {
+    isDraft: false,
+    canStart: true,
+    blocker: null,
+    status: 'backlog',
+    health: 'active',
+    ...overrides,
+  }
+}
 
 const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
@@ -14,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   useIssues: vi.fn(),
   useAddEpicIssue: vi.fn(),
   useRemoveEpicIssue: vi.fn(),
+  useStartIssue: vi.fn(),
   useMarkEpicDone: vi.fn(),
   useCloseEpic: vi.fn(),
   useUpdateEpic: vi.fn(),
@@ -40,6 +65,7 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useEpic: mocks.useEpic,
     useAddEpicIssue: mocks.useAddEpicIssue,
     useRemoveEpicIssue: mocks.useRemoveEpicIssue,
+    useStartIssue: mocks.useStartIssue,
     useMarkEpicDone: mocks.useMarkEpicDone,
     useCloseEpic: mocks.useCloseEpic,
     useUpdateEpic: mocks.useUpdateEpic,
@@ -65,15 +91,15 @@ const epic = {
     readyToMarkDone: false,
   },
   linkedIssues: [
-    { id: 'issue-1', number: 1, title: 'Done issue', status: 'completed', stage: 'done', priority: 'p2' },
-    { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'blocked', stage: 'build', priority: 'p1' },
+    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
+    linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'blocked' as LinkedIssue['health'], priority: 'p1', canStart: false }),
   ],
 }
 
 const issues = [
-  { id: 'issue-1', number: 1, title: 'Done issue', isDraft: false, canStart: false, blocker: null, status: 'done', health: 'done' },
-  { id: 'issue-2', number: 2, title: 'Blocked issue', isDraft: false, canStart: false, blocker: null, status: 'in_progress', health: 'blocked' },
-  { id: 'issue-3', number: 3, title: 'Candidate issue', isDraft: false, canStart: true, blocker: null, status: 'backlog', health: 'active' },
+  issue({ id: 'issue-1', number: 1, title: 'Done issue', canStart: false, status: 'done', health: 'done' }),
+  issue({ id: 'issue-2', number: 2, title: 'Blocked issue', canStart: false, status: 'in_progress', health: 'blocked' }),
+  issue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
 ]
 
 function renderPage() {
@@ -96,6 +122,7 @@ function renderPage() {
 describe('EpicDetailPage', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -109,6 +136,7 @@ describe('EpicDetailPage', () => {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -200,6 +228,7 @@ describe('EpicDetailPage lifecycle guards', () => {
 
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -212,6 +241,7 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -268,8 +298,8 @@ describe('EpicDetailPage lifecycle guards', () => {
           readyToMarkDone: false,
         },
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
-          { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'blocked', stage: 'build', priority: 'p1' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'blocked' as LinkedIssue['health'], priority: 'p1', canStart: false }),
         ],
       }),
       isLoading: false,
@@ -468,6 +498,7 @@ progress: {
 describe('EpicDetailPage numbered display', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -481,6 +512,7 @@ describe('EpicDetailPage numbered display', () => {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -521,7 +553,7 @@ describe('EpicDetailPage numbered display', () => {
 const searchEpic = {
   ...epic,
   linkedIssues: [
-    { id: 'issue-1', number: 1, title: 'Done issue', status: 'completed', stage: 'done', priority: 'p2' },
+    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
   ],
 }
 
@@ -556,6 +588,7 @@ const searchIssues = [
 describe('EpicDetailPage searchable Add Issue', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -569,6 +602,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
     mocks.useIssues.mockReturnValue({ data: searchIssues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -667,6 +701,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
 describe('EpicDetailPage edit flow', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -705,6 +740,7 @@ progress: {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -833,6 +869,7 @@ progress: {
 describe('EpicDetailPage markdown description', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -881,6 +918,7 @@ describe('EpicDetailPage markdown description', () => {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -934,6 +972,7 @@ describe('EpicDetailPage markdown description', () => {
 describe('EpicDetailPage current activity listing', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -973,6 +1012,7 @@ describe('EpicDetailPage current activity listing', () => {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -1306,6 +1346,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 describe('EpicDetailPage next issue reason display', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
+  const startMutate = vi.fn()
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
@@ -1344,6 +1385,7 @@ describe('EpicDetailPage next issue reason display', () => {
     mocks.useIssues.mockReturnValue({ data: issues })
     mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
     mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
     mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
     mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
@@ -1363,5 +1405,260 @@ describe('EpicDetailPage next issue reason display', () => {
     const reason = screen.getByTestId('next-issue-reason')
     expect(reason.textContent).toBe('Waiting on #5')
     expect(screen.queryByTestId('mark-epic-done')).toBeTruthy()
+  })
+
+  it('shows a Start action in the Next Issue summary and preserves the issue link', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: { id: 'issue-3', number: 3, title: 'Candidate issue' },
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+        linkedIssues: [linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' })],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByRole('link', { name: '#3 Candidate issue' }).getAttribute('href')).toContain('/issues/3')
+    fireEvent.click(screen.getByTestId('epic-detail-next-start'))
+    expect(startMutate).toHaveBeenCalledWith(3, expect.objectContaining({ onSettled: expect.any(Function) }))
+  })
+
+  it('does not show a Next Issue Start action for reason ready or empty states', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic(), isLoading: false })
+    renderPage()
+    expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
+    cleanup()
+
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        progress: {
+          deliveredCount: 1,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: true,
+        },
+      }),
+      isLoading: false,
+    })
+    renderPage()
+    expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
+    cleanup()
+
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 0,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+      }),
+      isLoading: false,
+    })
+    renderPage()
+    expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
+  })
+})
+
+describe('EpicDetailPage LinkedIssueRow inline Start', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders a Start button on a startable backlog row while keeping Remove and navigation', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const startButton = screen.getByTestId('linked-issue-start')
+    expect(startButton).toBeTruthy()
+    expect(startButton.textContent).toBe('Start')
+    expect(startButton).not.toBeDisabled()
+
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+    const navLink = screen.getByRole('link', { name: '#3' })
+    expect(navLink).toBeTruthy()
+    expect(navLink.getAttribute('href')).toContain('/issues/3')
+  })
+
+  it('hides the Start button on an in_progress linked issue row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], priority: 'p1', health: 'blocked' as LinkedIssue['health'], canStart: false }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-start')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
+  it('hides the Start button on a blocked linked issue row even when canStart is true', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', priority: 'p1', health: 'blocked' as LinkedIssue['health'], startBlocker: { kind: 'waiting-for', issue: { number: 1, title: 'Done issue' } } }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-start')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
+  it('hides the Start button on a done linked issue row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-start')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
+  it('hides the Start button on a cancelled linked issue row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-4', number: 4, title: 'Cancelled issue', status: 'cancelled' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'cancelled' as LinkedIssue['health'], canStart: false }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-start')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
+  it('hides the Start button when canStart is false even with backlog status', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Draft issue', canStart: false, startBlocker: { kind: 'draft' } }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-start')).toBeNull()
+  })
+
+  it('invokes the start mutation with the issue number when Start is clicked', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-start'))
+
+    expect(startMutate).toHaveBeenCalledWith(3, expect.objectContaining({ onSettled: expect.any(Function) }))
+    expect(startMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables the Start button for the clicked issue while the start mutation is pending', () => {
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const startButton = screen.getByTestId('linked-issue-start')
+    fireEvent.click(startButton)
+
+    expect(startButton).toBeDisabled()
+    expect(startButton.textContent).toBe('Starting...')
   })
 })

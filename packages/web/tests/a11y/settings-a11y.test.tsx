@@ -5,9 +5,9 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { axe } from 'vitest-axe'
-import type { Project } from '../src/entities/project'
-import { ProjectProvider } from '../src/entities/project'
-import { SettingsPage } from '../src/pages/settings/ui/SettingsPage'
+import type { Project } from '../../src/entities/project'
+import { ProjectProvider } from '../../src/entities/project'
+import { SettingsPage } from '../../src/pages/settings/ui/SettingsPage'
 
 const settingsTabs = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system', 'preferences'] as const
 const focusableSelector = [
@@ -19,8 +19,8 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
-vi.mock('../src/entities/project', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/project')>()
+vi.mock('../../src/entities/project', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/entities/project')>()
   return {
     ...actual,
     useRepositories: () => ({ data: projects[0].repositories, isLoading: false }),
@@ -30,8 +30,8 @@ vi.mock('../src/entities/project', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/entities/settings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/entities/settings')>()
+vi.mock('../../src/entities/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/entities/settings')>()
   return {
     ...actual,
     useOpencodeRuntime: () => ({ data: { mode: 'local', command: 'opencode', model: null, note: '' }, isLoading: false, error: null }),
@@ -53,7 +53,7 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/entities/template', () => ({
+vi.mock('../../src/entities/template', () => ({
   useProjectTemplates: () => ({ data: templates, isLoading: false, error: null }),
   useSystemTemplates: () => ({ data: templates, isLoading: false, error: null }),
   useProjectTemplateOverride: () => ({ data: null, isLoading: false, error: null }),

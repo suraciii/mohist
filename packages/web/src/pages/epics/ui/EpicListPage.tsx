@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEpics } from '../../../entities/epic'
+import { useEpics, useStartIssue } from '../../../entities/epic'
 import { EpicStatus, type EpicProgress, type EpicWithProgress } from '../../../entities/epic'
 import { EpicCreateDialog } from '../../../features/create-epic'
 import { Button } from '@/shared/ui/components/button'
@@ -43,7 +43,12 @@ function StatusBadge({ status }: { status: EpicStatus }) {
   )
 }
 
-function statusText(status: EpicStatus, progress: EpicProgress): React.ReactNode {
+function statusText(
+  status: EpicStatus,
+  progress: EpicProgress,
+  onStart?: (issueNumber: number) => void,
+  startPending?: boolean,
+): React.ReactNode {
   if (status === EpicStatus.Done) {
     return <span className="text-blue-700 font-medium">Completed</span>
   }
@@ -63,10 +68,26 @@ function statusText(status: EpicStatus, progress: EpicProgress): React.ReactNode
         </span>
       )}
       {next ? (
-        <span className="text-muted-foreground" data-testid="epic-card-next">
-          Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
-          <span className="text-muted-foreground ml-1">{next.title}</span>
-        </span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-muted-foreground min-w-0" data-testid="epic-card-next">
+            Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
+            <span className="text-muted-foreground ml-1">{next.title}</span>
+          </span>
+          {onStart && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation()
+                onStart(next.number)
+              }}
+              disabled={startPending}
+              data-testid="epic-card-start"
+            >
+              {startPending ? 'Starting...' : 'Start'}
+            </Button>
+          )}
+        </div>
       ) : nextReason ? (
         <span className="text-muted-foreground" data-testid="epic-card-next">{nextReason}</span>
       ) : progress.readyToMarkDone ? (
@@ -78,7 +99,15 @@ function statusText(status: EpicStatus, progress: EpicProgress): React.ReactNode
   )
 }
 
-function EpicCard({ epic }: { epic: EpicWithProgress }) {
+function EpicCard({
+  epic,
+  onStart,
+  startPending,
+}: {
+  epic: EpicWithProgress
+  onStart: (issueNumber: number) => void
+  startPending: boolean
+}) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
   const { progress } = epic
@@ -129,8 +158,8 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <div className="text-sm">
-          {statusText(epic.status, progress)}
+        <div className="text-sm min-w-0 flex-1">
+          {statusText(epic.status, progress, onStart, startPending)}
         </div>
       </div>
     </Card>
@@ -142,9 +171,11 @@ interface EpicSectionProps {
   epics: EpicWithProgress[]
   defaultExpanded: boolean
   testIdPrefix: string
+  onStart: (issueNumber: number) => void
+  pendingStartIssueNumber: number | null
 }
 
-function EpicSection({ title, epics, defaultExpanded, testIdPrefix }: EpicSectionProps) {
+function EpicSection({ title, epics, defaultExpanded, testIdPrefix, onStart, pendingStartIssueNumber }: EpicSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
@@ -168,7 +199,12 @@ function EpicSection({ title, epics, defaultExpanded, testIdPrefix }: EpicSectio
       {expanded && (
         <div className="grid gap-4">
           {epics.map(epic => (
-            <EpicCard key={epic.id} epic={epic} />
+            <EpicCard
+              key={epic.id}
+              epic={epic}
+              onStart={onStart}
+              startPending={pendingStartIssueNumber === epic.progress.nextIssue?.number}
+            />
           ))}
         </div>
       )}
@@ -178,12 +214,21 @@ function EpicSection({ title, epics, defaultExpanded, testIdPrefix }: EpicSectio
 
 export function EpicListPage() {
   const { data: epics, isLoading } = useEpics()
+  const startIssue = useStartIssue()
+  const [pendingStartIssueNumber, setPendingStartIssueNumber] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
   const activeEpics = epics?.filter(e => e.status === EpicStatus.Active) ?? []
   const pausedEpics = epics?.filter(e => e.status === EpicStatus.Paused) ?? []
   const doneEpics = epics?.filter(e => e.status === EpicStatus.Done) ?? []
   const closedEpics = epics?.filter(e => e.status === EpicStatus.Closed) ?? []
+
+  function handleStartIssue(issueNumber: number) {
+    setPendingStartIssueNumber(issueNumber)
+    startIssue.mutate(issueNumber, {
+      onSettled: () => setPendingStartIssueNumber(null),
+    })
+  }
 
   return (
     <div className="max-w-4xl mx-auto p-6">
@@ -220,6 +265,8 @@ export function EpicListPage() {
               epics={activeEpics}
               defaultExpanded={true}
               testIdPrefix="epic-section-active"
+              onStart={handleStartIssue}
+              pendingStartIssueNumber={pendingStartIssueNumber}
             />
           )}
 
@@ -228,7 +275,12 @@ export function EpicListPage() {
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Paused</h2>
               <div className="grid gap-4">
                 {pausedEpics.map(epic => (
-                  <EpicCard key={epic.id} epic={epic} />
+                  <EpicCard
+                    key={epic.id}
+                    epic={epic}
+                    onStart={handleStartIssue}
+                    startPending={pendingStartIssueNumber === epic.progress.nextIssue?.number}
+                  />
                 ))}
               </div>
             </section>
@@ -240,6 +292,8 @@ export function EpicListPage() {
               epics={doneEpics}
               defaultExpanded={false}
               testIdPrefix="epic-section-done"
+              onStart={handleStartIssue}
+              pendingStartIssueNumber={pendingStartIssueNumber}
             />
           )}
 
@@ -249,6 +303,8 @@ export function EpicListPage() {
               epics={closedEpics}
               defaultExpanded={false}
               testIdPrefix="epic-section-closed"
+              onStart={handleStartIssue}
+              pendingStartIssueNumber={pendingStartIssueNumber}
             />
           )}
         </div>
