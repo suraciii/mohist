@@ -11,8 +11,9 @@ import {
   usePauseEpic,
   useRemoveEpicIssue,
   useResumeEpic,
+  useStartIssue,
 } from '../../../entities/epic'
-import { EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
+import { canInlineStartRow, EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
 import { EditEpicDialog } from '../../../features/edit-epic'
 import { ApiError } from '../../../shared/api/client'
 import { Button } from '@/shared/ui/components/button'
@@ -77,8 +78,21 @@ function issueStatusTone(health: string) {
   }
 }
 
-function LinkedIssueRow({ issue, onRemove, disabled }: { issue: LinkedIssue; onRemove: (issueId: string) => void; disabled: boolean }) {
+function LinkedIssueRow({
+  issue,
+  onRemove,
+  onStart,
+  disabled,
+  startPending,
+}: {
+  issue: LinkedIssue
+  onRemove: (issueId: string) => void
+  onStart: (issueNumber: number) => void
+  disabled: boolean
+  startPending: boolean
+}) {
   const toProjectPath = useProjectPath()
+  const showStart = canInlineStartRow(issue)
 
   return (
     <Card className="flex items-center justify-between gap-4 p-4">
@@ -93,14 +107,26 @@ function LinkedIssueRow({ issue, onRemove, disabled }: { issue: LinkedIssue; onR
         </div>
         <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => onRemove(issue.id)}
-        disabled={disabled}
-      >
-        Remove
-      </Button>
+      <div className="flex shrink-0 gap-2">
+        {showStart && (
+          <Button
+            type="button"
+            onClick={() => onStart(issue.number)}
+            disabled={startPending}
+            data-testid="linked-issue-start"
+          >
+            {startPending ? 'Starting...' : 'Start'}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onRemove(issue.id)}
+          disabled={disabled}
+        >
+          Remove
+        </Button>
+      </div>
     </Card>
   )
 }
@@ -353,6 +379,8 @@ export function EpicDetailPage() {
   const { data: issues } = useIssues(projectId ? { projectId } : undefined)
   const addEpicIssue = useAddEpicIssue()
   const removeEpicIssue = useRemoveEpicIssue()
+  const startIssue = useStartIssue()
+  const [pendingStartIssueNumber, setPendingStartIssueNumber] = useState<number | null>(null)
   const markEpicDone = useMarkEpicDone()
   const closeEpic = useCloseEpic()
   const pauseEpic = usePauseEpic()
@@ -440,6 +468,13 @@ export function EpicDetailPage() {
       { epicId, issueId: selectedIssueId },
       { onSuccess: () => setSelectedIssueId(null) },
     )
+  }
+
+  function handleStartIssue(issueNumber: number) {
+    setPendingStartIssueNumber(issueNumber)
+    startIssue.mutate(issueNumber, {
+      onSettled: () => setPendingStartIssueNumber(null),
+    })
   }
 
   return (
@@ -552,9 +587,20 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next Issue</div>
             {epic.progress.nextIssue ? (
-              <Link to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)} className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
-                #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
-              </Link>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <Link to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)} className="min-w-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
+                  #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
+                </Link>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleStartIssue(epic.progress.nextIssue!.number)}
+                  disabled={pendingStartIssueNumber === epic.progress.nextIssue.number}
+                  data-testid="epic-detail-next-start"
+                >
+                  {pendingStartIssueNumber === epic.progress.nextIssue.number ? 'Starting...' : 'Start'}
+                </Button>
+              </div>
             ) : epic.progress.readyToMarkDone ? (
               <div className="mt-2 text-sm font-medium text-green-700">Ready to mark done</div>
             ) : epic.progress.nextIssueReason ? (
@@ -613,7 +659,9 @@ export function EpicDetailPage() {
                 key={issue.id}
                 issue={issue}
                 onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
+                onStart={handleStartIssue}
                 disabled={removeEpicIssue.isPending}
+                startPending={pendingStartIssueNumber === issue.number}
               />
             ))
           )}

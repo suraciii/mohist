@@ -1,0 +1,72 @@
+{
+  "project": "mohist-local",
+  "description": "Start issues directly from the epic page (inline start) — add a Start write-action to the epic list card next-issue area and the epic detail linked-issue row, reusing the existing issue start path, gated on the read model's canStart/nextIssue.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Epic inline-start foundation: LinkedIssue type, useStartIssue hook, gating predicate",
+      "spec": "specs/epic-inline-start/spec.md#Inline start reuses the existing issue start path without new semantics",
+      "description": "Add the shared epic-entity-layer plumbing both epic surfaces consume. Extend the web `LinkedIssue` type with `canStart` and `blocker` (reusing the existing `IssueStartBlocker` shape). Add a `useStartIssue` hook in `packages/web/src/entities/epic/api/queries.ts` that reuses `startIssue` from `entities/issue/api/client.ts`, invalidates `['epics']` + `['issues']` on success, and toasts success/error. Add a pure `canInlineStartRow(issue)` predicate in `packages/web/src/entities/epic/model/` that returns true only when `issue.canStart` and the issue is not in-flight/terminal/blocked. Export the hook and predicate from `entities/epic/index.ts`. No server changes.",
+      "acceptanceCriteria": [
+        "`packages/web/src/entities/epic/model/types.ts` `LinkedIssue` interface includes `canStart: boolean` and `blocker: IssueStartBlocker | null` (reusing the type from `entities/issue/model/issue.ts`).",
+        "`useStartIssue` exists in `packages/web/src/entities/epic/api/queries.ts`, is exported from `packages/web/src/entities/epic/index.ts`, calls `startIssue(number, projectId)` as its `mutationFn`, invalidates `['epics']` and `['issues']` on success, and calls `toast.success`/`toast.error` consistent with `useAddEpicIssue`.",
+        "`canInlineStartRow(issue)` returns true iff `issue.canStart === true` AND `issue.status` is not `in_progress`, `done`, or `cancelled` AND `issue.health` is not `blocked`.",
+        "Unit tests cover the `canInlineStartRow` truth table (startable backlog ready; draft/blocked/in-progress/done/cancelled each rejected) and assert `useStartIssue` invalidates both `['epics']` and `['issues']` and toasts on success and error.",
+        "`npm run typecheck -w packages/web` passes with no new errors.",
+        "`npm run test:run -w packages/web` passes for the new/extended predicate and hook tests."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended `LinkedIssue` type, `useStartIssue` hook, `canInlineStartRow` predicate, all exported from the epic entity barrel, plus passing unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Mirror the invalidation + toast pattern of `useAddEpicIssue`/`useRemoveEpicIssue` in the same file. The server `LinkedIssueDto` already emits `canStart`/`startBlocker` (shipped by prerequisite #171), so this is a type-only + hook change on the web. The polymorphic blocker DTO discriminator (`$type` draft/waiting-for) is already consumed successfully by the issue detail page off the same DTO."
+    },
+    {
+      "id": "T-002",
+      "title": "Epic detail LinkedIssueRow inline Start action",
+      "spec": "specs/epic-inline-start/spec.md#Epic detail linked issue row exposes an inline Start action only for startable non-terminal issues",
+      "description": "Add a Start button to `LinkedIssueRow` in `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx`, gated by `canInlineStartRow(issue)` from T-001. Clicking it calls the `useStartIssue` mutation with `issue.number`. Hide Start for in-progress/done/cancelled/blocked rows. Keep the existing navigation link and Remove action unchanged. Disable the button while a start is pending.",
+      "acceptanceCriteria": [
+        "`LinkedIssueRow` renders a Start button exactly when `canInlineStartRow(issue)` is true.",
+        "No Start button is rendered for issues whose status is `in_progress`, `done`, or `cancelled`, or whose health is `blocked`.",
+        "Activating Start calls `useStartIssue().mutate(issue.number)` (which routes to `POST /issues/{n}/start`); after success, the epic detail and issue caches refresh and the started row no longer shows Start (it is now in-progress).",
+        "The existing per-row navigation link to `/issues/{n}` and the existing Remove button remain present and unchanged for every row, with or without Start.",
+        "The Start button is disabled while the mutation is pending to prevent duplicate starts.",
+        "`packages/web/src/pages/epic-detail/ui/EpicDetailPage.test.tsx` covers: a startable backlog row shows Start; an in-progress row, a blocked row, and a done row each hide Start; activating Start invokes the mocked start mutation; Remove and navigation are still present on a startable row.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`LinkedIssueRow` with gated Start action wired to `useStartIssue`, plus passing row-gating tests in `EpicDetailPage.test.tsx`.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Test fixtures in `EpicDetailPage.test.tsx` already set `canStart`/`blocker` on linked issues (e.g. issue-3 candidate with `canStart: true`), so existing fixtures can be extended directly. Do not add a Remove/dialog confirmation for Start (fire-and-forget per design)."
+    },
+    {
+      "id": "T-003",
+      "title": "Epic list card next-issue inline Start action",
+      "spec": "specs/epic-inline-start/spec.md#Epic list card exposes an inline Start action on the startable next issue",
+      "description": "Add a Start button to the epic list card next-issue area in `packages/web/src/pages/epics/ui/EpicListPage.tsx` (`statusText`/`EpicCard`), shown exactly when `progress.nextIssue` is present (already startable by the `epic-tracking` definition of `nextIssue`). Wire it to `useStartIssue` from T-001. The button's `onClick` calls `e.stopPropagation()` so starting does not trigger the card's navigate-to-detail handler, and is disabled while pending. When `nextIssue` is absent but `nextIssueReason` is present, keep showing the blocker reason with no Start button.",
+      "acceptanceCriteria": [
+        "An Active epic card shows a Start button next to the Next-issue line exactly when `progress.nextIssue` is non-null.",
+        "When `progress.nextIssue` is null and `progress.nextIssueReason` is non-null, the card shows the blocker reason and renders no Start button.",
+        "When neither `nextIssue` nor `nextIssueReason` is present, the card shows no Start button and preserves the existing ready-to-mark-done / empty-state guidance.",
+        "Activating Start calls `e.stopPropagation()` and then `useStartIssue().mutate(nextIssue.number)`; the card does not navigate to the epic detail page.",
+        "The Start button is disabled while the mutation is pending.",
+        "On success the epic list query refetches (invalidated by T-001's hook) and the started issue is no longer the startable next issue on that card.",
+        "`packages/web/src/pages/epics/ui/EpicListPage.test.tsx` covers: startable next issue shows Start; `nextIssueReason`-only fixture shows reason and no Start; empty/ready-to-mark-done fixture shows no Start; activating Start fires the mocked start mutation and does not navigate; a failed start surfaces an error toast.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Epic list card next-issue area with gated Start action wired to `useStartIssue`, with `stopPropagation` and pending-disable, plus passing card-gating tests in `EpicListPage.test.tsx`.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The whole `<Card onClick={navigate}>` is a navigation target today; the Start button must live inside it with `stopPropagation`. `EpicListPage.test.tsx` already mocks `nextIssue`/`nextIssueReason` per card, so the three gating states are straightforward to cover. T-002 and T-003 are independent of each other and may be executed in either order after T-001."
+    }
+  ]
+}
