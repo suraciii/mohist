@@ -31,9 +31,11 @@ public sealed class SkillsContentSpecs
 
         Assert.Equal(0, exitCode);
         var lines = SplitLines(stdout.ToString());
-        Assert.Equal(2, lines.Length);
+        Assert.Equal(4, lines.Length);
         Assert.StartsWith("mohist\t", lines[0], StringComparison.Ordinal);
-        Assert.StartsWith("mohist-explore\t", lines[1], StringComparison.Ordinal);
+        Assert.StartsWith("mohist-create-epic\t", lines[1], StringComparison.Ordinal);
+        Assert.StartsWith("mohist-create-issue\t", lines[2], StringComparison.Ordinal);
+        Assert.StartsWith("mohist-explore\t", lines[3], StringComparison.Ordinal);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -53,6 +55,16 @@ public sealed class SkillsContentSpecs
             item =>
             {
                 Assert.Equal("mohist", item.Name);
+                Assert.False(string.IsNullOrWhiteSpace(item.Description));
+            },
+            item =>
+            {
+                Assert.Equal("mohist-create-epic", item.Name);
+                Assert.False(string.IsNullOrWhiteSpace(item.Description));
+            },
+            item =>
+            {
+                Assert.Equal("mohist-create-issue", item.Name);
                 Assert.False(string.IsNullOrWhiteSpace(item.Description));
             },
             item =>
@@ -106,13 +118,13 @@ public sealed class SkillsContentSpecs
     {
         using var stdout = new StringWriter();
 
-        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist", "--full"]).InvokeAsync();
+        var exitCode = await BuildRootCommand(stdout).Parse(["skills", "get", "mohist-create-issue", "--full"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
         var content = stdout.ToString();
         var marker = "--- references/issue-templates.md ---";
         Assert.Contains(marker, content);
-        Assert.True(content.IndexOf(marker, StringComparison.Ordinal) > content.IndexOf("name: mohist", StringComparison.Ordinal));
+        Assert.True(content.IndexOf(marker, StringComparison.Ordinal) > content.IndexOf("name: mohist-create-issue", StringComparison.Ordinal));
         Assert.DoesNotContain("mo skills get mohist --full", content, StringComparison.Ordinal);
     }
 

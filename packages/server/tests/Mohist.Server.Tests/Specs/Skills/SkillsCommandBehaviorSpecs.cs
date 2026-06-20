@@ -42,9 +42,11 @@ public sealed class SkillsCommandBehaviorSpecs
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(list.ExitCode == 0, $"list failed\nstdout:\n{list.Stdout}\n\nstderr:\n{list.Stderr}");
             var listLines = SplitLines(list.Stdout);
-            Assert.Equal(2, listLines.Length);
+            Assert.Equal(4, listLines.Length);
             Assert.StartsWith("mohist\t", listLines[0], StringComparison.Ordinal);
-            Assert.StartsWith("mohist-explore\t", listLines[1], StringComparison.Ordinal);
+            Assert.StartsWith("mohist-create-epic\t", listLines[1], StringComparison.Ordinal);
+            Assert.StartsWith("mohist-create-issue\t", listLines[2], StringComparison.Ordinal);
+            Assert.StartsWith("mohist-explore\t", listLines[3], StringComparison.Ordinal);
 
             var listJson = await RunProcessAsync(
                 "dotnet",
@@ -54,7 +56,7 @@ public sealed class SkillsCommandBehaviorSpecs
             Assert.True(listJson.ExitCode == 0, $"list --json failed\nstderr:\n{listJson.Stderr}");
             var listedSkills = global::System.Text.Json.JsonSerializer.Deserialize<List<SkillListItem>>(listJson.Stdout);
             Assert.NotNull(listedSkills);
-            Assert.Equal(new[] { "mohist", "mohist-explore" }, listedSkills!.Select(skill => skill.Name).ToArray());
+            Assert.Equal(new[] { "mohist", "mohist-create-epic", "mohist-create-issue", "mohist-explore" }, listedSkills!.Select(skill => skill.Name).ToArray());
 
             var getMohist = await RunProcessAsync(
                 "dotnet",
@@ -77,13 +79,13 @@ public sealed class SkillsCommandBehaviorSpecs
 
             var getFull = await RunProcessAsync(
                 "dotnet",
-                "\"" + cliDll + "\" skills get mohist --full",
+                "\"" + cliDll + "\" skills get mohist-create-issue --full",
                 installRoot,
                 BuildHomeEnvironment(tempHome, hermesHome));
-            Assert.True(getFull.ExitCode == 0, $"get mohist --full failed\nstderr:\n{getFull.Stderr}");
+            Assert.True(getFull.ExitCode == 0, $"get mohist-create-issue --full failed\nstderr:\n{getFull.Stderr}");
             var fullMarker = "--- references/issue-templates.md ---";
             Assert.Contains(fullMarker, getFull.Stdout, StringComparison.Ordinal);
-            Assert.True(getFull.Stdout.IndexOf(fullMarker, StringComparison.Ordinal) > getFull.Stdout.IndexOf("name: mohist", StringComparison.Ordinal));
+            Assert.True(getFull.Stdout.IndexOf(fullMarker, StringComparison.Ordinal) > getFull.Stdout.IndexOf("name: mohist-create-issue", StringComparison.Ordinal));
 
             var getAll = await RunProcessAsync(
                 "dotnet",
@@ -124,6 +126,8 @@ public sealed class SkillsCommandBehaviorSpecs
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(installRepo.ExitCode == 0, $"skills install failed\nstdout:\n{installRepo.Stdout}\n\nstderr:\n{installRepo.Stderr}");
             AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist", "SKILL.md"), "mohist");
+            AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-create-epic", "SKILL.md"), "mohist-create-epic");
+            AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-create-issue", "SKILL.md"), "mohist-create-issue");
             AssertDiscoveryStubOnly(Path.Combine(installRepoRoot, ".agents", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
             Assert.False(Directory.Exists(Path.Combine(installRepoRoot, ".claude", "skills")), "Repository install must not write to .claude.");
             Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills")), "Repository install must not write to Hermes.");
@@ -137,6 +141,8 @@ public sealed class SkillsCommandBehaviorSpecs
                 BuildHomeEnvironment(tempHome, hermesHome));
             Assert.True(installClaude.ExitCode == 0, $"skills install --claude failed\nstderr:\n{installClaude.Stderr}");
             AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist", "SKILL.md"), "mohist");
+            AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-create-epic", "SKILL.md"), "mohist-create-epic");
+            AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-create-issue", "SKILL.md"), "mohist-create-issue");
             AssertDiscoveryStubOnly(Path.Combine(installClaudeRoot, ".claude", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
             Assert.False(Directory.Exists(Path.Combine(installClaudeRoot, ".agents", "skills")), "Claude install must not write to .agents.");
             Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills")), "Claude install must not write to Hermes.");
@@ -149,7 +155,10 @@ public sealed class SkillsCommandBehaviorSpecs
             Assert.True(installHermes.ExitCode == 0, $"skills install --hermes failed\nstdout:\n{installHermes.Stdout}\n\nstderr:\n{installHermes.Stderr}");
             AssertFullPackagedHermesSkill(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md"), "mohist");
             AssertFullPackagedHermesSkill(Path.Combine(hermesHome, "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist", "references", "issue-templates.md")));
+            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-epic", "SKILL.md")), "Hermes install must package mohist-create-epic.");
+            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-issue", "SKILL.md")), "Hermes install must package mohist-create-issue.");
+            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-issue", "references", "issue-templates.md")));
+            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist-create-epic", "references", "epic-templates.md")));
             Assert.Contains("/mohist", installHermes.Stdout + installHermes.Stderr, StringComparison.Ordinal);
             Assert.Contains("/mohist-explore", installHermes.Stdout + installHermes.Stderr, StringComparison.Ordinal);
             Assert.Contains("reload/reset", installHermes.Stdout + installHermes.Stderr, StringComparison.Ordinal);
