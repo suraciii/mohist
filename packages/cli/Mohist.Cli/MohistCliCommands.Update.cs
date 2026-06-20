@@ -263,7 +263,14 @@ internal sealed class SourceCodeUpdater
 
     public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
     {
-        var context = new UpdateContext(dryRun, repoRoot, cliPath, cancellationToken);
+        var resolvedCliPath = await ResolveCliPathAsync(cliPath);
+        var context = new UpdateContext(dryRun, repoRoot, resolvedCliPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(resolvedCliPath))
+        {
+            _err.WriteLine("Could not resolve mo executable path. Pass --cli-path to update the CLI explicitly.");
+            return await FinalizeAsync(context, 1);
+        }
+
         var outcome = await RunStageMachineAsync(context, async (ctx, token) =>
         {
             return await UpdateCliStageAsync(ctx, token);
@@ -411,7 +418,7 @@ internal sealed class SourceCodeUpdater
         _out.WriteLine(StageLabels.CliUpdate);
         context.RecordStage(StageLabels.CliUpdate, "starting");
 
-        var exitCode = await UpdateCliAsync(context.RepoRoot, context.DryRun, context.CliPath, token);
+        var exitCode = await UpdateCliAsync(context.RepoRoot, context.DryRun, null, token);
         if (exitCode != 0)
         {
             context.RecordStage(StageLabels.CliUpdate, "failed");
@@ -556,6 +563,38 @@ internal sealed class SourceCodeUpdater
             return start;
         }
 
+        if (!context.DryRun)
+        {
+            _out.WriteLine("Waiting for runner service to become active...");
+            using var activeCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            activeCts.CancelAfter(_runnerIdentityTimeout);
+            var becameActive = false;
+            while (!activeCts.IsCancellationRequested)
+            {
+                if (await _systemd.IsRunnerRunningAsync(activeCts.Token))
+                {
+                    becameActive = true;
+                    break;
+                }
+
+                try
+                {
+                    await Task.Delay(RunnerIdentityPollInterval, activeCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            if (!becameActive)
+            {
+                context.RecordStage(StageLabels.RestoreRunner, "runner did not become active in time");
+                context.UnavailableCapability ??= "Runner unavailable";
+                return 1;
+            }
+        }
+
         context.RunnerRestored = true;
         _out.WriteLine("Runner service restored.");
         context.RecordStage(StageLabels.RestoreRunner, "runner started");
@@ -662,35 +701,54 @@ internal sealed class SourceCodeUpdater
 
     internal async Task<RuntimeCheckResult> CheckServerIdentityAsync(UpdateContext context, CancellationToken token)
     {
-        var info = await TryGetSystemInfoAsync(token);
-        if (info is null)
+        // The server may briefly report an empty git hash immediately after
+        // restart while build metadata is being initialized. Poll until a hash
+        // is available or we exhaust the tolerance window.
+        using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        pollCts.CancelAfter(_runnerIdentityTimeout);
+
+        SystemInfoSnapshot? info = null;
+        while (!pollCts.IsCancellationRequested)
         {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
-                "GET /api/system/info did not respond");
+            info = await TryGetSystemInfoAsync(pollCts.Token);
+            if (info is null)
+            {
+                return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Fail,
+                    "GET /api/system/info did not respond");
+            }
+
+            var runningHash = info.Running?.GitHash;
+            if (!string.IsNullOrWhiteSpace(runningHash))
+            {
+                var sourceHead = await TryGetSourceHeadAsync(context);
+                if (string.IsNullOrWhiteSpace(sourceHead))
+                {
+                    return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+                        "Source HEAD could not be determined; skipping identity check");
+                }
+
+                if (!string.Equals(runningHash, sourceHead, StringComparison.Ordinal))
+                {
+                    return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+                        $"Running server git hash '{runningHash}' does not match source HEAD '{sourceHead}'");
+                }
+
+                return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Pass,
+                    $"Server identity matches source HEAD '{sourceHead}'");
+            }
+
+            try
+            {
+                await Task.Delay(RunnerIdentityPollInterval, pollCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
 
-        var runningHash = info.Running?.GitHash;
-        if (string.IsNullOrWhiteSpace(runningHash))
-        {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
-                "Server reported an empty git hash; cannot verify identity");
-        }
-
-        var sourceHead = await TryGetSourceHeadAsync(context);
-        if (string.IsNullOrWhiteSpace(sourceHead))
-        {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
-                "Source HEAD could not be determined; skipping identity check");
-        }
-
-        if (!string.Equals(runningHash, sourceHead, StringComparison.Ordinal))
-        {
-            return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
-                $"Running server git hash '{runningHash}' does not match source HEAD '{sourceHead}'");
-        }
-
-        return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Pass,
-            $"Server identity matches source HEAD '{sourceHead}'");
+        return new RuntimeCheckResult("Server identity", RuntimeCheckOutcome.Warn,
+            "Server reported an empty git hash; cannot verify identity");
     }
 
     internal async Task<RuntimeCheckResult> CheckWebAssetsAsync(UpdateContext context, CancellationToken token)
@@ -738,28 +796,52 @@ internal sealed class SourceCodeUpdater
 
     internal async Task<RuntimeCheckResult> CheckRunnerConnectionAsync(UpdateContext context, CancellationToken token)
     {
-        var info = await TryGetSystemInfoAsync(token);
-        if (info is null)
-        {
-            return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
-                "GET /api/system/info did not respond");
-        }
+        // The runner systemd unit may be active before the runner has registered
+        // with the server. Poll the server's view of runner state until it catches
+        // up, within a bounded window.
+        using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        pollCts.CancelAfter(_runnerIdentityTimeout);
 
-        var runner = info.Services?.Runner;
-        if (string.IsNullOrWhiteSpace(runner))
+        SystemInfoSnapshot? info = null;
+        string? lastRunner = null;
+        while (!pollCts.IsCancellationRequested)
         {
-            return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
-                "Server did not report a runner service state");
-        }
+            info = await TryGetSystemInfoAsync(pollCts.Token);
+            if (info is null)
+            {
+                return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
+                    "GET /api/system/info did not respond");
+            }
 
-        if (string.Equals(runner, "active", StringComparison.OrdinalIgnoreCase))
-        {
-            return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Pass,
-                "Runner service is active");
+            var runner = info.Services?.Runner;
+            lastRunner = runner;
+            if (string.Equals(runner, "active", StringComparison.OrdinalIgnoreCase))
+            {
+                return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Pass,
+                    "Runner service is active");
+            }
+
+            // Empty or transitional states (e.g. activating) are retried.
+            if (!string.IsNullOrWhiteSpace(runner))
+            {
+                return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
+                    $"Runner service is '{runner}'; expected 'active'");
+            }
+
+            try
+            {
+                await Task.Delay(RunnerIdentityPollInterval, pollCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
 
         return new RuntimeCheckResult("Runner connection", RuntimeCheckOutcome.Fail,
-            $"Runner service is '{runner}'; expected 'active'");
+            string.IsNullOrWhiteSpace(lastRunner)
+                ? "Server did not report a runner service state"
+                : $"Runner service is '{lastRunner}'; expected 'active'");
     }
 
     internal async Task<RuntimeCheckResult> CheckManagedSkillAssetsAsync(UpdateContext context, CancellationToken token)
@@ -803,7 +885,8 @@ internal sealed class SourceCodeUpdater
                 return null;
 
             await using var stream = await response.Content.ReadAsStreamAsync(token);
-            return await JsonSerializer.DeserializeAsync<SystemInfoSnapshot>(stream, SystemInfoSnapshot.JsonOptions, token);
+            var envelope = await JsonSerializer.DeserializeAsync<SystemInfoEnvelope>(stream, SystemInfoSnapshot.JsonOptions, token);
+            return envelope?.Data;
         }
         catch
         {
@@ -1002,7 +1085,17 @@ internal sealed class SourceCodeUpdater
     public async Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
-        var target = await ResolveCliPathAsync(cliPath);
+        var home = _getUserHome();
+        var primaryTarget = ResolveManagedCliPath(home);
+        var alternateTarget = ResolveAlternateManagedCliPath(home);
+        // To avoid corrupting the running single-file process on Unix, install
+        // the new binary into the slot that is NOT currently executing. The
+        // wrapper is then updated to point at the new slot.
+        var currentProcessPath = Environment.ProcessPath?.Replace('\\', '/');
+        var managedTarget = string.Equals(currentProcessPath, primaryTarget, StringComparison.OrdinalIgnoreCase)
+            ? alternateTarget
+            : primaryTarget;
+        var target = !string.IsNullOrWhiteSpace(cliPath) ? await ResolveCliPathAsync(cliPath) : managedTarget;
         if (string.IsNullOrWhiteSpace(target))
         {
             _err.WriteLine("Could not resolve mo executable path. Pass --cli-path to update the CLI explicitly.");
@@ -1025,6 +1118,11 @@ internal sealed class SourceCodeUpdater
             _out.WriteLine($"  chmod +x {tempTarget}");
             _out.WriteLine($"  mv {tempTarget} {target}");
             _out.WriteLine($"  synchronize {sourceSkillData} into {managedSkillData} (prepare temp dir, replace managed root)");
+            if (target == primaryTarget || target == alternateTarget)
+            {
+                var wrapper = ResolveCliWrapperPath(home);
+                _out.WriteLine($"  ensure wrapper script at {wrapper} -> {target}");
+            }
             return 0;
         }
 
@@ -1050,6 +1148,8 @@ internal sealed class SourceCodeUpdater
             return publish;
         }
 
+        _fileSystem.CreateDirectory(Path.GetDirectoryName(target)!);
+
         var (copy, _, copyErr) = await _commandExecutor.ExecuteAsync("cp", [binary, tempTarget], root);
         if (copy != 0)
         {
@@ -1072,6 +1172,16 @@ internal sealed class SourceCodeUpdater
             if (!string.IsNullOrWhiteSpace(moveErr)) _err.WriteLine(moveErr);
             _err.WriteLine("CLI replace failed. Aborting update.");
             return move;
+        }
+
+        if (target == primaryTarget || target == alternateTarget)
+        {
+            var wrapperExit = await EnsureCliWrapperAsync(target, home);
+            if (wrapperExit != 0)
+            {
+                _err.WriteLine("CLI wrapper installation failed. Aborting update.");
+                return wrapperExit;
+            }
         }
 
         var synchronizer = new SkillAssetSynchronizer(_out, _err, _fileSystem);
@@ -1459,8 +1569,81 @@ internal sealed class SourceCodeUpdater
         if (!string.IsNullOrWhiteSpace(envPath))
             return Path.GetFullPath(envPath);
 
+        var home = _getUserHome();
+        var wrapper = ResolveCliWrapperPath(home);
+        if (_fileSystem.Exists(wrapper))
+            return wrapper;
+
         var (exitCode, stdout, _) = await _commandExecutor.ExecuteAsync("sh", ["-lc", "command -v mo"], null);
         return exitCode == 0 ? stdout.Trim() : null;
+    }
+
+    private static string ResolveManagedCliPath(string? home = null)
+    {
+        var root = !string.IsNullOrWhiteSpace(home)
+            ? home
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(root, ".local", "share", "mohist", "cli", "mo").Replace('\\', '/');
+    }
+
+    private static string ResolveAlternateManagedCliPath(string? home = null)
+    {
+        var root = !string.IsNullOrWhiteSpace(home)
+            ? home
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(root, ".local", "share", "mohist", "cli", "mo.next").Replace('\\', '/');
+    }
+
+    private static string ResolveCliWrapperPath(string? home = null)
+    {
+        var root = !string.IsNullOrWhiteSpace(home)
+            ? home
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(root, ".local", "bin", "mo").Replace('\\', '/');
+    }
+
+    private async Task<int> EnsureCliWrapperAsync(string managedCliPath, string? home = null)
+    {
+        var wrapperPath = ResolveCliWrapperPath(home);
+        _fileSystem.CreateDirectory(Path.GetDirectoryName(wrapperPath)!);
+
+        // If the wrapper path currently points to a regular file or symlink that
+        // is not the managed binary, remove it so we can install the wrapper script.
+        if (_fileSystem.Exists(wrapperPath))
+        {
+            try
+            {
+                _fileSystem.Delete(wrapperPath);
+            }
+            catch (Exception ex)
+            {
+                _err.WriteLine($"Could not remove existing entry at {wrapperPath}: {ex.Message}");
+                return 1;
+            }
+        }
+
+        var wrapper = "#!/bin/sh" + Environment.NewLine
+            + $"exec \"{managedCliPath}\" \"$@\"" + Environment.NewLine;
+        try
+        {
+            await _fileSystem.WriteAllTextAsync(wrapperPath, wrapper);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Could not write wrapper script at {wrapperPath}: {ex.Message}");
+            return 1;
+        }
+
+        var (chmod, _, chmodErr) = await _commandExecutor.ExecuteAsync("chmod", ["+x", wrapperPath], null);
+        if (chmod != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(chmodErr)) _err.WriteLine(chmodErr);
+            _err.WriteLine($"Could not make wrapper script at {wrapperPath} executable.");
+            return chmod;
+        }
+
+        _out.WriteLine($"Installed CLI wrapper: {wrapperPath}");
+        return 0;
     }
 
     public const string CliPathEnvironmentVariable = "MOHIST_CLI_PATH";
@@ -1685,6 +1868,12 @@ internal sealed class SourceCodeUpdater
 
         [System.Text.Json.Serialization.JsonPropertyName("services")]
         public SystemInfoServiceSnapshot? Services { get; set; }
+    }
+
+    private sealed class SystemInfoEnvelope
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("data")]
+        public SystemInfoSnapshot? Data { get; set; }
     }
 
     private static string FormatReadinessStatus(string path, HttpStatusCode statusCode)

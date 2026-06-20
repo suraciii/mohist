@@ -1,5 +1,5 @@
 ---
-purpose: "Template and variable modules, merge strategy, and loading flow."
+purpose: "Workflow profile：它包含什么（template + variables + prompts）、合并策略、加载流程。"
 include:
   - "Module definitions and interfaces."
   - "Variable merge strategy with ASCII diagrams."
@@ -12,7 +12,13 @@ style:
   - "Keep text short and human-readable."
 ---
 
-# Workflow Template & Variables
+# Workflow Profile
+
+> **Workflow profile 是 per project/issue 的工作流配置，含两块：**
+> 1. **template** —— 选哪个工作流定义（`WorkflowDefinition`：stage/task/check 结构）
+> 2. **variables** —— 变量覆盖（`VariableBundle`）
+>
+> **prompts 不是 workflow profile 的一部分**——它是更上层的独立抽象（项目/issue 级的 prompt 库），workflow 只是它的消费者之一；将来脱离 workflow 的独立 Agent 也会消费同一份 prompt。见 `prompt-management.md`。
 
 ## Modules
 

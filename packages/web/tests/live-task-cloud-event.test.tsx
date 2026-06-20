@@ -8,7 +8,6 @@ import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
-import { RuntimeToastHost } from '../src/shared/ui/toast'
 
 const toast = vi.hoisted(() => ({
   info: vi.fn(),

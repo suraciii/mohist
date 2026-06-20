@@ -398,7 +398,7 @@ describe('EpicListPage basic actions', () => {
   it('renders a Paused section between Active and Done with amber badge and de-emphasized cards', () => {
     mocks.useEpics.mockReturnValue({
       data: [
-        epics[0],
+        activeWithBoth,
         {
           id: 'epic-paused',
           number: null,
@@ -417,7 +417,7 @@ describe('EpicListPage basic actions', () => {
             readyToMarkDone: false,
           },
         },
-        epics[1],
+        doneEpic,
       ],
       isLoading: false,
     })
