@@ -170,7 +170,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         // next pending work (e.g. a check). Strip any new dispatch now that
         // the workflow is terminally stopped so GetCurrentWorkIdAsync() reports
         // no active work.
-        ClearDispatchedChecks();
+        _dispatchedWorkId = null;
         await SaveRunAsync();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);

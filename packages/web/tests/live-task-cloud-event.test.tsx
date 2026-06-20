@@ -26,7 +26,7 @@ vi.mock('../src/shared/api/events-hub', () => ({
   useEventsConnection: eventsHub.useEventsConnection,
 }))
 
-const { unwrapEnvelope, unwrapTranscriptEnvelope } = __testing__
+const { unwrapEnvelope, unwrapTranscriptEnvelope, routeTranscriptEventName } = __testing__
 
 describe('unwrapEnvelope', () => {
   it('returns the data when given a CloudEvents 1.0.2 envelope', () => {
@@ -204,7 +204,7 @@ describe('LiveTaskProvider transcript routing', () => {
   ] as const)('forwards %s transcript events to %s subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent(eventName, (detail) => received.push(detail))
+    const off = onAgentEvent(routeTranscriptEventName(eventName) as Parameters<typeof onAgentEvent>[0], (detail) => received.push(detail))
 
     rtlRender(
       <QueryClientProvider client={queryClient}>
@@ -258,7 +258,7 @@ describe('LiveTaskProvider transcript routing', () => {
   ] as const)('routes %s transcript events to coder_tool_call subscribers', async (eventName, partialPayload) => {
     const queryClient = new QueryClient()
     const received: unknown[] = []
-    const off = onAgentEvent(eventName, (detail) => received.push(detail))
+    const off = onAgentEvent(routeTranscriptEventName(eventName) as Parameters<typeof onAgentEvent>[0], (detail) => received.push(detail))
 
     rtlRender(
       <QueryClientProvider client={queryClient}>

@@ -34,6 +34,7 @@ if (typeof window !== 'undefined' && !window.ResizeObserver) {
   }
   Object.defineProperty(window, 'ResizeObserver', {
     writable: true,
+    configurable: true,
     value: ResizeObserverPolyfill,
   })
 }

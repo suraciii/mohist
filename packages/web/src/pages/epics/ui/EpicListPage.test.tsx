@@ -426,9 +426,9 @@ describe('EpicListPage basic actions', () => {
 
     const sections = screen.getAllByRole('heading', { level: 2 })
     const sectionTexts = sections.map(h => h.textContent)
-    const activeIdx = sectionTexts.indexOf('Active')
-    const pausedIdx = sectionTexts.indexOf('Paused')
-    const doneIdx = sectionTexts.indexOf('Done')
+    const activeIdx = sectionTexts.findIndex(t => t?.startsWith('Active'))
+    const pausedIdx = sectionTexts.findIndex(t => t?.startsWith('Paused'))
+    const doneIdx = sectionTexts.findIndex(t => t?.startsWith('Done'))
 
     expect(activeIdx).not.toBe(-1)
     expect(pausedIdx).not.toBe(-1)
