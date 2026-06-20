@@ -37,6 +37,12 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, waiting: waiting, runnerIds: runnerIds, ct: ct));
         });
 
+        group.MapGet("/usage", async (HttpContext context, AgentSessionQuerier sessions, CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, ct));
+        });
+
         return app;
     }
 

@@ -214,3 +214,18 @@ public sealed record ActivityPreviewDto(string Kind, string Text, string Created
 public sealed record ActivityWaitingCardDto(string IssueId, int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
 
 public sealed record AgentSessionStatusRequest([property: JsonPropertyName("status")] string Status, DateTime? LastDataAt = null, string? FailureReason = null);
+
+public sealed record AgentUsageTimeseriesDto(
+    DateTime RangeFrom,
+    DateTime RangeTo,
+    string BucketGranularity,
+    IReadOnlyList<UsageBucketDto> Buckets);
+
+public sealed record UsageBucketDto(
+    DateTime BucketStart,
+    DateTime BucketEnd,
+    long InputTokens,
+    long OutputTokens,
+    long TotalTokens,
+    double CostAmount,
+    string? CostCurrency);

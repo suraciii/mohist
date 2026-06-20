@@ -253,7 +253,7 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
-      livenessQuietThresholdMs: 30,
+      livenessQuietThresholdMs: 80,
       probeTimeoutMs: 80,
       timeout: 1_000,
     }, undefined, shared.context()))
@@ -326,7 +326,7 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(contextWithOverrides({
       prompt: "long resumed task",
       session: "shared-session",
-      livenessQuietThresholdMs: 30,
+      livenessQuietThresholdMs: 80,
       probeTimeoutMs: 80,
       timeout: 1_000,
     }, undefined, shared.context()))

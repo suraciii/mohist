@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { StatusBar } from '../../../shared/ui/StatusBar'
-import { ActiveSessionCard, WaitingCard, RecentCard, useActivityCards } from '../../../widgets/coder-session'
+import { ActiveSessionCard, WaitingCard, RecentCard, UsageSnapshotLabel, useActivityCards, useActivityUsageSnapshot } from '../../../widgets/coder-session'
 import { RunnerSummaryBadge, RunnerListCard } from '../../../widgets/runner-status'
 
 function EmptySection({ message }: { message: string }) {
@@ -22,6 +22,7 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
 
 export function ActivityPage() {
   const { activeCards, recentCards, waitingCards, statusCounts, slotUsage } = useActivityCards()
+  const usageSnapshot = useActivityUsageSnapshot()
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -46,6 +47,10 @@ export function ActivityPage() {
         <div className="max-w-3xl mx-auto px-4 py-4 md:px-6 space-y-6">
           <section>
             <RunnerListCard />
+          </section>
+
+          <section>
+            <UsageSnapshotLabel snapshot={usageSnapshot} />
           </section>
 
           <section>

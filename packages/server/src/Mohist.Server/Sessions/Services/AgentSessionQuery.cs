@@ -25,7 +25,7 @@ public sealed class AgentSessionQuery
         AgentSessionQueryOrder order = AgentSessionQueryOrder.CreatedAscending,
         CancellationToken ct = default)
     {
-        var records = await ListByLabelsAsync(labels, order, limit: 1, ct);
+        var records = await ListByLabelsAsync(labels, order, limit: 1, ct: ct);
         return records.FirstOrDefault();
     }
 
@@ -33,10 +33,16 @@ public sealed class AgentSessionQuery
         IReadOnlyDictionary<string, string> labels,
         AgentSessionQueryOrder order = AgentSessionQueryOrder.CreatedAscending,
         int? limit = null,
+        DateTime? from = null,
+        DateTime? to = null,
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = QueryRowsByLabels(db, labels);
+        if (from is not null)
+            query = query.Where(session => session.CreatedAt >= from.Value);
+        if (to is not null)
+            query = query.Where(session => session.CreatedAt < to.Value);
         query = order == AgentSessionQueryOrder.CreatedDescending
             ? query.OrderByDescending(session => session.CreatedAt)
             : query.OrderBy(session => session.CreatedAt);

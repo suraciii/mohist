@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useContext } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { EventName, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
@@ -10,7 +10,7 @@ import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
 import { EVENT_TYPES, REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
-import { useRuntimeToast } from '../../shared/ui/toast'
+import { RuntimeToastContext } from '../../shared/ui/toast'
 
 /**
  * Compile-time guard: every name the switch can route (i.e. every key of
@@ -247,11 +247,11 @@ function getCurrentIssueNumber(): number | null {
  */
 function useRunnerDropNotice(): void {
   const { data: agentStatus } = useAgentStatus()
-  const toastCtx = useRuntimeToast()
+  const toastCtx = useContext(RuntimeToastContext)
   const lastSeen = useRef<boolean | null>(null)
 
   useEffect(() => {
-    if (!agentStatus) return
+    if (!agentStatus || !toastCtx) return
     const next = agentStatus.runnerAvailable === false
     if (lastSeen.current === null) {
       lastSeen.current = next
