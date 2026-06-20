@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Workflow.Services.Sessions;
 
 namespace Mohist.Server.Sessions.Services;
 
@@ -35,14 +36,16 @@ public sealed class AgentSessionQuery
         int? limit = null,
         DateTime? from = null,
         DateTime? to = null,
+        string? status = null,
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var query = QueryRowsByLabels(db, labels);
+        var query = QueryRowsByLabels(db.AgentSessions.AsNoTracking(), labels);
         if (from is not null)
             query = query.Where(session => session.CreatedAt >= from.Value);
         if (to is not null)
             query = query.Where(session => session.CreatedAt < to.Value);
+        query = ApplyStatusFilter(query, status);
         query = order == AgentSessionQueryOrder.CreatedDescending
             ? query.OrderByDescending(session => session.CreatedAt)
             : query.OrderBy(session => session.CreatedAt);
@@ -50,7 +53,7 @@ public sealed class AgentSessionQuery
             query = query.Take(limit.Value);
 
         var rows = await query.ToListAsync(ct);
-        return await ToRecordsAsync(db, rows, ct);
+        return ToRecords(rows);
     }
 
     public async Task<IReadOnlyList<AgentSessionRecord>> ListByIdsAsync(
@@ -63,56 +66,78 @@ public sealed class AgentSessionQuery
             .Where(session => sessionIds.Contains(session.Id))
             .OrderBy(session => session.CreatedAt)
             .ToListAsync(ct);
-        return await ToRecordsAsync(db, rows, ct);
+        return ToRecords(rows);
+    }
+
+    /// <summary>
+    /// Translates the "active"/"inactive" status filter into a DB-level
+    /// predicate on <see cref="AgentSessionRow.AgentSessionId"/> and
+    /// <see cref="AgentSessionRow.LastDataAt"/>, so it composes with label
+    /// filters, ordering and limit in a single SQL statement.
+    /// </summary>
+    private static IQueryable<AgentSessionRow> ApplyStatusFilter(
+        IQueryable<AgentSessionRow> query, string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return query;
+        var cutoff = DateTime.UtcNow - AgentSessionJsonHelper.ActiveRuntimeEventWindow;
+        return status.Trim().ToLowerInvariant() switch
+        {
+            "active" => query.Where(s => s.AgentSessionId != null && s.LastDataAt >= cutoff),
+            "inactive" => query.Where(s => s.AgentSessionId == null || s.LastDataAt < cutoff),
+            _ => query,
+        };
     }
 
     private static IQueryable<AgentSessionRow> QueryRowsByLabels(
-        MohistDbContext db,
+        IQueryable<AgentSessionRow> query,
         IReadOnlyDictionary<string, string> labels)
     {
         var filters = labels
             .Where(label => !string.IsNullOrWhiteSpace(label.Key) && !string.IsNullOrWhiteSpace(label.Value))
             .ToArray();
         if (filters.Length == 0)
-            return db.AgentSessions.AsNoTracking().Where(_ => false);
+            return query.Where(_ => false);
 
-        IQueryable<AgentSessionRow> query = db.AgentSessions.AsNoTracking();
         foreach (var (key, value) in filters)
         {
-            query = query.Where(session => db.AgentSessionLabels.Any(label =>
-                label.SessionId == session.Id
-                && label.Key == key
-                && label.Value == value));
+            query = key switch
+            {
+                AgentSessionQueryMetadataKeys.ProjectId => query.Where(s => s.LabelProjectId == value),
+                AgentSessionQueryMetadataKeys.WorkflowRunId => query.Where(s => s.LabelSourceId == value),
+                AgentSessionQueryMetadataKeys.SessionName => query.Where(s => s.LabelSessionName == value),
+                AgentSessionQueryMetadataKeys.IssueNumber => query.Where(s => s.LabelIssueNumber == value),
+                AgentSessionQueryMetadataKeys.WorkId => query.Where(s => s.LabelWorkId == value),
+                AgentSessionQueryMetadataKeys.WorkType => query.Where(s => s.LabelWorkType == value),
+                AgentSessionQueryMetadataKeys.Stage => query.Where(s => s.LabelStage == value),
+                AgentSessionQueryMetadataKeys.SourceKind => query.Where(s => s.LabelSourceKind == value),
+                _ => query.Where(_ => false),
+            };
         }
 
         return query;
     }
 
-    private static async Task<IReadOnlyList<AgentSessionRecord>> ToRecordsAsync(
-        MohistDbContext db,
-        IReadOnlyList<AgentSessionRow> rows,
-        CancellationToken ct)
+    /// <summary>
+    /// Builds <see cref="AgentSessionRecord"/> objects from raw rows by
+    /// deserializing the <see cref="AgentSessionRow.State"/> JSON.
+    /// Labels come from <see cref="AgentSessionMetadata.Labels"/> inside the
+    /// JSON directly — the label data lives in one place (the State column)
+    /// and is indexed via stored computed columns on AgentSessions.
+    /// </summary>
+    private static IReadOnlyList<AgentSessionRecord> ToRecords(IReadOnlyList<AgentSessionRow> rows)
     {
         if (rows.Count == 0) return [];
 
-        var ids = rows.Select(row => row.Id).ToArray();
-        var labels = await db.AgentSessionLabels.AsNoTracking()
-            .Where(label => ids.Contains(label.SessionId))
-            .ToListAsync(ct);
-        var labelsBySession = labels
-            .GroupBy(label => label.SessionId, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => (IReadOnlyDictionary<string, string>)group.ToDictionary(label => label.Key, label => label.Value, StringComparer.Ordinal),
-                StringComparer.Ordinal);
-
-        var result = new List<AgentSessionRecord>();
+        var result = new List<AgentSessionRecord>(rows.Count);
         foreach (var row in rows)
         {
             var session = AgentSessionJson.Deserialize(row);
             if (session is null) continue;
-            labelsBySession.TryGetValue(row.Id, out var sessionLabels);
-            result.Add(new AgentSessionRecord(row, session, sessionLabels ?? new Dictionary<string, string>(StringComparer.Ordinal)));
+            result.Add(new AgentSessionRecord(
+                row,
+                session,
+                session.Metadata.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal)));
         }
 
         return result;

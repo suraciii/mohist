@@ -979,10 +979,9 @@ public class AgentSessionSpecs
 
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
-            var label = await db.AgentSessionLabels.FirstAsync(s =>
-                s.SessionId == session.Id && s.Key == AgentSessionQueryMetadataKeys.Stage);
-            label.Value = "Plan";
-            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlRawAsync(
+                """UPDATE AgentSessions SET State = json_set(State, '$.Metadata.Labels."mohist.io/stage"', {0}) WHERE Id = {1}""",
+                "Plan", session.Id);
         }
 
         var runState = JsonSerializer.Serialize(new
@@ -1198,12 +1197,9 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        return await db.AgentSessionLabels
-            .Where(label => label.Key == AgentSessionQueryMetadataKeys.WorkflowRunId && label.Value == workflowRunId)
-            .Join(db.AgentSessionLabels.Where(label => label.Key == AgentSessionQueryMetadataKeys.SessionName && label.Value == sessionName),
-                left => left.SessionId,
-                right => right.SessionId,
-                (left, right) => left.SessionId)
+        return await db.AgentSessions
+            .Where(s => s.LabelSourceId == workflowRunId && s.LabelSessionName == sessionName)
+            .Select(s => s.Id)
             .SingleAsync();
     }
 

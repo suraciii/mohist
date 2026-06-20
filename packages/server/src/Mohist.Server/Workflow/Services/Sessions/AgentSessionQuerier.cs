@@ -69,13 +69,12 @@ public class AgentSessionQuerier
     public async Task<IReadOnlyList<AgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = (await _sessionQuery.ListByLabelsAsync(
-                Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
-                AgentSessionQueryOrder.CreatedDescending,
-                ct: ct))
-            .Where(session => MatchesStatus(session.Session, status))
-            .Take(limit)
-            .ToList();
+        var sessions = await _sessionQuery.ListByLabelsAsync(
+            Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionQueryOrder.CreatedDescending,
+            limit,
+            status: status,
+            ct: ct);
         sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
         var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(IssueNumber), ct);
         var eventSummaries = await LoadEventSummariesAsync(db, sessions.Select(r => r.Session.Id), ct);
@@ -190,12 +189,11 @@ public class AgentSessionQuerier
     {
         var take = Math.Clamp(limit ?? 50, 1, 200);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = (await _sessionQuery.ListByLabelsAsync(
+        var sessions = await _sessionQuery.ListByLabelsAsync(
                 Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
                 AgentSessionQueryOrder.CreatedDescending,
                 take,
-                ct: ct))
-            .ToList();
+                ct: ct);
         sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
 
         var sessionIds = sessions.Select(s => s.Session.Id).ToArray();
@@ -219,7 +217,7 @@ public class AgentSessionQuerier
         return new ActivityDto(summary, cards, waiting.ToList());
     }
 
-    private async Task<Dictionary<string, ActivityTaskProgressDto>> BuildTaskProgressMapAsync(List<AgentSessionRecord> sessions, CancellationToken ct)
+    private async Task<Dictionary<string, ActivityTaskProgressDto>> BuildTaskProgressMapAsync(IReadOnlyList<AgentSessionRecord> sessions, CancellationToken ct)
     {
         var result = new Dictionary<string, ActivityTaskProgressDto>(StringComparer.Ordinal);
         var workflowRunIds = sessions
@@ -571,17 +569,6 @@ public class AgentSessionQuerier
         return result;
     }
 
-    private static bool MatchesStatus(AgentSession session, string? status)
-    {
-        if (string.IsNullOrWhiteSpace(status)) return true;
-        return status.Trim().ToLowerInvariant() switch
-        {
-            "active" => AgentSessionJsonHelper.StatusName(session) == "active",
-            "inactive" => AgentSessionJsonHelper.StatusName(session) == "inactive",
-            _ => true,
-        };
-    }
-
     private static async Task<AgentSessionTranscriptData> LoadTranscriptAsync(MohistDbContext db, string sessionId, CancellationToken ct)
     {
         var turns = await db.AgentSessionTranscriptTurns.AsNoTracking()
@@ -610,9 +597,9 @@ public class AgentSessionQuerier
         CreatedAt = part.LastSeenAt,
     };
 
-    private static async Task<List<AgentSessionRecord>> ReconcileActiveSessionsAsync(
+    private static async Task<IReadOnlyList<AgentSessionRecord>> ReconcileActiveSessionsAsync(
         MohistDbContext db,
-        List<AgentSessionRecord> sessions,
+        IReadOnlyList<AgentSessionRecord> sessions,
         CancellationToken ct)
     {
         if (sessions.Count == 0) return sessions;

@@ -5,7 +5,7 @@ namespace Mohist.Server.Sessions.Services;
 
 public static class AgentSessionJsonHelper
 {
-    private static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
+    internal static readonly TimeSpan ActiveRuntimeEventWindow = TimeSpan.FromMinutes(5);
 
     public static string StatusName(AgentSession session) =>
         session.Status.AgentRuntimeSessionId is not null

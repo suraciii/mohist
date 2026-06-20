@@ -30,7 +30,6 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
-    public DbSet<AgentSessionLabelRow> AgentSessionLabels { get; set; } = null!;
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
     public DbSet<AgentSessionTranscriptPartRow> AgentSessionTranscriptParts { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
@@ -118,16 +117,27 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Status).HasMaxLength(64).IsRequired().HasConversion<string>();
             entity.HasIndex(e => e.AgentSessionId);
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
-        });
 
-        modelBuilder.Entity<AgentSessionLabelRow>(entity =>
-        {
-            entity.ToTable("AgentSessionLabels");
-            entity.HasKey(e => new { e.SessionId, e.Key });
-            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
-            entity.Property(e => e.Key).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.Value).HasMaxLength(1024).IsRequired();
-            entity.HasIndex(e => new { e.Key, e.Value, e.SessionId });
+            entity.Property(e => e.LabelProjectId)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/project-id"')""", stored: true);
+            entity.Property(e => e.LabelSourceId)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/source-id"')""", stored: true);
+            entity.Property(e => e.LabelSessionName)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/session-name"')""", stored: true);
+            entity.Property(e => e.LabelIssueNumber)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/issue-number"')""", stored: true);
+            entity.Property(e => e.LabelWorkId)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/work-id"')""", stored: true);
+            entity.Property(e => e.LabelWorkType)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/work-type"')""", stored: true);
+            entity.Property(e => e.LabelStage)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/stage"')""", stored: true);
+            entity.Property(e => e.LabelSourceKind)
+                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/source-kind"')""", stored: true);
+
+            entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
+            entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");
+            entity.HasIndex(e => new { e.LabelSourceId, e.LabelSessionName }).HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
