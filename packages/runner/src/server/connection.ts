@@ -13,12 +13,8 @@ export class ServerConnection {
     await this.post("register", { hostname: hostname(), ...registration }, signal)
   }
 
-  async heartbeat(signal: AbortSignal) {
-    if (this.buildGitHash) {
-      await this.post("heartbeat", { buildGitHash: this.buildGitHash }, signal)
-      return
-    }
-    await this.post("heartbeat", undefined, signal)
+  async heartbeat(state: RunnerRegistration, signal: AbortSignal) {
+    await this.post("heartbeat", { hostname: hostname(), ...state, buildGitHash: this.buildGitHash }, signal)
   }
 
   async disconnect(signal: AbortSignal) {
