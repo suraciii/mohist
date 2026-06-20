@@ -301,7 +301,7 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
 function buildRegistry(handler: (ctx: ActionContext) => Promise<ActionResult>): ActionRegistry {
   const registry = new ActionRegistry()
   registry.register("core/script", async (ctx) => handler(ctx))
-  registry.register("mohist/prepare", async (ctx) => handler(ctx))
+  registry.register("mohist/rebase", async (ctx) => handler(ctx))
   return registry
 }
 

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -81,14 +80,6 @@ export interface WorkspaceInfo {
   changeDir?: string | null
 }
 
-export interface LandingWorkspaceInfo {
-  path: string
-  runId: string
-  runBranch: string
-  baseBranch: string
-  gitUrl: string
-}
-
 export class WorkspaceManager {
   constructor(private readonly runnerRoot = defaultRunnerRoot()) {}
 
@@ -117,28 +108,29 @@ export class WorkspaceManager {
     const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
     const runBranch = runBranchName(runId)
 
+    // Health gate: before any cache repair or workspace mutation,
+    // probe the existing workspace (if any) for residual rebase / merge /
+    // cherry-pick state. A mid-flight rebase crash from a previous run
+    // would otherwise leave the workspace in an unrescuable state for
+    // the next materialize(). The gate is a no-op when no workspace
+    // exists yet (first-time materialization).
+    const suppliedPath = stringAt(variables, ["workspace", "path"])
+    const workspacePath = suppliedPath
+      ? resolve(suppliedPath)
+      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber)
+    await this.runHealthGate(workspacePath, runBranch, signal)
+
     const cachePath = resolve(join(this.runnerRoot, "repos", slug(projectId), slug(repoName)))
     const projectRoot = resolve(join(this.runnerRoot, slug(projectName)))
     await this.ensureCache(cachePath, gitUrl, projectRoot, effectiveBaseBranch, signal)
     await this.resolveBranch(cachePath, effectiveBaseBranch, signal)
 
-    const suppliedPath = stringAt(variables, ["workspace", "path"])
-    const workspacePath = suppliedPath
-      ? resolve(suppliedPath)
-      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber)
     const marker = issueWorkspaceMarker(variables)
     const workspaceExistsBeforeCacheRepair = exists(workspacePath)
     if (workspaceExistsBeforeCacheRepair && !await hasSameMarker(workspacePath, marker)) {
       await deleteDirectory(workspacePath)
     }
     await this.ensureFreshWorkspace(cachePath, workspacePath, effectiveBaseBranch, runBranch, gitUrl, marker, signal)
-
-    // Prune any landing workspaces left behind by a previous, possibly
-    // crashed, run. Each landing is runId-scoped (and uuid-disambiguated),
-    // so removing them cannot affect a different run and cannot reach
-    // into the workflow workspace's object store — landing clones are
-    // isolated `--shared` alternates clones of the workflow workspace.
-    await this.pruneLandingWorkspaces(variables, runId, signal)
 
     const changeDir = stringAt(variables, ["openspecChangeDir"])
     if (changeDir) await ensureDir(join(workspacePath, changeDir, "specs"))
@@ -160,6 +152,16 @@ export class WorkspaceManager {
     const workspacePath = suppliedPath
       ? resolve(suppliedPath)
       : issueWorkspacePath(this.runnerRoot, projectName, issueNumber ?? 0)
+
+    // Health gate: every dispatch passes through verify(), so this is
+    // the per-task entry point. A residual rebase / merge / cherry-pick
+    // from a prior mid-flight crash is detected and aborted here, BEFORE
+    // the marker / branch checks below — otherwise a `git checkout` from
+    // the residual state would refuse with "resolve your current index
+    // first" (the #166 fatality). The gate is non-destructive: the
+    // `reset --hard <runBranch>` aligns the tree to the run branch ref,
+    // which has not moved because the failed rebase never advanced it.
+    await this.runHealthGate(workspacePath, runBranch, signal)
 
     if (!exists(workspacePath)) {
       throw new WorkspaceMissingError(
@@ -208,140 +210,94 @@ export class WorkspaceManager {
     return { action: "verify", workspacePath, marker: onDiskMarker ?? undefined }
   }
 
-  // Materialize an isolated temporary landing workspace as a `git clone
-  // --shared` of the workflow workspace. The landing workspace is a fully
-  // independent repository that references the workflow workspace's
-  // object store via alternates (read-only), so removing the landing
-  // directory cannot delete or corrupt the workflow workspace's git
-  // objects, refs, or branch. The `origin` remote is reset to the
-  // configured repository gitUrl so push operations in the landing
-  // workspace target the real upstream.
-  async createLandingWorkspace(work: WorkItem, signal: AbortSignal): Promise<LandingWorkspaceInfo> {
-    const variables = work.variables ?? {}
-    const gitUrl = stringAt(variables, ["repository", "gitUrl"])
-    const baseBranch = stringAt(variables, ["repository", "baseBranch"])
-    if (!gitUrl) throw new Error("Landing workspace requires repository.gitUrl in variables.")
-    const effectiveBaseBranch = baseBranch ?? "main"
-    const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId ?? ""
-    const runBranch = runBranchName(runId)
+  // Workspace health gate (T-003). Detects residual rebase / merge /
+  // cherry-pick state in the workflow workspace (`.git/rebase-merge`,
+  // `.git/rebase-apply`, `.git/MERGE_HEAD`, `.git/CHERRY_PICK_HEAD`)
+  // and aborts the in-progress operation, then re-aligns the working
+  // tree + index to the run branch ref. The gate runs at the entry of
+  // `verify()` and `materialize()` so a mid-flight crash from a prior
+  // run never permanently sticks the workspace. The recovery is
+  // non-destructive: `git rebase` advances the run branch ref only on
+  // success, so the run branch ref is still pointing at the pre-rebase
+  // commit when a crash happens, and `git reset --hard <runBranch>`
+  // just rolls the work tree back to that pre-rebase state.
+  //
+  // The gate is a no-op when the workspace path does not exist (first
+  // materialize of a fresh run) or when no residual state is detected.
+  // Untracked files are intentionally left alone (no `git clean -fd`):
+  // the dirty-worktree boundary checks elsewhere govern those, and a
+  // destructive clean risks dropping agent artifacts.
+  private async runHealthGate(workspacePath: string, runBranch: string, signal: AbortSignal): Promise<void> {
+    if (!exists(workspacePath)) return
+    // Only probe inside an actual git work tree. A bare cache or a
+    // non-git directory is irrelevant to the gate.
+    if (!exists(join(workspacePath, ".git"))) return
 
-    const projectId = stringAt(variables, ["project", "id"]) ?? "project"
-    const projectName = stringAt(variables, ["project", "name"]) ?? projectId
+    const residual = await this.detectResidualState(workspacePath, signal)
+    if (!residual) return
 
-    const suppliedPath = stringAt(variables, ["workspace", "path"])
-    const workspacePath = suppliedPath
-      ? resolve(suppliedPath)
-      : issueWorkspacePath(this.runnerRoot, projectName, numberAt(variables, ["issue", "number"]) ?? 0)
-    if (!exists(workspacePath)) {
-      throw new Error(`Workflow workspace ${workspacePath} must exist before creating a landing workspace.`)
+    // Best-effort abort. A non-zero exit is ignored — even when the
+    // abort command itself fails (e.g. corrupt git state), the
+    // subsequent `reset --hard` is what we need to land the workspace
+    // back on the run branch. The reset is the authoritative recovery.
+    if (residual === "rebase") {
+      await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal)
+    } else if (residual === "merge") {
+      await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal)
+    } else if (residual === "cherry-pick") {
+      await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal)
     }
 
-    const landingPath = landingWorkspacePath(this.runnerRoot, projectName, runId)
-    await ensureDir(join(landingPath, ".."))
-    // `git clone --shared` defaults to --single-branch, which only
-    // materializes the branch that is checked out in the source. We need
-    // both the base branch and the per-run branch refs to be visible in
-    // the landing clone, so use --no-single-branch and then explicitly
-    // fetch all local refs from the workspace. This keeps the landing
-    // clone's object store shared with the workflow workspace via
-    // alternates (read-only), so removing the landing directory cannot
-    // affect the workflow workspace's refs or objects.
-    const result = await runCommand("git", ["clone", "--shared", "--no-single-branch", workspacePath, landingPath], ".", signal)
-    if (result.exitCode !== 0) {
-      // best-effort cleanup on failed clone
-      await deleteDirectory(landingPath)
-      throw new Error(`git clone --shared for landing workspace failed: ${result.stderr || result.stdout}`)
+    // `git checkout <runBranch>` brings HEAD back to the run branch (it
+    // may be detached after a rebase crash). If we are already on the
+    // run branch, this is a no-op. If `checkout` fails (extremely rare
+    // after an abort + reset), the subsequent reset still aligns the
+    // tree+index to the run branch ref via the detached-HEAD path.
+    const checkout = await runCommand("git", ["-C", workspacePath, "checkout", runBranch], workspacePath, signal)
+    if (checkout.exitCode !== 0) {
+      // Detached-HEAD fallback: explicitly point HEAD at the run branch
+      // ref. This handles the case where a branch checkout is refused
+      // because the work tree is mid-rebase, but in practice the abort
+      // above should have cleared that.
+      await runCommand("git", ["-C", workspacePath, "checkout", "--detach", runBranch], workspacePath, signal)
     }
 
-    // The clone checks out the workspace's current branch (the run
-    // branch). `git fetch` refuses to update the currently checked-out
-    // branch, so detach HEAD first; we will leave the run branch
-    // ref alone (the clone already created it pointing at the right
-    // commit) and fetch the remaining local refs (base branch + any
-    // others) explicitly.
-    const detach = await runCommand("git", ["-C", landingPath, "checkout", "--detach", "HEAD"], landingPath, signal)
-    if (detach.exitCode !== 0) {
-      await deleteDirectory(landingPath)
-      throw new Error(`git checkout --detach HEAD in landing workspace failed: ${detach.stderr || detach.stdout}`)
-    }
-
-    // Pull all the workflow workspace's local refs (base branch + any
-    // other refs the workflow has produced, excluding the run branch
-    // which is already correct) into the landing clone so
-    // publish/preflight can read and base-branch-checkout against them
-    // without going back to the workflow workspace.
-    const fetchResult = await runCommand(
-      "git",
-      ["-C", landingPath, "fetch", "origin", "+refs/heads/*:refs/heads/*"],
-      landingPath,
-      signal,
-    )
-    if (fetchResult.exitCode !== 0) {
-      await deleteDirectory(landingPath)
-      throw new Error(`git fetch refs/heads/* in landing workspace failed: ${fetchResult.stderr || fetchResult.stdout}`)
-    }
-
-    // Reset origin to the configured remote gitUrl so push operations in
-    // the landing workspace target the real upstream, not the workflow
-    // workspace's local cache clone.
-    const setUrl = await runCommand("git", ["-C", landingPath, "remote", "set-url", "origin", gitUrl], landingPath, signal)
-    if (setUrl.exitCode !== 0) {
-      await deleteDirectory(landingPath)
-      throw new Error(`git remote set-url failed in landing workspace: ${setUrl.stderr || setUrl.stdout}`)
-    }
-
-    return { path: landingPath, runId, runBranch, baseBranch: effectiveBaseBranch, gitUrl }
-  }
-
-  // Best-effort disposal of an isolated landing workspace. The landing
-  // workspace is a `--shared` clone of the workflow workspace, so a
-  // recursive `rm` of the landing directory only removes the clone's own
-  // working tree, index, and ref files; the workflow workspace's object
-  // store (shared via alternates) is read-only and untouched. A failure
-  // here is reported via the returned `disposed: false` so callers can
-  // surface it without losing the landing path that needs follow-up.
-  async disposeLandingWorkspace(landing: LandingWorkspaceInfo | string, signal: AbortSignal): Promise<{ path: string, disposed: boolean, error?: string }> {
-    const path = typeof landing === "string" ? landing : landing.path
-    if (!exists(path)) return { path, disposed: true }
-    try {
-      await deleteDirectory(path)
-      return { path, disposed: true }
-    } catch (err) {
-      return { path, disposed: false, error: err instanceof Error ? err.message : String(err) }
+    // `reset --hard <runBranch>` aligns the index + work tree to the
+    // run branch ref. This is the line of non-recoverable writes for
+    // the gate: any uncommitted worktree state from the aborted op
+    // (including conflict markers, unmerged entries, partial commits)
+    // is discarded. The run branch ref itself is NOT moved — only the
+    // work tree + index are reset to it.
+    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal)
+    if (reset.exitCode !== 0) {
+      throw new Error(`Workspace health gate failed to reset ${workspacePath} to ${runBranch}: ${reset.stderr || reset.stdout}`)
     }
   }
 
-  // Remove landing workspaces left behind by previous runs. Pruning is
-  // scoped to the project's landing directory and only removes entries
-  // that match the prior runId (or entries with the issue runId
-  // pattern), so a crash in one run cannot leak landing dirs that
-  // affect a concurrent or future run.
-  async pruneLandingWorkspaces(variables: JsonObject | undefined, runId: string | null | undefined, signal: AbortSignal): Promise<string[]> {
-    const projectId = stringAt(variables, ["project", "id"]) ?? "project"
-    const projectName = stringAt(variables, ["project", "name"]) ?? projectId
-    const landingRoot = landingRootPath(this.runnerRoot, projectName)
-    if (!exists(landingRoot)) return []
-
-    const safeRunId = landingSafeId(runId)
-    const removed: string[] = []
-    const entries = await readdir(landingRoot, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      // Landing dir naming: `<runId>-<uuid>`. Always remove dirs whose
-      // runId prefix matches the run we are now ensuring (a crashed
-      // run will not race with a single concurrent ensure of the same
-      // runId). The uuid disambiguates concurrent retries of the same
-      // runId and is preserved on creation.
-      if (!entry.name.startsWith(`${safeRunId}-`)) continue
-      const target = join(landingRoot, entry.name)
-      try {
-        await deleteDirectory(target)
-        removed.push(target)
-      } catch {
-        // best-effort; the next ensure will retry.
-      }
+  // Probe `.git/rebase-merge` / `.git/rebase-apply` /
+  // `.git/MERGE_HEAD` / `.git/CHERRY_PICK_HEAD` inside the workspace.
+  // Returns the kind of residual state detected (priority-ordered:
+  // rebase wins over merge, which wins over cherry-pick — git itself
+  // would refuse to start a second op with any of these in flight).
+  // Returns null when the workspace is clean.
+  private async detectResidualState(workspacePath: string, signal: AbortSignal): Promise<"rebase" | "merge" | "cherry-pick" | null> {
+    const gitPath = async (name: string): Promise<string | null> => {
+      const result = await runCommand("git", ["-C", workspacePath, "rev-parse", "--git-path", name], workspacePath, signal)
+      if (result.exitCode !== 0) return null
+      const out = result.stdout.trim()
+      if (!out) return null
+      return out.match(/^[A-Za-z]:[\\/]|^\//) ? out : join(workspacePath, out)
     }
-    return removed
+
+    const rebaseMerge = await gitPath("rebase-merge")
+    if (rebaseMerge && exists(rebaseMerge)) return "rebase"
+    const rebaseApply = await gitPath("rebase-apply")
+    if (rebaseApply && exists(rebaseApply)) return "rebase"
+    const mergeHead = await gitPath("MERGE_HEAD")
+    if (mergeHead && exists(mergeHead)) return "merge"
+    const cherryPickHead = await gitPath("CHERRY_PICK_HEAD")
+    if (cherryPickHead && exists(cherryPickHead)) return "cherry-pick"
+    return null
   }
 
   private async ensureCache(cachePath: string, gitUrl: string, projectRoot: string, baseBranch: string, signal: AbortSignal) {
@@ -455,19 +411,6 @@ export function runnerVariables() {
 
 function issueWorkspacePath(runnerRoot: string, projectName: string, issueNumber: number) {
   return resolve(join(runnerRoot, slug(projectName), "workspaces", `issue-${issueNumber}`))
-}
-
-function landingRootPath(runnerRoot: string, projectName: string) {
-  return resolve(join(runnerRoot, slug(projectName), "landing"))
-}
-
-function landingWorkspacePath(runnerRoot: string, projectName: string, runId: string) {
-  return resolve(join(landingRootPath(runnerRoot, projectName), `${landingSafeId(runId)}-${randomUUID()}`))
-}
-
-function landingSafeId(runId: string | null | undefined) {
-  const safe = (runId ?? "").replace(/[^A-Za-z0-9_-]/g, "")
-  return safe || "run"
 }
 
 function runBranchName(runId: string | null | undefined) {
@@ -589,28 +532,12 @@ async function readCacheOrigin(cachePath: string, signal: AbortSignal) {
 }
 
 // Decide whether the cache's object store is still referenced by an
-// active workspace clone. The check is scoped to the project root: only
-// clones under `<projectRoot>/workspaces/` and `<projectRoot>/landing/`
-// are scanned, which is where the runner actually creates `--shared`
-// alternates clones.
-//
-// References can be transitive. A `--shared` clone's
-// `.git/objects/info/alternates` lists sibling `<git_dir>/objects`
-// paths; one of those alternates may itself be a `.git/objects` path
-// belonging to another clone (the source clone of a `--shared` clone),
-// which in turn has its own alternates chain. The scan follows the
-// chain so a landing workspace whose alternates point at the workflow
-// workspace (whose alternates point at the cache) is detected as a
-// transitive reference. Deleting the cache in that situation would
-// corrupt both clones' object stores.
-//
-// The scan tolerates missing directories, unreadable alternates
-// files, and malformed entries — a corrupt alternates file in a stale
-// landing dir is not a reason to refuse cache replacement. Only an
-// unambiguous match (direct or transitive) triggers the block.
+// active workflow workspace clone under `<projectRoot>/workspaces/`.
+// The scan follows transitive alternates so deleting the cache cannot
+// corrupt active workspace object stores.
 async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot: string, signal: AbortSignal) {
   const target = resolve(join(cachePath, "objects"))
-  const cloneRoots = [join(projectRoot, "workspaces"), join(projectRoot, "landing")]
+  const cloneRoots = [join(projectRoot, "workspaces")]
 
   async function readAlternates(objectsDir: string): Promise<string[]> {
     const gitDir = objectsDir.replace(/[\\/]objects$/, "")

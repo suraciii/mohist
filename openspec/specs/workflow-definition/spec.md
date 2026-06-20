@@ -2,18 +2,20 @@
 
 ### Requirement: REQ-WD-001 Integrate owns intelligent OpenSpec spec sync
 
-The workflow SHALL treat `integrate:spec-sync` as the stage task that writes approved change delta specs into main OpenSpec specs. The task SHALL read the change delta specs and existing main specs, resolve clear ADDED, MODIFIED, REMOVED, and RENAMED intent, and preserve separate integration steps for spec sync, archive, delivery (prepare then publish), and final health. The task SHALL commit generated spec changes to the worktree or report a no-change result before completing; the runner SHALL verify `git status --porcelain` is clean before marking the task completed.
+The workflow SHALL treat `integrate:spec-sync` as the stage task that writes approved change delta specs into main OpenSpec specs. The task SHALL read the change delta specs and existing main specs, resolve clear ADDED, MODIFIED, REMOVED, and RENAMED intent, and preserve separate integration steps for spec sync, archive, delivery (rebase then push), and final health. The task SHALL commit generated spec changes to the worktree or report a no-change result before completing; the runner SHALL verify `git status --porcelain` is clean before marking the task completed.
 
 #### Scenario: Integrate runs distinct ordered steps
+
 - **WHEN** an approved change enters INTEGRATE
 - **THEN** the workflow SHALL run `integrate:spec-sync` before `integrate:archive-change`
-- **AND** it SHALL run `integrate:prepare` before `integrate:publish`
-- **AND** it SHALL keep `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, `integrate:publish`, and `final-health` as distinct task or step history entries
+- **AND** it SHALL run `integrate:rebase` before `integrate:push`
+- **AND** it SHALL keep `integrate:spec-sync`, `integrate:archive-change`, `integrate:rebase`, `integrate:push`, and `final-health` as distinct task or step history entries
 
 #### Scenario: Archive waits for spec sync
+
 - **WHEN** `integrate:spec-sync` fails
 - **THEN** the workflow SHALL NOT archive the OpenSpec change
-- **AND** it SHALL NOT prepare or publish the candidate or run final health
+- **AND** it SHALL NOT rebase, push, or run final health
 
 #### Scenario: Spec-sync commits or reports no-change before completing
 
@@ -36,31 +38,31 @@ The built-in default workflow definition SHALL only declare stages that the runn
 
 ### Requirement: REQ-WD-002 Integrate uses the standard task/check stage contract
 
-The Integrate stage SHALL execute deterministic integration work as standard WorkflowRun tasks and SHALL run final verification as a read-only WorkflowRun check. Integrate ordering, task failure handling, delivery metadata (prepare and publish), freeze behavior, and post-publish health failure handling SHALL be decided by StageRun rather than by runner-local step state.
+The Integrate stage SHALL execute deterministic integration work as standard WorkflowRun tasks and SHALL run final verification as a read-only WorkflowRun check. Integrate ordering, task failure handling, delivery metadata (rebase and push), freeze behavior, and post-publish health failure handling SHALL be decided by StageRun rather than by runner-local step state.
 
 #### Scenario: Integrate runs tasks before checks
 
 - **WHEN** an issue enters Integrate
-- **THEN** the stage SHALL execute `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, and `integrate:publish` as ordered StageRun tasks
+- **THEN** the stage SHALL execute `integrate:spec-sync`, `integrate:archive-change`, `integrate:rebase`, and `integrate:push` as ordered StageRun tasks
 - **AND** it SHALL run `health:integrate` only after those tasks succeed
 
 #### Scenario: Integrate failure stays local
 
-- **WHEN** `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, or `integrate:publish` fails
+- **WHEN** `integrate:spec-sync`, `integrate:archive-change`, `integrate:rebase`, or `integrate:push` fails
 - **THEN** later Integrate tasks and checks SHALL NOT run
 - **AND** the issue SHALL remain associated with Integrate failure evidence
 
 #### Scenario: Post-publish health cannot auto-fix
 
-- **WHEN** `health:integrate` fails after `integrate:publish` has completed
+- **WHEN** `health:integrate` fails after `integrate:push` has completed
 - **THEN** the failure SHALL be recorded as a post-publish delivery failure
-- **AND** the stage SHALL NOT apply any check failure policy that would modify code after the publish freeze point
+- **AND** the stage SHALL NOT apply any check failure policy that would modify code after the push freeze point
 
-#### Scenario: Publish is the single push owner
+#### Scenario: Push is the single push owner
 
 - **WHEN** the default Integrate workflow is loaded
-- **THEN** `integrate:publish` SHALL be the only default task that pushes delivery changes to the remote
-- **AND** the workflow SHALL NOT declare a separate `integrate:push` task
+- **THEN** `integrate:push` SHALL be the only default task that pushes delivery changes to the remote
+- **AND** the workflow SHALL NOT declare a separate delivery push task outside `integrate:push`
 
 ### Requirement: Stage definitions declare workflow behavior policies
 
@@ -119,7 +121,7 @@ The declarative definitions for Plan, Build, Check, and Integrate SHALL preserve
 #### Scenario: Integrate definition preserves integration contract
 
 - **WHEN** Integrate executes through the config-driven runner
-- **THEN** it SHALL execute spec sync, change archive, branch prepare, and branch publish as ordered stage tasks
+- **THEN** it SHALL execute spec sync, change archive, branch rebase, and branch push as ordered stage tasks
 - **AND** it SHALL run the Integrate health check only after those tasks succeed
 
 ### Requirement: StageDefinition separates static promises from run-owned work sources

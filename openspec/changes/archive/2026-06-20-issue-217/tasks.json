@@ -1,0 +1,112 @@
+{
+  "project": "mohist-local",
+  "description": "Single-workspace integrate landing: collapse prepare/publish+landing into on-workspace rebase(remote,squash)+push with a workspace health gate.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Unify mohist/rebase with remote + squash options (absorb prepare)",
+      "spec": "specs/merge-delivery/spec.md#rebase-reconciles-and-squashes-the-run-branch-onto-the-base-branch",
+      "description": "Extend rebaseAction in packages/runner/src/actions/rebase.ts with a `remote` option (set -> `git fetch <remote> <baseBranch>` then rebase onto `<remote>/<baseBranch>`; unset -> rebase local base, current behavior) and a `squash`+`message` option (after a successful rebase, `git reset --soft <base>` + `git commit` to fold N commits into 1). Absorb prepare's dirty-tree handling so this one action can serve both manual rebase and integrate. Do NOT delete prepare/publish yet — they stay registered until the cutover task.",
+      "acceptanceCriteria": [
+        "mohist/rebase with `remote` set fetches `<remote> <baseBranch>` and rebases `workspace.branch` onto `<remote>/<baseBranch>`; with `remote` unset it rebases onto the local base branch",
+        "With `squash: true` and a `message`, after a successful rebase the run branch HEAD is a single commit containing the full issue diff, produced via `reset --soft <base>` + `commit`",
+        "The squash phase runs only after a successful rebase and cannot produce conflicts or a new failure kind",
+        "Rebase stays on `workspace.branch` for its whole execution and never runs `git checkout <baseBranch>` inside the workspace",
+        "rebase.spec.ts covers the remote-fetch path, the squash folding (N commits -> 1), and the local-base path",
+        "`npm run typecheck` and `npm test` pass in packages/runner"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended packages/runner/src/actions/rebase.ts (remote + squash options) with updated rebase.spec.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Primary spec: merge-delivery 'Rebase reconciles and squashes the run branch onto the base branch'. Also satisfies workspace-materialization 'mohist/rebase operates inside the bound workflow workspace' (the unified action contract). Keep prepare/publish registered so the tree stays green; the cutover (T-005) removes them."
+    },
+    {
+      "id": "T-002",
+      "title": "Add mohist/push as a pure fast-forward ref push",
+      "spec": "specs/merge-delivery/spec.md#push-fast-forwards-the-prepared-run-branch-to-the-remote-base",
+      "description": "Add a pushAction that lands the prepared run branch on the base branch via `git push origin <source>:<target>` as a strict fast-forward ref update, with source = run branch and target = base branch. No target checkout, no landing clone, no working-tree mutation. Register it as `mohist/push` in createDefaultRegistry. Classify a non-fast-forward rejection as `base-moved` and anything else as `retry-safe`.",
+      "acceptanceCriteria": [
+        "mohist/push runs `git push origin <source>:<target>` and advances the remote target as a fast-forward to the prepared commit",
+        "Push does not check out the target branch, does not create a landing clone, and does not mutate the workspace working tree or index; the workspace stays on `workspace.branch`",
+        "A non-fast-forward push rejection is reported with failure kind `base-moved`; other failures are reported as `retry-safe`",
+        "The push task is the single push owner; the task result records the landed commit and that the push occurred",
+        "push.spec.ts covers a successful fast-forward push, the base-moved classification on a non-FF rejection, and an assertion that the workspace branch is unchanged after push",
+        "`npm run typecheck` and `npm test` pass in packages/runner"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New push action in packages/runner/src/actions + registration in registry.ts + push.spec.ts coverage",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Independent of T-001 (push only needs the run branch ref, not rebase internals). Nothing invokes mohist/push until the workflow cutover (T-005); it is a registered action waiting for use."
+    },
+    {
+      "id": "T-003",
+      "title": "Add the workspace health gate at verify/materialize entry",
+      "spec": "specs/workspace-health-gate/spec.md#workspace-consumption-detects-and-heals-residual-rebasemerge-state-at-entry",
+      "description": "Add a health gate to WorkspaceManager.verify and WorkspaceManager.materialize that probes for residual `rebase-merge`, `rebase-apply`, `MERGE_HEAD`, and `CHERRY_PICK_HEAD` before handing the workspace to any task. When residual state is detected, abort the in-progress operation, check out `workspace.branch`, and align the tree+index to the `workspace.branch` ref so no conflict markers remain. Recovery must not move or discard commits already reachable at the run branch ref.",
+      "acceptanceCriteria": [
+        "Both WorkspaceManager.verify and WorkspaceManager.materialize run the health gate at entry, before any task/action is dispatched",
+        "Residual `rebase-merge`/`rebase-apply` triggers `git rebase --abort`; residual `MERGE_HEAD`/`CHERRY_PICK_HEAD` triggers the matching abort, before the workspace is handed to a task",
+        "After recovery the workspace is on `workspace.branch`, tree+index aligned to the run branch ref, with no conflict markers or partial resolution state",
+        "Recovery does not move or discard commits on the `workspace.branch` ref (rebase advances the ref only on success, so committed agent work survives a mid-rebase crash)",
+        "A workspace test simulates a mid-rebase-crash fixture and verifies the workspace self-heals so a subsequent dispatch succeeds without manual `git checkout`/`rebase --abort`",
+        "`npm run typecheck` and `npm test` pass in packages/runner"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Health gate in packages/runner/src/runtime/workspace.ts (verify + materialize) with a mid-rebase-crash fixture test",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the new safety net that lets landing be removed (T-005). Placement matches the dispatch flow: verify on every dispatch (executor.ts), materialize at workflow start (runner-signalr.ts)."
+    },
+    {
+      "id": "T-004",
+      "title": "Switch merge-ready preflight to merge-base --is-ancestor",
+      "spec": "specs/worktree-manager/spec.md#read-only-squash-mergeability-preflight",
+      "description": "Rewrite mergeReadyAction (and remove runSquashMergePreflight) in packages/runner/src/actions/registry.ts so the preflight uses `git merge-base --is-ancestor origin/<baseBranch> <runBranch>` instead of a landing-clone `merge --squash --no-commit` probe. A run branch containing the latest base tip reports canMerge true; otherwise canMerge false (needs rebase). No checkout, no landing clone, no working-tree mutation; conflict-file detail is no longer reported by the preflight (it surfaces in the Integrate rebase).",
+      "acceptanceCriteria": [
+        "mergeReadyAction resolves preparedness with `git merge-base --is-ancestor origin/<baseBranch> <runBranch>`",
+        "A run branch whose history contains the latest `origin/<baseBranch>` tip reports canMerge: true; a run branch that does not reports canMerge: false with a rebase-required indication",
+        "The preflight does not check out the base branch, does not create a landing clone, and does not run a `merge --squash` probe; the workspace stays on `workspace.branch`",
+        "The preflight no longer reports conflict-file detail from a probe merge",
+        "merge-ready.spec.ts is updated to the is-ancestor model (prepared -> ready, behind base -> not ready) and passes",
+        "`npm run typecheck` and `npm test` pass in packages/runner"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated mergeReadyAction in registry.ts (is-ancestor) with updated merge-ready.spec.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Removes merge-ready's dependency on createLandingWorkspace, which is the prerequisite for deleting landing in T-005. The authoritative conflict detection moves to the Integrate rebase (T-001)."
+    },
+    {
+      "id": "T-005",
+      "title": "Integrate cutover: rewrite YAML to rebase+push, delete prepare/publish and landing",
+      "spec": "specs/workflow-definition/spec.md#req-wd-001-integrate-owns-intelligent-openspec-spec-sync",
+      "description": "Cut integrate over to the new model. Rewrite the integrate stage in packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml to `spec-sync -> archive-change -> rebase(remote=origin, squash=true) -> push`. Delete prepareAction and publishAction, deregister `mohist/prepare`/`mohist/publish`, and delete the landing mechanism from WorkspaceManager (createLandingWorkspace/disposeLandingWorkspace/pruneLandingWorkspaces + landing path helpers) and all landing calls/the DeliveryWorkspaceManager interface from registry.ts. Remove/replace the prepare/publish tests and update delivery-shared-ref / regression tests, then run a full issue end-to-end.",
+      "acceptanceCriteria": [
+        "mohist-default.workflow.yaml integrate stage runs `integrate:spec-sync`, `integrate:archive-change`, `integrate:rebase` (remote=origin, squash=true), then `integrate:push`, with `health:integrate` only after those tasks",
+        "`mohist/prepare` and `mohist/publish` are deregistered; prepareAction and publishAction are deleted from registry.ts",
+        "createLandingWorkspace, disposeLandingWorkspace, pruneLandingWorkspaces, and the landing path helpers are deleted from workspace.ts; no landing calls remain in registry.ts and the DeliveryWorkspaceManager landing interface is removed",
+        "prepare.spec.ts and publish.spec.ts are deleted or replaced; delivery-shared-ref and any issue-112-regression-style tests are updated to the rebase+push model",
+        "grep for createLandingWorkspace/disposeLandingWorkspace/pruneLandingWorkspaces across packages/runner returns no references, and no `landing` path references remain in packages/runner/src/runtime/workspace.ts (including the cache-reference scan root at isCacheReferencedByActiveWorkspace's cloneRoots)",
+        "`npm run typecheck` and `npm test` pass in packages/runner; `npm run build` (dotnet build Mohist.sln) succeeds",
+        "End-to-end: one issue run through the full workflow lands on master as a single squash commit via a fast-forward, with the workspace never leaving its run branch (issue acceptance criteria #4 and #8)"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Rewritten integrate stage in mohist-default.workflow.yaml; prepare/publish actions and landing mechanism deleted; regression tests updated; green typecheck/test/build + end-to-end landing",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Depends on T-001 (rebase has squash), T-002 (push exists), T-003 (health gate replaces landing as the crash safety net), and T-004 (merge-ready no longer uses landing) so landing can be deleted without breaking consumers. This single cutover is atomic because the YAML switch, prepare/publish deletion, and landing deletion are mutually coupled."
+    }
+  ]
+}

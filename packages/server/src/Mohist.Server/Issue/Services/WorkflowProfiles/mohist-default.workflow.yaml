@@ -289,23 +289,25 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
-      - id: integrate:prepare
-        title: Prepare branch
-        uses: mohist/prepare
+      - id: integrate:rebase
+        title: Rebase and squash branch
+        uses: mohist/rebase
         with:
           baseBranch: ${{ repository.baseBranch }}
+          remote: origin
+          squash: true
+          message: "Complete issue #${{ issue.number }}"
           conflictResolver:
-            title: Resolve prepare conflicts
+            title: Resolve rebase conflicts
             with:
               description: "Resolve rebase conflicts, stage resolved files, and continue until the rebase completes."
-      - id: integrate:publish
-        title: Publish changes
-        uses: mohist/publish
+      - id: integrate:push
+        title: Push changes
+        uses: mohist/push
         with:
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
           remote: origin
-          message: "Complete issue #${{ issue.number }}"
     checks:
       - name: health
         title: Health

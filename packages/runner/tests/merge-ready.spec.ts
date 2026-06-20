@@ -2,41 +2,16 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   mergeReadyAction,
   setDeliveryGitRunnerForTest,
-  setDeliveryWorkspaceManagerForTest,
 } from "../src/actions/registry.js"
-import type { LandingWorkspaceInfo } from "../src/runtime/workspace.js"
-import type { DeliveryWorkspaceManager } from "../src/actions/registry.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 type WorkspaceCall = { workDir: string; args: string[] }
 
-const WORKSPACE_PATH = "/workspace/issue-150"
-const LANDING_PATH = "/landing/wr-merge-ready-1"
+const WORKSPACE_PATH = "/workspace/issue-217"
 
 afterEach(() => {
   setDeliveryGitRunnerForTest(null)
-  setDeliveryWorkspaceManagerForTest(null)
 })
-
-function installLandingWorkspace(landingOverrides: Partial<LandingWorkspaceInfo> = {}) {
-  const landing: LandingWorkspaceInfo = {
-    path: LANDING_PATH,
-    runId: "wr-merge-ready-1",
-    runBranch: "mohist/run-wr-merge-ready-1",
-    baseBranch: "main",
-    gitUrl: "https://example.com/repo.git",
-    ...landingOverrides,
-  }
-  const manager: DeliveryWorkspaceManager = {
-    createLandingWorkspace: async (_work, _signal) => landing,
-    disposeLandingWorkspace: async (target, _signal) => {
-      const path = typeof target === "string" ? target : target.path
-      return { path, disposed: true }
-    },
-  }
-  setDeliveryWorkspaceManagerForTest(manager)
-  return landing
-}
 
 function installGit(respond: (call: WorkspaceCall, history: WorkspaceCall[]) => { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string } | Promise<{ success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }>) {
   const calls: WorkspaceCall[] = []
@@ -60,10 +35,6 @@ function workspaceCalls(calls: WorkspaceCall[]) {
   return calls.filter((c) => c.workDir === WORKSPACE_PATH).map((c) => c.args.join(" "))
 }
 
-function landingCalls(calls: WorkspaceCall[]) {
-  return calls.filter((c) => c.workDir === LANDING_PATH).map((c) => c.args.join(" "))
-}
-
 function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "wr-merge-ready-1",
@@ -75,7 +46,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     with: withOverrides,
     variables: {
       project: { path: WORKSPACE_PATH },
-      issue: { title: "Merge ready issue", number: 150 },
+      issue: { title: "Merge ready issue", number: 217 },
       repository: {
         gitUrl: "https://example.com/repo.git",
         baseBranch: "main",
@@ -90,37 +61,30 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
       ...variables,
     },
     workDir: WORKSPACE_PATH,
-    issueNumber: 150,
+    issueNumber: 217,
     signal: new AbortController().signal,
   }
 }
 
-describe("mohist/merge-ready (ref-safe, landing-workspace scoped)", () => {
-  it("CleanCandidate_ReportsCanMergeTrueAndKeepsWorkflowWorkspaceUntouched", async () => {
-    installLandingWorkspace()
+describe("mohist/merge-ready (ref-safe, is-ancestor)", () => {
+  it("PreparedCandidate_ReportsCanMergeTrue", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
-        case "rev-parse main":
+        case "rev-parse origin/main":
           return ok("base-sha\n")
-        case "rev-parse HEAD":
+        case "rev-parse mohist/run-wr-merge-ready-1":
           return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
+        case "merge-base origin/main mohist/run-wr-merge-ready-1":
           return ok("merge-base-sha\n")
-        case "fetch origin main":
-          return ok("From https://example.com/repo\n * branch            main       -> FETCH_HEAD")
-        case "checkout main":
-          return ok("Switched to branch 'main'")
-        case "merge --squash --no-commit HEAD":
-          return ok("Squash commit -- not updating HEAD")
-        case "reset --hard origin/main":
-          return ok("HEAD is now at origin/main")
+        case "merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1":
+          return ok("")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
+    const result = await mergeReadyAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
@@ -136,267 +100,299 @@ describe("mohist/merge-ready (ref-safe, landing-workspace scoped)", () => {
     })
     expect(typeof output.checkedAt).toBe("string")
     expect(new Date(output.checkedAt).toString()).not.toBe("Invalid Date")
+    expect(output.error ?? null).toBeNull()
 
-    // The squash-merge probe and the base-branch checkout run only in
-    // the landing workspace — never in the workflow workspace.
-    expect(landingCalls(calls)).toContain("checkout main")
-    expect(landingCalls(calls)).toContain("merge --squash --no-commit HEAD")
-    expect(workspaceCalls(calls)).not.toContain("checkout main")
-    expect(workspaceCalls(calls)).not.toContain("merge --squash --no-commit HEAD")
-
-    // The workflow workspace's only git calls are read-only rev-parse/merge-base.
-    const workflowCmdSet = new Set(workspaceCalls(calls))
-    expect(workflowCmdSet.has("rev-parse main")).toBe(true)
-    expect(workflowCmdSet.has("rev-parse HEAD")).toBe(true)
-    expect(workflowCmdSet.has("merge-base main HEAD")).toBe(true)
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("rev-parse origin/main")
+    expect(cmds).toContain("rev-parse mohist/run-wr-merge-ready-1")
+    expect(cmds).toContain("merge-base origin/main mohist/run-wr-merge-ready-1")
+    expect(cmds).toContain("merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1")
   })
 
-  it("ConflictingCandidate_ReportsConflictFilesAndCanMergeFalse", async () => {
-    installLandingWorkspace()
+  it("BehindBaseCandidate_ReportsCanMergeFalseAndRebaseRequired", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
-        case "rev-parse main":
+        case "rev-parse origin/main":
           return ok("base-sha\n")
-        case "rev-parse HEAD":
+        case "rev-parse mohist/run-wr-merge-ready-1":
           return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
+        case "merge-base origin/main mohist/run-wr-merge-ready-1":
           return ok("merge-base-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "checkout main":
-          return ok("Switched to branch 'main'")
-        case "merge --squash --no-commit HEAD":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/registry.ts\nCONFLICT (content): Merge conflict in packages/runner/src/runtime/workspace.ts\nAutomatic merge failed; fix conflicts and then commit the result.")
-        case "diff --name-only --diff-filter=U":
-          return ok("packages/runner/src/actions/registry.ts\npackages/runner/src/runtime/workspace.ts\n")
-        case "reset --hard origin/main":
-          return ok("HEAD is now at origin/main")
+        case "merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1":
+          return fail("")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output).toMatchObject({
-      kind: "merge-ready",
-      strategy: "squash",
-      targetBranch: "main",
-      baseSha: "base-sha",
-      candidateHeadSha: "candidate-head-sha",
-      mergeBaseSha: "merge-base-sha",
-      canMerge: false,
-      conflictFiles: [
-        "packages/runner/src/actions/registry.ts",
-        "packages/runner/src/runtime/workspace.ts",
-      ],
-    })
-    expect(output.error).toContain("CONFLICT")
-
-    // Conflict files captured before the landing-workspace reset.
-    const diffIndex = landingCalls(calls).indexOf("diff --name-only --diff-filter=U")
-    const resetIndex = landingCalls(calls).indexOf("reset --hard origin/main")
-    expect(diffIndex).toBeGreaterThan(-1)
-    expect(resetIndex).toBeGreaterThan(-1)
-    expect(diffIndex).toBeLessThan(resetIndex)
-
-    // No base-branch checkout or merge --squash in the workflow workspace.
-    expect(workspaceCalls(calls)).not.toContain("checkout main")
-    expect(workspaceCalls(calls)).not.toContain("merge --squash --no-commit HEAD")
-  })
-
-  it("CleanupFailure_DoesNotFlipDetectedConflictIntoPassingResult", async () => {
-    installLandingWorkspace()
-    const calls = installGit(async (_call, history) => {
-      const command = history[history.length - 1].args.join(" ")
-      switch (command) {
-        case "rev-parse main":
-          return ok("base-sha\n")
-        case "rev-parse HEAD":
-          return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
-          return ok("merge-base-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "checkout main":
-          return ok("Switched to branch 'main'")
-        case "merge --squash --no-commit HEAD":
-          return fail("CONFLICT (content): Merge conflict in foo.txt\nAutomatic merge failed; fix conflicts and then commit the result.")
-        case "diff --name-only --diff-filter=U":
-          return ok("foo.txt\n")
-        case "reset --hard origin/main":
-          return ok("HEAD is now at origin/main")
-        default:
-          return fail(`unexpected git call: ${command}`)
-      }
-    })
-    // Dispose fails — but the preflight outcome was already captured.
-    setDeliveryWorkspaceManagerForTest({
-      createLandingWorkspace: async () => ({
-        path: LANDING_PATH,
-        runId: "wr-merge-ready-1",
-        runBranch: "mohist/run-wr-merge-ready-1",
-        baseBranch: "main",
-        gitUrl: "https://example.com/repo.git",
-      }),
-      disposeLandingWorkspace: async () => ({ path: LANDING_PATH, disposed: false, error: "rm -rf failed" }),
-    })
-
-    const result = await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    // The detected conflict is preserved: canMerge must still be false
-    // and the conflict file list must still be populated.
-    expect(result.status).toBe("failure")
-    expect(output.canMerge).toBe(false)
-    expect(output.conflictFiles).toEqual(["foo.txt"])
-    expect(output.error).toContain("CONFLICT")
-
-    // Sanity: the merge probe ran in the landing workspace and not in
-    // the workflow workspace.
-    expect(landingCalls(calls)).toContain("merge --squash --no-commit HEAD")
-    expect(workspaceCalls(calls)).not.toContain("merge --squash --no-commit HEAD")
-  })
-
-  it("NoCheckoutOrMergeSquashInWorkflowWorkspace_BranchStable", async () => {
-    installLandingWorkspace()
-    const calls = installGit(async (_call, history) => {
-      const command = history[history.length - 1].args.join(" ")
-      switch (command) {
-        case "rev-parse main":
-          return ok("base-sha\n")
-        case "rev-parse HEAD":
-          return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
-          return ok("merge-base-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "checkout main":
-          return ok("Switched to branch 'main'")
-        case "merge --squash --no-commit HEAD":
-          return ok("Squash commit -- not updating HEAD")
-        case "reset --hard origin/main":
-          return ok("HEAD is now at origin/main")
-        default:
-          return fail(`unexpected git call: ${command}`)
-      }
-    })
-
-    await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
-
-    // Branch-stability invariant: the workflow workspace never sees
-    // `checkout <baseBranch>` or `merge --squash ...`.
-    const workflowCmdSet = new Set(workspaceCalls(calls))
-    expect(workflowCmdSet.has("checkout main")).toBe(false)
-    expect(workflowCmdSet.has("merge --squash --no-commit HEAD")).toBe(false)
-  })
-
-  it("LandingWorkspaceCreationFails_ReportsCanMergeFalseWithLandingError", async () => {
-    setDeliveryWorkspaceManagerForTest({
-      createLandingWorkspace: async () => {
-        throw new Error("clone --shared refused")
-      },
-      disposeLandingWorkspace: async () => ({ path: LANDING_PATH, disposed: true }),
-    })
-    const calls = installGit(async (_call, history) => {
-      const command = history[history.length - 1].args.join(" ")
-      switch (command) {
-        case "rev-parse main":
-          return ok("base-sha\n")
-        case "rev-parse HEAD":
-          return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
-          return ok("merge-base-sha\n")
-        default:
-          return fail(`unexpected git call: ${command}`)
-      }
-    })
-
-    const result = await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
+    const result = await mergeReadyAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
     expect(output.canMerge).toBe(false)
-    expect(output.error).toContain("clone --shared refused")
-    // No base-branch checkout or merge --squash was attempted in any
-    // workspace — the preflight aborted before the landing workspace
-    // could be used.
-    expect(landingCalls(calls)).toEqual([])
-    expect(workspaceCalls(calls)).not.toContain("checkout main")
-    expect(workspaceCalls(calls)).not.toContain("merge --squash --no-commit HEAD")
+    expect(output.error).toContain("does not contain the latest 'origin/main' tip")
+    expect(output.error).toContain("rebase is required")
+    expect(output.conflictFiles).toEqual([])
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1")
   })
 
-  it("FetchFailsInLandingWorkspace_ReportsCanMergeFalseWithFetchError", async () => {
-    installLandingWorkspace()
+  it("NoCheckoutOrMergeSquashInWorkspace_BranchStable", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
-        case "rev-parse main":
+        case "rev-parse origin/main":
           return ok("base-sha\n")
-        case "rev-parse HEAD":
+        case "rev-parse mohist/run-wr-merge-ready-1":
           return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
+        case "merge-base origin/main mohist/run-wr-merge-ready-1":
           return ok("merge-base-sha\n")
-        case "fetch origin main":
-          return fail("fatal: could not resolve host example.com")
+        case "merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1":
+          return ok("")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    const result = await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
+    await mergeReadyAction(context())
+
+    const cmds = new Set(workspaceCalls(calls))
+    expect(cmds.has("checkout main")).toBe(false)
+    expect(cmds.has("merge --squash --no-commit mohist/run-wr-merge-ready-1")).toBe(false)
+    expect(cmds.has("merge --squash --no-commit HEAD")).toBe(false)
+    expect(cmds.has("merge --squash mohist/run-wr-merge-ready-1")).toBe(false)
+    expect(cmds.has("fetch origin main")).toBe(false)
+    expect(cmds.has("reset --hard origin/main")).toBe(false)
+  })
+
+  it("BaseRefRevParseFails_ReportsCanMergeFalseWithBaseError", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse origin/main":
+          return fail("fatal: ambiguous argument 'origin/main'")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await mergeReadyAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
     expect(output.canMerge).toBe(false)
-    expect(output.error).toContain("could not resolve host example.com")
-    expect(landingCalls(calls)).toContain("fetch origin main")
-    expect(landingCalls(calls)).not.toContain("checkout main")
-    expect(landingCalls(calls)).not.toContain("merge --squash --no-commit HEAD")
+    expect(output.error).toContain("Could not resolve base branch 'origin/main'")
+    expect(output.conflictFiles).toEqual([])
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toEqual(["rev-parse origin/main"])
   })
 
-  it("PreflightRunsInLandingWorkspace_NotInWorkflowWorkspace", async () => {
-    installLandingWorkspace()
+  it("SourceRevParseFails_ReportsCanMergeFalseWithSourceError", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
-        case "rev-parse main":
+        case "rev-parse origin/main":
           return ok("base-sha\n")
-        case "rev-parse HEAD":
-          return ok("candidate-head-sha\n")
-        case "merge-base main HEAD":
-          return ok("merge-base-sha\n")
-        case "fetch origin main":
-          return ok("")
-        case "checkout main":
-          return ok("Switched to branch 'main'")
-        case "merge --squash --no-commit HEAD":
-          return ok("Squash commit -- not updating HEAD")
-        case "reset --hard origin/main":
-          return ok("HEAD is now at origin/main")
+        case "rev-parse mohist/run-wr-merge-ready-1":
+          return fail("fatal: unknown revision")
         default:
           return fail(`unexpected git call: ${command}`)
       }
     })
 
-    await mergeReadyAction(context({ baseBranch: "main", source: "HEAD" }))
+    const result = await mergeReadyAction(context())
+    const output = JSON.parse(result.output ?? "{}")
 
-    // Every preflight git call lands on the landing workspace path.
-    const landingWorkdirs = new Set(
-      calls.filter((c) => c.workDir === LANDING_PATH).map((c) => c.args.join(" "))
+    expect(result.status).toBe("failure")
+    expect(output.canMerge).toBe(false)
+    expect(output.error).toBe("Could not resolve source")
+    expect(output.baseSha).toBe("base-sha")
+    expect(output.candidateHeadSha).toBe("")
+    expect(output.conflictFiles).toEqual([])
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("rev-parse origin/main")
+    expect(cmds).toContain("rev-parse mohist/run-wr-merge-ready-1")
+  })
+
+  it("ExplicitSourceOverridesDefault", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse origin/main":
+          return ok("base-sha\n")
+        case "rev-parse custom-source":
+          return ok("custom-head-sha\n")
+        case "merge-base origin/main custom-source":
+          return ok("custom-merge-base\n")
+        case "merge-base --is-ancestor origin/main custom-source":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await mergeReadyAction(context({ source: "custom-source" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.canMerge).toBe(true)
+    expect(output.candidateHeadSha).toBe("custom-head-sha")
+    expect(output.mergeBaseSha).toBe("custom-merge-base")
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("rev-parse custom-source")
+    expect(cmds).toContain("merge-base origin/main custom-source")
+    expect(cmds).toContain("merge-base --is-ancestor origin/main custom-source")
+    expect(cmds).not.toContain("rev-parse mohist/run-wr-merge-ready-1")
+  })
+
+  it("ExplicitRemoteOverridesDefault", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse upstream/main":
+          return ok("upstream-base-sha\n")
+        case "rev-parse mohist/run-wr-merge-ready-1":
+          return ok("candidate-head-sha\n")
+        case "merge-base upstream/main mohist/run-wr-merge-ready-1":
+          return ok("merge-base-sha\n")
+        case "merge-base --is-ancestor upstream/main mohist/run-wr-merge-ready-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await mergeReadyAction(context({ remote: "upstream" }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.canMerge).toBe(true)
+    expect(output.baseSha).toBe("upstream-base-sha")
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("rev-parse upstream/main")
+    expect(cmds).toContain("merge-base --is-ancestor upstream/main mohist/run-wr-merge-ready-1")
+    expect(cmds).not.toContain("rev-parse origin/main")
+  })
+
+  it("SourceDefaultsToWorkspaceBranchWhenNotProvided", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse origin/main":
+          return ok("base-sha\n")
+        case "rev-parse mohist/run-wr-merge-ready-1":
+          return ok("candidate-head-sha\n")
+        case "merge-base origin/main mohist/run-wr-merge-ready-1":
+          return ok("merge-base-sha\n")
+        case "merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await mergeReadyAction(context())
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("rev-parse mohist/run-wr-merge-ready-1")
+    expect(cmds).toContain("merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1")
+    expect(cmds).not.toContain("rev-parse HEAD")
+  })
+
+  it("SourceFallsBackToHeadWhenWorkspaceBranchMissing", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse origin/main":
+          return ok("base-sha\n")
+        case "rev-parse HEAD":
+          return ok("head-sha\n")
+        case "merge-base origin/main HEAD":
+          return ok("merge-base-sha\n")
+        case "merge-base --is-ancestor origin/main HEAD":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await mergeReadyAction(
+      context({}, { workspace: { path: WORKSPACE_PATH, branch: null, changeDir: null } }),
     )
-    expect(landingWorkdirs.has("fetch origin main")).toBe(true)
-    expect(landingWorkdirs.has("checkout main")).toBe(true)
-    expect(landingWorkdirs.has("merge --squash --no-commit HEAD")).toBe(true)
-    expect(landingWorkdirs.has("reset --hard origin/main")).toBe(true)
+    const output = JSON.parse(result.output ?? "{}")
 
-    // And none of those calls touch the workflow workspace.
-    expect(workspaceCalls(calls)).not.toContain("fetch origin main")
-    expect(workspaceCalls(calls)).not.toContain("checkout main")
-    expect(workspaceCalls(calls)).not.toContain("merge --squash --no-commit HEAD")
-    expect(workspaceCalls(calls)).not.toContain("reset --hard origin/main")
+    expect(result.status).toBe("success")
+    expect(output.canMerge).toBe(true)
+    expect(output.candidateHeadSha).toBe("head-sha")
+
+    const cmds = workspaceCalls(calls)
+    expect(cmds).toContain("rev-parse HEAD")
+    expect(cmds).toContain("merge-base --is-ancestor origin/main HEAD")
+  })
+
+  it("PreflightIsRefOnly_NoWorkingTreeMutation", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse origin/main":
+          return ok("base-sha\n")
+        case "rev-parse mohist/run-wr-merge-ready-1":
+          return ok("candidate-head-sha\n")
+        case "merge-base origin/main mohist/run-wr-merge-ready-1":
+          return ok("merge-base-sha\n")
+        case "merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await mergeReadyAction(context())
+
+    const cmds = workspaceCalls(calls)
+    for (const cmd of cmds) {
+      expect(cmd).not.toMatch(/^checkout\b/)
+      expect(cmd).not.toMatch(/\bmerge --squash\b/)
+      expect(cmd).not.toMatch(/^reset\b/)
+      expect(cmd).not.toMatch(/^clean\b/)
+      expect(cmd).not.toMatch(/^add\b/)
+      expect(cmd).not.toMatch(/^commit\b/)
+      expect(cmd).not.toMatch(/^fetch\b/)
+      expect(cmd).not.toMatch(/^clone\b/)
+    }
+  })
+
+  it("NoLandingWorkspaceCreated_NoCloneIssued", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse origin/main":
+          return ok("base-sha\n")
+        case "rev-parse mohist/run-wr-merge-ready-1":
+          return ok("candidate-head-sha\n")
+        case "merge-base origin/main mohist/run-wr-merge-ready-1":
+          return ok("merge-base-sha\n")
+        case "merge-base --is-ancestor origin/main mohist/run-wr-merge-ready-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    await mergeReadyAction(context())
+
+    const workDirs = new Set(calls.map((c) => c.workDir))
+    expect(workDirs.size).toBe(1)
+    expect(workDirs.has(WORKSPACE_PATH)).toBe(true)
+
+    for (const call of calls) {
+      expect(call.args[0]).not.toBe("clone")
+    }
   })
 })
