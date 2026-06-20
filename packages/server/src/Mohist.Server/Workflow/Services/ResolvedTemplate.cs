@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Workflow.Services;
 
@@ -53,7 +54,7 @@ public sealed record ResolvedTemplate(
             return null;
 
         var globalElement = globalVars is not null
-            ? JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(globalVars))
+            ? JSON.DeserializeElement(JSON.Serialize(globalVars))
             : (JsonElement?)null;
 
         return new Mohist.Server.Workflow.Domain.VariableBundle(
@@ -67,6 +68,6 @@ public sealed record ResolvedTemplate(
             .Where(kv => kv.Value.HasValue)
             .ToDictionary(kv => kv.Key, kv => kv.Value!.Value);
 
-        return JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(dict));
+        return JSON.DeserializeElement(JSON.Serialize(dict));
     }
 }

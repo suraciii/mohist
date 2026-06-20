@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Workflow.Storage;
 
@@ -40,11 +41,6 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     public const string DirectoryFilesName = "files";
     public const string StorageRootName = "artifacts";
     public const string WorkflowSegment = "workflows";
-
-    private static readonly JsonSerializerOptions MetadataJson = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true,
-    };
 
     private readonly ILogger<FileSystemWorkflowArtifactStorage> _log;
     private readonly WorkflowArtifactDirectoryLimits _defaultLimits;
@@ -373,7 +369,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             return null;
         await using var stream = File.OpenRead(metadataPath);
         return await JsonSerializer.DeserializeAsync<WorkflowArtifactStorageMetadata>(
-            stream, MetadataJson, cancellationToken).ConfigureAwait(false);
+            stream, JSON.Indented, cancellationToken).ConfigureAwait(false);
     }
 
     private static string ResolveStorageRoot(WorkflowArtifactStorageOptions options)
@@ -520,7 +516,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 bufferSize: 4096,
                 useAsync: true))
             {
-                await JsonSerializer.SerializeAsync(output, metadata, MetadataJson, cancellationToken)
+                await JsonSerializer.SerializeAsync(output, metadata, JSON.Indented, cancellationToken)
                     .ConfigureAwait(false);
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }

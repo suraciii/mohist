@@ -1,5 +1,5 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Project.Domain;
 
@@ -17,7 +17,7 @@ public sealed record ProjectVariablesBag(
 
         try
         {
-            return JsonSerializer.Deserialize<ProjectVariablesBag>(json, JsonOptions) ?? Empty;
+            return JSON.Deserialize<ProjectVariablesBag>(json) ?? Empty;
         }
         catch
         {
@@ -25,7 +25,7 @@ public sealed record ProjectVariablesBag(
         }
     }
 
-    public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
+    public string ToJson() => JSON.Serialize(this);
 
     public ProjectVariablesBag PatchVar(string name, JsonElement value)
     {
@@ -87,11 +87,6 @@ public sealed record ProjectVariablesBag(
     }
 
     private static JsonElement? CloneElement(JsonElement? value) => value.HasValue ? value.Value.Clone() : null;
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
 }
 
 [GenerateSerializer]

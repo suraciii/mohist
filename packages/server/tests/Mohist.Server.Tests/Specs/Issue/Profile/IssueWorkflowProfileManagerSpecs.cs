@@ -213,6 +213,58 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(1, doc.RootElement.GetProperty("keep").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task SetVariables_ChineseValues_PersistAndRoundTripVerbatimFromSqlite()
+    {
+        // T-004 acceptance: a Chinese workflow variable persists to SQLite
+        // and round-trips back as readable Chinese (not as \uXXXX escapes).
+        // The set path goes through VariableBundle.ToJson() which uses JSON.Options
+        // (the unified facade); the get path reads back the raw SQLite TEXT and
+        // deserializes it through VariableBundle.FromJson. Verify both:
+        //   1. the persisted SQLite TEXT contains the verbatim characters
+        //   2. the readback yields a VariableBundle whose Vars contains the same
+        //      characters (no \uXXXX escapes appear at any step).
+        var bundle = new VariableBundle(
+            Vars: JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                greeting = "中文变量值",
+                description = "用于测试中文变量持久化",
+                stageName = "构建",
+            })).RootElement);
+
+        await _manager.SetVariablesAsync("issue_zh", bundle);
+
+        await using (var db = new MohistDbContext(_options))
+        {
+            var conn = db.Database.GetDbConnection();
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT \"Variables\" FROM \"IssueWorkflowProfiles\" WHERE \"IssueId\" = $id";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "$id";
+            p.Value = "issue_zh";
+            cmd.Parameters.Add(p);
+
+            var persisted = (string?)await cmd.ExecuteScalarAsync();
+            Assert.NotNull(persisted);
+            Assert.Contains("中文变量值", persisted);
+            Assert.Contains("用于测试中文变量持久化", persisted);
+            Assert.Contains("构建", persisted);
+            Assert.DoesNotContain("\\u4e2d", persisted);
+            Assert.DoesNotContain("\\u6587", persisted);
+            Assert.DoesNotContain("\\u6784", persisted);
+        }
+
+        var got = await _manager.GetVariablesAsync("issue_zh");
+        Assert.NotNull(got.Vars);
+        var raw = got.Vars!.Value.GetRawText();
+        Assert.Contains("\"greeting\":\"中文变量值\"", raw);
+        Assert.Contains("\"description\":\"用于测试中文变量持久化\"", raw);
+        Assert.Contains("\"stageName\":\"构建\"", raw);
+    }
+
     // ===================== helpers =====================
 
     private class Factory : IDbContextFactory<MohistDbContext>

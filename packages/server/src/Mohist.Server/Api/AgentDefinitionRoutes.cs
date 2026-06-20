@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
 
 namespace Mohist.Server.Api;
@@ -129,11 +130,9 @@ public sealed record AgentUpdateRequest(
     IReadOnlySet<string> Fields,
     JsonElement Raw)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     public static async ValueTask<AgentUpdateRequest?> BindAsync(HttpContext context)
     {
-        var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JsonOptions);
+        var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
         return new AgentUpdateRequest(
             GetString(raw, "name"),
             GetString(raw, "description"),

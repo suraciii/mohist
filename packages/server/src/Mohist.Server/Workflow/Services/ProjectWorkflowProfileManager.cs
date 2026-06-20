@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
@@ -396,7 +397,7 @@ public class ProjectWorkflowProfileManager
 
         row.DisplayName = string.IsNullOrWhiteSpace(displayName) ? key : displayName!;
         row.Description = description ?? string.Empty;
-        row.TagsJson = JsonSerializer.Serialize(tags ?? Array.Empty<string>());
+        row.TagsJson = JSON.Serialize(tags ?? Array.Empty<string>());
         row.Stage = stage;
         row.Body = body;
         row.UpdatedAt = DateTime.UtcNow;
@@ -450,7 +451,7 @@ public class ProjectWorkflowProfileManager
             return [];
         try
         {
-            return JsonSerializer.Deserialize<string[]>(json) ?? [];
+            return JSON.Deserialize<string[]>(json) ?? [];
         }
         catch
         {

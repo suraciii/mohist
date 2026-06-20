@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions.Services;
@@ -144,7 +145,7 @@ public static class AgentSessionJsonHelper
     {
         try
         {
-            var payload = JsonSerializer.Deserialize<JsonElement>(json);
+            var payload = JSON.DeserializeElement(json);
             if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("text", out var text))
                 return text.GetString() ?? string.Empty;
             if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Object && content.TryGetProperty("text", out var contentText))
@@ -162,7 +163,7 @@ public static class AgentSessionJsonHelper
     {
         try
         {
-            return JsonSerializer.Deserialize<JsonElement>(json);
+            return JSON.DeserializeElement(json);
         }
         catch
         {
@@ -183,7 +184,7 @@ public static class AgentSessionJsonHelper
     {
         try
         {
-            var payload = JsonSerializer.Deserialize<JsonElement>(json);
+            var payload = JSON.DeserializeElement(json);
             return GetStringProp(payload, "messageId")
                 ?? GetStringProp(payload, "partId")
                 ?? GetToolStringProp(payload, "toolCallId")

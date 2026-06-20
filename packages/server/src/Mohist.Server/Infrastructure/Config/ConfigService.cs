@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Domain;
 
@@ -85,7 +86,7 @@ public class ConfigService
             null => "",
             JsonElement json => json.GetRawText(),
             string text => text,
-            _ => JsonSerializer.Serialize(value),
+            _ => JSON.Serialize(value),
         };
 
         await WriteConfigFileAsync(key, strValue);
@@ -99,7 +100,7 @@ public class ConfigService
             ? (json.GetString() ?? "")
             : json.GetRawText(),
         string text => text,
-        _ => JsonSerializer.Serialize(value),
+        _ => JSON.Serialize(value),
     };
 
     public async Task ClearAsync(string key)
@@ -124,7 +125,7 @@ public class ConfigService
         {
             try
             {
-                var agentConfig = JsonSerializer.Deserialize<Dictionary<string, object?>>(agentJson);
+                var agentConfig = JSON.Deserialize<Dictionary<string, object?>>(agentJson);
                 if (agentConfig is not null)
                     return Task.FromResult<Dictionary<string, object?>?>(agentConfig);
             }
@@ -158,7 +159,7 @@ public class ConfigService
         {
             try
             {
-                var stageAgents = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, object?>>>(stageAgentsJson);
+                var stageAgents = JSON.Deserialize<Dictionary<string, Dictionary<string, object?>>>(stageAgentsJson);
                 if (stageAgents is not null)
                 {
                     foreach (var (stage, config) in stageAgents)
@@ -192,7 +193,7 @@ public class ConfigService
             ["agent"] = agent,
         };
 
-        var varsElement = JsonSerializer.SerializeToElement(vars);
+        var varsElement = JSON.SerializeToElement(vars);
         return new VariableBundle(Vars: varsElement, Stages: null);
     }
 
@@ -310,7 +311,7 @@ public class ConfigService
         }
         SetNestedValue(root, path, nodeValue);
 
-        var options = new JsonSerializerOptions { WriteIndented = true };
+        var options = JSON.Indented;
         await File.WriteAllTextAsync(_configPath, root.ToJsonString(options));
     }
 
@@ -398,13 +399,13 @@ public class ConfigService
     private static object? ParseValue(string type, string value) => type switch
     {
         "number" => int.TryParse(value, out var n) ? n : value,
-        "json" => JsonSerializer.Deserialize<JsonElement>(value),
+        "json" => JSON.DeserializeElement(value),
         _ => value,
     };
 
     private static bool JsonIsValid(string value)
     {
-        try { JsonSerializer.Deserialize<JsonElement>(value); return true; }
+        try { JSON.DeserializeElement(value); return true; }
         catch { return false; }
     }
 }

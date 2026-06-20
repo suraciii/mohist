@@ -1,0 +1,175 @@
+# Issue 218 Progress
+
+## Codebase Patterns
+
+- `Mohist.Server.Infrastructure.JSON` is the single source of truth for `JsonSerializerOptions`; the encoder (non-ASCII preserving) and all custom converters live there. **Converters must be listed in the order they should be matched** — System.Text.Json walks the list and uses the first matching converter, so `UnknownFailureReasonJsonConverter` is registered **before** `JsonStringEnumConverter` (the latter would otherwise win for the `FailureReason` type and skip our fallback).
+- For `JavaScriptEncoder.Create(UnicodeRanges.All)`, HTML-significant characters (`<`, `>`, `&`) are escaped as uppercase-hex sequences (`\u003C`, `\u003E`, `\u0026`). Tests that assert these escapes must match the uppercase form.
+- `JsonSerializerDefaults.Web` (used by `JSON.Options`) flips property naming to **camelCase**, so a record field `Reason` serializes as `reason`. Anonymous types with `Reason = ...` likewise become `"reason"`. Tests must use the camelCase form when asserting raw JSON substrings.
+- `Mohist.Server` has `InternalsVisibleTo("Mohist.Server.Tests")` (see `AssemblyInfo.cs`), so `internal` types in `JSON` (e.g. `UnknownFailureReasonJsonConverter`) are visible from tests.
+- The `SpecFiles_MustHaveSpecOrCollectionSuffix` and `SpecNamespaces_MustBeUnderSpecs` arch rules mean new unit tests belong in `packages/server/tests/Mohist.Server.Tests/Specs/<Area>/<Name>Specs.cs` under namespace `Mohist.Server.Tests.Specs.<Area>`.
+- Specs are categorized via `Traits.Speed` (Unit/Grain/Integration/Service) and `Traits.Sut` (Foundation/Workflow/Issue/...). New facade-level tests fit `Speed=Unit, Sut=Foundation`.
+- `JavaScriptEncoder.Create(UnicodeRanges.All)` covers the Basic Multilingual Plane (BMP) only. Characters in supplementary planes (emoji `🚀` = U+1F680, etc.) are still `\uXXXX`-escaped by the encoder. The task's "Chinese in API responses / SignalR / persisted JSON" gate is satisfied because Chinese characters are in the BMP (CJK Unified Ideographs: U+4E00–U+9FFF). Tests for the non-ASCII behavior should use BMP characters (Chinese, Japanese kana, accented Latin, etc.) rather than emoji, unless the explicit goal is supplementary-plane passthrough (in which case the encoder would need to be widened).
+
+## Task T-001: Establish unified JSON facade with non-ASCII encoder and converter ownership
+
+### What was implemented
+- Added `Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)` to `JSON.Options` so non-ASCII characters (e.g. `中文`) serialize verbatim while HTML-significant characters (`<`, `>`, `&`) remain escaped.
+- Added a read-only `JSON.Indented` variant — `new JsonSerializerOptions(Options) { WriteIndented = true }` — that clones the encoder, converter list, and other settings from `Options`.
+- Promoted `UnknownFailureReasonJsonConverter` out of `WorkflowQuerier` into a shared `internal sealed` nested type on `JSON`. Registered it on `JSON.Options` (listed **before** `JsonStringEnumConverter` so it wins for the `FailureReason` type).
+- `WorkflowQuerier.RunJsonOptions` now references the promoted converter (`new JSON.UnknownFailureReasonJsonConverter()`). The field is preserved per the task's "do not delete here" note — T-003 owns the field deletion.
+- New `Mohist.Server.Tests.Specs.Foundation.JSONSpecs` covering: encoder equivalence, non-ASCII verbatim output, HTML-significant escapes, indented variant, `FailureReason` round-trip for known/unknown string/number values, golden-master for `FailureDetails`, case-insensitive deserialization, null-ignore, and Chinese content round-trip.
+
+### Files changed
+- `packages/server/src/Mohist.Server/Infrastructure/JSON.cs` — added encoder, `Indented` field, promoted converter.
+- `packages/server/src/Mohist.Server/Workflow/Services/WorkflowQuerier.cs` — removed private `UnknownFailureReasonJsonConverter`; `RunJsonOptions` references `JSON.UnknownFailureReasonJsonConverter`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Foundation/JSONSpecs.cs` — new unit spec.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Api/IssueWorkflowLifecycleSpecs.cs` — updated `RerunAsync_WhenActiveWorkflowStateCannotDeserialize_ReplacesActiveWorkflow` to `RerunAsync_WhenFailureReasonIsUnknownLegacyValue_RerunsExistingWorkflow`. The pre-change behavior relied on `JSON.Options` *not* having the `UnknownFailureReasonJsonConverter`, which made deserialization of `"RemovedReason"` throw and trigger the "replace workflow" recovery path. After promoting the converter onto `JSON.Options`, the fallback (returns `FailureReason.TaskFailed`) is now the default everywhere, so `RerunAsync` succeeds and the existing workflow is restarted in place. The test now asserts the in-place rerun, which is the new (intended) recovery path.
+
+### Learnings for future tasks
+
+#### Decisions made
+- The promoted `UnknownFailureReasonJsonConverter` lives in `JSON.cs` (as a nested `internal sealed` class) so the facade is self-contained: a single file owns encoder, indented variant, custom converters, and the entry points. `Infrastructure → Workflow.Domain.Run` is already a common direction (see `Infrastructure/Events/WorkflowEventSerializer.cs`, `Infrastructure/Data/Workflow/WorkflowRunStore.cs`), so the cross-package reference from `JSON.cs` is consistent with existing layering.
+- Used `new JsonSerializerOptions(source) { WriteIndented = true }` for the indented clone — this deep-copies the converter list per .NET semantics, so `JSON.Indented` carries the `UnknownFailureReasonJsonConverter` and `JsonStringEnumConverter` for free.
+- The acceptance criterion's "value-identical to the pre-change representation" is satisfied for serialization because the converter's `Write` method (`WriteStringValue(value.ToString())`) is unchanged. The pre-change `WorkflowQuerier.RunJsonOptions` and the new `JSON.Options` produce byte-identical output for `FailureReason` values.
+
+#### Gotchas discovered
+- **Converter order matters.** System.Text.Json walks the `Converters` list and uses the first matching converter. Placing `JsonStringEnumConverter` before `UnknownFailureReasonJsonConverter` makes the standard enum converter win for the `FailureReason` type and silently skip our fallback. Always list specialized converters before the generic `JsonStringEnumConverter`.
+- **HTML escapes are uppercase-hex.** `JavaScriptEncoder.Create(UnicodeRanges.All)` escapes `<`, `>`, `&` as `\u003C`, `\u003E`, `\u0026` (uppercase letters). Don't write `\u003c` in tests — they will not match.
+- **The pre-existing `RerunAsync_WhenActiveWorkflowStateCannotDeserialize_ReplacesActiveWorkflow` test relied on the inconsistency being fixed by T-001.** Tests that exercise the "JSON deserialization failure → fallback path" will see different observable behavior once the converter lives on `JSON.Options`. T-003 will need to re-audit similar tests.
+- **Anonymous type property names get camelCased by `JsonSerializerDefaults.Web`.** A `new { Reason = ... }` serializes to `"reason":"..."` (lowercase). Tests asserting raw JSON must use the camelCase form.
+
+#### Patterns / API shapes established
+- `JSON.Options` is now the single options source: encoder = non-ASCII preserving, `DefaultIgnoreCondition = WhenWritingNull`, `PropertyNameCaseInsensitive = true`, `JsonStringEnumConverter` + custom converters (FailureReason first).
+- `JSON.Indented` is a separate options instance for human-readable files (e.g. `ConfigService`'s config dump in T-003). It's a clone of `Options` with `WriteIndented = true`; do not mutate either field.
+- All other code paths should call `JSON.Serialize<T>` / `JSON.Deserialize<T>` / `JSON.DeserializeOrThrow<T>` (and pass `JSON.Options` / `JSON.Indented` to any direct `JsonSerializer.*` call) — T-003 owns the call-site migration.
+
+#### Cross-task invariants
+- **Do not delete `WorkflowQuerier.RunJsonOptions` in T-002/T-003** unless the field's other usages (lines 56, 121, 132, 142, 143, 166, 180) have been replaced with `JSON.Options`. T-003's audit table already accounts for this.
+- **The serialization representation of `FailureReason` is locked in by T-001's golden-master test** (`FailureDetails_RoundTrip_ForKnownValues_MatchesGoldenMaster`). T-003 must not change this output. T-002's HTTP/SignalR wiring is output-direction only and must not affect `FailureReason` serialization.
+- **The `UnknownFailureReasonJsonConverter` is `internal` and is exposed via `JSON.UnknownFailureReasonJsonConverter`**. If T-003 needs to add a new local options field that also wants the converter, it should pull from `JSON.UnknownFailureReasonJsonConverter` rather than constructing a new one.
+
+## Task T-003: Eliminate local JsonSerializerOptions fields and converge business serialization to the facade
+
+### What was implemented
+- Eliminated every `static readonly JsonSerializerOptions` field outside the `JSON` facade and every `new JsonSerializerOptions(` constructor call across the `packages/server/src` tree, following the design migration audit table.
+- Converted the middle-layer shared options into thin delegators that return `JSON.Options`:
+  - `Infrastructure/Data/Sessions/AgentSessionStore.AgentSessionJson.JsonOptions` → `Mohist.Server.Infrastructure.JSON.Options`
+  - `Infrastructure/Events/CloudEvent.JsonOptions` → `JSON.Options`
+  - `Workflow/Domain/VariableBundle.JsonOptions` → `JSON.Options`
+  - `Workflow/Services/WorkflowYamlSerializer.JsonOptions` → `JSON.Options`
+  - `Infrastructure/Serialization/WorkflowVariableJson.Options` → `JSON.Options`
+  - `Infrastructure/Events/{AgentSession,Issue,Workflow}EventSerializer.JsonOptions` → `JSON.Options`
+- Removed local converter-bearing fields in `WorkflowQuerier` (`RunJsonOptions`, `StorageJsonOptions`) and `IssueQuerier` (`RunJsonOptions`); both now call sites pass `JSON.Options` directly to `JsonSerializer.Serialize/Deserialize`.
+- Replaced the inline `new(JsonSerializerDefaults.Web)` in `Api/RunnerRoutes.cs` with `JSON.Options`.
+- Switched default-argument `JsonSerializer.Serialize/Deserialize` call sites to facade helpers (`JSON.Serialize`, `JSON.Deserialize`, `JSON.SerializeToElement`, `JSON.DeserializeElement`, `JSON.SerializeToUtf8Bytes`) or to passing `JSON.Options` / `JSON.Indented` directly. Affected subsystems: Workflow/Grains, Sessions, ConfigService, Label, Project, Api/LogsRoutes, Api/AgentDefinitionRoutes, Api/AgentJobController, Issue, Storage, InMemoryEventBus, CloudEvent handlers, etc.
+- `ConfigService` and the two `FileSystem{Attachment,WorkflowArtifact}Storage` metadata files now use `JSON.Indented` for human-readable on-disk files.
+- Added two new source-grep guard tests in `JSONSpecs`:
+  - `ServerSource_NoLocalJsonSerializerOptionsConstructors` — fails if any file under `packages/server/src/Mohist.Server` (excluding `Infrastructure/JSON.cs`) contains `new JsonSerializerOptions(`.
+  - `ServerSource_NoLocalStaticJsonSerializerOptionsFields` — fails if any such file declares a `static readonly JsonSerializerOptions` field that does not delegate to `JSON.Options` / `JSON.Indented`.
+
+### Files changed
+- **Bucket B (local fields removed/delegated)**
+  - `Workflow/Services/WorkflowQuerier.cs` — `RunJsonOptions` and `StorageJsonOptions` deleted; all call sites now pass `JSON.Options`.
+  - `Issue/Services/IssueQuerier.cs` — `RunJsonOptions` deleted; call sites now pass `JSON.Options`.
+  - `Infrastructure/Data/Sessions/AgentSessionStore.cs` — `AgentSessionJson.JsonOptions` delegates to `JSON.Options`.
+  - `Infrastructure/Events/CloudEvent.cs` — `JsonOptions` delegates to `JSON.Options`.
+  - `Infrastructure/Events/{AgentSession,Issue,Workflow}EventSerializer.cs` — `JsonOptions` delegates to `JSON.Options`.
+  - `Workflow/Domain/VariableBundle.cs` — `JsonOptions` delegates to `JSON.Options`.
+  - `Workflow/Services/WorkflowYamlSerializer.cs` — `JsonOptions` delegates to `JSON.Options`.
+  - `Infrastructure/Serialization/WorkflowVariableJson.cs` — `Options` delegates to `JSON.Options`.
+  - `Project/Domain/ProjectVariablesBag.cs`, `SystemInfo/SystemUpdateService.cs`, `Api/AgentDefinitionRoutes.cs`, `Api/AgentJobController.cs`, `Workflow/Services/WorkflowProfileManager.cs`, `Workflow/Services/Storage/FileSystemAttachmentStorage.cs`, `Workflow/Services/Storage/FileSystemWorkflowArtifactStorage.cs` — local options fields removed; all calls now pass `JSON.Options` / `JSON.Indented`.
+- **Bucket A (default-arg call sites switched to `JSON.*`)**
+  - `Agent/Grains/AgentJobGrain.cs`
+  - `Api/AgentDefinitionRoutes.cs`, `Api/AgentJobController.cs`, `Api/IssueRoutes.Helpers.cs`, `Api/LogsRoutes.cs`, `Api/RunnerRoutes.cs`
+  - `Infrastructure/Config/ConfigService.cs`
+  - `Infrastructure/Data/Workflow/WorkflowExecutionContext.cs`
+  - `Infrastructure/Events/InMemoryEventBus.cs`
+  - `Issue/Services/IssueQuerier.cs`, `Issue/Services/IssueVariableBuilder.cs`, `Issue/Services/WorkflowProfiles/IssueWorkflowProfileStorageIntegrity.cs`, `Issue/Services/WorkflowProfiles/MohistIssueWorkflowProfileBase.cs`
+  - `Label/Services/LabelCatalogService.cs`
+  - `Project/Domain/ProjectVariablesBag.cs`, `Project/Grains/ProjectGrain.cs`, `Project/Services/ProjectQuerier.cs`
+  - `Sessions/Grains/AgentSessionGrain.cs`, `Sessions/Services/AgentSessionJsonHelper.cs`, `Sessions/Services/AgentSessionSummaryBuilder.cs`, `Sessions/Services/ContextExhaustionClassifier.cs`, `Sessions/Services/TranscriptAccumulator.cs`
+  - `Workflow/Domain/Run/WorkflowRun.Approval.cs`, `Workflow/Domain/Run/WorkflowRun.Check.cs`
+  - `Workflow/Grains/Surrogates/JsonElementSurrogate.cs`, `Workflow/Grains/WorkflowDispatchBuilder.cs`, `Workflow/Grains/WorkflowDispatchHelpers.cs`, `Workflow/Grains/WorkflowGrain.cs`
+  - `Workflow/Services/Artifacts/WorkflowArtifactUploadService.cs`, `Workflow/Services/ProjectWorkflowProfileManager.cs`, `Workflow/Services/ResolvedTemplate.cs`, `Workflow/Services/Sessions/AgentSessionQuerier.cs`, `Workflow/Services/WorkflowQuerier.cs`
+- **Tests**
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Foundation/JSONSpecs.cs` — added `ServerSource_NoLocalJsonSerializerOptionsConstructors` and `ServerSource_NoLocalStaticJsonSerializerOptionsFields` (both unit tests; 33 / 33 JSON tests now green).
+
+### Learnings for future tasks
+
+#### Decisions made
+- The middle-layer shared options were kept as thin delegating fields rather than deleted outright. Each delegator is `public static readonly JsonSerializerOptions JsonOptions = JSON.Options;` — a one-liner. This preserves the public surface (callers in other packages can still reference `AgentSessionJson.JsonOptions` etc.) without any new behavior. Deleting the fields would have rippled into 5+ call sites in tests and 1+ in `Infrastructure/Events/InMemoryEventBus.cs` and `CloudEventBusServiceCollectionExtensions.cs`; the delegator is the smaller change.
+- The source-grep guard test walks up from `AppContext.BaseDirectory` to find `packages/server/src/Mohist.Server`. This is a test-time-only helper; it does not affect production code paths. The test fails fast (sub-second) on any new local options constructor/field that is not a delegator.
+- The two `FileSystem*Storage` metadata files use `JSON.Indented` rather than `JSON.Options` because they are operator-readable on disk. This matches the design's "human-readable files" clause (also applies to `ConfigService`).
+- `ConfigService` migrates the seven local `JsonSerializer.Serialize/Deserialize` call sites to `JSON.Serialize` / `JSON.Deserialize` (or `JSON.Indented` for the dump). The dump uses `JSON.Indented` to preserve the existing one-key-per-line layout for human consumption.
+
+#### Gotchas discovered
+- **`HttpApiJsonWiringSpecs` tests still fail in the workspace** because of a pre-existing WIP regression in `Infrastructure/Hosting/MohistServiceRegistration.cs` (the WIP commit `d2115fae` strips `LabelCatalogService`, `AttachmentService`, `AgentQuerier`, `WorkflowDispatchBuilder`, etc. from the service registration). The fixture's `WebApplicationFactory<>` host cannot start without them, so every `Speed=Integration` test in the project fails. This is **pre-existing** (HEAD~1 already has 477 failed/1588 passed; T-003 keeps the same 477/1590 passed). The T-002 HTTP/SignalR wiring work in HEAD~1 also never landed in this branch (no `ConfigureHttpJsonOptions` / `AddJsonProtocol` calls in `MohistServiceRegistration.cs`), so the integration tests' assertions about the wiring are observing the pre-promotion state, not T-003's changes. Future tasks should not assume the `HttpApiJsonWiringSpecs` tests are gating T-003; they are gated by the upstream WIP being unwound.
+- **The `WorkflowQuerier.RunJsonOptions` and `StorageJsonOptions` fields existed in the T-001 baseline but were never actually used** in any code that exercised the FailureReason converter. They were redundant. Deleting them is safe; the only purpose they served was the (already-promoted) `UnknownFailureReasonJsonConverter` registration, which T-001 moved to `JSON.Options`.
+- **`Mohist.Server.Infrastructure.Serialization.WorkflowVariableJson` was the only file with its own `using` of `System.Text.Json` AND its own `static readonly JsonSerializerOptions Options` field, all of which were redundant** (the field equaled `new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = WhenWritingNull, PropertyNameCaseInsensitive = true, Converters = { new JsonStringEnumConverter() } }`, which is byte-equivalent to `JSON.Options` except for the missing `Encoder` and the missing `UnknownFailureReasonJsonConverter` — and that latter is now global). The file becomes a one-liner delegator.
+- **`WorkflowRun.Approval.cs`, `WorkflowRun.Check.cs`** had `JsonSerializer.Serialize` calls that used the default-argument overload (no options). The default-argument overload uses `JsonSerializerOptions.Default` (no encoder, no converters), so these would have produced escaped non-ASCII strings. Migrating them to `JSON.Serialize` makes their output match every other code path.
+- **Multi-line `JsonSerializer.DeserializeAsync<T>(body, options, ct)` calls confuse single-line grep audits.** The T-003 grep audit must use `--multiline` (rg `-U`) to see them. A naive single-line grep will report them as "missing options" because the `JSON.Options` token sits on a different line. The 3 such sites in the codebase are `Api/AgentJobController.cs:53`, `Workflow/Services/Storage/FileSystemAttachmentStorage.cs:134`, `Workflow/Services/Storage/FileSystemWorkflowArtifactStorage.cs:371` — all three already pass `JSON.Options` / `JSON.Indented` and need no further migration.
+
+#### Patterns / API shapes established
+- The source-grep guard in `JSONSpecs.ServerSource_NoLocalJsonSerializerOptionsConstructors` is the spec's verifiable scenario for "no `new JsonSerializerOptions(` outside the facade". It is intentionally test-side (not a Roslyn analyzer) — it runs in milliseconds and lives next to the JSON tests so any new JSON-related PR either re-affirms or visibly breaks the invariant.
+- The two `ServerSource_*` tests use `LocateServerSourceRoot` which walks up from the test assembly's `BaseDirectory`. This works in both `dotnet test` and `dotnet test --no-build` invocations because `AppContext.BaseDirectory` is the test output dir, which always sits under `packages/server/tests/Mohist.Server.Tests/bin/<config>/<tfm>/`.
+- All `static readonly JsonSerializerOptions` fields that survive the migration are documented as delegators: their initializer is literally `JSON.Options` or `Mohist.Server.Infrastructure.JSON.Options`. The source-grep test treats such fields as compliant (line contains `JSON.Options` / `JSON.Indented`).
+
+#### Cross-task invariants
+- **The custom converter ordering on `JSON.Options` is load-bearing**: `UnknownFailureReasonJsonConverter` must remain listed before `JsonStringEnumConverter` (T-001's note still applies). T-003 does not add or remove any converters; it only migrates call sites to use the existing set.
+- **No `new JsonSerializerOptions(` is allowed outside `Infrastructure/JSON.cs`.** The `ServerSource_NoLocalJsonSerializerOptionsConstructors` test will fail the next time someone adds one. This guards the design's "no drift" goal going forward.
+- **`JSON.Indented` is the human-readable variant** for on-disk operator-facing files. Code that needs a different indented-options variant (e.g. camelCase disabled) must add a documented narrow variant on `JSON.cs` rather than constructing a new `JsonSerializerOptions` locally.
+- **The `MohistIntegrationFixture` test infrastructure is in a pre-existing broken state** (host fails to start because of the WIP service-registration regression). T-003 does not depend on the integration test tier passing — all T-003 work is verified through `Speed=Unit` and `Speed=Grain` tests, which are not blocked by the host-startup issue. Future tasks that need integration tests should first restore the service registrations stripped by the WIP commit.
+
+## Task T-004: End-to-end verification of non-ASCII serialization across all surfaces
+
+### Verification report — every acceptance criterion
+
+- **`Manual: an issue with a Chinese title — GET via API returns readable Chinese, and the hub event push is readable Chinese.`** — Covered by `HttpApiJsonWiringSpecs` (5/5 green):
+  - `GetIssue_WithChineseTitle_ResponseBodyContainsVerbatimCharacters` posts an issue with the title `修复中文乱码 — Issue #1`, GETs it back through the API, and asserts the response body contains the verbatim characters and no `\uXXXX` escapes for `修` (`\u4fee`), `复` (`\u590d`), `中` (`\u4e2d`).
+  - `PostIssue_WithInvalidChineseLabel_ErrorResponseBodyContainsVerbatimCharacters` posts an invalid label `中文标签`, asserts the error response body contains the verbatim characters and no escapes for `中文`/`中`/`标签`.
+  - `JsonHubProtocol_WithUnifiedFacade_WritesNonAsciiPayloadVerbatim` constructs a `JsonHubProtocol` bound to the resolved `JsonHubProtocolOptions`, sends a fake hub invocation with `NonAsciiText` as the argument, and asserts the wire bytes contain the verbatim characters and no escapes for `修`/`中`/`文`.
+  - `HttpJsonOptions_EncoderMatchesUnifiedFacade` and `SignalRJsonHubProtocolOptions_PayloadSerializerOptionsIsUnifiedFacade` assert the global HTTP/SignalR options resolve to `JSON.Options`'s encoder / options.
+- **`Manual: a Chinese workflow variable persists to SQLite and round-trips back as readable Chinese.`** — Covered by new `IssueWorkflowProfileManagerSpecs.SetVariables_ChineseValues_PersistAndRoundTripVerbatimFromSqlite`. The test sets a `VariableBundle` with Chinese values (`greeting = "中文变量值"`, `description = "用于测试中文变量持久化"`, `stageName = "构建"`) through `IssueWorkflowProfileManager.SetVariablesAsync`, then opens a raw SQLite connection and SELECTs the `Variables` column directly. The persisted TEXT contains the verbatim characters and no `\u4e2d`/`\u6587`/`\u6784` escapes. The subsequent `GetVariablesAsync` round-trip produces a `VariableBundle.Vars` whose `GetRawText()` contains the verbatim Chinese keys/values.
+- **`Manual: runner event stream and a persisted artifact/log containing Chinese are readable.`** — Covered by two new tests:
+  - `AgentSessionEventSerializerSpecs.ToData_EventPayloadWithChineseContent_EmitsVerbatimCharacters` and `ToData_EventPayloadWithChineseFailureCategory_EmitsVerbatimCharacters` exercise `AgentSessionEventSerializer.ToData(...)` (which uses `JSON.Options` via the `AgentSessionEventSerializer.JsonOptions` delegator) for an `AgentSessionRuntimeBound` event with id `acp-中文-会话-001` and an `AgentSessionContextExhausted` event with `FailureCategory = "上下文耗尽"`. Both produce `JsonElement` values whose string properties read back as the verbatim Chinese.
+  - `FileSystemWorkflowArtifactStorageSpecs.WriteFileAsync_MetadataWithChineseSourcePath_PersistsVerbatimOnDisk` writes an artifact whose source path is `中文目录/工件.md`, then reads the on-disk `metadata.json` directly and asserts it contains the verbatim path and no `\u4e2d`/`\u5de5`/`\u4ef6` escapes. The deserialized `WorkflowArtifactStorageMetadata.Path` round-trips back to the original source path. The content file also preserves the Chinese content (`这是一段中文内容`).
+- **`dotnet test Mohist.sln` is fully green, including all pre-existing serialization-related specs.** — `2074 passed, 0 failed, 10 skipped` (10 skips are explicit `[Fact(Skip = "...")]` markers — pre-existing, unrelated to JSON). Re-run a second time for stability: same result. This includes all 33 `JSONSpecs`, all 5 `HttpApiJsonWiringSpecs`, all 55 `MohistDefaultWorkflowProfileSpecs` (which exercise Chinese issue titles in workflow variable building), and every pre-existing serialization test. The T-003 progress note about 477 integration failures turned out to be stale: the working tree had the WIP-regression services re-applied (T-003's notes describe the WIP commit `d2115fae`'s stripped services — those are back in place, plus the T-002 wiring on top). T-002's WIP changes are present in the working tree (HTTP `JsonOptions` encoder assignment + `AddSignalR().AddJsonProtocol(JSON.Options)` in `MohistServiceRegistration.ConfigureMohistServices`) but uncommitted; they will be committed together with this T-004 verification task per the task's "stage and commit your changes" instruction.
+- **`Confirmed via grep: no `new JsonSerializerOptions(` outside Infrastructure/JSON.cs in packages/server/src.`** — `rg -t cs "new JsonSerializerOptions\(" packages/server/src` returns zero matches. The `JSONSpecs.ServerSource_NoLocalJsonSerializerOptionsConstructors` test (passing) enforces the same invariant at test time so future regressions will fail CI. The companion `ServerSource_NoLocalStaticJsonSerializerOptionsFields` test confirms every remaining `static readonly JsonSerializerOptions` field outside `JSON.cs` is a thin delegator (`JsonOptions = JSON.Options` or `Options = JSON.Options`) — 8 delegators total (in `CloudEvent`, `VariableBundle`, `WorkflowYamlSerializer`, `WorkflowVariableJson`, `AgentSessionStore.AgentSessionJson`, and the three `*EventSerializer` files).
+- **`Confirmed: persisted JSON written before the change (escaped or verbatim) still deserializes to equal values with no migration step.`** — Three new tests in `JSONSpecs`:
+  - `Deserialize_PreChangeEscapedJson_ReadsBackAsVerbatimValues` reads a hand-written `\uXXXX`-escaped JSON blob (representative of pre-change persisted JSON) through `JSON.Deserialize<T>` and asserts every Chinese value comes back as the verbatim Unicode string.
+  - `Deserialize_PreChangeEscapedJson_EqualsVerbatimJson` parses both an escaped and a verbatim representation of the same data and asserts the resulting objects are value-equal — confirming the two representations are interchangeable for the decoder.
+  - `Deserialize_PreChangeSessionJson_RoundTripsToSameValue` parses a representative pre-change `AgentSession`-shaped JSON blob and asserts every string field reads back as the verbatim Chinese.
+
+### Files changed
+- `packages/server/tests/Mohist.Server.Tests/Specs/Foundation/JSONSpecs.cs` — added 3 backward-compat tests + 2 helper records (`PersistedShape`, `PersistedSession`). Total: 36/36 JSONSpecs now green (was 33).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/IssueWorkflowProfileManagerSpecs.cs` — added `SetVariables_ChineseValues_PersistAndRoundTripVerbatimFromSqlite`. Total: 11/11 now green (was 10).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Sessions/AgentSessionEventSerializerSpecs.cs` — added 2 Chinese event-stream tests. Total: 4/4 now green (was 2).
+- `packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Storage/FileSystemWorkflowArtifactStorageSpecs.cs` — added `WriteFileAsync_MetadataWithChineseSourcePath_PersistsVerbatimOnDisk`. Total: 51/51 now green (was 50).
+- `openspec/changes/issue-218/progress.txt` — added T-004 entry + a new Codebase Patterns bullet documenting the BMP-only encoder limit.
+
+### Net test count
+- Before T-004: 2067 passed / 0 failed / 10 skipped.
+- After T-004: 2074 passed / 0 failed / 10 skipped (+7 new T-004 tests).
+
+### Learnings for future tasks
+
+#### Decisions made
+- The verification report uses xUnit tests as the substitute for "manual exercise of a running server + runner". Every acceptance criterion that involves HTTP/SignalR/persistence has a corresponding test that hits the real code path: the `HttpApiJsonWiringSpecs` tests use the real `MohistIntegrationFixture` (full `WebApplicationFactory<Program>` with the configured `MohistServiceRegistration`), and the persistence tests use real SQLite / real filesystem / real `IssueWorkflowProfileManager`. This is the strongest automated substitute for manual exercise; a human reviewer would observe the same byte-for-byte behavior.
+- The `VariableBundle` round-trip test reads the SQLite `Variables` column through raw ADO.NET (`db.Database.GetDbConnection()` + `SELECT ... FROM IssueWorkflowProfiles`) rather than through EF's materialized entity. This proves the persisted TEXT itself is verbatim Chinese — not just the EF-deserialized model. The test fails if any layer in the pipeline escapes the values.
+- The artifact storage test reads the on-disk `metadata.json` via `File.ReadAllTextAsync` directly, again proving the file contents are verbatim Chinese — not just the deserialized metadata object.
+- Backward compat is tested with hand-written `\uXXXX`-escaped JSON rather than with a pre-change database fixture. This is the smallest possible test that proves the invariant, and it can run as a unit test (no fixture, no migration story needed).
+
+#### Gotchas discovered
+- **`JavaScriptEncoder.Create(UnicodeRanges.All)` does NOT pass supplementary-plane characters through.** Emojis like `🚀` (U+1F680) are escaped as `\uD83D\uDE80` even with `UnicodeRanges.All`. This is by design: `UnicodeRanges.All` covers the BMP (U+0000–U+FFFF). The task's "Chinese" gate is satisfied because Chinese characters live in the BMP (CJK Unified Ideographs at U+4E00–U+9FFF). The first attempt at the SQLite round-trip test included an emoji and failed; removed the emoji and the test passed. Documented in Codebase Patterns so future tasks don't trip on it.
+- **The 10 skipped tests are all explicit `[Fact(Skip = "...")]`** — they are deliberate skips with reasons, not flaky failures. The pre-T-003 progress note about 477 failed tests was stale: the working tree had the T-002 WIP services re-applied (LabelCatalogService, AttachmentService, AgentQuerier, WorkflowDispatchBuilder, etc. all back in place). T-004 re-confirms: `dotnet test Mohist.sln` reports 2074/0/10 with zero failures.
+- **T-002's WIP wiring is still uncommitted.** `Infrastructure/Hosting/MohistServiceRegistration.cs` has the HTTP `JsonOptions` encoder assignment and the `AddSignalR().AddJsonProtocol(JSON.Options)` registration, but they are sitting in the working tree on top of the T-003 commit (912d657e). The T-003 commit intentionally did not include them (it was scoped to Bucket A/B/C; Bucket D was T-002). T-004's task says "stage and commit your changes", which captures both the T-002 wiring and T-004's verification. If a future reviewer splits the commit, the T-002 wiring commit message should reference T-002 and call out the bucket-D delivery.
+
+#### Patterns / API shapes established
+- The "verification test" pattern: every acceptance criterion that mentions a specific surface (HTTP / SignalR / SQLite / file / event-stream) has a unit or integration test that opens that surface and reads back the bytes. This is the durable form of T-004's HITL manual checks — automated, fast, and reproducible.
+- The backward-compat test pattern (`Deserialize_PreChangeEscapedJson_...`) is reusable for future schema migrations that touch the encoder: write a `\uXXXX`-escaped representation of the new shape, assert the old decoder accepts it. This is the smallest possible test that proves "no migration needed".
+- The SQLite raw-SELECT pattern (`db.Database.GetDbConnection()` + `SELECT "col" FROM "table"`) is the strongest assertion of "verbatim Chinese on the wire" — it bypasses every EF abstraction and reads the actual persisted bytes. Reuse this pattern when future tasks need to prove a column's contents are preserved through a serializer change.
+
+#### Cross-task invariants
+- **All 4 tasks in the issue's task graph are now complete and verified.** T-001 (encoder + Indented + converter) → committed. T-002 (HTTP/SignalR wiring) → present in working tree, committed together with T-004. T-003 (local options elimination) → committed. T-004 (verification) → committed with this entry.
+- **The source-grep guard is now three tests deep**: `ServerSource_NoLocalJsonSerializerOptionsConstructors`, `ServerSource_NoLocalStaticJsonSerializerOptionsFields`, and the in-spec `HTTP API wiring uses a single global options registration` (asserted via `HttpJsonOptions_EncoderMatchesUnifiedFacade` + `SignalRJsonHubProtocolOptions_PayloadSerializerOptionsIsUnifiedFacade`). A regression in any of the three would fail CI.
+- **The unified-options invariant is locked in by `JSONSpecs.FailureDetails_RoundTrip_ForKnownValues_MatchesGoldenMaster`** (T-001) and `JSONSpecs.Deserialize_PreChangeEscapedJson_*` (T-004). Future encoder tweaks must preserve both the forward golden-master output and the backward escaped-input acceptance.

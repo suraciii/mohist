@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
@@ -281,20 +282,20 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var input = _input!;
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         if (!string.IsNullOrWhiteSpace(input.WorkspacePath))
-            payload["workspace"] = JsonSerializer.SerializeToElement(
-                new { path = input.WorkspacePath }, WorkflowVariableJson.Options);
+            payload["workspace"] = JSON.SerializeToElement(
+                new { path = input.WorkspacePath });
 
         var variablesJson = payload.Count == 0
             ? null
-            : JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
+            : JSON.Serialize(payload);
 
         var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
-            ["prompt"] = JsonSerializer.SerializeToElement(input.Prompt, WorkflowVariableJson.Options),
+            ["prompt"] = JSON.SerializeToElement(input.Prompt),
         };
         if (!string.IsNullOrWhiteSpace(input.Model))
-            with["model"] = JsonSerializer.SerializeToElement(input.Model, WorkflowVariableJson.Options);
-        var withJson = JsonSerializer.Serialize(with, WorkflowVariableJson.Options);
+            with["model"] = JSON.SerializeToElement(input.Model);
+        var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
             WorkflowRunId: string.Empty,

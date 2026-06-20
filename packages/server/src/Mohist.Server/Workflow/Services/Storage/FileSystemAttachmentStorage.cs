@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Workflow.Storage;
 
@@ -14,11 +15,6 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
     public const string MetadataFileName = "metadata.json";
     public const string FileContentName = "content";
     public const string StorageRootName = "attachments";
-
-    private static readonly JsonSerializerOptions MetadataJson = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = true,
-    };
 
     private readonly ILogger<FileSystemAttachmentStorage> _log;
     private readonly string _root;
@@ -136,7 +132,7 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
         RejectReparsePoint(metadataPath, $"Attachment metadata path '{storagePath}' must not be a symlink.");
         await using var stream = File.OpenRead(metadataPath);
         return await JsonSerializer.DeserializeAsync<AttachmentStorageMetadata>(
-            stream, MetadataJson, cancellationToken).ConfigureAwait(false);
+            stream, JSON.Indented, cancellationToken).ConfigureAwait(false);
     }
 
     private static string ResolveStorageRoot(AttachmentStorageOptions options, IEnvironmentVariableProvider? environment)
@@ -249,7 +245,7 @@ public sealed class FileSystemAttachmentStorage : IAttachmentStorage
                 bufferSize: 4096,
                 useAsync: true))
             {
-                await JsonSerializer.SerializeAsync(output, metadata, MetadataJson, cancellationToken)
+                await JsonSerializer.SerializeAsync(output, metadata, JSON.Indented, cancellationToken)
                     .ConfigureAwait(false);
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }

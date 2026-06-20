@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Api;
 
@@ -51,7 +52,7 @@ public static class AgentJobController
         {
             body = await JsonSerializer.DeserializeAsync<AgentJobValidationRequest>(
                 request.Body,
-                AgentJobValidationJson.Options,
+                JSON.Options,
                 ct);
         }
         catch (JsonException ex)
@@ -255,11 +256,3 @@ public sealed record AgentJobValidationResponse(
     string JobId,
     string? FailureReason,
     int? ExitCode);
-
-internal static class AgentJobValidationJson
-{
-    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-}

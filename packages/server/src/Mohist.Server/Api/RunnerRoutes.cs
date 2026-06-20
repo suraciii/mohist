@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -40,7 +41,7 @@ public static class RunnerRoutes
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var req = request.ContentLength.GetValueOrDefault() > 0
-                ? await JsonSerializer.DeserializeAsync<RunnerHeartbeatRequest>(request.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ? await JsonSerializer.DeserializeAsync<RunnerHeartbeatRequest>(request.Body, JSON.Options)
                 : null;
 
             if (req is not null)

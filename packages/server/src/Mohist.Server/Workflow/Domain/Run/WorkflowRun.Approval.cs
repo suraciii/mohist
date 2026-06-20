@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 
@@ -68,8 +69,8 @@ public static partial class WorkflowRunExtensions
         {
             var withInput = new Dictionary<string, JsonElement?>
             {
-                ["session"] = JsonSerializer.SerializeToElement(stage),
-                ["prompt"] = JsonSerializer.SerializeToElement($"${{{{ prompts.{DefaultFeedbackTaskId} }}}}"),
+                ["session"] = JSON.SerializeToElement(stage),
+                ["prompt"] = JSON.SerializeToElement($"${{{{ prompts.{DefaultFeedbackTaskId} }}}}"),
             };
             return new TaskDefinition(
                 Id: DefaultFeedbackTaskId,
@@ -89,7 +90,7 @@ public static partial class WorkflowRunExtensions
                 with = with is null
                     ? new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
                     : new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal);
-                with["session"] = JsonSerializer.SerializeToElement(stage);
+                with["session"] = JSON.SerializeToElement(stage);
             }
             return new TaskDefinition(config.Id, config.Title, config.Uses, with);
         }

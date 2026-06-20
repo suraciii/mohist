@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Label;
 
@@ -186,7 +187,7 @@ public class LabelCatalogService
     private static string SerializeSupportedValues(IReadOnlyList<string>? values)
     {
         if (values is null || values.Count == 0) return "[]";
-        return System.Text.Json.JsonSerializer.Serialize(values);
+        return JSON.Serialize(values);
     }
 
     private static IReadOnlyList<string>? DeserializeSupportedValues(string json)
@@ -194,7 +195,7 @@ public class LabelCatalogService
         if (string.IsNullOrEmpty(json) || json == "[]") return null;
         try
         {
-            return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
+            return JSON.Deserialize<List<string>>(json);
         }
         catch
         {

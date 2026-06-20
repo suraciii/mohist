@@ -29,4 +29,37 @@ public class AgentSessionEventSerializerSpecs
         Assert.Contains("usage.updated", EventCatalog.All);
         Assert.Contains("model.resolved", EventCatalog.All);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ToData_EventPayloadWithChineseContent_EmitsVerbatimCharacters()
+    {
+        // T-004 acceptance: runner event stream with Chinese content is
+        // readable. AgentSessionEventSerializer uses JSON.Options (a thin
+        // delegate), so non-ASCII characters in event payloads are emitted
+        // verbatim and not \uXXXX-escaped.
+        var payload = new AgentSessionRuntimeBound("acp-中文-会话-001");
+
+        var data = AgentSessionEventSerializer.ToData(payload);
+
+        Assert.Equal("acp-中文-会话-001", data.GetProperty("agentRuntimeSessionId").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ToData_EventPayloadWithChineseFailureCategory_EmitsVerbatimCharacters()
+    {
+        var payload = new AgentSessionContextExhausted(
+            FailureCategory: "上下文耗尽",
+            ContextUsagePercent: 0.95,
+            ContextWindowUsed: 9000,
+            ContextWindowSize: 10000,
+            RecordedAt: new DateTime(2026, 6, 21, 0, 0, 0, DateTimeKind.Utc));
+
+        var data = AgentSessionEventSerializer.ToData(payload);
+
+        Assert.Equal("上下文耗尽", data.GetProperty("failureCategory").GetString());
+    }
 }

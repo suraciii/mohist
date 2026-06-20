@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain;
 
@@ -194,7 +195,7 @@ public static class IssueWorkflowProfileStorageIntegrity
             {
                 ["agent"] = agentConfig,
             };
-            var topElement = JsonSerializer.SerializeToElement(topLevelVars);
+            var topElement = JSON.SerializeToElement(topLevelVars);
             result = VariableBundle.Patch(result, new VariableBundle(Vars: topElement));
         }
 
@@ -207,7 +208,7 @@ public static class IssueWorkflowProfileStorageIntegrity
                     throw new InvalidOperationException(
                         $"Invalid stage name or null agent config for stage '{stage}'");
 
-                var stageVarsElement = JsonSerializer.SerializeToElement(
+                var stageVarsElement = JSON.SerializeToElement(
                     new Dictionary<string, object?>(StringComparer.Ordinal) { ["agent"] = stageAgent });
                 stages[stage] = new StageVariables(stageVarsElement);
             }

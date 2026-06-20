@@ -119,7 +119,7 @@ public class IssueWorkflowLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task RerunAsync_WhenActiveWorkflowStateCannotDeserialize_ReplacesActiveWorkflow()
+    public async Task RerunAsync_WhenFailureReasonIsUnknownLegacyValue_RerunsExistingWorkflow()
     {
         var (projectId, _, issueNumber, _, oldWrId) = await SeedIssueInProgressAsync();
         await _grains.GetGrain<IWorkflowGrain>(oldWrId).StopAsync("test-stop");
@@ -131,12 +131,11 @@ public class IssueWorkflowLifecycleSpecs
         var restarted = await GetIssueInfoAsync(projectId, issueNumber);
         Assert.NotNull(restarted);
         Assert.Equal("in_progress", restarted!.Status);
-        Assert.NotNull(restarted.WorkflowRunId);
-        Assert.NotEqual(oldWrId, restarted.WorkflowRunId);
+        Assert.Equal(oldWrId, restarted.WorkflowRunId);
 
-        var newRun = await LoadWorkflowRunAsync(restarted.WorkflowRunId!);
-        Assert.NotNull(newRun);
-        Assert.Equal(WorkflowRunStatus.Running, newRun!.Status);
+        var run = await LoadWorkflowRunAsync(oldWrId);
+        Assert.NotNull(run);
+        Assert.Equal(WorkflowRunStatus.Running, run!.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Definition;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -8,7 +9,7 @@ namespace Mohist.Server.Workflow.Services;
 
 public static class WorkflowYamlSerializer
 {
-    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    public static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 
     public static WorkflowDefinition FromYaml(string yaml, string id = "workflow")
     {

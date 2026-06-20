@@ -1,0 +1,87 @@
+{
+  "project": "mohist-local",
+  "description": "Unify server JSON serialization behind a single facade with a non-ASCII-preserving encoder, wire it into HTTP and SignalR global options, and converge all scattered business-code options so Chinese (and other non-ASCII) text stops being serialized as \\uXXXX escapes.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Establish unified JSON facade with non-ASCII encoder and converter ownership",
+      "spec": "specs/json-serialization/spec.md#Unified options preserve non-ASCII characters via a safe encoder",
+      "description": "Enhance the existing Mohist.Server.Infrastructure.JSON facade: add Encoder = JavaScriptEncoder.Create(UnicodeRanges.All) to JSON.Options, add a read-only Indented variant (JSON.Options cloned with WriteIndented = true), and promote the options-scoped UnknownFailureReasonJsonConverter out of WorkflowQuerier into a shared/internal converter registered once on JSON.Options. This makes the facade the single source of JsonSerializerOptions and the single correct entry point for serialize/deserialize.",
+      "acceptanceCriteria": [
+        "JSON.Options sets Encoder = JavaScriptEncoder.Create(UnicodeRanges.All); serializing HTML-significant characters (<, >, &) still escapes them.",
+        "Serializing a non-ASCII string (e.g. \"中文\") via JSON.Serialize emits the characters verbatim, not \\u4e2d\\u6587 escapes (unit test).",
+        "JSON.Indented produces WriteIndented output that otherwise reuses JSON.Options settings (unit test).",
+        "UnknownFailureReasonJsonConverter is registered on JSON.Options; a FailureReason round-trip (known and unknown values) is value-identical to the pre-change representation (golden-master unit test).",
+        "dotnet build is clean (TreatWarningsAsErrors) and dotnet test for the affected server projects is green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/JSON.cs updated (encoder + Indented); promoted shared FailureReason converter type; new unit tests for encoder/indented/round-trip.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "ApprovalFeedbackStatusJsonConverter is attribute-based ([JsonConverter] on ApprovalFeedback.cs:6) and works under any options instance, so it needs no change. Do not delete WorkflowQuerier.RunJsonOptions here — that happens in T-003 once the converter is available on the facade."
+    },
+    {
+      "id": "T-002",
+      "title": "Wire HTTP API and SignalR global JSON options to the unified facade",
+      "spec": "specs/json-serialization/spec.md#HTTP API layer reuses the unified options for all responses",
+      "description": "Register Microsoft.AspNetCore.Http.Json.JsonOptions (SerializerOptions = JSON.Options) in MohistServiceRegistration.ConfigureMohistServices, and chain .AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options) onto the existing services.AddSignalR() call so every outbound API response and both hubs (/hubs/runner, /hubs/events) serialize through the non-ASCII-preserving encoder. No per-route or per-call options overrides.",
+      "acceptanceCriteria": [
+        "An API endpoint whose response payload contains Chinese text (e.g. an issue title) emits verbatim characters in the body with no \\uXXXX escapes (integration test).",
+        "An error response from the unhandled-exception middleware whose message contains non-ASCII text emits verbatim characters (integration test).",
+        "A SignalR hub push whose payload contains non-ASCII text delivers verbatim characters to the client (integration test).",
+        "No response helper (Results.Ok/Results.Json, ApiResults.*, exception middleware) overrides the encoder with a locally constructed options instance.",
+        "dotnet test for the server project is green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs updated (global Http.Json.JsonOptions + AddSignalR().AddJsonProtocol); new integration tests for API and hub non-ASCII output.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Also satisfies specs/json-serialization/spec.md#SignalR hubs reuse the unified options and specs/http-api/spec.md#API responses preserve non-ASCII characters verbatim. HTTP and SignalR wiring are intentionally one task (issue Bucket D — 2 global registrations off the same facade); splitting a one-line wiring each would be technical-step over-splitting."
+    },
+    {
+      "id": "T-003",
+      "title": "Eliminate local JsonSerializerOptions fields and converge business serialization to the facade",
+      "spec": "specs/json-serialization/spec.md#Server exposes a single JSON serialization entry point",
+      "description": "Replace every local static readonly JsonSerializerOptions field and the inline new(JsonSerializerDefaults.Web) in Api/RunnerRoutes.cs with JSON.Options (or JSON.Indented for human-readable files such as ConfigService), following the design migration audit table. Middle-layer shared options (AgentSessionJson.JsonOptions, CloudEvent.JsonOptions, VariableBundle.JsonOptions, WorkflowYamlSerializer.JsonOptions, WorkflowVariableJson.Options, the *EventSerializer fields) become thin delegators to JSON.Options or are deleted where file-local. Switch the ~40 default-argument JsonSerializer.Serialize/Deserialize call sites (Workflow/Grains, Sessions, ConfigService, Label, Project, Api/LogsRoutes, etc.) to JSON.Serialize/JSON.Deserialize or to passing JSON.Options.",
+      "acceptanceCriteria": [
+        "A ripgrep over packages/server/src excluding Infrastructure/JSON.cs returns zero matches for `new JsonSerializerOptions(`.",
+        "Every JsonSerializer.Serialize/Deserialize call in packages/server/src passes JSON.Options, JSON.Indented, or an options instance sourced from JSON.* (grep audit verification).",
+        "Enum-as-string representation and AgentSessionStore / session-state JSON are byte/value-identical to pre-change (golden-master tests where the type has a custom converter).",
+        "The one previously inline options in Api/RunnerRoutes.cs now uses JSON.Options.",
+        "dotnet test Mohist.sln is fully green, including all pre-existing serialization-related specs."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Local JsonSerializerOptions fields removed/delegated across Workflow, Sessions, Issue, Project, Events, Api, Storage; default-arg call sites switched to JSON.*; existing tests still pass.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Depends on T-001 because the converter-bearing fields (WorkflowQuerier.RunJsonOptions, AgentSessionJson) can only reference JSON.Options once UnknownFailureReasonJsonConverter is registered on the facade. Independent of T-002 (transport wiring) — business-code options and transport wiring can proceed in parallel. Audit table is in openspec/changes/issue-218/design.md."
+    },
+    {
+      "id": "T-004",
+      "title": "End-to-end verification of non-ASCII serialization across all surfaces",
+      "spec": "specs/http-api/spec.md#API responses preserve non-ASCII characters verbatim",
+      "description": "Human-verified end-to-end confirmation that non-ASCII (Chinese) appears verbatim everywhere after the convergence. Run a full dotnet test Mohist.sln, confirm the source-grep guard (no local options outside the facade), and manually exercise a running server+runner: create/view an issue with a Chinese title, a workflow with Chinese variables, and a runner event stream — confirming API responses, SignalR hub pushes, and persisted JSON (config/artifact/session) are readable Chinese. Also confirm backward compatibility: JSON persisted before the change still deserializes correctly.",
+      "acceptanceCriteria": [
+        "Manual: an issue with a Chinese title — GET via API returns readable Chinese, and the hub event push is readable Chinese.",
+        "Manual: a Chinese workflow variable persists to SQLite and round-trips back as readable Chinese.",
+        "Manual: runner event stream and a persisted artifact/log containing Chinese are readable.",
+        "dotnet test Mohist.sln is fully green, including all pre-existing serialization-related specs.",
+        "Confirmed via grep: no `new JsonSerializerOptions(` outside Infrastructure/JSON.cs in packages/server/src.",
+        "Confirmed: persisted JSON written before the change (escaped or verbatim) still deserializes to equal values with no migration step."
+      ],
+      "priority": 3,
+      "mode": "HITL",
+      "type": "REVIEW",
+      "output": "Verification report: each acceptance criterion checked off against a running server+runner, with full green dotnet test Mohist.sln and the source-grep guard confirmed.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "HITL because the manual checks require a running server + runner and human judgment on readable Chinese rendering. Automated tests already live in T-001/T-002/T-003; this is the integration gate, not a test task. Also covers specs/json-serialization/spec.md#Deserialization stays backward-compatible with persisted JSON."
+    }
+  ]
+}

@@ -555,8 +555,8 @@ public class FileSystemWorkflowArtifactStorageSpecs : IDisposable
         }
     }
 
-    [Fact]
-    public async Task WriteFileAsync_AtomicMoveKeepsDestinationIntactOnFailure()
+[Fact]
+    public async Task WriteFileAsync_RollsBackWhenContentSizeDoesNotMatchDeclaredSize()
     {
         // The destination is a normal file that is unwriteable in a
         // sense: the content size declared on the stream does not
@@ -577,5 +577,51 @@ public class FileSystemWorkflowArtifactStorageSpecs : IDisposable
 
         Assert.False(File.Exists(contentAbsolute));
         Assert.False(File.Exists(contentAbsolute + ".tmp"));
+    }
+
+    [Fact]
+    public async Task WriteFileAsync_MetadataWithChineseSourcePath_PersistsVerbatimOnDisk()
+    {
+        // T-004 acceptance: a persisted artifact containing Chinese characters
+        // is readable on disk (the JSON.Options.Encoder passes non-ASCII through
+        // while the indented serializer is used for human-readable files).
+        const string sourcePath = "中文目录/工件.md";
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_zh", "t_zh", "a_zh", WorkflowArtifactStorageKind.File);
+        var payload = "# 标题\n\n这是一段中文内容。"u8.ToArray();
+
+        var write = new WorkflowArtifactFileWrite
+        {
+            SourcePath = sourcePath,
+            Size = payload.Length,
+            ContentType = "text/markdown",
+            ContentHash = "sha256:zh",
+        };
+
+        await _storage.WriteFileAsync(
+            storagePath,
+            Bytes(payload),
+            write,
+            SampleRecordedAt);
+
+        var contentAbsolute = _storage.ResolveAbsolutePath(storagePath);
+        var collection = Path.GetDirectoryName(contentAbsolute)!;
+        var metadataPath = Path.Combine(collection, "metadata.json");
+        Assert.True(File.Exists(metadataPath));
+
+        var rawJson = await File.ReadAllTextAsync(metadataPath);
+        Assert.Contains(sourcePath, rawJson);
+        Assert.Contains("中文目录/工件.md", rawJson);
+        Assert.DoesNotContain("\\u4e2d", rawJson);
+        Assert.DoesNotContain("\\u5de5", rawJson);
+        Assert.DoesNotContain("\\u4ef6", rawJson);
+
+        var metadata = await _storage.ReadMetadataAsync(storagePath);
+        Assert.NotNull(metadata);
+        Assert.Equal(sourcePath, metadata!.Path);
+
+        using var reader = new StreamReader(_storage.OpenFileContent(storagePath));
+        var read = await reader.ReadToEndAsync();
+        Assert.Contains("这是一段中文内容", read);
     }
 }

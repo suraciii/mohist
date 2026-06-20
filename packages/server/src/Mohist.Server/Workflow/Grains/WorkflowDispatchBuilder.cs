@@ -41,10 +41,10 @@ public sealed class WorkflowDispatchBuilder(
             var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
             foreach (var p in prompts)
                 promptsMap[p.Key] = p.Body;
-            payload["prompts"] = JsonSerializer.SerializeToElement(promptsMap, WorkflowVariableJson.Options);
+            payload["prompts"] = JSON.SerializeToElement(promptsMap);
         }
 
-        var variables = JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
+        var variables = JSON.Serialize(payload);
         var withStr = ResolveWith(effectiveVarsJson, resolved, req.With, req.Stage, workId, workflowRunId);
 
         return new WorkDispatch(
@@ -58,7 +58,7 @@ public sealed class WorkflowDispatchBuilder(
             Title: req.Title,
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
             Artifacts: req.Artifacts is not null && !req.Artifacts.IsEmpty ? JSON.Serialize(req.Artifacts) : null,
-            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JsonSerializer.Serialize(req.Outputs) : null);
+            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JSON.Serialize(req.Outputs) : null);
     }
 
     internal static WorkDispatchRequest BuildChecksRequest(
@@ -68,16 +68,16 @@ public sealed class WorkflowDispatchBuilder(
     {
         var checksPayload = items.Select(i => new Dictionary<string, JsonElement?>
         {
-            ["name"] = JsonSerializer.SerializeToElement(i.Name),
-            ["title"] = JsonSerializer.SerializeToElement(i.Title),
-            ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
-            ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
+            ["name"] = JSON.SerializeToElement(i.Name),
+            ["title"] = JSON.SerializeToElement(i.Title),
+            ["uses"] = i.Uses is not null ? JSON.SerializeToElement(i.Uses) : null,
+            ["with"] = i.With is not null ? JSON.SerializeToElement(i.With) : null,
         }).ToList();
 
         return new WorkDispatchRequest(
             stage, $"checks-{stage}", "checks", "Stage checks",
             Uses: null,
-            With: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) },
+            With: new Dictionary<string, JsonElement?> { ["checks"] = JSON.SerializeToElement(checksPayload) },
             WorkIdOverride: workIdOverride);
     }
 
@@ -91,7 +91,7 @@ public sealed class WorkflowDispatchBuilder(
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, req.Stage)
-            ?? JsonSerializer.Deserialize<JsonElement>("{}");
+            ?? JSON.DeserializeElement("{}");
 
         if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
         {
@@ -100,9 +100,9 @@ public sealed class WorkflowDispatchBuilder(
         }
 
         payload["vars"] = effectiveVarsJson;
-        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = workflowRunId }, WorkflowVariableJson.Options);
-        payload["stage"] = JsonSerializer.SerializeToElement(new { name = req.Stage }, WorkflowVariableJson.Options);
-        payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = req.WorkType, title = req.Title, attempt }, WorkflowVariableJson.Options);
+        payload["workflow"] = JSON.SerializeToElement(new { runId = workflowRunId });
+        payload["stage"] = JSON.SerializeToElement(new { name = req.Stage });
+        payload["work"] = JSON.SerializeToElement(new { id = workId, type = req.WorkType, title = req.Title, attempt });
 
         if (run.RuntimeVariables is { Count: > 0 })
             payload = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, run.RuntimeVariables);
@@ -119,14 +119,14 @@ public sealed class WorkflowDispatchBuilder(
                     var issueNumber = TryGetAnnotation(run, "issueNumber", out var numStr) && int.TryParse(numStr, out var n) ? (int?)n : null;
                     var projectId = TryGetAnnotation(run, "projectId", out var pid) ? pid : "";
 
-                    payload["approvalFeedback"] = JsonSerializer.SerializeToElement(new
+                    payload["approvalFeedback"] = JSON.SerializeToElement(new
                     {
                         id = feedback.Id,
                         stage = feedback.Stage,
                         createdAt = feedback.CreatedAt.ToString("O"),
                         summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
                         command = WorkflowRunExtensions.BuildFeedbackShowCommand(issueNumber, feedback.Id, projectId),
-                    }, WorkflowVariableJson.Options);
+                    });
                 }
             }
         }
@@ -160,7 +160,7 @@ public sealed class WorkflowDispatchBuilder(
             dispatchWith["agent"] = effectiveAgentEl.Clone();
         }
 
-        var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
+        var withStr = dispatchWith is not null ? JSON.Serialize(dispatchWith) : null;
         LogAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved, workflowRunId);
         return withStr;
     }
