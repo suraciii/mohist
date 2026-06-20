@@ -45,7 +45,7 @@ Epic 与 Issue 是**同一类问题的两个粒度**（单元层 / 组织层）�
 
 **收敛的问题类**：在**什么环境、如何隔离、用什么配置**去执行。
 
-Project 是**横切的执行环境容器**：git 仓库绑定、数据隔离、项目级变量。它对 Issue、对 Workflow、对 Agent 都提供"环境 + 隔离 + 配置"，不专门服务 Issue。
+Project 是**横切的执行环境容器**：git 仓库绑定、数据隔离、项目级变量、**项目级 prompt 库**。它对 Issue、对 Workflow、对 Agent 都提供"环境 + 隔离 + 配置"，不专门服务 Issue。prompt 归此（唯一可配置层；内置 .prompt 只是 loader fallback；无 issue 级覆盖）；详见 [`prompt-management.md`](prompt-management.md)。
 
 与 Issue 是**两类不同的问题**：一个想"仓库与边界"，一个想"工作项状态机"，互不渗透。故独立成域，不并入 Issue。
 

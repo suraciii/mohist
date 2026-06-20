@@ -21,7 +21,7 @@
 |---|---|---|---|
 | `WorkflowDefinition` | 结构类型（stages/tasks/checks）+ 引擎 | **Workflow** | ✓ 已在 `Workflow/Domain/Definition/` |
 | workflow profile | template 选择 + variables（per project/issue 配置） | **Issue / Project 自己** | ✓ 留原处（本就是它们的配置） |
-| prompts | 项目/issue 级 prompt 库 | **独立抽象**（workflow 与未来独立 Agent 共享） | 见 `prompt-management.md`，不属 profile |
+| prompts | project 级 prompt 库（内置 .prompt 兜底） | **Project Space**（project-scoped） | 见 `prompt-management.md`，不属 profile |
 | 默认 `WorkflowDefinition` 内容 | 出厂默认工作流（yaml） | **应用配置层**（composition root） | ❌ 错放在 Issue，要搬 |
 | 投影 | Issue 解读 workflow 运行状态（attention 等） | **Issue**（只读消费） | ✓ 留 Issue |
 
