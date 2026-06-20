@@ -75,13 +75,13 @@ vi.mock('../../entities/settings', async (importOriginal) => {
 function arrangeAiLoaded() {
   aiSettingsClient.useOpencodeRuntime.mockReturnValue({ isLoading: false, error: null })
   aiSettingsClient.useAvailableModelIds.mockReturnValue({
-    data: ['openai/gpt-4', 'anthropic/claude-3'],
+    data: { models: ['openai/gpt-4', 'anthropic/claude-3'], modelVariants: {} },
     isLoading: false,
     error: null,
   })
-  aiSettingsClient.useOpencodeModel.mockReturnValue({ data: { model: null } })
+  aiSettingsClient.useOpencodeModel.mockReturnValue({ data: { model: null, variant: null } })
   aiSettingsClient.useUpdateOpencodeModel.mockReturnValue({ mutate: vi.fn() })
-  aiSettingsClient.useStageModels.mockReturnValue({ data: { stageModels: null } })
+  aiSettingsClient.useStageModels.mockReturnValue({ data: { stageModels: null, stageModelVariants: null } })
   aiSettingsClient.useSetStageModels.mockReturnValue({ mutate: vi.fn() })
 }
 

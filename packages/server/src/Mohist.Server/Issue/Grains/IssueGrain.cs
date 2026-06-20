@@ -159,17 +159,22 @@ public class IssueGrain : Grain, IIssueGrain
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
 
-        // T1: persist only the issue's built-in calling context on the issue
+        // T1: persist the issue's built-in calling context on the issue
         // profile. Global (config.jsonc) and project Variables are NOT baked
         // in here — they are merged live at resolution time (dispatch + display)
         // so that edits to project/global Variables propagate to already-created
-        // issues. Explicit issue overrides are layered on later via PATCH.
+        // issues. Explicit issue overrides (e.g. model + reasoning variant set
+        // via POST/PATCH /api/issues) are preserved by PATCH-merging the
+        // context bundle on top of any existing variables, so an issue whose
+        // agent config was set during creation survives the T1 merge.
         var issueBundle = IssueVariableBuilder.BuildContextBundle(
             wrId,
             issue,
             projectContext,
             workspace);
-        await _issueProfileManager.SetVariablesAsync(issue.Id, issueBundle);
+        var existingVariables = await _issueProfileManager.GetVariablesAsync(issue.Id);
+        var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
+        await _issueProfileManager.SetVariablesAsync(issue.Id, mergedVariables);
 
         foreach (var (key, body) in mergedPrompts)
             await _issueProfileManager.SetPromptAsync(issue.Id, key, body);

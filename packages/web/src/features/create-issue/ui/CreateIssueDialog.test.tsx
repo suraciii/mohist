@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { CreateIssueDialog } from './CreateIssueDialog'
@@ -42,7 +43,7 @@ const mocks = vi.hoisted(() => ({
   useLabels: vi.fn(() => ({ data: [] })),
   useProject: vi.fn(() => ({ projectId: 'proj_create', projects: [{ id: 'proj_create', name: 'Project' }] })),
   useRepositories: vi.fn(() => ({ data: [{ name: 'main', isDefault: true }] })),
-  useAvailableModelIds: vi.fn(() => ({ data: [] })),
+  useAvailableModelIds: vi.fn<() => { data: { models: string[]; modelVariants: Record<string, string[]> } | undefined; isLoading: boolean; error: unknown }>(() => ({ data: { models: [], modelVariants: {} }, isLoading: false, error: null })),
   useWorkflowProfiles: vi.fn<() => { data: unknown[] }>(() => ({ data: [] })),
   useIssueTemplates: vi.fn<() => { data: unknown[]; isLoading: boolean }>(() => ({ data: [], isLoading: false })),
   useIssueTemplate: vi.fn<(id: string | null) => { data: unknown }>(() => ({ data: undefined })),
@@ -254,5 +255,94 @@ describe('CreateIssueDialog template selector', () => {
       workflowProfileId: 'mohist/default',
       labels: { type: 'prd' },
     }))
+  })
+})
+
+describe('CreateIssueDialog model + variant picker', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('hides the variant picker when no model is selected', () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: { models: ['anthropic/claude'], modelVariants: { 'anthropic/claude': ['low', 'high'] } },
+      isLoading: false,
+      error: null,
+    })
+    renderDialog()
+    expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
+  })
+
+  it('renders only the selected model variants in the picker', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude', 'openai/gpt-4'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    renderDialog()
+
+    fireEvent.click(screen.getByTestId('create-issue-model-trigger'))
+    const modelButton = await screen.findByText('claude', { selector: 'span' })
+    fireEvent.click(modelButton.closest('button')!)
+
+    const variantTrigger = await screen.findByTestId('create-issue-model-variant-variant-trigger')
+    fireEvent.click(variantTrigger)
+    const list = await screen.findByRole('listbox')
+    const options = Array.from(list.querySelectorAll('[role="option"]')).map((el) => el.textContent?.trim())
+    expect(options).toEqual(['Default', 'low', 'medium', 'high'])
+  })
+
+  it('sends modelVariant alongside model on create when the picker has a value', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    const user = userEvent.setup()
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
+
+    await user.click(screen.getByTestId('create-issue-model-trigger'))
+    const modelButton = await screen.findByText('claude', { selector: 'span' })
+    await user.click(modelButton.closest('button')!)
+
+    const variantTrigger = await screen.findByTestId('create-issue-model-variant-variant-trigger')
+    await user.click(variantTrigger)
+    await user.click(await screen.findByRole('option', { name: 'high' }))
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'anthropic/claude',
+      modelVariant: 'high',
+    }))
+  })
+
+  it('hides the variant picker when the selected model reports no variants', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude', 'openai/gpt-4'],
+        modelVariants: { 'openai/gpt-4': [] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    renderDialog()
+
+    fireEvent.click(screen.getByTestId('create-issue-model-trigger'))
+    const modelButton = await screen.findByText('gpt-4', { selector: 'span' })
+    fireEvent.click(modelButton.closest('button')!)
+
+    expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
   })
 })

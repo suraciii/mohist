@@ -1,9 +1,12 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Services;
 using IssueDomain = Mohist.Server.Issue.Domain;
 
 namespace Mohist.Server.Api;
@@ -36,7 +39,8 @@ public static partial class IssueRoutes
             CreateIssueRequest req,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
-            IssueRepositoryResolver repositoryResolver) =>
+            IssueRepositoryResolver repositoryResolver,
+            IssueWorkflowProfileManager issueProfileManager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -45,6 +49,9 @@ public static partial class IssueRoutes
 
             if (TryValidateLabels(req.Labels, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
+
+            if (TryValidateModelMetadata(req, out var modelError) is false)
+                return ApiResults.BadRequest(modelError!, "invalid_model_metadata");
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
             if (resolution.HasProblem)
@@ -77,6 +84,9 @@ public static partial class IssueRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
+
+            await ApplyCreateModelMetadataAsync(issueProfileManager, issueId, req);
+
             var issue = await issuesQuery.GetAsync(project.Id, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
@@ -99,12 +109,16 @@ public static partial class IssueRoutes
             UpdateIssueRequest req,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            IssueWorkflowProfileManager issueProfileManager) =>
         {
             var project = GetRequiredProject(ctx);
 
             if (TryValidateLabels(req.Labels, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
+
+            if (TryValidateModelMetadata(req, out var modelError) is false)
+                return ApiResults.BadRequest(modelError!, "invalid_model_metadata");
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -125,6 +139,11 @@ public static partial class IssueRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
+
+            var issueId = await ResolveIssueIdAsync(issueIdentityResolver, project.Id, number);
+            if (issueId is not null)
+                await ApplyUpdateModelMetadataAsync(issueProfileManager, issueId, req, req.Raw);
+
             var info = await issuesQuery.GetAsync(project.Id, number);
             return ApiResults.Ok(info);
         });
@@ -174,8 +193,124 @@ public static partial class IssueRoutes
                 return false;
             }
         }
-
         error = null;
         return true;
+    }
+
+    private static bool TryValidateModelMetadata(CreateIssueRequest req, out string? error)
+    {
+        error = IssueModelMetadata.Validate(req.Model, req.StageModels);
+        return error is null;
+    }
+
+    private static bool TryValidateModelMetadata(UpdateIssueRequest req, out string? error)
+    {
+        error = IssueModelMetadata.Validate(req.Model, req.StageModels);
+        return error is null;
+    }
+
+    private static async Task<string?> ResolveIssueIdAsync(
+        IssueIdentityResolver resolver,
+        string projectId,
+        int number) =>
+        await resolver.GetIdAsync(projectId, number);
+
+    private static async Task ApplyCreateModelMetadataAsync(
+        IssueWorkflowProfileManager profileManager,
+        string issueId,
+        CreateIssueRequest req)
+    {
+        var patch = BuildCreatePatch(req);
+        if (!patch.TouchesAnyField) return;
+
+        var seed = IssueModelMetadata.ApplyModelMetadata(VariableBundle.Empty, patch);
+        await profileManager.SetVariablesAsync(issueId, seed);
+    }
+
+    private static async Task ApplyUpdateModelMetadataAsync(
+        IssueWorkflowProfileManager profileManager,
+        string issueId,
+        UpdateIssueRequest req,
+        JsonElement rawPatch)
+    {
+        var patch = BuildUpdatePatch(req, rawPatch);
+        if (!patch.TouchesAnyField) return;
+
+        var current = await profileManager.GetVariablesAsync(issueId);
+        var patched = IssueModelMetadata.ApplyModelMetadata(current, patch);
+        await profileManager.SetVariablesAsync(issueId, patched);
+    }
+
+    /// <summary>
+    /// Build a <see cref="IssueModelMetadata.ModelMetadataPatch"/> for the
+    /// create path. On create, every field with a non-null bound value is
+    /// <see cref="IssueModelMetadata.FieldPatchKind.Set"/>; nothing is
+    /// "clear" or "absent" because there's no prior state to clear.
+    /// </summary>
+    private static IssueModelMetadata.ModelMetadataPatch BuildCreatePatch(CreateIssueRequest req)
+    {
+        return new IssueModelMetadata.ModelMetadataPatch(
+            Model: req.Model is null ? IssueModelMetadata.FieldPatch<string>.Absent : IssueModelMetadata.FieldPatch<string>.Set(req.Model),
+            ModelVariant: req.ModelVariant is null ? IssueModelMetadata.FieldPatch<string>.Absent : IssueModelMetadata.FieldPatch<string>.Set(req.ModelVariant),
+            StageModels: req.StageModels is null ? IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Absent : IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Set(req.StageModels),
+            StageModelVariants: req.StageModelVariants is null ? IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Absent : IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Set(req.StageModelVariants));
+    }
+
+    /// <summary>
+    /// Build a <see cref="IssueModelMetadata.ModelMetadataPatch"/> for the
+    /// update path. We inspect the raw patch JSON to detect explicit
+    /// presence (vs. absence) per field — System.Text.Json deserializes
+    /// both "absent" and "explicit null" into <c>null</c> on a nullable
+    /// string, but the spec says a present-but-null field means "clear".
+    /// </summary>
+    private static IssueModelMetadata.ModelMetadataPatch BuildUpdatePatch(UpdateIssueRequest req, JsonElement rawPatch)
+    {
+        return new IssueModelMetadata.ModelMetadataPatch(
+            Model: ResolveStringField(rawPatch, "model", req.Model),
+            ModelVariant: ResolveStringField(rawPatch, "modelVariant", req.ModelVariant),
+            StageModels: ResolveMapField(rawPatch, "stageModels", req.StageModels),
+            StageModelVariants: ResolveMapField(rawPatch, "stageModelVariants", req.StageModelVariants));
+    }
+
+    private static IssueModelMetadata.FieldPatch<string> ResolveStringField(JsonElement raw, string name, string? boundValue)
+    {
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty(name, out var el))
+            return IssueModelMetadata.FieldPatch<string>.Absent;
+
+        return el.ValueKind switch
+        {
+            JsonValueKind.Null => IssueModelMetadata.FieldPatch<string>.Clear,
+            JsonValueKind.String when string.IsNullOrWhiteSpace(el.GetString())
+                => IssueModelMetadata.FieldPatch<string>.Clear,
+            JsonValueKind.String => IssueModelMetadata.FieldPatch<string>.Set(el.GetString()!),
+            _ => IssueModelMetadata.FieldPatch<string>.Clear, // unexpected type → treat as clear
+        };
+    }
+
+    private static IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>> ResolveMapField(
+        JsonElement raw,
+        string name,
+        IReadOnlyDictionary<string, string>? boundValue)
+    {
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty(name, out var el))
+            return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Absent;
+
+        if (el.ValueKind == JsonValueKind.Null)
+            return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Clear;
+
+        if (el.ValueKind != JsonValueKind.Object)
+            return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Clear;
+
+        // Preserve raw JSON order — the helper reads keys via TryGetValue and
+        // does not depend on order, but tests expect the order the caller sent.
+        var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var prop in el.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String && prop.Value.GetString() is { } s)
+            {
+                dict[prop.Name] = s;
+            }
+        }
+        return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Set(dict);
     }
 }

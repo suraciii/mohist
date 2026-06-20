@@ -57,6 +57,48 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
         return Task.FromResult<IReadOnlyList<string>>(models);
     }
 
+    public Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsAsync()
+    {
+        var aggregated = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var runner in _runners.Values)
+        {
+            if (runner.CoderModelVariants is null || runner.CoderModelVariants.Count == 0)
+                continue;
+
+            foreach (var entry in runner.CoderModelVariants)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Key))
+                    continue;
+
+                var reportedVariants = (entry.Value ?? [])
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+
+                if (reportedVariants.Length == 0)
+                    continue;
+
+                if (aggregated.TryGetValue(entry.Key, out var existing))
+                {
+                    var union = existing
+                        .Concat(reportedVariants)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    aggregated[entry.Key] = union;
+                }
+                else
+                {
+                    aggregated[entry.Key] = reportedVariants;
+                }
+            }
+        }
+
+        var materialized = aggregated
+            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        return Task.FromResult<IReadOnlyDictionary<string, string[]>>(materialized);
+    }
+
     public Task<IReadOnlyList<RunnerInfo>> ListAllAsync()
     {
         return Task.FromResult<IReadOnlyList<RunnerInfo>>(_runners.Values.ToList());

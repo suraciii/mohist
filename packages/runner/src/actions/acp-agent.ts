@@ -345,6 +345,7 @@ function isPromptWorkActivity(activityType: string): boolean {
 
 interface AgentConfig {
   model?: string
+  variant?: string
   timeoutMs?: number
   sessionStartTimeoutMs?: number
   livenessQuietThresholdMs?: number
@@ -354,6 +355,7 @@ interface AgentConfig {
 
 interface RequestedModel {
   model?: string
+  variant?: string
   source: "agent.model" | "with.model" | "none"
 }
 
@@ -575,6 +577,7 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
   if (agent && typeof agent === "object") {
     return {
       model: stringInput(agent as JsonObject, "model") ?? undefined,
+      variant: stringInput(agent as JsonObject, "variant") ?? undefined,
       timeoutMs: numberInput(agent as JsonObject, "timeout") ?? undefined,
       sessionStartTimeoutMs: numberInput(agent as JsonObject, "sessionStartTimeout") ?? undefined,
       livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
@@ -584,6 +587,7 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
   }
   return {
     model: stringInput(with_, "model") ?? undefined,
+    variant: stringInput(with_, "variant") ?? undefined,
     timeoutMs: numberInput(with_, "timeout") ?? undefined,
     sessionStartTimeoutMs: numberInput(with_, "sessionStartTimeout") ?? undefined,
     livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
@@ -632,10 +636,18 @@ function buildSessionMeta(compaction: CompactionConfig): { [key: string]: unknow
 }
 
 function resolveRequestedModel(context: ActionContext, agentConfig?: AgentConfig): RequestedModel {
+  const variant = stringInput(context.with, "variant") ?? agentConfig?.variant
+  const composedVariant = variant?.trim() ? variant.trim() : undefined
   const agentModel = agentConfig?.model
-  if (agentModel?.trim()) return { model: agentModel, source: "agent.model" }
+  if (agentModel?.trim()) {
+    const composed = composedVariant ? `${agentModel.trim()}:${composedVariant}` : agentModel.trim()
+    return { model: composed, variant: composedVariant, source: "agent.model" }
+  }
   const withModel = stringInput(context.with, "model")
-  if (withModel?.trim()) return { model: withModel, source: "with.model" }
+  if (withModel?.trim()) {
+    const composed = composedVariant ? `${withModel.trim()}:${composedVariant}` : withModel.trim()
+    return { model: composed, variant: composedVariant, source: "with.model" }
+  }
   return { source: "none" }
 }
 
@@ -669,6 +681,7 @@ function modelDiagnosticContext(context: ActionContext, requested: RequestedMode
     stage: context.stage,
     sessionName: sessionNameFromContext(context),
     requestedModel: requested.model ?? null,
+    requestedVariant: requested.variant ?? null,
     requestedModelSource: requested.source,
   }
 }
@@ -1312,11 +1325,12 @@ async function attachSessionToServer(context: ActionContext, agentSessionId: str
   const target = sessionTargetFromContext(context)
   if (!target || !context.serverConnection) return
 
+  const requestedModel = resolveRequestedModel(context, agentConfig).model
   await context.serverConnection.attachWorkflowAgentSession(
     target.projectId,
     target.workflowRunId,
     target.sessionName,
-    { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) },
+    { agentSessionId, workDir: context.workDir, processPid, model: requestedModel, ...(resolvedModel ? { resolvedModel } : {}) },
     context.signal)
 }
 

@@ -25,7 +25,7 @@ vi.mock("../src/server/runner-signalr.js", () => ({
 }))
 
 vi.mock("../src/runtime/opencode-models.js", () => ({
-  discoverOpencodeModels: vi.fn(async () => ["openai/gpt-5.5"]),
+  discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
 }))
 
 const setSessionHandlers = vi.fn()

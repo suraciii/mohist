@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
 import { useProject } from '../../project/@x/project-context'
+import type { OpencodeModelVariants } from './client'
 import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
@@ -58,7 +59,7 @@ export function useUpdateConfig() {
 
 export function useOpencodeModel() {
   const { projectId } = useProject()
-  return useQuery<{ model: string | null }>({
+  return useQuery<{ model: string | null; variant: string | null }>({
     queryKey: ['opencode-model', projectId],
     queryFn: () => getOpencodeModel(projectId),
     enabled: !!projectId,
@@ -68,8 +69,8 @@ export function useOpencodeModel() {
 export function useUpdateOpencodeModel() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation<{ model: string | null }, Error, string | null>({
-    mutationFn: (model) => updateOpencodeModel(projectId, model),
+  return useMutation<{ model: string | null; variant: string | null }, Error, { model: string | null; variant?: string | null }>({
+    mutationFn: ({ model, variant }) => updateOpencodeModel(projectId, model, variant),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-model', projectId] })
       queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
@@ -83,11 +84,11 @@ export function useUpdateOpencodeModel() {
 
 export function useAvailableModelIds() {
   const { projectId } = useProject()
-  return useQuery<string[]>({
+  return useQuery<{ models: string[]; modelVariants: OpencodeModelVariants }>({
     queryKey: ['opencode-model-ids', projectId],
     queryFn: async () => {
       const response = await getOpencodeModels(projectId)
-      return response.models
+      return { models: response.models, modelVariants: response.modelVariants ?? {} }
     },
     enabled: !!projectId,
   })
@@ -223,7 +224,7 @@ export function useSetAgentRuntime() {
 
 export function useStageModels() {
   const { projectId } = useProject()
-  return useQuery<{ stageModels: Record<string, string> | null }>({
+  return useQuery<{ stageModels: Record<string, string> | null; stageModelVariants: Record<string, string> | null }>({
     queryKey: ['stage-models', projectId],
     queryFn: () => getStageModels(projectId),
     enabled: !!projectId,
@@ -234,7 +235,7 @@ export function useSetStageModels() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation({
-    mutationFn: ({ stage, model }: { stage: string; model: string | null }) => setStageModel(projectId, stage, model),
+    mutationFn: ({ stage, model, variant }: { stage: string; model: string | null; variant?: string | null }) => setStageModel(projectId, stage, model, variant),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
       toast.success('Stage models updated')

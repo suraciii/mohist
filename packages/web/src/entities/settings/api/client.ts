@@ -25,8 +25,21 @@ export function setLogLevel(level: string) {
   return updateConfig('logLevel', level).then((config) => ({ level: config.logLevel ?? level }))
 }
 
+export type OpencodeModelVariants = Record<string, string[]>
+
 export function getOpencodeModels(projectId?: string | null) {
-  return request<{ models: string[] }>(projectApiPath(projectId, '/opencode/models'))
+  return request<{ models: string[]; modelVariants?: OpencodeModelVariants }>(projectApiPath(projectId, '/opencode/models'))
+}
+
+export function getOpencodeModelVariantsFor(modelIds: ReadonlyArray<string | null | undefined>, variantsMap?: OpencodeModelVariants | null): OpencodeModelVariants {
+  const result: OpencodeModelVariants = {}
+  if (!variantsMap) return result
+  for (const id of modelIds) {
+    if (!id) continue
+    const variants = variantsMap[id]
+    if (variants && variants.length > 0) result[id] = variants
+  }
+  return result
 }
 
 export function getProjectWorkflowVariables(projectId?: string | null) {
@@ -41,12 +54,20 @@ export function patchProjectWorkflowVariables(projectId: string | null | undefin
 }
 
 export function getOpencodeModel(projectId?: string | null) {
-  return getProjectWorkflowVariables(projectId).then((variables) => ({ model: getAgentModel(variables.vars) }))
+  return getProjectWorkflowVariables(projectId).then((variables) => ({
+    model: getAgentModel(variables.vars),
+    variant: getAgentVariant(variables.vars),
+  }))
 }
 
-export function updateOpencodeModel(projectId: string | null | undefined, model: string | null) {
-  return patchProjectWorkflowVariables(projectId, { vars: { agent: { type: 'opencode', model } } })
-    .then((variables) => ({ model: getAgentModel(variables.vars) }))
+export function updateOpencodeModel(projectId: string | null | undefined, model: string | null, variant?: string | null) {
+  const agent: Record<string, unknown> = { type: 'opencode', model }
+  if (variant !== undefined) agent.variant = variant
+  return patchProjectWorkflowVariables(projectId, { vars: { agent } })
+    .then((variables) => ({
+      model: getAgentModel(variables.vars),
+      variant: getAgentVariant(variables.vars),
+    }))
 }
 
 export function getModel() {
@@ -169,12 +190,20 @@ function encodeRuntimeValue(key: keyof AgentRuntimeConfig, value: number): numbe
 }
 
 export function getStageModels(projectId?: string | null) {
-  return getProjectWorkflowVariables(projectId).then((variables) => ({ stageModels: getStageModelMap(variables) }))
+  return getProjectWorkflowVariables(projectId).then((variables) => ({
+    stageModels: getStageModelMap(variables),
+    stageModelVariants: getStageModelVariantMap(variables),
+  }))
 }
 
-export function setStageModel(projectId: string | null | undefined, stage: string, model: string | null) {
-  return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent: { type: 'opencode', model } } } } })
-    .then((variables) => ({ stageModels: getStageModelMap(variables) }))
+export function setStageModel(projectId: string | null | undefined, stage: string, model: string | null, variant?: string | null) {
+  const agent: Record<string, unknown> = { type: 'opencode', model }
+  if (variant !== undefined) agent.variant = variant
+  return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent } } } })
+    .then((variables) => ({
+      stageModels: getStageModelMap(variables),
+      stageModelVariants: getStageModelVariantMap(variables),
+    }))
 }
 
 export function getWorkflowProfiles() {
@@ -217,9 +246,24 @@ function getAgentModel(vars: Record<string, unknown> | null | undefined) {
   return typeof model === 'string' && model.trim() ? model : null
 }
 
+function getAgentVariant(vars: Record<string, unknown> | null | undefined) {
+  const agent = vars?.agent
+  if (!agent || typeof agent !== 'object') return null
+  const variant = (agent as Record<string, unknown>).variant
+  return typeof variant === 'string' && variant.trim() ? variant : null
+}
+
 function getStageModelMap(variables: VariableBundle) {
   const entries = Object.entries(variables.stages ?? {})
     .map(([stage, stageVars]) => [stage, getAgentModel(stageVars?.vars)] as const)
+    .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null
+}
+
+function getStageModelVariantMap(variables: VariableBundle) {
+  const entries = Object.entries(variables.stages ?? {})
+    .map(([stage, stageVars]) => [stage, getAgentVariant(stageVars?.vars)] as const)
     .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
 
   return entries.length > 0 ? Object.fromEntries(entries) : null

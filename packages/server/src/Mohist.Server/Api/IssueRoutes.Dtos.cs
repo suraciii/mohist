@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 
@@ -9,25 +10,140 @@ public record CreateIssueRequest(
     Dictionary<string, string>? Labels = null,
     string? Priority = null,
     string? Model = null,
+    string? ModelVariant = null,
     Dictionary<string, object?>? AgentConfig = null,
     Dictionary<string, string>? StageModels = null,
+    Dictionary<string, string>? StageModelVariants = null,
     string? WorkflowProfileId = null,
     string? RepositoryName = null,
     string? Risk = null,
     bool? IsDraft = null,
     string[]? AttachmentIds = null);
 
-public record UpdateIssueRequest(
-    string? Title = null,
-    string? Body = null,
-    Dictionary<string, string>? Labels = null,
-    string? Priority = null,
-    string? Model = null,
-    Dictionary<string, object?>? AgentConfig = null,
-    Dictionary<string, string>? StageModels = null,
-    Dictionary<string, Dictionary<string, string>>? StageVariables = null,
-    bool? IsDraft = null,
-    string[]? AttachmentIds = null);
+/// <summary>
+/// PATCH body for issue updates. Includes a <see cref="Raw"/> JsonElement
+/// so the route handler can detect explicit <c>null</c> fields
+/// (System.Text.Json cannot distinguish "absent" from "null" on plain
+/// nullable reference types). The model-metadata fields
+/// (<c>model</c>, <c>modelVariant</c>, <c>stageModels</c>,
+/// <c>stageModelVariants</c>) follow the spec's "present-but-null = clear"
+/// semantic; <see cref="Raw"/> lets the handler detect presence.
+/// </summary>
+public record UpdateIssueRequest
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public string? Title { get; init; }
+    public string? Body { get; init; }
+    public Dictionary<string, string>? Labels { get; init; }
+    public string? Priority { get; init; }
+    public string? Model { get; init; }
+    public string? ModelVariant { get; init; }
+    public Dictionary<string, object?>? AgentConfig { get; init; }
+    public Dictionary<string, string>? StageModels { get; init; }
+    public Dictionary<string, string>? StageModelVariants { get; init; }
+    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; init; }
+    public bool? IsDraft { get; init; }
+    public string[]? AttachmentIds { get; init; }
+
+    /// <summary>
+    /// Raw JSON body, captured at bind time. Used by the route handler to
+    /// inspect model-metadata field presence without re-parsing the request
+    /// body. A field present in the raw body but null on the bound record
+    /// means "explicit clear"; a field absent from the raw body means "no
+    /// change".
+    /// </summary>
+    public JsonElement Raw { get; init; }
+
+    public static async ValueTask<UpdateIssueRequest?> BindAsync(HttpContext context)
+    {
+        JsonElement raw;
+        try
+        {
+            raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (raw.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return new UpdateIssueRequest
+        {
+            Title = GetString(raw, "title"),
+            Body = GetString(raw, "body"),
+            Labels = GetStringMap(raw, "labels"),
+            Priority = GetString(raw, "priority"),
+            Model = GetString(raw, "model"),
+            ModelVariant = GetString(raw, "modelVariant"),
+            AgentConfig = GetObject(raw, "agentConfig"),
+            StageModels = GetStringMap(raw, "stageModels"),
+            StageModelVariants = GetStringMap(raw, "stageModelVariants"),
+            StageVariables = GetNestedStringMap(raw, "stageVariables"),
+            IsDraft = GetNullableBool(raw, "isDraft"),
+            AttachmentIds = GetStringArray(raw, "attachmentIds"),
+            Raw = raw,
+        };
+    }
+
+    private static string? GetString(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String
+            ? el.GetString()
+            : null;
+
+    private static Dictionary<string, string>? GetStringMap(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Object)
+            return null;
+        var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var prop in el.EnumerateObject())
+        {
+            if (prop.Value.ValueKind != JsonValueKind.String) continue;
+            dict[prop.Name] = prop.Value.GetString()!;
+        }
+        return dict;
+    }
+
+    private static Dictionary<string, object?>? GetObject(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Object
+            ? JsonSerializer.Deserialize<Dictionary<string, object?>>(el.GetRawText(), JsonOptions)
+            : null;
+
+    private static Dictionary<string, Dictionary<string, string>>? GetNestedStringMap(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Object)
+            return null;
+        var dict = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var stage in el.EnumerateObject())
+        {
+            if (stage.Value.ValueKind != JsonValueKind.Object) continue;
+            var inner = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var prop in stage.Value.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != JsonValueKind.String) continue;
+                inner[prop.Name] = prop.Value.GetString()!;
+            }
+            dict[stage.Name] = inner;
+        }
+        return dict;
+    }
+
+    private static bool? GetNullableBool(JsonElement raw, string name) =>
+        raw.TryGetProperty(name, out var el) && (el.ValueKind == JsonValueKind.True || el.ValueKind == JsonValueKind.False)
+            ? el.GetBoolean()
+            : null;
+
+    private static string[]? GetStringArray(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Array)
+            return null;
+        return el.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!).ToArray();
+    }
+}
 
 public record CreateFeedbackRequest(string Stage, string Body);
 

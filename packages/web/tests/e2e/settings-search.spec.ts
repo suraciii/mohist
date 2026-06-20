@@ -64,7 +64,12 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
       return route.fulfill({ json: apiResponse(repositories) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/opencode/models`) {
-      return route.fulfill({ json: apiResponse({ models: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'] }) })
+      return route.fulfill({
+        json: apiResponse({
+          models: ['openai/gpt-4.1', 'anthropic/claude-sonnet-4'],
+          modelVariants: { 'anthropic/claude-sonnet-4': ['low', 'medium', 'high'] },
+        }),
+      })
     }
     if (method === 'GET' && path === `/projects/${project.id}/workflow-profile/variables`) {
       return route.fulfill({ json: apiResponse({ vars: { agent: { type: 'opencode', model: null } }, stages: {} }) })

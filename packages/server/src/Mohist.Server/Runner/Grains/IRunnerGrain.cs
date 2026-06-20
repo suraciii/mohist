@@ -37,7 +37,8 @@ public record RunnerInfo(
     string Kind = "external",
     DateTimeOffset? RegisteredAt = null,
     int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots,
-    string? BuildGitHash = null);
+    string? BuildGitHash = null,
+    Dictionary<string, string[]>? CoderModelVariants = null);
 
 [GenerateSerializer]
 public record WorkDispatch(
