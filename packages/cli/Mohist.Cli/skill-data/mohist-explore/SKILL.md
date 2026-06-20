@@ -85,11 +85,14 @@ Switch to domain expert perspective. Explore the current technical implementatio
 
 By now you understand the need (User Voice), the target product form (Product Shape), and the domain it touches (Domain Model). Before converging, decide the output shape: **one issue, or several.**
 
-Apply these rules **in this priority order** — a higher rule always overrides a lower one:
+**Every issue is an MVP** — it must independently deliver product value. A finished issue must be valuable to the user on its own; a split that leaves a piece with no standalone value (e.g. a "frontend" issue with no backend, or a "backend" issue with no UI) is wrong.
 
-1. **Bounded context (hard rule).** If the change touches more than one bounded context (e.g. Issue + Agent/Session + Web App-Shell), it MUST be split — one issue per context's internal change. Different contexts have different models, invariants, and owners; bundling them hides complexity and couples review and rollback. This rule never yields to the ones below.
-2. **Concern.** Within a context, if one issue would solve more than one concern, split it — one issue per concern. Tell-tale signs: you cannot name the issue in one phrase, or its acceptance criteria cluster into unrelated groups.
-3. **Scale.** If a single-context, single-concern change is still too large to plan/build/check in one workflow run, split it along natural seams.
+When to split:
+
+- **Different problem, or different bounded context → must split**, one issue per context. Problem, domain, and bounded context are the same axis — a bounded context is the DDD boundary around one problem domain.
+- **Same bounded context → may split**, as long as each piece still delivers standalone value (e.g. along a concern or scale seam).
+
+Exception: many small, scattered, low-cost changes across different problems and contexts aren't worth one issue each. Merge them into a single tracking issue for the batch.
 
 Then decide whether the split issues form an **epic**:
 
@@ -113,7 +116,7 @@ Produce as part of the output:
 
 Prefer fewer dependencies — if two issues seem tightly coupled, re-check whether they are really one issue, or whether the split seam is wrong. But do not invent fake independence: if B genuinely needs A's contract, say so. The `mohist` skill turns this list into issue prerequisites at creation time, so the epic can advance issue-by-issue without false starts.
 
-**Gate:** Can you name, for each proposed issue, exactly one bounded context and one concern? If any issue still bundles two contexts or two concerns, split again. If you propose an epic, can you state its milestone goal in one sentence? For 2+ issues, is the dependency order stated — including which can run in parallel?
+**Gate:** Does every proposed issue deliver standalone value? Check that different-context work is split one issue per context, within-context splits each still stand alone, and scattered trivial changes are bundled — not over-split. If you propose an epic, can you state its milestone goal in one sentence? For 2+ issues, is the dependency order stated — including which can run in parallel?
 
 ### 5. Converge
 
@@ -144,7 +147,7 @@ Common backtrack triggers:
 - Do not include issue-creation execution details (frontmatter, `mo issue create`, workflow ids, risk fields). That is the `mohist` skill's responsibility. This skill produces PRD *content*; `mohist` turns it into an issue.
 - Do not prescribe implementation (files, functions, tables, task breakdown). That is the Plan stage's responsibility.
 - The PRD body carries no source paths, file names, line numbers, or symbol names. You explore code to ground your understanding; the PRD itself is product-facing prose.
-- When splitting, apply the rules strictly in priority order: bounded context → concern → scale. Do **not** split by UI surface (e.g. "the attention zone" vs "the pulse zone") or by phasing (e.g. "v1 snapshot" vs "v2 trend") — those are neither context nor concern boundaries, and they produce coupled, mis-scoped issues. Do not split by scale alone either: if context and concern are identical, keep it in one issue even if large (express the phasing inside that issue instead).
+- When splitting: never cut one problem along a layer seam (frontend vs backend); never over-split scattered trivial changes into many issues — bundle them. Otherwise follow the split rules above.
 - Do not start from a blank slate and patrol for random problems. Always begin from a user-provided seed.
 - Do not let Domain Model grow into a technical design document. Keep it to the minimum domain context needed to understand the requirement, or omit it.
 
