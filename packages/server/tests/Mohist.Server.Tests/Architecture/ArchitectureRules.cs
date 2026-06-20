@@ -116,7 +116,8 @@ public class ArchitectureRules
     [Fact]
     public void RowModels_AreInInfrastructureData()
     {
-        Classes().That().HaveNameEndingWith("Row")
+        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+            .And().HaveNameEndingWith("Row")
             .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data(\\..*)?", useRegularExpressions: true)
             .Because("EF row models are persistence data models and belong under Infrastructure.Data")
             .Check(_architecture);
@@ -125,7 +126,8 @@ public class ArchitectureRules
     [Fact]
     public void DbContexts_AreInInfrastructureData()
     {
-        Classes().That().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.DbContext))
+        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+            .And().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.DbContext))
             .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data(\\..*)?", useRegularExpressions: true)
             .Because("database contexts are infrastructure data concerns")
             .Check(_architecture);
@@ -134,7 +136,8 @@ public class ArchitectureRules
     [Fact]
     public void Migrations_AreInInfrastructureData()
     {
-        Classes().That().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration))
+        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+            .And().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration))
             .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data.Migrations", useRegularExpressions: true)
             .Because("EF migrations should live with database schema artifacts under Infrastructure.Data")
             .Check(_architecture);
@@ -143,7 +146,8 @@ public class ArchitectureRules
     [Fact]
     public void ModelSnapshots_AreInInfrastructureData()
     {
-        Classes().That().HaveNameEndingWith("ModelSnapshot")
+        Classes().That().ResideInNamespace("Mohist.Server", useRegularExpressions: true)
+            .And().HaveNameEndingWith("ModelSnapshot")
             .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data.Migrations", useRegularExpressions: true)
             .Because("EF model snapshots should live with database schema artifacts under Infrastructure.Data")
             .Check(_architecture);
