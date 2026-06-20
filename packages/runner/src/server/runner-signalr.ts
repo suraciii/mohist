@@ -129,7 +129,10 @@ export class RunnerSignalRClient {
       const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
       if (branchExists.exitCode !== 0) return { exists: false }
 
-      const aheadBehindResult = await git(workspace.workDir, ["rev-list", "--left-right", "--count", `${workspace.baseBranch}...${workspace.head}`], ac.signal)
+      const fetchResult = await git(workspace.workDir, ["fetch", "origin", workspace.baseBranch], ac.signal)
+      if (fetchResult.exitCode !== 0) return { exists: false, reason: "fetch_failed" }
+      const remoteRef = `origin/${workspace.baseBranch}`
+      const aheadBehindResult = await git(workspace.workDir, ["rev-list", "--left-right", "--count", `${remoteRef}...${workspace.head}`], ac.signal)
       const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
       const rebaseResult = await git(workspace.workDir, ["rebase", "--show-current-patch"], ac.signal)
       const rebaseInProgress = rebaseResult.exitCode === 0
