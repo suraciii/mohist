@@ -1,4 +1,4 @@
-import type { RunnerOptions } from "../core/types.js"
+import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
 import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
@@ -31,6 +31,8 @@ export class RunnerHost {
   private readonly workspace: WorkspaceManager
   private readonly maxConcurrentWorkflows: number
   private readonly buildGitHash: string | null
+  private coderModels: string[] = []
+  private coderModelVariants: Record<string, string[]> = {}
 
   // Step 10 of design/eventbus.md: AcpSessionManager and
   // SharedAcpConnection are created once per host (not per work item).
@@ -59,7 +61,7 @@ export class RunnerHost {
     while (!signal.aborted) {
       await this.connectRunner(signal)
       await this.initializeSharedConnection(signal)
-      const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
+      const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
       try {
         await this.runWorkerPool(signal)
       } catch (error) {
@@ -228,16 +230,24 @@ export class RunnerHost {
     }
   }
 
+  private registrationState(): RunnerRegistration {
+    return {
+      capabilities: [],
+      projectId: this.options.projectId,
+      coderModels: this.coderModels,
+      coderModelVariants: this.coderModelVariants,
+      maxWorkflowSlots: this.maxConcurrentWorkflows,
+    }
+  }
+
   private async connectRunner(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
         const discovered = await discoverOpencodeModels(signal)
+        this.coderModels = discovered.models
+        this.coderModelVariants = discovered.variants
         await this.connection.connect({
-          capabilities: [],
-          projectId: this.options.projectId,
-          coderModels: discovered.models,
-          coderModelVariants: discovered.variants,
-          maxWorkflowSlots: this.maxConcurrentWorkflows,
+          ...this.registrationState(),
           buildGitHash: this.buildGitHash,
         }, signal)
         await this.signalR.start()

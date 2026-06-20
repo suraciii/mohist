@@ -160,6 +160,34 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task HeartbeatRepair_OfflineGrain_PreservesCapacityFromHeartbeatInfo()
+    {
+        var runnerId = $"repair-runner-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        // A fresh grain is Offline with null _info, mirroring the state after the
+        // silo collects and reactivates it. A heartbeat carrying the full runner
+        // state must rebuild capacity instead of collapsing to the default
+        // (regression: runner heartbeats that omitted MaxWorkflowSlots reset a
+        // capacity-4 runner to 1).
+        await runner.HeartbeatRepairAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            ProjectId: null,
+            CoderModels: ["openai/gpt-4", "anthropic/claude"],
+            MaxWorkflowSlots: 4));
+
+        var info = await runner.GetInfoAsync();
+        Assert.NotNull(info);
+        Assert.Equal(4, info!.MaxWorkflowSlots);
+        Assert.Equal(2, info.CoderModels?.Length);
+        Assert.True(await runner.IsAvailableAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_KeepsAssignment_AndRunnerDropsPendingWork()
