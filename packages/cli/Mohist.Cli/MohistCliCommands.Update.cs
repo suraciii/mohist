@@ -1086,6 +1086,33 @@ internal sealed class SourceCodeUpdater
         return 0;
     }
 
+    public async Task<int> SyncSkillsAsync(string? repoRoot, string? sourceSkillData, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        var managedSkillData = ResolveManagedSkillAssetRoot();
+
+        string sourceSkillDataDir;
+        if (!string.IsNullOrWhiteSpace(sourceSkillData))
+        {
+            sourceSkillDataDir = sourceSkillData!;
+        }
+        else
+        {
+            var root = ResolveRepoRoot(repoRoot);
+            sourceSkillDataDir = Path.Combine(root, "packages", "cli", "Mohist.Cli", "skill-data");
+        }
+
+        _out.WriteLine($"Syncing skill data: {sourceSkillDataDir} -> {managedSkillData}");
+
+        if (dryRun)
+        {
+            _out.WriteLine("Dry run: would synchronize managed skill assets (copy to temp dir, validate, replace managed root).");
+            return 0;
+        }
+
+        var synchronizer = new SkillAssetSynchronizer(_out, _err, _fileSystem);
+        return await synchronizer.SyncAsync(sourceSkillDataDir, managedSkillData);
+    }
+
     public async Task<int> UpdateServerAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);

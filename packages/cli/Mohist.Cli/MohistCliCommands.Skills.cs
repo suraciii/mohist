@@ -16,6 +16,7 @@ internal static class SkillsCommands
         skills.Subcommands.Add(BuildList(assets, api.Output));
         skills.Subcommands.Add(BuildGet(assets, api.Output, api.Error));
         skills.Subcommands.Add(BuildPath(assets, api.Output, api.Error));
+        skills.Subcommands.Add(BuildSync(provider));
 
         return skills;
     }
@@ -41,6 +42,27 @@ internal static class SkillsCommands
         });
 
         return install;
+    }
+
+    private static Command BuildSync(IServiceProvider provider)
+    {
+        var sync = new Command("sync", "Sync working-tree skill-data into the managed cache so `mo skills get` reflects local edits");
+        var updater = provider.GetRequiredService<SourceCodeUpdater>();
+        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
+        var sourceOpt = new Option<string?>("--source") { Description = "Source skill-data directory (default: <repo-root>/packages/cli/Mohist.Cli/skill-data)" };
+        var dryRunOpt = MohistCliCommands.DryRunOption();
+
+        sync.Options.Add(repoRootOpt);
+        sync.Options.Add(sourceOpt);
+        sync.Options.Add(dryRunOpt);
+        sync.SetAction(async (ctx, token) =>
+        {
+            var repoRoot = ctx.GetValue(repoRootOpt);
+            var source = ctx.GetValue(sourceOpt);
+            var dryRun = ctx.GetValue(dryRunOpt);
+            return await updater.SyncSkillsAsync(repoRoot, source, dryRun, token);
+        });
+        return sync;
     }
 
     private static Command BuildList(SkillAssetService assets, TextWriter output)
