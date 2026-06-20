@@ -195,6 +195,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Title).HasMaxLength(512).IsRequired();
             entity.Property(e => e.Priority).HasMaxLength(16).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.PauseReason).HasMaxLength(1024);
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
             entity.HasIndex(e => new { e.ProjectId, e.Number });
         });

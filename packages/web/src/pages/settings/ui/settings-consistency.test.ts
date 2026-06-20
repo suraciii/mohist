@@ -29,7 +29,7 @@ describe('settings visual consistency contract', () => {
 
 it('does not use forbidden settings text color tokens', () => {
     const hardcodedGrayToken = ['text', 'gray', ''].join('-')
-    // Forbid opacity-based foreground tokens that fall below the contrast
+// Forbid opacity-based foreground tokens that fall below the contrast
     // floor used by Settings (>= 4.5:1). The accessibility-tuned `/85` value
     // introduced for section descriptions in PR #118 meets that target and is
     // allowed; the older `/8`, `/75`, and `/80` values are forbidden. Word
@@ -62,7 +62,7 @@ it('does not use forbidden settings text color tokens', () => {
 
   it('keeps ModelSelect aligned with settings text tokens', () => {
     const source = readFileSync(modelSelectPath, 'utf8')
-    const foregroundOpacityToken = /text-foreground\/(?:8|75|80)/
+    const foregroundOpacityToken = /text-foreground\/(?:8|75|80)(?!\d)/
 
     expect(source).not.toMatch(foregroundOpacityToken)
   })

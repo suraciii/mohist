@@ -300,7 +300,7 @@ describe('settings visual accessibility evidence', () => {
     for (const [sectionName, section] of sections) {
       arrangeLoadedMocks()
       const { container } = renderEvidenceSection(section)
-      expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument()
+expect(screen.getByRole('heading', { level: 2 })).toBeInTheDocument()
       writeBeforeArtifact(sectionName)
       writeArtifact(`${sectionName}-after.html`, renderTextSnapshot(container))
       writeArtifact(`${sectionName}-visual-diff.txt`, visualDiffSummary(sectionName, container))

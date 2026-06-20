@@ -50,3 +50,14 @@ export function updateEpic(id: string, data: UpdateEpicInput, projectId?: string
     body: JSON.stringify(data),
   })
 }
+
+export function pauseEpic(id: string, reason?: string | null, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/pause`), {
+    method: 'POST',
+    body: reason != null ? JSON.stringify({ reason }) : undefined,
+  })
+}
+
+export function resumeEpic(id: string, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/resume`), { method: 'POST' })
+}

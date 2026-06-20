@@ -389,6 +389,63 @@ describe('EpicListPage basic actions', () => {
     expect(screen.getByText('1 / 3 completed')).toBeTruthy()
   })
 
+  it('renders without a Paused section when there are zero paused epics', () => {
+    renderPage()
+
+    expect(screen.queryByRole('heading', { name: 'Paused' })).toBeNull()
+  })
+
+  it('renders a Paused section between Active and Done with amber badge and de-emphasized cards', () => {
+    mocks.useEpics.mockReturnValue({
+      data: [
+        epics[0],
+        {
+          id: 'epic-paused',
+          number: null,
+          title: 'Paused Epic',
+          description: 'On hold',
+          priority: 'p2',
+          status: EpicStatus.Paused,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          progress: {
+            deliveredCount: 0,
+            totalIssueCount: 2,
+            blockedIssues: [],
+            activeIssues: [],
+            nextIssue: null,
+            readyToMarkDone: false,
+          },
+        },
+        epics[1],
+      ],
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const sections = screen.getAllByRole('heading', { level: 2 })
+    const sectionTexts = sections.map(h => h.textContent)
+    const activeIdx = sectionTexts.indexOf('Active')
+    const pausedIdx = sectionTexts.indexOf('Paused')
+    const doneIdx = sectionTexts.indexOf('Done')
+
+    expect(activeIdx).not.toBe(-1)
+    expect(pausedIdx).not.toBe(-1)
+    expect(doneIdx).not.toBe(-1)
+    expect(activeIdx).toBeLessThan(pausedIdx)
+    expect(pausedIdx).toBeLessThan(doneIdx)
+
+    const pausedCard = screen.getByText('Paused Epic').closest('[data-slot="card"]')
+    expect(pausedCard).toBeTruthy()
+    expect(pausedCard!.className).toContain('opacity-60')
+
+    const badges = screen.getAllByText('Paused')
+    expect(badges.length).toBeGreaterThan(0)
+    const pausedBadge = badges.find(b => b.tagName !== 'H2') as HTMLElement
+    expect(pausedBadge).toBeTruthy()
+  })
+
   it('opens create dialog and submits title description and priority', async () => {
     renderPage()
 

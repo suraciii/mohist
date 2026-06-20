@@ -8,6 +8,7 @@ import { RuntimeToastHost } from '../src/shared/ui/toast'
 import { ProjectProvider } from '../src/entities/project'
 import { useLiveTask } from '../src/entities/issue'
 import { onAgentEvent } from '../src/entities/agent'
+import { RuntimeToastHost } from '../src/shared/ui/toast'
 
 const toast = vi.hoisted(() => ({
   info: vi.fn(),
@@ -120,6 +121,10 @@ function LiveTaskProbe() {
   return <div data-testid="active-task">{state.activeTaskId ?? ''}</div>
 }
 
+function rtlRender(ui: React.ReactElement) {
+  return render(<RuntimeToastHost>{ui}</RuntimeToastHost>)
+}
+
 describe('LiveTaskProvider transcript routing', () => {
   beforeEach(() => {
     eventsHub.useEventsConnection.mockClear()
@@ -162,7 +167,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -202,7 +207,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const received: unknown[] = []
     const off = onAgentEvent(routedName, (detail) => received.push(detail))
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -256,7 +261,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const received: unknown[] = []
     const off = onAgentEvent('coder_tool_call', (detail) => received.push(detail))
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -308,7 +313,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(['issues'], [{ id: 'issue-1', number: 82 }])
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -334,7 +339,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -368,7 +373,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const queryClient = new QueryClient()
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -400,7 +405,7 @@ describe('LiveTaskProvider transcript routing', () => {
   it('shows merge failure toast for reverse-DNS workflow failed events', async () => {
     const queryClient = new QueryClient()
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -433,7 +438,7 @@ describe('LiveTaskProvider transcript routing', () => {
     const seen: unknown[] = []
     const off = onRebaseEvent((event) => seen.push(event))
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>
@@ -465,7 +470,7 @@ describe('LiveTaskProvider transcript routing', () => {
   it('shows rebase conflict toast and updates conflict state for reverse-DNS failed events', async () => {
     const queryClient = new QueryClient()
 
-    render(
+    rtlRender(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="project-1">
           <RuntimeToastHost>

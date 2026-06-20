@@ -386,12 +386,176 @@ public class EpicApiSpecs
         Assert.Equal("p2", patched.Priority);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Pause_FromActive_ReturnsPausedStatusAndPersistsReason()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-pause-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "To pause", projectId = project.Id });
+
+        var paused = await _client.PostDataAsync<EpicFullDto>(
+            $"/api/projects/{project.Id}/epics/{created.Id}/pause",
+            new { reason = "Waiting for design review" });
+
+        Assert.Equal("paused", paused.Status);
+        Assert.Equal("Waiting for design review", paused.PauseReason);
+
+        var detail = await _client.GetDataAsync<EpicDetailFullDto>($"/api/projects/{project.Id}/epics/{created.Id}");
+        Assert.Equal("paused", detail.Status);
+        Assert.Equal("Waiting for design review", detail.PauseReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Pause_FromActive_DoesNotUnbindLinkedIssues()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-pause-nounbind-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Container", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Member", projectId = project.Id });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/issues", new { issueId = issue.Id });
+
+        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{epic.Id}/pause", new { reason = "park" });
+
+        var detail = await _client.GetDataAsync<EpicDetailFullDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("paused", detail.Status);
+        Assert.Single(detail.LinkedIssues);
+        Assert.Equal(issue.Id, detail.LinkedIssues[0].Id);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Pause_WithoutReason_PersistsNullReason()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-pause-noreason-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "No reason", projectId = project.Id });
+
+        var paused = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause");
+
+        Assert.Equal("paused", paused.Status);
+        Assert.Null(paused.PauseReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Resume_FromPaused_ReturnsActiveStatusAndClearsReason()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-resume-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "To resume", projectId = project.Id });
+        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "on hold" });
+
+        var resumed = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/resume");
+
+        Assert.Equal("active", resumed.Status);
+        Assert.Null(resumed.PauseReason);
+
+        var detail = await _client.GetDataAsync<EpicDetailFullDto>($"/api/projects/{project.Id}/epics/{created.Id}");
+        Assert.Equal("active", detail.Status);
+        Assert.Null(detail.PauseReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task MarkDone_OnPausedEpic_Returns409WithEpicPausedCannotMarkDone()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-paused-done-reject-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused epic", projectId = project.Id });
+        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "hold" });
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{created.Id}/done", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ConflictEnvelope>();
+        Assert.NotNull(envelope);
+        Assert.False(envelope!.Success);
+        Assert.Equal("EPIC_PAUSED_CANNOT_MARK_DONE", envelope.Code);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task Close_FromPaused_Succeeds()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-close-paused-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused then close", projectId = project.Id });
+        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/pause", new { reason = "abandon" });
+
+        var closed = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Id}/close");
+
+        Assert.Equal("closed", closed.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicList_IncludesPauseReason()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-list-reason-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Active one", projectId = project.Id });
+        var paused = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused one", projectId = project.Id });
+        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{paused.Id}/pause", new { reason = "hold" });
+
+        var list = await _client.GetDataAsync<EpicWithProgressFullDto[]>($"/api/projects/{project.Id}/epics");
+
+        Assert.Equal(2, list.Length);
+        var activeEpic = list.First(e => e.Status == "active");
+        Assert.Null(activeEpic.PauseReason);
+        var pausedEpic = list.First(e => e.Status == "paused");
+        Assert.Equal("hold", pausedEpic.PauseReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task PauseRoute_AcceptsEpicNumber()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-pause-num-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Number pause", projectId = project.Id });
+
+        var paused = await _client.PostDataAsync<EpicFullDto>(
+            $"/api/projects/{project.Id}/epics/{created.Number}/pause",
+            new { reason = "by number" });
+
+        Assert.Equal("paused", paused.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeRoute_AcceptsEpicNumber()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-resume-num-{Guid.NewGuid():N}" });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Number resume", projectId = project.Id });
+        await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/pause", new { reason = "hold" });
+
+        var resumed = await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/resume");
+
+        Assert.Equal("active", resumed.Status);
+    }
+
     private sealed record ProjectDto(string Id);
     private sealed record EpicDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
+    private sealed record EpicFullDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt, string? PauseReason);
     private sealed record EpicWithProgressDto(string Id, int? Number, string Priority, string UpdatedAt);
+    private sealed record EpicWithProgressFullDto(string Id, int? Number, string Status, string? PauseReason);
     private sealed record EpicDetailDto(string Id, int? Number, string Title, string Description, string Status, LinkedIssueDto[] LinkedIssues);
+    private sealed record EpicDetailFullDto(string Id, int? Number, string Status, string? PauseReason, LinkedIssueDto[] LinkedIssues);
     private sealed record LinkedIssueDto(string Id);
     private sealed record IssueDto(int Number, string Id, PrimaryEpicDto? PrimaryEpic);
     private sealed record PrimaryEpicDto(string Id, int? Number, string Title);
     private sealed record NotFoundEnvelope(bool Success, string? Code = null, string? Error = null);
+    private sealed record ConflictEnvelope(bool Success, string? Code = null, string? Error = null);
 }

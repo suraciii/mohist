@@ -108,6 +108,52 @@ public class EpicGrain : Grain, IEpicGrain
         domain.ClearPendingEvents();
     }
 
+    public async Task<EpicDto> PauseAsync(string? reason)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.Pause(reason, now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
+        return ToDto(row);
+    }
+
+    public async Task<EpicDto> ResumeAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.Resume(now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
+        return ToDto(row);
+    }
+
     public async Task<EpicDto> SetStatusAsync(string status)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -220,6 +266,7 @@ public class EpicGrain : Grain, IEpicGrain
             Description = row.Description,
             Priority = row.Priority,
             Status = ParseStatus(row.Status),
+            PauseReason = row.PauseReason,
             CreatedAt = row.CreatedAt.UtcDateTime,
             UpdatedAt = row.UpdatedAt.UtcDateTime,
         };
@@ -237,6 +284,7 @@ public class EpicGrain : Grain, IEpicGrain
         Description = epic.Description,
         Priority = epic.Priority,
         Status = StatusName(epic.Status),
+        PauseReason = epic.PauseReason,
         CreatedAt = epic.CreatedAt == default ? now : new DateTimeOffset(epic.CreatedAt, TimeSpan.Zero),
         UpdatedAt = new DateTimeOffset(epic.UpdatedAt, TimeSpan.Zero),
     };
@@ -247,6 +295,7 @@ public class EpicGrain : Grain, IEpicGrain
         row.Description = epic.Description;
         row.Priority = epic.Priority;
         row.Status = StatusName(epic.Status);
+        row.PauseReason = epic.PauseReason;
         row.UpdatedAt = new DateTimeOffset(epic.UpdatedAt, TimeSpan.Zero);
         if (row.CreatedAt == default) row.CreatedAt = now;
     }
@@ -254,6 +303,7 @@ public class EpicGrain : Grain, IEpicGrain
     private static string StatusName(EpicStatusEnum status) => status switch
     {
         EpicStatusEnum.Active => "active",
+        EpicStatusEnum.Paused => "paused",
         EpicStatusEnum.Done => "done",
         EpicStatusEnum.Closed => "closed",
         _ => "active",
@@ -261,6 +311,7 @@ public class EpicGrain : Grain, IEpicGrain
 
     private static EpicStatusEnum ParseStatus(string status) => status?.ToLowerInvariant() switch
     {
+        "paused" => EpicStatusEnum.Paused,
         "done" => EpicStatusEnum.Done,
         "closed" => EpicStatusEnum.Closed,
         _ => EpicStatusEnum.Active,
@@ -287,5 +338,5 @@ public class EpicGrain : Grain, IEpicGrain
     }
 
     private static EpicDto ToDto(EpicRow epic) =>
-        new(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"));
+        new(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), epic.PauseReason);
 }

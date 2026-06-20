@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
-import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, removeEpicIssue, updateEpic, type UpdateEpicInput } from './client'
+import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, pauseEpic, removeEpicIssue, resumeEpic, updateEpic, type UpdateEpicInput } from './client'
 
 export function useEpics() {
   const { projectId } = useProject()
@@ -96,6 +96,38 @@ export function useCloseEpic() {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', id] })
       toast.success('Epic closed')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function usePauseEpic() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<Epic, Error, { id: string; reason?: string | null }>({
+    mutationFn: ({ id, reason }) => pauseEpic(id, reason, projectId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', projectId, variables.id] })
+      toast.success('Epic paused')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useResumeEpic() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<Epic, Error, string>({
+    mutationFn: (id) => resumeEpic(id, projectId),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', projectId, id] })
+      toast.success('Epic resumed')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

@@ -8,7 +8,9 @@ import {
   useCloseEpic,
   useEpic,
   useMarkEpicDone,
+  usePauseEpic,
   useRemoveEpicIssue,
+  useResumeEpic,
 } from '../../../entities/epic'
 import { EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
 import { EditEpicDialog } from '../../../features/edit-epic'
@@ -47,6 +49,7 @@ function PriorityBadge({ priority }: { priority: string }) {
 function StatusBadge({ status }: { status: EpicStatus }) {
   const colors: Record<EpicStatus, string> = {
     [EpicStatus.Active]: 'bg-green-100 text-green-700',
+    [EpicStatus.Paused]: 'bg-amber-100 text-amber-700',
     [EpicStatus.Done]: 'bg-blue-100 text-blue-700',
     [EpicStatus.Closed]: 'bg-gray-100 text-gray-700',
   }
@@ -352,9 +355,13 @@ export function EpicDetailPage() {
   const removeEpicIssue = useRemoveEpicIssue()
   const markEpicDone = useMarkEpicDone()
   const closeEpic = useCloseEpic()
+  const pauseEpic = usePauseEpic()
+  const resumeEpic = useResumeEpic()
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
+  const [pauseReason, setPauseReason] = useState('')
 
   const availableIssues = useMemo(() => {
     if (!issues || !epic) return []
@@ -395,12 +402,15 @@ export function EpicDetailPage() {
   const epicId = epic.id
   const submitDisabled = !selectedIssueId || addEpicIssue.isPending
   const unfinishedCount = Math.max(epic.progress.totalIssueCount - epic.progress.deliveredCount, 0)
-  const markDoneBlocked = epic.status === EpicStatus.Active && !epic.progress.readyToMarkDone
-  const markDoneTooltip = markDoneBlocked
-    ? unfinishedCount === 1
-      ? '1 linked issue remains unfinished'
-      : `${unfinishedCount} linked issues remain unfinished`
-    : undefined
+  const isPaused = epic.status === EpicStatus.Paused
+  const markDoneBlocked = isPaused || (epic.status === EpicStatus.Active && !epic.progress.readyToMarkDone)
+  const markDoneTooltip = isPaused
+    ? 'Resume this Epic before marking it done'
+    : markDoneBlocked
+      ? unfinishedCount === 1
+        ? '1 linked issue remains unfinished'
+        : `${unfinishedCount} linked issues remain unfinished`
+      : undefined
   const isClosed = epic.status === EpicStatus.Closed
   const isDone = epic.status === EpicStatus.Done
   const linkedIssueCount = epic.linkedIssues.length
@@ -409,6 +419,18 @@ export function EpicDetailPage() {
     closeEpic.mutate(epicId, {
       onSettled: () => setCloseConfirmOpen(false),
     })
+  }
+
+  function handleConfirmPause() {
+    pauseEpic.mutate(
+      { id: epicId, reason: pauseReason.trim() || null },
+      {
+        onSettled: () => {
+          setPauseConfirmOpen(false)
+          setPauseReason('')
+        },
+      },
+    )
   }
 
   function handleAddIssue(event: FormEvent) {
@@ -442,6 +464,14 @@ export function EpicDetailPage() {
               </span>
               <StatusBadge status={epic.status} />
               <PriorityBadge priority={epic.priority} />
+              {epic.pauseReason && (
+                <span
+                  data-testid="pause-reason"
+                  className="rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
+                >
+                  {epic.pauseReason}
+                </span>
+              )}
             </div>
             <h1 className="mt-2 text-2xl font-bold text-foreground">{epic.title}</h1>
             {epic.description && (
@@ -462,6 +492,28 @@ export function EpicDetailPage() {
             >
               Edit
             </Button>
+            {!isDone && !isClosed && !isPaused && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPauseConfirmOpen(true)}
+                disabled={pauseEpic.isPending}
+                data-testid="pause-epic-trigger"
+              >
+                {pauseEpic.isPending ? 'Pausing...' : 'Pause'}
+              </Button>
+            )}
+            {isPaused && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => resumeEpic.mutate(epicId)}
+                disabled={resumeEpic.isPending}
+                data-testid="resume-epic-trigger"
+              >
+                {resumeEpic.isPending ? 'Resuming...' : 'Resume'}
+              </Button>
+            )}
             {!isDone && !isClosed && (
               <Button
                 type="button"
@@ -610,6 +662,53 @@ export function EpicDetailPage() {
               data-testid="close-epic-confirm"
             >
               {closeEpic.isPending ? 'Closing...' : 'Close Epic'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pauseConfirmOpen} onOpenChange={(v) => !v && setPauseConfirmOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pause Epic?</DialogTitle>
+            <DialogDescription>
+              Pausing this Epic will keep all linked issues connected. The Epic will be hidden from the active view until resumed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="pause-reason-input" className="text-sm font-medium text-foreground">
+              Reason (optional)
+            </label>
+            <Input
+              id="pause-reason-input"
+              value={pauseReason}
+              onChange={(e) => setPauseReason(e.target.value)}
+              placeholder="Why are you pausing this Epic?"
+              data-testid="pause-reason-input"
+              disabled={pauseEpic.isPending}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setPauseConfirmOpen(false)
+                setPauseReason('')
+              }}
+              disabled={pauseEpic.isPending}
+              data-testid="pause-epic-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmPause}
+              disabled={pauseEpic.isPending}
+              data-testid="pause-epic-confirm"
+            >
+              {pauseEpic.isPending ? 'Pausing...' : 'Pause Epic'}
             </Button>
           </DialogFooter>
         </DialogContent>

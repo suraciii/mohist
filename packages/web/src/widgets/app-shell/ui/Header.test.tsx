@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { Header } from './Header'
+
+const epicMocks = vi.hoisted(() => ({
+  useEpic: vi.fn(),
+}))
 
 vi.mock('../../../entities/project', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/project')>()
@@ -19,6 +23,14 @@ vi.mock('../../../entities/project', async (importOriginal) => {
 vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } }),
 }))
+
+vi.mock('../../../entities/epic', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/epic')>()
+  return {
+    ...actual,
+    useEpic: epicMocks.useEpic,
+  }
+})
 
 function renderHeader(initialRoute: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -55,6 +67,10 @@ function renderHeaderWithRoute(initialRoute: string, routePath: string) {
 }
 
 describe('Header', () => {
+  beforeEach(() => {
+    epicMocks.useEpic.mockReturnValue({ data: undefined, isLoading: false })
+  })
+
   afterEach(() => {
     cleanup()
   })
@@ -110,5 +126,51 @@ describe('Header', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument()
     expect(screen.getByTestId('header-new-issue')).toBeInTheDocument()
+  })
+
+  it('shows Epic #<number> on epic detail route (first-segment branch)', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-99', number: 7, title: 'Test', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeaderWithRoute('/epics/epic-99', '/epics/:id')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
+  })
+
+  it('shows Epic #<number> on epic detail route with project prefix (section branch)', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-42', number: 3, title: 'My Epic', description: '', priority: 'p2', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeaderWithRoute('/demo/epics/epic-42', '/:projectName/epics/:id')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
+  })
+
+  it('shows Epic #… while epic number is loading', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    })
+    renderHeaderWithRoute('/epics/epic-loading', '/epics/:id')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #\u2026' })).toBeInTheDocument()
+  })
+
+  it('resolves Epic #<number> when path segment is the epic number itself', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-something', number: 12, title: 'By Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeaderWithRoute('/demo/epics/12', '/:projectName/epics/:id')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #12' })).toBeInTheDocument()
+  })
+
+  it('shows Epics as title on epics route (unchanged)', () => {
+    renderHeader('/epics')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epics' })).toBeInTheDocument()
+  })
+
+  it('shows issue number on issue detail route (unchanged)', () => {
+    renderHeaderWithRoute('/demo/issues/42', '/:projectName/issues/:number')
+    expect(screen.getByRole('heading', { level: 1, name: 'Issue #42' })).toBeInTheDocument()
   })
 })

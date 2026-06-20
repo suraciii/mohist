@@ -26,6 +26,17 @@ public class EpicNotReadyToMarkDoneException : InvalidOperationException
     }
 }
 
+public class EpicPausedCannotMarkDoneException : InvalidOperationException
+{
+    public string EpicId { get; }
+
+    public EpicPausedCannotMarkDoneException(string epicId)
+        : base($"Epic {epicId} is paused; resume to active before marking done.")
+    {
+        EpicId = epicId;
+    }
+}
+
 public class EpicDuplicateLinkedIssueException : InvalidOperationException
 {
     public int IssueNumber { get; }

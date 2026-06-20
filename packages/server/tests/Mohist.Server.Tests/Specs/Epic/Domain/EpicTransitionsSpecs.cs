@@ -309,6 +309,147 @@ public class EpicTransitionsSpecs
         Assert.Equal(eventsBefore, epic.PendingEvents.Count);
         Assert.Equal(updatedAtBefore, epic.UpdatedAt);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Pause_FromActive_SetsStatusToPausedAndPersistsReasonAndRecordsStatusChanged()
+    {
+        var epic = NewActiveEpic();
+        epic.LinkIssue("issue_1", 1, UtcNow);
+
+        epic.Pause(reason: "need to clarify scope", now: UtcNow);
+
+        Assert.Equal(EpicStatus.Paused, epic.Status);
+        Assert.Equal("need to clarify scope", epic.PauseReason);
+        Assert.Single(epic.LinkedIssueNumbers);
+        var statusChanged = EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents).Last();
+        Assert.Equal("active", statusChanged.OldStatus);
+        Assert.Equal("paused", statusChanged.NewStatus);
+        Assert.Null(EpicEventAssertions.OfType<EpicClosed>(epic.PendingEvents).SingleOrDefault());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Pause_OnAlreadyPaused_IsIdempotentNoOp()
+    {
+        var epic = NewActiveEpic();
+        epic.Pause(null, UtcNow);
+        var eventsBefore = epic.PendingEvents.Count;
+        var updatedAtBefore = epic.UpdatedAt;
+
+        epic.Pause("different reason", UtcNow);
+
+        Assert.Equal(EpicStatus.Paused, epic.Status);
+        Assert.Null(epic.PauseReason);
+        Assert.Equal(eventsBefore, epic.PendingEvents.Count);
+        Assert.Equal(updatedAtBefore, epic.UpdatedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Pause_OnDoneEpic_ThrowsAlreadyTerminal()
+    {
+        var epic = NewActiveEpic();
+        epic.LinkIssue("issue_1", 1, UtcNow);
+        epic.MarkDone(new HashSet<int>(), UtcNow);
+
+        var ex = Assert.Throws<EpicAlreadyTerminalException>(() =>
+            epic.Pause(null, UtcNow));
+
+        Assert.Equal("done", ex.CurrentStatus);
+        Assert.Equal("paused", ex.RequestedStatus);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Pause_OnClosedEpic_ThrowsAlreadyTerminal()
+    {
+        var epic = NewActiveEpic();
+        epic.Close(UtcNow);
+
+        var ex = Assert.Throws<EpicAlreadyTerminalException>(() =>
+            epic.Pause(null, UtcNow));
+
+        Assert.Equal("closed", ex.CurrentStatus);
+        Assert.Equal("paused", ex.RequestedStatus);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Resume_FromPaused_SetsStatusToActiveAndClearsReasonAndRecordsStatusChanged()
+    {
+        var epic = NewActiveEpic();
+        epic.Pause("temporary hold", UtcNow);
+
+        epic.Resume(UtcNow);
+
+        Assert.Equal(EpicStatus.Active, epic.Status);
+        Assert.Null(epic.PauseReason);
+        var statusChanged = EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents).Last();
+        Assert.Equal("paused", statusChanged.OldStatus);
+        Assert.Equal("active", statusChanged.NewStatus);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Resume_OnActiveEpic_IsNoOp()
+    {
+        var epic = NewActiveEpic();
+        var eventsBefore = epic.PendingEvents.Count;
+
+        epic.Resume(UtcNow);
+
+        Assert.Equal(EpicStatus.Active, epic.Status);
+        Assert.Equal(eventsBefore, epic.PendingEvents.Count);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void MarkDone_OnPausedEpic_ThrowsPausedCannotMarkDone()
+    {
+        var epic = NewActiveEpic();
+        epic.Pause("paused for a reason", UtcNow);
+
+        var ex = Assert.Throws<EpicPausedCannotMarkDoneException>(() =>
+            epic.MarkDone(new HashSet<int>(), UtcNow));
+
+        Assert.Equal(epic.Id, ex.EpicId);
+        Assert.Equal(EpicStatus.Paused, epic.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Close_FromPaused_AllowedWithoutResume()
+    {
+        var epic = NewActiveEpic();
+        epic.Pause("temporary hold", UtcNow);
+
+        epic.Close(UtcNow);
+
+        Assert.Equal(EpicStatus.Closed, epic.Status);
+        Assert.NotNull(EpicEventAssertions.OfType<EpicClosed>(epic.PendingEvents).SingleOrDefault());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void Pause_WithoutReason_PersistsNullReason()
+    {
+        var epic = NewActiveEpic();
+
+        epic.Pause(null, UtcNow);
+
+        Assert.Equal(EpicStatus.Paused, epic.Status);
+        Assert.Null(epic.PauseReason);
+    }
 }
 
 internal static class EpicEventAssertions

@@ -63,14 +63,14 @@ public class EpicQuerier
     private async Task<EpicWithProgressDto> ToWithProgressAsync(MohistDbContext db, EpicRow epic)
     {
         var progress = await BuildProgressAsync(db, epic);
-        return new EpicWithProgressDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), progress);
+        return new EpicWithProgressDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), progress, epic.PauseReason);
     }
 
     private async Task<EpicDetailDto> ToDetailAsync(MohistDbContext db, EpicRow epic)
     {
         var linked = await GetLinkedIssuesAsync(db, epic);
         var progress = BuildProgress(linked);
-        return new EpicDetailDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress);
+        return new EpicDetailDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress, epic.PauseReason);
     }
 
     private async Task<EpicProgressDto> BuildProgressAsync(MohistDbContext db, EpicRow epic) =>

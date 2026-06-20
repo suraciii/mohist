@@ -2,6 +2,7 @@ import type { IssueStatus, IssueHealth, WorkflowStage } from '../../issue/@x/typ
 
 export enum EpicStatus {
   Active = 'active',
+  Paused = 'paused',
   Done = 'done',
   Closed = 'closed',
 }
@@ -15,6 +16,7 @@ export interface Epic {
   description: string
   priority: EpicPriority
   status: EpicStatus
+  pauseReason?: string | null
   createdAt: string
   updatedAt: string
 }
