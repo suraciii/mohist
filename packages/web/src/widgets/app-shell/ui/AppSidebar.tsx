@@ -4,6 +4,7 @@ import {
   LayoutDashboardIcon,
   ListTodoIcon,
   ActivityIcon,
+  ServerIcon,
   ArchiveIcon,
   FileTextIcon,
   SettingsIcon,
@@ -42,6 +43,7 @@ const primaryNav = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, to: '/' },
   { key: 'issues', label: 'Issues', icon: ListTodoIcon, to: '/issues' },
   { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity' },
+  { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners' },
   { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics' },
 ] as const
 

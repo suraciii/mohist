@@ -13,6 +13,7 @@ import { SessionPage } from '../pages/session/ui/SessionPage'
 import { CreateIssueDialog } from '../features/create-issue'
 import { SettingsPage } from '../pages/settings/ui/SettingsPage'
 import { ActivityPage } from '../pages/activity/ui/ActivityPage'
+import { RunnersPage } from '../pages/runners/ui/RunnersPage'
 import { LogsPage } from '../pages/logs/ui/LogsPage'
 import { ArchivedPage } from '../pages/archived/ui/ArchivedPage'
 import { ProjectGuard, MobileBottomNav, FAB } from '../widgets/app-shell'
@@ -59,6 +60,7 @@ function AppContent() {
                 <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
                 <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
                 <Route path="activity" element={<ActivityPage />} />
+                <Route path="runners" element={<RunnersPage />} />
                 <Route path="settings" element={<Navigate to="settings/ai" replace />} />
                 <Route path="settings/:section" element={<SettingsPage />} />
                 <Route path="logs" element={<LogsPage />} />

@@ -140,7 +140,86 @@ internal sealed class MohistCliApi
         }
     }
 
+    public async Task<int> PrintRunnerListAsync(string projectId, RunnerScopeFilter scope, string mode, bool colorEnabled)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
+            return 1;
+        }
+
+        JsonNode? responseData;
+        try
+        {
+            responseData = await GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}/runners");
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+        catch (ApiResponseException ex)
+        {
+            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+
+        if (responseData is null)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+
+        var runners = responseData["runners"] as JsonArray ?? new JsonArray();
+        var filtered = new JsonArray();
+        foreach (var runner in runners)
+        {
+            if (runner is not JsonObject obj) continue;
+            var runnerScope = obj["scope"] as JsonObject;
+            var type = StringOfNullable(runnerScope, "type");
+            if (scope == RunnerScopeFilter.Global && !string.Equals(type, "global", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (scope == RunnerScopeFilter.Project && !string.Equals(type, "project", StringComparison.OrdinalIgnoreCase))
+                continue;
+            filtered.Add(obj.DeepClone());
+        }
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            _out.WriteLine(filtered.ToJsonString(JsonOptions));
+            return 0;
+        }
+
+        if (filtered.Count == 0)
+        {
+            _out.WriteLine("No runners connected");
+            _out.WriteLine($"Start a runner: {RunnerStartHint}");
+            return 0;
+        }
+
+        var activeProjectId = await TryReadActiveProjectIdAsync();
+        var renderer = new TableRenderer(_out, activeProjectId);
+        renderer.Render(filtered, TableShape.RunnerList, colorEnabled);
+        return 0;
+    }
+
+    public enum RunnerScopeFilter
+    {
+        All,
+        Global,
+        Project,
+    }
+
+    private static string StringOfNullable(JsonNode? node, string key)
+    {
+        if (node is null) return "";
+        var value = node[key];
+        if (value is null) return "";
+        return value.GetValue<string>() ?? "";
+    }
+
     internal const string ServerUnavailableMessage = "Server is not running. Start with: mo server start";
+    internal const string RunnerStartHint = "npx mohist runner";
 
     public abstract record OutputModeResult
     {
@@ -256,6 +335,7 @@ internal sealed class MohistCliApi
         LabelList,
         IssueTemplateList,
         IssueTemplateShow,
+        RunnerList,
     }
 
     internal static TableShape ParseTableShape(string? shape)
