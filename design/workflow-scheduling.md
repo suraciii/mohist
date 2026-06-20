@@ -2,7 +2,7 @@
 purpose: "Describe workflow scheduling at the grain-interface level."
 include:
   - "Grain responsibilities and public grain interfaces."
-  - "Workflow scheduling, assignment, delivery, report, and recovery flows."
+  - "Discovery, binding, pull delivery, report, supervision, and recovery."
   - "ASCII diagrams and swimlanes that show grain-to-grain interactions."
 exclude:
   - "WorkflowRun/domain model internals; keep them in the Domain Model chapter only."
@@ -17,28 +17,36 @@ style:
 
 # Workflow Scheduling
 
-本文记录 workflow 调度相关 grain 的接口级交互。范围只包括 grain 接口和流程，不描述领域模型、数据库表或 UI/API payload。
+Grain-level scheduling. Discovery, binding, delivery, report, supervision, recovery.
 
 ## Model
 
 ```text
 WorkflowGrain
-  owns assignment + lease
-  runs internal RunCoreAsync() to repair scheduling
+  owns work lifecycle + progression
+  serves work on pull; passive between polls
+  completion watchdog: no report by work timeout -> work FAILED
+  never queries runner state
 
 WorkflowBacklogGrain
-  stores workflowRunId candidates
+  index of workflows with no runner assigned
 
 RunnerGrain
-  stores a disposable work registry
-  polls project backlogs with round-robin fairness
+  supervises runner process liveness only (heartbeat, online/offline)
+  pulls work from bound workflows on behalf of its process
+  does not supervise works
+
+runner process (physical)
+  executes work; spawns subprocesses
+  enforces execution timeout: kill hung subprocess, report failure
+  no supervision duty
 ```
 
-`RunCoreAsync` 是 `WorkflowGrain` 内部动作，不暴露为 grain 接口，也不返回 work。
-
 ```text
-assignment truth = WorkflowGrain
-runner cache     = assigned/running work registry
+work truth    = WorkflowGrain
+runner truth  = RunnerGrain
+backlog truth = WorkflowBacklogGrain
+grains cooperate by calls only; no shared state
 ```
 
 ## Interfaces
@@ -49,280 +57,176 @@ IWorkflowBacklogGrain
   ClaimAsync(runnerId) -> workflowRunId?
 
 IWorkflowGrain
-  AssignRunnerAsync(runnerId) -> Assigned | Rejected
+  AssignRunnerAsync(runnerId) -> Assigned | Rejected   # backlog bind
+  PollWork(runnerId) -> WorkDispatch?                   # bound runner pulls work
   ReportResultAsync(runnerId, workId, result)
+  NotifyRunnerLostAsync(runnerId)
 
 IRunnerGrain
   RegisterAsync(info)
   HeartbeatAsync()
-  AssignWorkAsync(work) -> Assigned | Rejected
-  PollAsync() -> WorkDispatch?
-  ReportResultAsync(workflowRunId, workId, result) -> report response
+  PollAsync() -> WorkDispatch?                          # process pulls; grain fetches from bound workflows
+  ReportResultAsync(workflowRunId, workId, result)      # relay to workflow
 ```
+
+Delivery is pull. No push from WorkflowGrain to runner.
+
+## Backlog
+
+Backlog = workflows with no runner assigned. Membership by claim-status only.
+
+```text
+enter    : created / resumed / exited approval gate, and has no runner
+leave    : claimed by a runner
+re-enter : binding released (runner lost)
+never    : a bound workflow does not re-enter between work items
+```
+
+A bound workflow is served exclusively by its runner; the next work item is pulled directly, not re-queued.
+
+Per-project grain: `WorkflowBacklogKeys.ForProject(projectId)`.
 
 ## Project Scan
 
 ```text
-project-bound runner
-    |
-    |-- projectId from RunnerInfo
-            -> scan only that project's backlog
+project-bound runner -> scan its project's backlog
+global runner        -> round-robin over known projects (in-memory dir + persisted list)
+```
 
-global runner
-    |
-    |-- known project ids
-    |      |-- in-memory backlog directory
-    |      |-- persisted project list
-    |
-    |-- round-robin project cursor
-            -> scan each project backlog fairly
+Persisted project ids keep backlog discovery working after server restart.
+
+## Bind
+
+Runner with spare capacity claims an unbound workflow from the backlog.
+
+```text
+RunnerGrain            WorkflowBacklogGrain          WorkflowGrain
+    |                          |                           |
+    | ClaimAsync(runnerId)     |                           |
+    |------------------------->|                           |
+    |                          | pick unbound workflowRunId|
+    |                          | AssignRunnerAsync(runnerId)|
+    |                          |--------------------------->|
+    |                          |                           | bind runner (1:1, lifetime)
+    |                          |                           | remove self from backlog
+    |                          | return Assigned           |
+    |                          |<--------------------------|
+    | return workflowRunId?    |                           |
+    |<-------------------------|                           |
+    | record bound workflow    |                           |
 ```
 
 ```text
-Poll #1:  A -> B -> C
-Poll #2:  B -> C -> A
-Poll #3:  C -> A -> B
+AssignRunnerAsync:
+  unassigned + runnable         -> bind runner, Assigned
+  already bound to same runner  -> Assigned
+  bound to another runner       -> Rejected
+  not runnable                  -> Rejected
 ```
 
-Global runners should not depend on a single in-memory directory as the only project source. Server restart can lose that directory; persisted project ids keep backlog discovery possible.
+Lazy cleanup: a claim that gets Rejected is dropped from the backlog; the next candidate is tried.
 
-## Poll And Assign
+## Pull Work
+
+Bound RunnerGrain pulls work from its bound WorkflowGrain; serves it to its process.
 
 ```text
-RunnerGrain                 WorkflowBacklogGrain              WorkflowGrain
-    |                                |                               |
-    | PollAsync()                    |                               |
-    | find Assigned work             |                               |
-    | mark it Running                |                               |
-    |                                |                               |
-    | if capacity full               |                               |
-    |     return null                |                               |
-    |                                |                               |
-    | ClaimAsync(runnerId)           |                               |
-    |------------------------------->|                               |
-    |                                | pick workflowRunId            |
-    |                                | AssignRunnerAsync(runnerId)   |
-    |                                |------------------------------>|
-    |                                |                               | assign/restore runner
-    |                                |                               | RunCoreAsync()
-    |                                |                               | if work needs delivery
-    | AssignWorkAsync(work)          |                               |
-    |<---------------------------------------------------------------|
-    | add/update registry as Assigned|                               |
-    | return Assigned                |                               |
-    |---------------------------------------------------------------->|
-    |                                | return Assigned               |
-    |                                |<------------------------------|
-    |                                | remove candidate              |
-    | return workflowRunId?          |                               |
-    |<-------------------------------|                               |
-    | find Assigned work             |                               |
-    | mark it Running                |                               |
-    | return WorkDispatch?           |                               |
+runner process     RunnerGrain                WorkflowGrain
+    |                  |                           |
+    | PollAsync()      |                           |
+    |----------------->|                           |
+    |                  | PollWork(runnerId)        |
+    |                  |--------------------------->|
+    |                  |                           | PENDING     -> STARTED, return it
+    |                  |                           | in-flight   -> return for resume
+    |                  |                           | none        -> null
+    |                  | return WorkDispatch?      |
+    |                  |<--------------------------|
+    | return WorkDispatch?                        |
+    |<-----------------|
 ```
 
-`AssignRunnerAsync` is idempotent:
+No forward call from WorkflowGrain to runner. The bound-workflow set on RunnerGrain is disposable; truth is the WorkflowGrain binding.
+
+## Work State Machine
 
 ```text
-unassigned + runnable              -> assign runner, RunCoreAsync(), Assigned
-already assigned to same runner    -> RunCoreAsync(), Assigned
-assigned to another runner         -> Rejected
-not runnable / missing             -> Rejected
+PENDING --pull--> STARTED --report(success|fail)--> COMPLETED | FAILED
+                       |
+                       | no report by declared timeout: watchdog -> FAILED
 ```
 
-Backlog behavior:
+- PENDING: work exists, waiting to be pulled. No timeout (waiting for capacity is normal).
+- STARTED: pulled by bound runner. Watchdog armed with the work's declared timeout.
+- COMPLETED | FAILED: report received; workflow advances.
+- FAILED by watchdog: no report within timeout. Workflow advances (repair / stage-fail).
+
+The watchdog is a local timer plus "report arrived?". It does not query runner state.
+
+## Supervision
+
+Supervision is split by level. Nothing crosses levels.
 
 ```text
-Assigned -> remove candidate, return workflowRunId
-Rejected -> remove candidate, scan next
+subprocess execution    runner process     kill hung subprocess, report failure
+work completion         WorkflowGrain      watchdog: no report by timeout -> FAILED
+runner process liveness RunnerGrain        heartbeat -> online/offline
 ```
 
-## Run Core
+RunnerGrain supervises the runner process only. A runner serves many workflows; work supervision belongs to the owning WorkflowGrain, which owns the work and its timeout value.
 
-```text
-WorkflowGrain.RunCoreAsync()
-    |
-    |-- no runner assigned + needs runner
-    |       -> backlog.EnqueueAsync(workflowRunId)
-    |
-    |-- runner assigned + work exists + no lease
-    |       -> create lease
-    |       -> runner.AssignWorkAsync(work)
-    |
-    |-- runner assigned + lease exists
-    |       -> runner.AssignWorkAsync(leased work)
-    |
-    |-- no work / already consistent
-            -> no-op
-```
-
-`RunCoreAsync` is a side-effecting repair step:
-
-```text
-input:  current workflow grain state
-output: persisted scheduling side effects
-return: nothing meaningful to callers
-```
-
-## Runner Work Cache
-
-Runner does not store assigned workflows.
-
-```text
-WorkflowGrain assignment
-    |
-    |-- authoritative
-    |-- durable
-    |-- survives runner/server restart
-
-RunnerGrain work cache
-    |
-    |-- work registry
-    |-- each work has Assigned or Running status
-    |-- disposable
-```
-
-```text
-RunnerGrain.AssignWorkAsync(work)
-    |
-    |-- same workflowRunId + workId already in registry
-    |       -> Assigned
-    |
-    |-- same workflowRunId has different registry work
-    |       -> replace old entries, accept new work
-    |
-    |-- runner offline / cannot accept
-    |       -> Rejected
-    |
-    |-- otherwise
-            -> add to registry as Assigned
-            -> Assigned
-```
-
-Runner registry 是可丢的投递/执行缓存；事实来源是 `WorkflowGrain` 的 assignment + lease。
-
-Capacity is based on registered work, not assigned workflow count.
-
-```text
-can accept work when:
-  activeWorkflowCount < maxWorkflowSlots
-
-activeWorkflowCount =
-  distinct workflowRunId in Assigned or Running work
-```
-
-`PollAsync` mutates state only when it is actually handing valid work to the runner process.
-Before delivery it rechecks the authoritative workflow assignment/lease so stopped,
-completed, replaced, or stolen work is dropped instead of executed:
-
-```text
-PollAsync()
-    |
-    |-- find first registry entry with Status = Assigned
-    |-- validate against WorkflowGrain
-    |       |-- owner is this runner?
-    |       |-- workflow is Running?
-    |       |-- current workId still matches?
-    |       |-- no -> remove registry entry, scan next
-    |-- mark it Running
-    |-- return WorkDispatch
-    |
-    |-- no Assigned work -> return null
-```
-
-State queries are read-only:
-
-```text
-GetRuntimeStateAsync()
-    |
-    |-- read registry
-    |-- return distinct workflowRunId values
-    |-- no dequeue
-    |-- no validation side effects
-```
+Execution timeout (kill) is in the runner process — only it can kill its own subprocesses.
 
 ## Report
 
 ```text
-RunnerProcess                      RunnerGrain                     WorkflowGrain
-    |                                    |
-    | PollAsync()                        |
-    |-------------------------->         |
-    | return WorkDispatch                |
-    |<--------------------------         |
-    |                                    |
-    | execute work                       |
-    |                                    |
-    | ReportResultAsync(workflowRunId, workId, result)
-    |----------------------------------->|
-    |                                    | check local registry
-    |                                    | call WorkflowGrain.ReportResultAsync(...)
-    |                                    | tracked -> remove registry work
-    |                                    | untracked -> keep response explicit
-    |                                    |----------------------------------->|
-    |                                    | validate lease owner
-    |                                    | advance workflow
-    |                                    |<-----------------------------------|
-    | return report response             |
-    |<-----------------------------------|
+runner process        RunnerGrain              WorkflowGrain
+    |                     |                          |
+    | execute             |                          |
+    | ReportResultAsync(workflowRunId, workId, result)|
+    |-------------------->|                          |
+    |                     | ReportResultAsync(runnerId, workId, result)
+    |                     |------------------------->|
+    |                     |                          | validate bound runner
+    |                     |                          | STARTED -> COMPLETED | FAILED
+    |                     |                          | advance / arm repair
+    |                     | return response          |
+    |                     |<-------------------------|
+    |<--------------------|
 ```
 
-`workflowRunId` is required. Runner process reports to `RunnerGrain`; `RunnerGrain` owns local work lifecycle and forwards the accepted fact to `WorkflowGrain`.
+Late or duplicate report for an already-terminal work is ignored (idempotent by workId + attempt).
 
-## Recovery Reminder
+## Binding Lifecycle
+
+One workflow, one runner, for the workflow's life. Never reassigned.
 
 ```text
-WorkflowGrain reminder
-    |
-    |-- no runner attention needed
-    |       -> no-op
-    |
-    |-- unassigned + needs runner
-    |       -> backlog.EnqueueAsync(workflowRunId)
-    |
-    |-- assigned + needs runner
-            -> RunCoreAsync()
-            -> if runner cannot accept: keep assignment + lease
+bound              -> stays bound through all work items; must flow continuously
+work stalls        -> watchdog fails the WORK (not the binding); workflow advances
+runner lost        -> fault: workflow has no executor and cannot proceed until the
+                      runner recovers or the run is rerun. Not a legitimate stall.
+runner recovers    -> bound runner resumes pulling; in-flight work resumes
 ```
 
-Strong assignment rule:
+- Resume: same runner returns, pulls in-flight work, continues.
+- Rerun: runner permanently gone; start a fresh run with a new binding. The only way to change runners.
+
+Pipeline rule: once a runner is assigned, the workflow must flow continuously — every work reaches COMPLETED or FAILED (report or watchdog). Any stall after assignment is a bug. Pending before assignment is normal waiting, not a stall. Runner loss after assignment is a fault, resolved by recovery or rerun.
+
+## Recovery
+
+Retry + idempotency throughout.
 
 ```text
-runner offline / timeout / unregister
-  does not release assignment
-  does not assign workflow to another runner
-  workflow keeps retrying the same runner by reminder
+unbound + has work            -> reminder re-enqueue to backlog (idempotent)
+claim / assignment lost       -> next claim re-binds (AssignRunnerAsync idempotent)
+work pull lost                -> runner polls again; workflow re-serves (idempotent)
+report lost                   -> runner re-reports; workflow dedups (idempotent)
+work pulled, no report        -> watchdog -> FAILED -> advance
+process dies mid-work         -> no report -> watchdog -> FAILED -> next work waits for runner
+process lost (heartbeat)      -> RunnerGrain -> NotifyRunnerLostAsync -> workflow marks waiting
 ```
 
-Stop/cancel does not erase assignment. It clears executable state; assignment remains available for inspection.
-
-## Recovery Cases
-
-```text
-assignment response lost
-  -> reminder EnqueueAsync(workflowRunId)
-  -> same runner assignment is idempotent
-
-work dispatch lost
-  -> reminder RunCoreAsync()
-  -> same leased work is assigned to runner again
-
-runner pending buffer lost
-  -> reminder RunCoreAsync()
-  -> same leased work is assigned to runner again
-```
-
-## Lazy Backlog Cleanup
-
-```text
-RunnerGrain              WorkflowBacklogGrain          WorkflowGrain
-    |                             |                           |
-    | ClaimAsync(runnerId)        |                           |
-    |---------------------------->|                           |
-    |                             | AssignRunnerAsync(...)    |
-    |                             |-------------------------->|
-    |                             |                           | Rejected
-    |                             |<--------------------------|
-    |                             | remove candidate          |
-    |                             | scan next                 |
-```
+Before start (no runner): pending is normal; workflow waits in the backlog.
+After start (has runner): must progress or fail; the watchdog bounds every work.
