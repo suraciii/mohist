@@ -22,8 +22,10 @@ public class IssueReadModel
     public string Priority { get; set; } = "p2";
     public string? Risk { get; set; }
     public string? Model { get; set; }
+    public string? ModelVariant { get; set; }
     public Dictionary<string, object?>? AgentConfig { get; set; }
     public Dictionary<string, string>? StageModels { get; set; }
+    public Dictionary<string, string>? StageModelVariants { get; set; }
     public string CreatedAt { get; set; } = "";
     public string UpdatedAt { get; set; } = "";
     public string? ArchivedAt { get; set; }

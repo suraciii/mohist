@@ -102,8 +102,10 @@ export interface Issue {
   priority?: string | null
   risk?: string | null
   model?: string | null
+  modelVariant?: string | null
   agentConfig?: Record<string, unknown> | null
   stageModels?: Record<string, string> | null
+  stageModelVariants?: Record<string, string> | null
   archivedAt?: string
   blockedReason?: string
   prerequisites?: IssuePrerequisiteSummary[]

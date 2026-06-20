@@ -24,7 +24,8 @@ public static class RunnerRoutes
                 req.ProjectId,
                 req.CoderModels,
                 MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots),
-                BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash)));
+                BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
+                CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants)));
             return Results.Ok();
         });
 
@@ -51,7 +52,8 @@ public static class RunnerRoutes
                     req.ProjectId,
                     req.CoderModels,
                     MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots),
-                    BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash));
+                    BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
+                    CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants));
                 await runner.HeartbeatRepairAsync(info);
             }
             else
@@ -219,10 +221,50 @@ public static class RunnerRoutes
         var trimmed = value.Trim();
         return trimmed.Length > 0 ? trimmed : null;
     }
+
+    private static Dictionary<string, string[]>? NormalizeCoderModelVariants(Dictionary<string, string[]>? variants)
+    {
+        if (variants is null || variants.Count == 0)
+            return null;
+
+        var normalized = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in variants)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+                continue;
+
+            var cleaned = (entry.Value ?? [])
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim())
+                .Where(v => v.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (cleaned.Length == 0)
+                continue;
+
+            normalized[entry.Key.Trim()] = cleaned;
+        }
+
+        return normalized.Count == 0 ? null : normalized;
+    }
 }
 
-public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null, string? BuildGitHash = null);
-public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null, string? BuildGitHash = null);
+public record RunnerRegisterRequest(
+    string[] Capabilities,
+    string? ProjectId = null,
+    string? Hostname = null,
+    string[]? CoderModels = null,
+    int? MaxWorkflowSlots = null,
+    string? BuildGitHash = null,
+    Dictionary<string, string[]>? CoderModelVariants = null);
+public record RunnerHeartbeatRequest(
+    string[]? Capabilities = null,
+    string? ProjectId = null,
+    string? Hostname = null,
+    string[]? CoderModels = null,
+    int? MaxWorkflowSlots = null,
+    string? BuildGitHash = null,
+    Dictionary<string, string[]>? CoderModelVariants = null);
 public record RunnerReportRequest(
     string WorkId,
     string Status,

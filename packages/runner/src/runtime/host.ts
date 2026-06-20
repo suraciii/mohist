@@ -231,11 +231,12 @@ export class RunnerHost {
   private async connectRunner(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
-        const coderModels = await discoverOpencodeModels(signal)
+        const discovered = await discoverOpencodeModels(signal)
         await this.connection.connect({
           capabilities: [],
           projectId: this.options.projectId,
-          coderModels,
+          coderModels: discovered.models,
+          coderModelVariants: discovered.variants,
           maxWorkflowSlots: this.maxConcurrentWorkflows,
           buildGitHash: this.buildGitHash,
         }, signal)

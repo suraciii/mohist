@@ -23,6 +23,7 @@ import { composeIssueTemplateBody, useIssueTemplate, useIssueTemplates } from '.
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import { parseIssueFrontmatter } from '../lib/frontmatter'
+import { VariantPicker } from '../../../shared/ui/VariantPicker'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
 const RISKS = ['low', 'medium', 'high']
@@ -64,14 +65,28 @@ function XIcon({ className }: { className?: string }) {
   )
 }
 
-function ModelPresetSelect({ value, onChange, onClear }: { value: string | null; onChange: (id: string) => void; onClear: () => void }) {
-  const { data: availableModelIds, isLoading } = useAvailableModelIds()
+function ModelPresetSelect({
+  value,
+  variant,
+  onChange,
+  onVariantChange,
+  onClear,
+}: {
+  value: string | null
+  variant: string | null
+  onChange: (id: string) => void
+  onVariantChange: (variant: string | null) => void
+  onClear: () => void
+}) {
+  const { data: availableModels, isLoading } = useAvailableModelIds()
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  const allModels: string[] = availableModelIds ?? []
+  const allModels: string[] = availableModels?.models ?? []
+  const modelVariantsMap = availableModels?.modelVariants ?? {}
+  const availableVariants = value ? modelVariantsMap[value] ?? [] : []
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allModels
@@ -92,11 +107,12 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
         const m = filtered[highlightedIndex]
         if (m) {
           onChange(m)
+          onVariantChange(null)
           setPopoverOpen(false)
         }
       }
     },
-    [filtered, highlightedIndex, onChange],
+    [filtered, highlightedIndex, onChange, onVariantChange],
   )
 
   const displayText = value
@@ -106,10 +122,10 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
   return (
     <div className="flex items-center gap-2">
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverTrigger>
+        <PopoverTrigger data-testid="create-issue-model-trigger">
           <Button
             variant="outline"
-            className={`w-full inline-flex items-center justify-between gap-1.5 text-sm font-medium min-h-[44px] md:min-h-0 ${
+            className={`flex-1 inline-flex items-center justify-between gap-1.5 text-sm font-medium min-h-[44px] md:min-h-0 ${
               value
                 ? 'border-blue-200 bg-blue-50 text-blue-700'
                 : ''
@@ -150,6 +166,7 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
                 variant="ghost"
                 onClick={() => {
                   onChange(modelId)
+                  onVariantChange(null)
                   setPopoverOpen(false)
                 }}
                 onMouseEnter={() => setHighlightedIndex(i)}
@@ -170,11 +187,22 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
           </div>
         </PopoverContent>
       </Popover>
+      <VariantPicker
+        id="create-issue-model-variant"
+        modelId={value}
+        modelVariants={availableVariants}
+        value={variant && availableVariants.includes(variant) ? variant : null}
+        onChange={onVariantChange}
+        aria-label="Coder model reasoning variant"
+      />
       {value && (
         <Button
           variant="ghost"
           size="icon"
-          onClick={onClear}
+          onClick={() => {
+            onClear()
+            onVariantChange(null)
+          }}
           className="text-muted-foreground hover:text-red-500 hover:bg-red-50"
           title="Clear"
         >
@@ -234,6 +262,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [body, setBody] = useState('')
   const [labels, setLabels] = useState<LabelMap>({})
   const [model, setModel] = useState<string | null>(null)
+  const [modelVariant, setModelVariant] = useState<string | null>(null)
   const [priority, setPriority] = useState<string>('p2')
   const [repositoryName, setRepositoryName] = useState<string | null>(null)
   const [workflowProfileId, setWorkflowProfileId] = useState<string | null>(null)
@@ -291,9 +320,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
       createIssue({
         title,
         body: body || undefined,
-attachmentIds: extractAttachmentIds(body),
+        attachmentIds: extractAttachmentIds(body),
         labels: Object.keys(labels).length > 0 ? labels : undefined,
         ...(model ? { model } : {}),
+        ...(modelVariant ? { modelVariant } : {}),
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
@@ -311,6 +341,7 @@ attachmentIds: extractAttachmentIds(body),
     setBody('')
     setLabels({})
     setModel(null)
+    setModelVariant(null)
     setPriority('p2')
     setRepositoryName(null)
     setWorkflowProfileId(null)
@@ -479,7 +510,9 @@ attachmentIds: extractAttachmentIds(body),
             <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
             <ModelPresetSelect
               value={model}
+              variant={modelVariant}
               onChange={setModel}
+              onVariantChange={setModelVariant}
               onClear={() => setModel(null)}
             />
           </div>

@@ -9,6 +9,14 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
     Task<IReadOnlyList<string>> ListCoderModelsAsync();
 
     /// <summary>
+    /// Returns a per-model variants map aggregated across all registered runners.
+    /// The union of every runner's <c>CoderModelVariants</c> is folded so each model
+    /// carries the full set of variants any registered runner reports. Models with
+    /// no reported variants are absent from the returned map.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, string[]>> ListCoderModelVariantsAsync();
+
+    /// <summary>
     /// Returns all registered runner info entries in this registry without filtering.
     /// </summary>
     Task<IReadOnlyList<RunnerInfo>> ListAllAsync();

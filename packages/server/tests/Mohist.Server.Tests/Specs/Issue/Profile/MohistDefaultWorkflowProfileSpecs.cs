@@ -283,6 +283,39 @@ public class MohistDefaultWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void AgentConfig_WithModelAndVariant_PlacesBothInAgentVariable()
+    {
+        // Workflow-engine spec: BuildVariables captures the variant alongside
+        // the model at issue creation time so per-stage dispatch can carry
+        // both. BuildVariables is the source-of-truth seal for this invariant.
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-variant",
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Variant in agent config",
+        };
+
+        var variables = profile.BuildVariables(
+            "wr-1",
+            issue,
+            new WorkflowProjectContext("project-1", "Mohist", RepositoryBaseBranch: "main"),
+            new Dictionary<string, object?>
+            {
+                ["model"] = "anthropic/claude-opus-4-20250514",
+                ["variant"] = "high",
+            });
+
+        using var document = JsonDocument.Parse(variables);
+        var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("anthropic/claude-opus-4-20250514", agent.GetProperty("model").GetString());
+        Assert.Equal("high", agent.GetProperty("variant").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void StageVariables_MergesStageOverrides()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());

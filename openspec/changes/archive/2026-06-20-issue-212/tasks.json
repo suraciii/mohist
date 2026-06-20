@@ -1,0 +1,114 @@
+{
+  "project": "mohist-local",
+  "description": "Support optional model-bound reasoning variants (推理档位) across all model-config surfaces, sourced from opencode model discovery and delivered best-effort to coder sessions.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Runner discovers per-model reasoning variants via opencode models --verbose",
+      "spec": "specs/agent-runtime/spec.md#Model discovery does not create opencode sessions",
+      "description": "Switch discoverOpencodeModels (packages/runner/src/runtime/opencode-models.ts) from `opencode models` to `opencode models --verbose`, parse the `id\\n{json}` stream, and extract each model's top-level `variants` object into a flat list of variant names. Keep the registration `coderModels: string[]` unchanged and add a parallel `coderModelVariants: Record<modelId, string[]>` (model absent or mapped to [] when variants is absent/empty/unparseable). Parsing must be defensive so a malformed metadata block degrades to an empty variant set rather than failing discovery; the existing 30-minute discovery cache and command-failure error reporting are preserved.",
+      "acceptanceCriteria": [
+        "discoverOpencodeModels extracts each model id together with its variant-name list",
+        "Runner registration keeps coderModels: string[] unchanged and adds a parallel coderModelVariants: Record<modelId, string[]>",
+        "A model whose metadata has a populated variants map yields those variant names (e.g. low/medium/high/max)",
+        "A model whose metadata has variants:{} or a missing/malformed variants block yields variants:[] without failing discovery",
+        "When the opencode models command fails, discovery reports the error exactly as before (no regression)",
+        "The 30-minute discovery cache still suppresses repeated spawns within the window",
+        "Unit tests cover: populated variants, empty variants, malformed JSON fallback, and command-failure paths (vitest)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated packages/runner/src/runtime/opencode-models.ts + registration wiring in host.ts + passing runner unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This is the sole source of variant data for the whole feature (design D1). The coderModels: string[] + coderModelVariants map contract defined here is consumed by T-002."
+    },
+    {
+      "id": "T-002",
+      "title": "Server serves per-model variants from the opencode models endpoint",
+      "spec": "specs/http-api/spec.md#Opencode models endpoint exposes per-model variants",
+      "description": "Update RunnerRegistryGrain and the GET /api/projects/{projectId}/opencode/models route (packages/server/src/Mohist.Server/Api/OpencodeRoutes.cs) to accept the parallel coderModelVariants map from runner registration and serve a modelVariants: Record<modelId, string[]> map alongside the unchanged models: string[]. A model reporting no variants is absent from the map (or mapped to []) and is never omitted from models. The runner-status DTO and its Web consumer keep using coderModels: string[] unchanged. Keep the endpoint strictly additive: clients that ignore the map still receive model ids in the same shape as today.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{projectId}/opencode/models returns models: string[] unchanged plus a modelVariants map carrying each model's variant list as reported by registered runners",
+        "A registered model with no variants is absent from modelVariants (or []) and is still present in models",
+        "Aggregating runners with disjoint coderModels yields the union of models with each model's variants preserved",
+        "Integration test (ApiContractSpecs style) registers a runner reporting coderModelVariants and asserts the endpoint reflects them; the existing runner-status coderModels rendering is unchanged",
+        "npm test (server) passes with TreatWarningsAsErrors"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated OpencodeRoutes.cs + runner registry storage + passing server integration tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Consumes the coderModelVariants contract from T-001. The web picker (T-005) reads this endpoint's modelVariants map. coderModels: string[] stays unchanged so the runner-status surface needs no work."
+    },
+    {
+      "id": "T-003",
+      "title": "Server persists, round-trips, and dispatches issue/agent reasoning variant",
+      "spec": "specs/http-api/spec.md#Issue APIs expose model metadata",
+      "description": "Add an optional model-bound reasoning variant to issue and agent configuration on the server: issue-level `modelVariant` beside `model` and per-stage `stageModelVariants` beside `stageModels` (IssueInfo, IssueReadModel, IssueRoutes.Dtos, IssueQuerier), plus a `variant` key in the opaque agentConfig produced by BuildAgentConfig. Issue create/update/list/detail APIs must accept and return these fields, clear the variant when its model is cleared, and reject invalid model metadata as today. Thread the variant into BuildVariables at issue creation so per-stage agent dispatch carries it (no runtime re-resolution). Persist variants on the existing nullable JSON columns with no schema migration. `mo issue show` inherits the new fields automatically via the JSON read model.",
+      "acceptanceCriteria": [
+        "POST/PATCH /api/issues accept modelVariant and stageModelVariants and the detail/list responses return them",
+        "Setting a model to null clears its bound variant atomically on the same update",
+        "An issue created/updated with a model+variant retains the variant on subsequent reads (round-trip)",
+        "Invalid model metadata (non provider/model format) is still rejected with HTTP 400",
+        "Malformed stored stage_models JSON still returns the issue without per-stage overrides (no regression)",
+        "BuildVariables captures the variant into the agent config at issue creation; recovery/dispatch paths read the pre-merged value (workflow-engine spec)",
+        "No EF Core migration is added; variants ride existing JSON columns",
+        "Server specs cover round-trip, clear-on-clear, invalid-reject, and fixed-at-creation dispatch; npm test passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Issue domain/DTOs/querier + BuildVariables/BuildAgentConfig threading + passing server specs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Spans http-api + local-issue-store + workflow-engine delta specs (design D2, D4). Independent of the discovery endpoint (T-002) since persisted variant values are plain strings. If the CLI issue create/update --model path persists today, add a parallel --model-variant flag there; otherwise rely on the JSON show round-trip."
+    },
+    {
+      "id": "T-004",
+      "title": "Runner delivers reasoning variant to coder session best-effort",
+      "spec": "specs/agent-runtime/spec.md#Runner applies reasoning variant to coder session on a best-effort basis",
+      "description": "In packages/runner/src/actions/acp-agent.ts, extend resolveAgentConfig to read a `variant` from the agent/with config, and have resolveRequestedModel compose the effective model id as `${model}:${variant}` when a variant is present. applyRequestedModel then sets that composed id via the existing setSessionConfigOption call (no new session-config path); the existing try/catch already makes delivery best-effort. Update the session-reuse match logic (requestedModelMatchesSession, cachedModelAllowsReuse) so the composed id — including the variant suffix — participates in cache keying, so a variant change selects a fresh session. Do not pre-validate the variant against discovery before delivery.",
+      "acceptanceCriteria": [
+        "When dispatch carries a variant, the runner sets the model as provider/model:<variant> before prompt execution",
+        "When the model ignores/rejects an unsupported variant, the run still succeeds and the variant is not recorded as the failure reason",
+        "When dispatch carries no variant, the runner launches the session exactly as before this change",
+        "Changing only the variant (same base model) does not reuse a session cached under a different variant",
+        "Runner tests (acp-agent.spec.ts style) cover supported-variant apply, unsupported-variant non-failure, no-variant baseline, and variant-aware session reuse",
+        "npm run typecheck and npm test for packages/runner pass"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated acp-agent.ts variant resolution/composition + session-reuse keying + passing runner tests",
+      "dependsOn": ["T-001", "T-003"],
+      "passes": false,
+      "notes": "Design D5. BUILD SPIKE FIRST: confirm opencode honors the provider/model:<variant> id syntax across providers (open question in design.md) before finalizing; the existing try/catch guarantees best-effort even if a provider does not honor it."
+    },
+    {
+      "id": "T-005",
+      "title": "Web variant picker bound to the selected model on every model selector",
+      "spec": "specs/web-ui/spec.md#Web UI supports issue model overrides",
+      "description": "Add an optional reasoning-variant picker next to every model selector in the Web UI — issue default and per-stage overrides, project-level and per-stage defaults, and the Agent editor. The picker reads the selected model's entry from the modelVariants map returned by GET /api/projects/{id}/opencode/models, shows only those variants, hides entirely when the selected model has none, and refreshes when the model changes. On model change/clear, drop a previously stored variant the new model does not support; on reopen, show the stored variant as selected. Send modelVariant/stageModelVariants (and the agent variant) through the existing issue/agent create/update APIs.",
+      "acceptanceCriteria": [
+        "Every model selector surface renders a variant picker that presents only the selected model's discovery-reported variants",
+        "Selectors hide the variant picker for models absent from modelVariants (no variants)",
+        "Changing the model refreshes the picker and drops a stored variant the new model does not support",
+        "Reopening a selector for a model with a stored variant shows that variant selected",
+        "Issue/agent create and update send the variant alongside the model and persist it (verified against the API)",
+        "Web unit/component tests cover show-only-supported, hide-when-none, refresh-and-drop-on-model-change, and show-stored; e2e/a11y mocks for /opencode/models updated",
+        "npm run typecheck -w packages/web and npm run test:run -w packages/web pass"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Variant picker components wired into all model selectors + passing web tests",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Design D6. Reads variant sets from T-002's endpoint and writes via T-003's API. No runtime probing — purely discovery-driven."
+    }
+  ]
+}

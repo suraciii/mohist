@@ -3,6 +3,7 @@ import { ChevronRightIcon } from 'lucide-react'
 import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings'
 import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
+import { VariantPicker, resolveVariantAgainstModel } from '../../../shared/ui/VariantPicker'
 import { Button } from '@/shared/ui/components/button'
 import { CardSection } from '@/shared/ui/components/card-section'
 import type { SettingsSearchEntry } from '@/features/settings-search'
@@ -43,9 +44,12 @@ export function AiSettingsSection() {
   const setStageModels = useSetStageModels()
   const [stageOverridesOpen, setStageOverridesOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
+  const [localStageModelVariants, setLocalStageModelVariants] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (stageModelsData?.stageModels) setLocalStageModels(stageModelsData.stageModels)
+    if (stageModelsData?.stageModelVariants) setLocalStageModelVariants(stageModelsData.stageModelVariants)
+    else setLocalStageModelVariants({})
   }, [stageModelsData])
 
   useEffect(() => {
@@ -56,27 +60,67 @@ export function AiSettingsSection() {
     return () => window.removeEventListener(REVEAL_STAGE_MODEL_OVERRIDES_EVENT, revealStageOverrides)
   }, [])
 
+  const modelIds = availableModelIds?.models ?? []
+  const modelVariantsMap = availableModelIds?.modelVariants ?? {}
+
   const coderModels = useMemo(() => {
-    return (availableModelIds ?? [])
+    return modelIds
       .map((id): Model => ({ id, name: id.split('/').pop() || id, badges: [], contextWindow: 0 }))
       .sort((a, b) => a.id.localeCompare(b.id))
-  }, [availableModelIds])
+  }, [modelIds])
+
+  const storedDefaultModel = opencodeModelData?.model ?? null
+  const storedDefaultVariant = opencodeModelData?.variant ?? null
+  const defaultModelVariants = useMemo(
+    () => (storedDefaultModel ? modelVariantsMap[storedDefaultModel] ?? [] : []),
+    [storedDefaultModel, modelVariantsMap],
+  )
 
   const handleSetOpencodeModel = (modelId: string) => {
-    setOpencodeModel.mutate(modelId)
+    if (modelId === storedDefaultModel) return
+    setOpencodeModel.mutate({ model: modelId, variant: null })
+  }
+
+  const handleClearOpencodeModel = () => {
+    setOpencodeModel.mutate({ model: null, variant: null })
+  }
+
+  const handleSetDefaultVariant = (variant: string | null) => {
+    setOpencodeModel.mutate({ model: storedDefaultModel, variant })
   }
 
   const handleSetStageModel = (stage: string, modelId: string) => {
     const updated = { ...localStageModels, [stage]: modelId }
     setLocalStageModels(updated)
-    setStageModels.mutate({ stage, model: modelId })
+    setLocalStageModelVariants((prev) => {
+      const next = { ...prev }
+      delete next[stage]
+      return next
+    })
+    setStageModels.mutate({ stage, model: modelId, variant: null })
   }
 
   const handleClearStageModel = (stage: string) => {
     const updated = { ...localStageModels }
     delete updated[stage]
     setLocalStageModels(updated)
-    setStageModels.mutate({ stage, model: null })
+    setLocalStageModelVariants((prev) => {
+      const next = { ...prev }
+      delete next[stage]
+      return next
+    })
+    setStageModels.mutate({ stage, model: null, variant: null })
+  }
+
+  const handleSetStageVariant = (stage: string, variant: string | null) => {
+    const stageModel = localStageModels[stage] ?? null
+    setLocalStageModelVariants((prev) => {
+      const next = { ...prev }
+      if (variant) next[stage] = variant
+      else delete next[stage]
+      return next
+    })
+    setStageModels.mutate({ stage, model: stageModel, variant })
   }
 
   if (runtimeLoading || modelsLoading) {
@@ -104,14 +148,26 @@ export function AiSettingsSection() {
               <span className="text-xs text-muted-foreground">{coderModels.length} models available</span>
             </div>
             <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
-            <ModelSelect
-              id="settings-default-model"
-              value={opencodeModelData?.model ?? null}
-              placeholder="Opencode default"
-              models={coderModels}
-              onChange={handleSetOpencodeModel}
-              aria-labelledby={DEFAULT_MODEL_LABEL_ID}
-            />
+            <div className="flex items-center gap-2">
+              <ModelSelect
+                id="settings-default-model"
+                value={storedDefaultModel}
+                placeholder="Opencode default"
+                models={coderModels}
+                onChange={handleSetOpencodeModel}
+                onClear={storedDefaultModel ? handleClearOpencodeModel : undefined}
+                allowClear={!!storedDefaultModel}
+                aria-labelledby={DEFAULT_MODEL_LABEL_ID}
+              />
+              <VariantPicker
+                id="settings-default-model"
+                modelId={storedDefaultModel}
+                modelVariants={defaultModelVariants}
+                value={storedDefaultVariant}
+                onChange={handleSetDefaultVariant}
+                aria-label="Default model reasoning variant"
+              />
+            </div>
           </div>
         </CardSection>
       </SettingsSection>
@@ -135,21 +191,36 @@ export function AiSettingsSection() {
 
         {stageOverridesOpen && (
           <div id={STAGE_OVERRIDES_ID} className="mt-4 space-y-3 pl-6">
-            {STAGES.map((stage) => (
-              <div key={stage} className="space-y-1">
-                <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
-                <ModelSelect
-                  id={`settings-stage-model-${stage}`}
-                  value={localStageModels[stage] ?? null}
-                  placeholder="Default"
-                  models={coderModels}
-                  onChange={(modelId) => handleSetStageModel(stage, modelId)}
-                  onClear={() => handleClearStageModel(stage)}
-                  allowClear={!!localStageModels[stage]}
-                  aria-labelledby={`settings-stage-model-${stage}-label`}
-                />
-              </div>
-            ))}
+            {STAGES.map((stage) => {
+              const stageModel = localStageModels[stage] ?? null
+              const stageVariants = stageModel ? modelVariantsMap[stageModel] ?? [] : []
+              const stageVariant = resolveVariantAgainstModel(localStageModelVariants[stage], stageModel, modelVariantsMap)
+              return (
+                <div key={stage} className="space-y-1">
+                  <label id={`settings-stage-model-${stage}-label`} className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
+                  <div className="flex items-center gap-2">
+                    <ModelSelect
+                      id={`settings-stage-model-${stage}`}
+                      value={stageModel}
+                      placeholder="Default"
+                      models={coderModels}
+                      onChange={(modelId) => handleSetStageModel(stage, modelId)}
+                      onClear={() => handleClearStageModel(stage)}
+                      allowClear={!!stageModel}
+                      aria-labelledby={`settings-stage-model-${stage}-label`}
+                    />
+                    <VariantPicker
+                      id={`settings-stage-model-${stage}`}
+                      modelId={stageModel}
+                      modelVariants={stageVariants}
+                      value={stageVariant}
+                      onChange={(variant) => handleSetStageVariant(stage, variant)}
+                      aria-label={`${stage} stage reasoning variant`}
+                    />
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

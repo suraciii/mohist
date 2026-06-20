@@ -395,8 +395,10 @@ public class IssueQuerier
             Priority = issue.Priority,
             Risk = issue.Risk,
             Model = null,
+            ModelVariant = null,
             AgentConfig = null,
             StageModels = null,
+            StageModelVariants = null,
             StageVariables = null,
             CreatedAt = issue.CreatedAt.ToString("o"),
             UpdatedAt = issue.UpdatedAt.ToString("o"),
@@ -429,8 +431,10 @@ public class IssueQuerier
         Priority = issue.Priority,
         Risk = issue.Risk,
         Model = issue.Model,
+        ModelVariant = issue.ModelVariant,
         AgentConfig = issue.AgentConfig,
         StageModels = issue.StageModels,
+        StageModelVariants = issue.StageModelVariants,
         CreatedAt = issue.CreatedAt,
         UpdatedAt = issue.UpdatedAt,
         ArchivedAt = issue.ArchivedAt,
@@ -772,22 +776,30 @@ public class IssueQuerier
         var agentConfig = ReadAgentConfig(effective.Vars);
         issue.AgentConfig = agentConfig;
         issue.Model = ReadAgentModel(agentConfig);
+        issue.ModelVariant = ReadAgentVariant(agentConfig, hasModel: !string.IsNullOrWhiteSpace(issue.Model));
 
         if (effective.Stages is null || effective.Stages.Count == 0)
         {
             issue.StageModels = null;
+            issue.StageModelVariants = null;
             return;
         }
 
         var stageModels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var stageModelVariants = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (stage, variables) in effective.Stages)
         {
-            var model = ReadAgentModel(ReadAgentConfig(variables.Vars));
+            var stageAgentConfig = ReadAgentConfig(variables.Vars);
+            var model = ReadAgentModel(stageAgentConfig);
             if (!string.IsNullOrWhiteSpace(model))
                 stageModels[stage] = model;
+            var variant = ReadAgentVariant(stageAgentConfig, hasModel: !string.IsNullOrWhiteSpace(model));
+            if (!string.IsNullOrWhiteSpace(variant))
+                stageModelVariants[stage] = variant;
         }
 
         issue.StageModels = stageModels.Count > 0 ? stageModels : null;
+        issue.StageModelVariants = stageModelVariants.Count > 0 ? stageModelVariants : null;
     }
 
     private static Dictionary<string, object?>? ReadAgentConfig(JsonElement? vars)
@@ -806,6 +818,20 @@ public class IssueQuerier
             return null;
         if (raw is string model)
             return string.IsNullOrWhiteSpace(model) ? null : model;
+        if (raw is JsonElement { ValueKind: JsonValueKind.String } element)
+            return element.GetString();
+        return null;
+    }
+
+    private static string? ReadAgentVariant(Dictionary<string, object?>? agentConfig, bool hasModel)
+    {
+        // Variant is bound to its model: if no model, the variant is meaningless
+        // and is suppressed from the response, mirroring the clear-on-clear invariant.
+        if (!hasModel) return null;
+        if (agentConfig is null || !agentConfig.TryGetValue("variant", out var raw) || raw is null)
+            return null;
+        if (raw is string variant)
+            return string.IsNullOrWhiteSpace(variant) ? null : variant;
         if (raw is JsonElement { ValueKind: JsonValueKind.String } element)
             return element.GetString();
         return null;

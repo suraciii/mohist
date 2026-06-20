@@ -91,6 +91,7 @@ export interface RunnerRegistration {
   projectId?: string
   hostname?: string
   coderModels?: string[]
+  coderModelVariants?: Record<string, string[]>
   maxWorkflowSlots?: number
   buildGitHash?: string | null
 }

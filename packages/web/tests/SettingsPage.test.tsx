@@ -90,7 +90,7 @@ beforeEach(() => {
     error: null,
   })
   ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { model: null },
+    data: { model: null, variant: null },
     isLoading: false,
     error: null,
   })
@@ -99,7 +99,7 @@ beforeEach(() => {
     isPending: false,
   })
   ;(useStageModels as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { stageModels: null },
+    data: { stageModels: null, stageModelVariants: null },
     isLoading: false,
     error: null,
   })
@@ -108,7 +108,7 @@ beforeEach(() => {
     isPending: false,
   })
   ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: ['openai/gpt-4', 'anthropic/claude-3-opus'],
+    data: { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} },
     isLoading: false,
     error: null,
   })
@@ -190,6 +190,48 @@ describe('SettingsPage', () => {
       expect(screen.queryByText('Command')).not.toBeInTheDocument()
       expect(screen.queryByText('Models')).not.toBeInTheDocument()
       expect(screen.queryByText(/Mohist does not configure AI providers/i)).not.toBeInTheDocument()
+    })
+
+    it('renders the default model variant picker with the stored variant when the model reports variants', () => {
+      ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: {
+          models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
+          modelVariants: { 'anthropic/claude-3-opus': ['low', 'medium', 'high'] },
+        },
+        isLoading: false,
+        error: null,
+      })
+      ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { model: 'anthropic/claude-3-opus', variant: 'high' },
+        isLoading: false,
+        error: null,
+      })
+
+      renderWithQueryClient(<SettingsPage />)
+
+      const trigger = screen.getByTestId('settings-default-model-variant-trigger')
+      expect(trigger).toBeInTheDocument()
+      expect(trigger).toHaveTextContent('high')
+    })
+
+    it('hides the default model variant picker when the model is not in the variants map', () => {
+      ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: {
+          models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
+          modelVariants: { 'anthropic/claude-3-opus': [] },
+        },
+        isLoading: false,
+        error: null,
+      })
+      ;(useOpencodeModel as ReturnType<typeof vi.fn>).mockReturnValue({
+        data: { model: 'anthropic/claude-3-opus', variant: 'high' },
+        isLoading: false,
+        error: null,
+      })
+
+      renderWithQueryClient(<SettingsPage />)
+
+      expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
     })
   })
 

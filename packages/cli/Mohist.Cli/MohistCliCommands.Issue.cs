@@ -124,6 +124,7 @@ internal static class IssueCommands
         var priorityOpt = MohistCliCommands.PriorityOption();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
+        var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
         var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low, medium, high); overrides frontmatter risk" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("creating");
@@ -136,6 +137,7 @@ internal static class IssueCommands
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
+        cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
         cmd.Options.Add(riskOpt);
         cmd.Options.Add(readyOpt);
@@ -151,6 +153,7 @@ internal static class IssueCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
+            var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
             var risk = ctx.GetValue(riskOpt);
             var ready = ctx.GetValue(readyOpt);
@@ -204,6 +207,7 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                     labels = labelMap,
                     priority = priority ?? "p2",
                     model,
+                    modelVariant,
                     workflowProfileId = effectiveWorkflow,
                     risk = effectiveRisk,
                     isDraft,
@@ -314,6 +318,7 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
         var priorityOpt = MohistCliCommands.PriorityOption();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
+        var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("updating");
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
@@ -325,6 +330,7 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
+        cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
         cmd.SetAction(ctx =>
@@ -339,6 +345,7 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
+            var modelVariant = ctx.GetValue(modelVariantOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
             return UpdateAsync();
@@ -388,6 +395,7 @@ var labelParse = LabelDelta.Parse(labels);
                         labels = merged,
                         priority,
                         model,
+                        modelVariant,
                         isDraft = draftState switch
                         {
                             MohistCliCommands.DraftFlagState.Draft => (bool?)true,
@@ -405,6 +413,7 @@ var labelParse = LabelDelta.Parse(labels);
                         labels = (Dictionary<string, string>?)null,
                         priority,
                         model,
+                        modelVariant,
                         isDraft = draftState switch
                         {
                             MohistCliCommands.DraftFlagState.Draft => (bool?)true,

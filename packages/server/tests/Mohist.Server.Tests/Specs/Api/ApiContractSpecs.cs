@@ -212,6 +212,175 @@ public class ApiContractSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task OpencodeModels_RunnerReportsVariants_ReturnsModelVariantsMap()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"variants-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"variant-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "test-host",
+            projectId,
+            coderModels = new[] { "zai/glm-5", "openai/gpt-5.5" },
+            coderModelVariants = new Dictionary<string, string[]>
+            {
+                ["zai/glm-5"] = new[] { "low", "medium", "high", "max" },
+                ["openai/gpt-5.5"] = new[] { "minimal", "low", "medium", "high" },
+            },
+        });
+        try
+        {
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{projectId}/opencode/models");
+
+            Assert.Contains("zai/glm-5", response.Models);
+            Assert.Contains("openai/gpt-5.5", response.Models);
+            Assert.Equal(new[] { "low", "medium", "high", "max" }, response.ModelVariants["zai/glm-5"]);
+            Assert.Equal(new[] { "minimal", "low", "medium", "high" }, response.ModelVariants["openai/gpt-5.5"]);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task OpencodeModels_ModelWithoutVariants_KeepsModelAndOmitsFromVariantsMap()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"no-variants-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"no-variants-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "test-host",
+            projectId,
+            coderModels = new[] { "zai/glm-5", "openai/gpt-5.5" },
+            coderModelVariants = new Dictionary<string, string[]>
+            {
+                ["zai/glm-5"] = new[] { "low", "high" },
+            },
+        });
+        try
+        {
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{projectId}/opencode/models");
+
+            Assert.Contains("openai/gpt-5.5", response.Models);
+            Assert.Contains("zai/glm-5", response.Models);
+            Assert.Equal(new[] { "low", "high" }, response.ModelVariants["zai/glm-5"]);
+            Assert.False(response.ModelVariants.ContainsKey("openai/gpt-5.5"));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task OpencodeModels_DisjointRunnerModels_ProducesUnionWithVariantsPreserved()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"union-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var projectRunnerId = $"union-project-runner-{Guid.NewGuid():N}";
+        var globalRunnerId = $"union-global-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{projectRunnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "project-host",
+            projectId,
+            coderModels = new[] { "zai/glm-5" },
+            coderModelVariants = new Dictionary<string, string[]>
+            {
+                ["zai/glm-5"] = new[] { "low", "medium" },
+            },
+        });
+        await _fixture.Client.PostOkAsync($"/api/runner/{globalRunnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "global-host",
+            coderModels = new[] { "openai/gpt-5.5" },
+            coderModelVariants = new Dictionary<string, string[]>
+            {
+                ["openai/gpt-5.5"] = new[] { "minimal", "high" },
+            },
+        });
+
+        try
+        {
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{projectId}/opencode/models");
+
+            Assert.Equal(new[] { "openai/gpt-5.5", "zai/glm-5" }, response.Models);
+            Assert.Equal(new[] { "low", "medium" }, response.ModelVariants["zai/glm-5"]);
+            Assert.Equal(new[] { "minimal", "high" }, response.ModelVariants["openai/gpt-5.5"]);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{projectRunnerId}/unregister", null);
+            await _fixture.Client.PostAsync($"/api/runner/{globalRunnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task RunnerStatus_RunnerWithVariants_KeepsCoderModelsAsStringArray()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"status-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"status-variant-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "status-host",
+            projectId,
+            coderModels = new[] { "zai/glm-5" },
+            coderModelVariants = new Dictionary<string, string[]>
+            {
+                ["zai/glm-5"] = new[] { "low", "high" },
+            },
+        });
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var runners = payload.GetProperty("data").GetProperty("runners");
+            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
+            Assert.NotEqual(JsonValueKind.Undefined, runner.ValueKind);
+
+            var coderModels = runner.GetProperty("coderModels");
+            Assert.Equal(JsonValueKind.Array, coderModels.ValueKind);
+            Assert.Single(coderModels.EnumerateArray());
+            Assert.Equal("zai/glm-5", coderModels[0].GetString());
+
+            Assert.False(runner.TryGetProperty("coderModelVariants", out _));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task IssueRebaseApi_QueuesWorkflowTask()
     {
         var projectName = UniqueProjectName("rebase");
@@ -266,7 +435,10 @@ public class ApiContractSpecs
         }
     }
 
-    private sealed record OpencodeModelsDto(string[] Models);
+    private sealed record OpencodeModelsDto(string[] Models, Dictionary<string, string[]> ModelVariants)
+    {
+        public OpencodeModelsDto() : this(Array.Empty<string>(), new Dictionary<string, string[]>()) { }
+    }
     private sealed record ProjectDto(string Id, string Name);
     private sealed record RepositoryDto(string Name);
     private sealed record IssueDto(string Id, string ProjectId, int Number);

@@ -20,7 +20,9 @@ public class IssueInfo
     public string Priority { get; set; } = "p2";
     public string? Risk { get; set; }
     public string? Model { get; set; }
+    public string? ModelVariant { get; set; }
     public Dictionary<string, string>? StageModels { get; set; }
+    public Dictionary<string, string>? StageModelVariants { get; set; }
     public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
     public Dictionary<string, object?>? AgentConfig { get; set; }
     public string CreatedAt { get; set; } = "";
