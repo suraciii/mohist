@@ -3,7 +3,8 @@ import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import { deleteDirectory, runCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
-import type { WorkItem } from "../core/types.js"
+import { parseObject } from "../core/json.js"
+import type { JsonObject, WorkItem } from "../core/types.js"
 
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
@@ -32,9 +33,10 @@ export class RunnerSignalRClient {
   }
 
   private registerHandlers(): void {
-    this.connection.on("MaterializeWorkspace", async (work: WorkItem) => {
+    this.connection.on("MaterializeWorkspace", async (raw: unknown) => {
       const ac = new AbortController()
       try {
+        const work = normalizeMaterializePayload(raw)
         const info = await this.workspaceManager.materialize(work, ac.signal)
         return { ok: true, workspacePath: info.path, branch: info.branch ?? null, changeDir: info.changeDir ?? null }
       } catch (error) {
@@ -190,6 +192,54 @@ export interface WorkspaceQuery {
   workspacePath?: string | null
   branch?: string | null
   baseBranch?: string | null
+}
+
+// The server sends a WorkDispatch over SignalR whose `variables` and `with`
+// fields are JSON-encoded strings (WorkDispatch.Variables is `string?` on the
+// C# side). The HTTP poll path normalizes this via toWorkItem/parseObject, but
+// the MaterializeWorkspace handler previously passed the raw payload straight
+// to workspaceManager.materialize, leaving `variables` as a string. The string
+// then failed the `typeof current !== "object"` guard in workspace.at(), so
+// repository.gitUrl and issue.number read as undefined and every retry-time
+// re-materialization threw "Workspace requires repository.gitUrl...".
+//
+// This helper mirrors the HTTP path's normalization so both dispatch paths
+// hand workspaceManager.materialize a parsed object. It tolerates either wire
+// shape (string or already-object) so it stays correct if the server later
+// switches to sending variables as a raw JSON object.
+export function normalizeMaterializePayload(raw: unknown): WorkItem {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("MaterializeWorkspace payload is not an object")
+  }
+  const src = raw as Record<string, unknown>
+  const variables = normalizeJsonObject(src.variables)
+  const withInput = normalizeJsonObject(src.with)
+  return {
+    workflowRunId: stringOrEmpty(src.workflowRunId),
+    workId: stringOrEmpty(src.workId),
+    workType: typeof src.workType === "string" ? src.workType : "task",
+    stage: typeof src.stage === "string" ? src.stage : null,
+    title: typeof src.title === "string" ? src.title : null,
+    uses: typeof src.uses === "string" ? src.uses : null,
+    with: withInput,
+    variables,
+    projectId: typeof src.projectId === "string" ? src.projectId : null,
+    issueNumber: typeof src.issueNumber === "number" ? src.issueNumber : null,
+    artifacts: normalizeJsonObject(src.artifacts),
+    outputs: null,
+    ownerKind: typeof src.ownerKind === "string" ? src.ownerKind : null,
+    agentJobId: typeof src.agentJobId === "string" ? src.agentJobId : null,
+  }
+}
+
+function normalizeJsonObject(value: unknown): JsonObject | null {
+  if (typeof value === "string") return parseObject(value)
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as JsonObject
+  return null
+}
+
+function stringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value : ""
 }
 
 export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined): { workDir: string; baseBranch: string; head: string } | null {
