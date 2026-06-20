@@ -28,6 +28,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
   const [body, setBody] = useState(issue.body ?? '')
   const [labels, setLabels] = useState<LabelMap>(issue.labels ?? {})
   const [priority, setPriority] = useState<string>(issue.priority ?? 'p2')
+  const [isDraft, setIsDraft] = useState(issue.isDraft)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -36,6 +37,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
       setBody(issue.body ?? '')
       setLabels(issue.labels ?? {})
       setPriority(issue.priority ?? 'p2')
+      setIsDraft(issue.isDraft)
     }
   }, [open, issue])
 
@@ -47,6 +49,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
         attachmentIds: extractAttachmentIds(body),
         labels,
         priority,
+        isDraft,
       }, issue.projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -121,6 +124,38 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
                   </Button>
                 )
               })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Status</label>
+            <div className="flex gap-1.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setIsDraft(true)}
+                className={`rounded-full ${
+                  isDraft
+                    ? 'ring-1 ring-offset-1 ring-muted-foreground bg-muted text-muted-foreground'
+                    : 'hover:opacity-80 text-muted-foreground'
+                }`}
+              >
+                Draft
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setIsDraft(false)}
+                className={`rounded-full ${
+                  !isDraft
+                    ? 'ring-1 ring-offset-1 ring-green-600 bg-green-100 text-green-700'
+                    : 'hover:opacity-80 text-muted-foreground'
+                }`}
+              >
+                Ready
+              </Button>
             </div>
           </div>
 
