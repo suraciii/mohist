@@ -31,6 +31,8 @@ internal sealed class SkillInstallService
         _error = error;
     }
 
+    private const string EntrySkillName = "mohist";
+
     public async Task<int> InstallAsync(SkillInstallOptions options)
     {
         var validationError = Validate(options);
@@ -41,28 +43,16 @@ internal sealed class SkillInstallService
         }
 
         var targetRoot = ResolveTargetRoot(options);
-        var results = new List<SkillInstallResult>();
-        foreach (var skill in _assets.ListVisibleSkills())
+        var skills = _assets.ListVisibleSkills();
+        var entrySkill = skills.FirstOrDefault(s => s.Name == EntrySkillName);
+        if (entrySkill is null || string.IsNullOrWhiteSpace(entrySkill.Name))
         {
-            SkillInstallResult result;
-            if (options.Hermes)
-            {
-                var resolved = await TryInstallHermesSkillAsync(targetRoot, skill.Name);
-                if (resolved.Error is not null)
-                {
-                    await _error.WriteLineAsync(resolved.Error);
-                    return 1;
-                }
-                result = resolved.Result;
-            }
-            else
-            {
-                result = await InstallDiscoveryStubAsync(targetRoot, skill);
-            }
-            results.Add(result);
+            await _error.WriteLineAsync($"Built-in entry skill '{EntrySkillName}' is missing.");
+            return 1;
         }
 
-        await WriteSummaryAsync(options, targetRoot, results);
+        var result = await InstallDiscoveryStubAsync(targetRoot, entrySkill);
+        await WriteSummaryAsync(options, targetRoot, [result]);
         return 0;
     }
 
@@ -90,40 +80,6 @@ internal sealed class SkillInstallService
         var existed = _fileSystem.Exists(skillPath);
         await _fileSystem.WriteAllTextAsync(skillPath, BuildDiscoveryStub(skill));
         return new SkillInstallResult(skill.Name, existed ? "updated" : "created");
-    }
-
-    private async Task<SkillInstallResult> InstallHermesSkillAsync(string targetRoot, string skillName)
-    {
-        var asset = _assets.GetSkill(skillName, includeSupplementaryFiles: true);
-        if (!asset.Found || asset.Skill is null)
-            throw new InvalidOperationException(asset.Error ?? $"Unable to resolve built-in skill '{skillName}'.");
-
-        var sourceRoot = asset.Skill.DirectoryPath;
-        var targetSkillRoot = Path.Combine(targetRoot, skillName);
-        var existed = _fileSystem.DirectoryExists(targetSkillRoot);
-
-        foreach (var file in _fileSystem.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
-        {
-            var relativePath = Path.GetRelativePath(sourceRoot, file);
-            var destinationPath = Path.Combine(targetSkillRoot, relativePath);
-            var contents = await _fileSystem.ReadAllTextAsync(file);
-            await _fileSystem.WriteAllTextAsync(destinationPath, contents);
-        }
-
-        return new SkillInstallResult(skillName, existed ? "updated" : "created");
-    }
-
-    private async Task<(SkillInstallResult Result, string? Error)> TryInstallHermesSkillAsync(string targetRoot, string skillName)
-    {
-        try
-        {
-            var result = await InstallHermesSkillAsync(targetRoot, skillName);
-            return (result, null);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return (new SkillInstallResult(skillName, "error"), ex.Message);
-        }
     }
 
     private async Task WriteSummaryAsync(SkillInstallOptions options, string targetRoot, IReadOnlyList<SkillInstallResult> results)
