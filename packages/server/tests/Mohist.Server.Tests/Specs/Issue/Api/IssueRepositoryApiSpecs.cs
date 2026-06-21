@@ -153,7 +153,7 @@ public class IssueRepositoryApiSpecs
         Assert.NotNull(fetched);
         Assert.Null(fetched!.Repository);
         Assert.NotNull(fetched.RepositoryProblem);
-        Assert.Equal("RepositoryNotFound", fetched.RepositoryProblem!.Code);
+        Assert.Equal("repositoryNotFound", fetched.RepositoryProblem!.Code);
         Assert.Equal("secondary", fetched.RepositoryProblem.RepositoryRef);
         Assert.NotNull(fetched.RepositoryProblem.CandidateNames);
         Assert.Contains("main", fetched.RepositoryProblem.CandidateNames!);

@@ -73,7 +73,7 @@ public class LabelCatalogApiSpecs
         Assert.NotNull(envelope.Data);
         Assert.Equal("module", envelope.Data.Key);
         Assert.Equal("Classifies the subsystem", envelope.Data.Description);
-        Assert.Equal("User", envelope.Data.Origin);
+        Assert.Equal("user", envelope.Data.Origin);
         Assert.NotNull(envelope.Data.SupportedValues);
         Assert.Equal(2, envelope.Data.SupportedValues.Count);
     }
@@ -116,7 +116,7 @@ public class LabelCatalogApiSpecs
         var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
             $"/api/projects/{project.Id}/labels/catalog");
         var refactorDef = Assert.Single(definitions, d => d.Key == "refactor");
-        Assert.Equal("System", refactorDef.Origin);
+        Assert.Equal("system", refactorDef.Origin);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -173,7 +173,7 @@ public class LabelCatalogApiSpecs
         Assert.True(envelope.Success);
         Assert.Equal("module", envelope.Data!.Key);
         Assert.Equal("Updated description", envelope.Data.Description);
-        Assert.Equal("User", envelope.Data.Origin);
+        Assert.Equal("user", envelope.Data.Origin);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
