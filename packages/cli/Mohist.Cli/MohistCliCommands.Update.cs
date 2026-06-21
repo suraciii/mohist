@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using System.Net;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
@@ -131,7 +132,10 @@ internal sealed record CliOutcomeRequest(
 
 internal static class CliOutcomeJson
 {
-    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 }
 
 internal sealed class UpdateContext

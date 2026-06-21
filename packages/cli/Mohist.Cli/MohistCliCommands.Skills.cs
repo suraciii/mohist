@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -6,6 +7,11 @@ namespace Mohist.Cli;
 
 internal static class SkillsCommands
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     public static Command Build(IServiceProvider provider)
     {
         var skills = new Command("skills", "Manage coder agent skills");
@@ -76,7 +82,7 @@ internal static class SkillsCommands
             var skills = assets.ListVisibleSkills();
             if (json)
             {
-                await output.WriteLineAsync(JsonSerializer.Serialize(skills));
+                await output.WriteLineAsync(JsonSerializer.Serialize(skills, JsonOptions));
                 return 0;
             }
 
@@ -136,7 +142,7 @@ internal static class SkillsCommands
                 }
 
                 if (json)
-                    await output.WriteLineAsync(JsonSerializer.Serialize(skills));
+                    await output.WriteLineAsync(JsonSerializer.Serialize(skills, JsonOptions));
 
                 return 0;
             }
@@ -161,7 +167,7 @@ internal static class SkillsCommands
                     name = skillResult.Skill.Name,
                     description = skillResult.Skill.Description,
                     content = BuildSkillOutput(skillResult.Skill, full),
-                }));
+                }, JsonOptions));
                 return 0;
             }
 
@@ -193,7 +199,7 @@ internal static class SkillsCommands
 
             if (json)
             {
-                await output.WriteLineAsync(JsonSerializer.Serialize(new { name = result.Skill.Name, path = result.Skill.DirectoryPath }));
+                await output.WriteLineAsync(JsonSerializer.Serialize(new { name = result.Skill.Name, path = result.Skill.DirectoryPath }, JsonOptions));
                 return 0;
             }
 

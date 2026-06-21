@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Events.Hub;
@@ -141,6 +142,11 @@ public static class MohistServiceRegistration
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
         services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options);
+
+        services.ConfigureHttpJsonOptions(options =>
+        {
+            options.SerializerOptions.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
+        });
 
         return services;
     }
