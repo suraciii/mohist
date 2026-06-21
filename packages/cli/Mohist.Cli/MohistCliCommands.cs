@@ -28,7 +28,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(LabelCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
-        root.Subcommands.Add(OtelCommands.Build(api, provider.GetRequiredService<IEnvironmentVariableProvider>()));
+        root.Subcommands.Add(OtelCommands.Build(api, provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance));
 
         return root;
     }
