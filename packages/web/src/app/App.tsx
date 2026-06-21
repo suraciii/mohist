@@ -23,6 +23,7 @@ import { DashboardPage } from '../pages/dashboard/ui/DashboardPage'
 import { IssuesPage } from '../pages/issues/ui/IssuesPage'
 import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
+import { RunnerDetailPage } from '../pages/runner-detail/ui/RunnerDetailPage'
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -67,6 +68,7 @@ function AppContent() {
                 <Route path="archived" element={<ArchivedPage />} />
                 <Route path="epics" element={<EpicListPage />} />
                 <Route path="epics/:id" element={<EpicDetailPage />} />
+                <Route path="runners/:runnerId" element={<RunnerDetailPage />} />
               </Route>
             </Route>
           </Routes>

@@ -349,8 +349,8 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         await runner.AssignWorkAsync(dispatch);
 
         var state = await runner.GetRuntimeStateAsync();
-        Assert.Single(state.ActiveWorkflowRunIds);
-        Assert.Equal(agentJobId, state.ActiveWorkflowRunIds[0]);
+        Assert.Single(state.ActiveWorks);
+        Assert.Equal(agentJobId, state.ActiveWorks[0].OwnerId);
     }
 }
 

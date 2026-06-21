@@ -13,7 +13,7 @@ public sealed record RunnerStatusView(
     IReadOnlyList<string> CoderModels,
     int CoderModelCount,
     RunnerCapacityView? Capacity,
-    RunnerActiveWorkView? ActiveWork,
+    IReadOnlyList<RunnerActiveWorkView> ActiveWorks,
     string? BuildGitHash = null);
 
 public sealed record RunnerScopeView(
@@ -27,7 +27,14 @@ public sealed record RunnerCapacityView(
 
 public sealed record RunnerActiveWorkView(
     string WorkId,
-    string WorkflowRunId,
-    string? WorkType = null,
+    string OwnerKind,
+    string OwnerId,
+    string WorkType,
     string? Stage = null,
-    string? Title = null);
+    string? Title = null,
+    RunnerActiveWorkIssueView? Issue = null);
+
+public sealed record RunnerActiveWorkIssueView(
+    string ProjectId,
+    string IssueId,
+    int IssueNumber);

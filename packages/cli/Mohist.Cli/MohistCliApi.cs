@@ -205,6 +205,144 @@ internal sealed class MohistCliApi
         return 0;
     }
 
+    public async Task<int> PrintRunnerShowAsync(string projectId, string runnerIdEncoded, string mode)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
+            return 1;
+        }
+
+        var path = $"/api/projects/{Uri.EscapeDataString(projectId)}/runners/{runnerIdEncoded}";
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.GetAsync(path);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            _err.WriteLine($"Runner '{runnerIdEncoded}' not found");
+            return 4;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+            var error = node?["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+            var code = node?["code"]?.GetValue<string>();
+            _err.WriteLine(code is null ? error : $"{error} ({code})");
+            return 1;
+        }
+
+        await using var okStream = await response.Content.ReadAsStreamAsync();
+        JsonNode? okNode = okStream.Length == 0 ? null : await JsonNode.ParseAsync(okStream);
+        var runner = okNode?["data"]?["runner"] as JsonObject;
+        if (runner is null)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            _out.WriteLine(runner.ToJsonString(JsonOptions));
+            return 0;
+        }
+
+        RenderRunnerShow(runner);
+        return 0;
+    }
+
+    private void RenderRunnerShow(JsonObject runner)
+    {
+        _out.WriteLine($"Runner: {StringOfNullable(runner, "id")}");
+        _out.WriteLine();
+        _out.WriteLine("Identity");
+        WriteKeyValue("  kind", StringOfNullable(runner, "kind"));
+        WriteKeyValue("  hostname", StringOfNullable(runner, "hostname"));
+        var scope = runner["scope"] as JsonObject;
+        var scopeType = StringOfNullable(scope, "type");
+        var scopeDetail = scopeType == "project"
+            ? $"{scopeType} ({StringOfNullable(scope, "projectId")})"
+            : scopeType;
+        WriteKeyValue("  scope", scopeDetail);
+        WriteKeyValue("  registeredAt", StringOfNullable(runner, "registeredAt"));
+        WriteKeyValue("  buildGitHash", StringOfNullable(runner, "buildGitHash"));
+
+        _out.WriteLine();
+        _out.WriteLine("Capabilities");
+        var caps = (runner["capabilities"] as JsonArray ?? new JsonArray())
+            .Select(v => v?.GetValue<string>() ?? string.Empty)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+        WriteKeyValue("  capabilities", caps.Count == 0 ? "(none)" : string.Join(", ", caps));
+        var coderModels = (runner["coderModels"] as JsonArray ?? new JsonArray())
+            .Select(v => v?.GetValue<string>() ?? string.Empty)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+        var coderModelCount = runner["coderModelCount"]?.GetValue<int?>() ?? coderModels.Count;
+        WriteKeyValue("  coderModels", coderModels.Count == 0 ? "(none)" : $"{string.Join(", ", coderModels)} ({coderModelCount})");
+        var capacity = runner["capacity"] as JsonObject;
+        var maxSlots = capacity?["totalSlots"]?.GetValue<int?>();
+        WriteKeyValue("  maxWorkflowSlots", maxSlots?.ToString() ?? "(unknown)");
+
+        _out.WriteLine();
+        _out.WriteLine("Active Works");
+        var works = runner["activeWorks"] as JsonArray ?? new JsonArray();
+        if (works.Count == 0)
+        {
+            _out.WriteLine("  (no active works)");
+        }
+        else
+        {
+            for (var i = 0; i < works.Count; i++)
+            {
+                if (works[i] is not JsonObject work) continue;
+                _out.WriteLine($"  [{i + 1}] workId: {StringOfNullable(work, "workId")}");
+                WriteKeyValue("      workType", StringOfNullable(work, "workType"));
+                var ownerKind = StringOfNullable(work, "ownerKind");
+                var ownerId = StringOfNullable(work, "ownerId");
+                WriteKeyValue("      owner", string.IsNullOrEmpty(ownerId) ? ownerKind : $"{ownerKind} {ownerId}");
+                WriteKeyValue("      stage", StringOfNullable(work, "stage"));
+                WriteKeyValue("      title", StringOfNullable(work, "title"));
+                if (work["issue"] is JsonObject issue)
+                {
+                    var issueNumber = issue["issueNumber"]?.GetValue<int?>();
+                    WriteKeyValue("      issue", issueNumber?.ToString() ?? StringOfNullable(issue, "issueId"));
+                }
+            }
+        }
+
+        _out.WriteLine();
+        _out.WriteLine("Health");
+        WriteKeyValue("  status", StringOfNullable(runner, "status"));
+        WriteKeyValue("  connectionState", StringOfNullable(runner, "connectionState"));
+        WriteKeyValue("  lastHeartbeatAt", StringOfNullable(runner, "lastHeartbeatAt"));
+        if (capacity is not null)
+        {
+            var used = capacity["usedSlots"]?.GetValue<int?>();
+            var total = capacity["totalSlots"]?.GetValue<int?>();
+            if (used is not null && total is not null)
+                WriteKeyValue("  capacity", $"{used}/{total} slots");
+        }
+    }
+
+    private void WriteKeyValue(string key, string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            _out.WriteLine($"{key}:");
+        else
+            _out.WriteLine($"{key}: {value}");
+    }
+
     public enum RunnerScopeFilter
     {
         All,

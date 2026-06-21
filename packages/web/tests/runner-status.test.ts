@@ -12,6 +12,7 @@ function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
     capabilities: [],
     coderModels: [],
     coderModelCount: 0,
+    activeWorks: [],
     ...overrides,
   }
 }
@@ -45,7 +46,7 @@ describe('deriveRunnerSummary', () => {
       makeRow({
         status: 'busy',
         connectionState: 'connected',
-        activeWork: { workId: 'w1', workflowRunId: 'wf1' },
+        activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
       }),
     ]
     const summary = deriveRunnerSummary(rows)
@@ -71,7 +72,7 @@ describe('deriveRunnerSummary', () => {
       makeRow({
         status: 'busy',
         connectionState: 'disconnected',
-        activeWork: { workId: 'w1', workflowRunId: 'wf1' },
+        activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
       }),
     ]
     const summary = deriveRunnerSummary(rows)
@@ -82,7 +83,12 @@ describe('deriveRunnerSummary', () => {
   it('counts both idle and busy connected runners', () => {
     const rows = [
       makeRow({ id: 'r1', status: 'idle', connectionState: 'connected' }),
-      makeRow({ id: 'r2', status: 'busy', connectionState: 'connected', activeWork: { workId: 'w1', workflowRunId: 'wf1' } }),
+      makeRow({
+        id: 'r2',
+        status: 'busy',
+        connectionState: 'connected',
+        activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
+      }),
     ]
     const summary = deriveRunnerSummary(rows)
     expect(summary.hasConnectedCapacity).toBe(true)

@@ -90,7 +90,7 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var state = await runner.GetRuntimeStateAsync();
-        Assert.Contains(jobKey, state.ActiveWorkflowRunIds);
+        Assert.Contains(jobKey, state.ActiveWorks.Select(w => w.OwnerId));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

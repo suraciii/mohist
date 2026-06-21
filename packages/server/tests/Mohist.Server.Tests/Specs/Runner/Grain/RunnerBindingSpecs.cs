@@ -151,7 +151,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync("wf-runtime-read", runnerId);
 
         var runtime = await runner.GetRuntimeStateAsync();
-        Assert.Contains("wf-runtime-read", runtime.ActiveWorkflowRunIds);
+        Assert.Contains("wf-runtime-read", runtime.ActiveWorks.Select(w => w.OwnerId));
 
         var work = await runner.PollAsync();
         Assert.NotNull(work);

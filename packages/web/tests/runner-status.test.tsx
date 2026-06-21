@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { fireEvent, render, screen, cleanup, within } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import React from 'react'
+import type { Project } from '../src/entities/project'
+import { ProjectProvider } from '../src/entities/project'
 import type { RunnerStatusRow, RunnerStatusSummary } from '../src/entities/runner/model/types'
 import { RunnerSummary } from '../src/widgets/runner-status/ui/RunnerSummary'
 import { RunnerList, RunnerListCard } from '../src/widgets/runner-status/ui/RunnerList'
@@ -13,6 +15,14 @@ vi.mock('../src/entities/runner', () => ({
 }))
 
 const { useRunners } = await import('../src/entities/runner')
+
+const TEST_PROJECT: Project = {
+  id: 'proj-1',
+  name: 'mohist-local',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+  repositories: [],
+}
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   return {
@@ -27,6 +37,7 @@ function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
     registeredAt: '2026-01-01T00:00:00Z',
     lastHeartbeatAt: '2026-01-01T12:00:00Z',
     connectionState: 'connected',
+    activeWorks: [],
     ...overrides,
   }
 }
@@ -44,6 +55,29 @@ function makeSummary(overrides: Partial<RunnerStatusSummary> = {}): RunnerStatus
 const RUNNER_START_HINT = 'Start a runner with: npx mohist runner'
 const RUNNER_START_HINT_LIST = 'npx mohist runner'
 
+function renderInRouter(ui: React.ReactNode, { withProject = false, initialEntries }: { withProject?: boolean; initialEntries?: string[] } = {}) {
+  const tree = (
+    <MemoryRouter initialEntries={initialEntries}>
+      {withProject ? <ProjectProvider initialProjects={[TEST_PROJECT]} initialProjectId={TEST_PROJECT.id}>{ui}</ProjectProvider> : ui}
+    </MemoryRouter>
+  )
+  return render(tree)
+}
+
+function renderInProjectRoutes(ui: React.ReactNode) {
+  return render(
+    <MemoryRouter initialEntries={['/mohist-local/activity']}>
+      <ProjectProvider initialProjects={[TEST_PROJECT]} initialProjectId={TEST_PROJECT.id}>
+        <Routes>
+          <Route path="/:projectName/activity" element={ui} />
+          <Route path="/:projectName/issues/:number" element={<div data-testid="issue-route">Issue route</div>} />
+          <Route path="/:projectName/runners/:runnerId" element={<div data-testid="runner-route">Runner route</div>} />
+        </Routes>
+      </ProjectProvider>
+    </MemoryRouter>,
+  )
+}
+
 beforeEach(() => {
   cleanup()
   ;(useRunners as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -60,21 +94,13 @@ describe('RunnerSummary UI', () => {
   describe('empty state', () => {
     it('shows no runner message when rows are empty', () => {
       const summary = makeSummary({ rows: [] })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('No runner')).toBeInTheDocument()
     })
 
     it('shows startup command hint when no runners connected', () => {
       const summary = makeSummary({ rows: [] })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText(RUNNER_START_HINT)).toBeInTheDocument()
     })
   })
@@ -88,11 +114,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 0,
         connectedBusyCount: 0,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('Runner stale/offline')).toBeInTheDocument()
     })
 
@@ -102,11 +124,7 @@ describe('RunnerSummary UI', () => {
         rows,
         hasConnectedCapacity: false,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText(RUNNER_START_HINT)).toBeInTheDocument()
     })
 
@@ -116,11 +134,7 @@ describe('RunnerSummary UI', () => {
         rows,
         hasConnectedCapacity: false,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       const button = screen.getByRole('button')
       expect(button).toBeInTheDocument()
     })
@@ -135,11 +149,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 1,
         connectedBusyCount: 0,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('Runner idle')).toBeInTheDocument()
     })
 
@@ -151,11 +161,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 1,
         connectedBusyCount: 0,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('1 runner ready')).toBeInTheDocument()
     })
 
@@ -170,11 +176,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 2,
         connectedBusyCount: 0,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('2 runners ready')).toBeInTheDocument()
     })
   })
@@ -185,7 +187,7 @@ describe('RunnerSummary UI', () => {
         makeRow({
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf1', workType: 'workflow' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
         }),
       ]
       const summary = makeSummary({
@@ -194,11 +196,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 0,
         connectedBusyCount: 1,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('Runner busy')).toBeInTheDocument()
     })
 
@@ -208,7 +206,7 @@ describe('RunnerSummary UI', () => {
           id: 'r1',
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf1', workType: 'workflow' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
         }),
       ]
       const summary = makeSummary({
@@ -217,11 +215,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 0,
         connectedBusyCount: 1,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('1 running workflow')).toBeInTheDocument()
     })
 
@@ -231,13 +225,13 @@ describe('RunnerSummary UI', () => {
           id: 'r1',
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf1', workType: 'workflow' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
         }),
         makeRow({
           id: 'r2',
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w2', workflowRunId: 'wf2', workType: 'workflow' },
+          activeWorks: [{ workId: 'w2', ownerKind: 'workflow', ownerId: 'wf2', workType: 'workflow' }],
         }),
       ]
       const summary = makeSummary({
@@ -246,11 +240,7 @@ describe('RunnerSummary UI', () => {
         connectedIdleCount: 0,
         connectedBusyCount: 2,
       })
-      render(
-        <MemoryRouter>
-          <RunnerSummary summary={summary} />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerSummary summary={summary} />)
       expect(screen.getByText('2 running workflows')).toBeInTheDocument()
     })
   })
@@ -259,22 +249,18 @@ describe('RunnerSummary UI', () => {
 describe('RunnerList UI', () => {
   describe('empty state', () => {
     it('shows no runners connected message', () => {
-      render(<RunnerList rows={[]} />)
+      renderInRouter(<RunnerList rows={[]} />)
       expect(screen.getByText('No runners connected')).toBeInTheDocument()
     })
 
     it('shows startup command hint in empty state', () => {
-      render(<RunnerList rows={[]} />)
+      renderInRouter(<RunnerList rows={[]} />)
       expect(screen.getByText(/Start a runner:/)).toBeInTheDocument()
       expect(screen.getByText(RUNNER_START_HINT_LIST)).toBeInTheDocument()
     })
 
     it('does not render a misleading settings manage action on the card', () => {
-      render(
-        <MemoryRouter>
-          <RunnerListCard />
-        </MemoryRouter>
-      )
+      renderInRouter(<RunnerListCard />)
 
       expect(screen.getByText('Runners')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Manage' })).not.toBeInTheDocument()
@@ -284,25 +270,25 @@ describe('RunnerList UI', () => {
   describe('idle runner rendering', () => {
     it('shows runner id', () => {
       const rows = [makeRow({ id: 'runner-455532', status: 'idle', connectionState: 'connected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('runner-455532')).toBeInTheDocument()
     })
 
     it('shows runner kind', () => {
       const rows = [makeRow({ kind: 'external', status: 'idle', connectionState: 'connected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('external')).toBeInTheDocument()
     })
 
     it('shows runner hostname', () => {
       const rows = [makeRow({ hostname: 'devbox', status: 'idle', connectionState: 'connected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('devbox')).toBeInTheDocument()
     })
 
     it('shows global scope badge', () => {
       const rows = [makeRow({ scope: { type: 'global' }, status: 'idle', connectionState: 'connected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('global')).toBeInTheDocument()
     })
 
@@ -314,13 +300,13 @@ describe('RunnerList UI', () => {
           connectionState: 'connected',
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('My Project')).toBeInTheDocument()
     })
 
     it('shows idle status badge', () => {
       const rows = [makeRow({ status: 'idle', connectionState: 'connected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('idle')).toBeInTheDocument()
     })
 
@@ -328,7 +314,7 @@ describe('RunnerList UI', () => {
       vi.setSystemTime(new Date('2026-01-01T12:02:00Z'))
       const heartbeatTime = '2026-01-01T12:00:00Z'
       const rows = [makeRow({ lastHeartbeatAt: heartbeatTime, status: 'idle', connectionState: 'connected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('heartbeat fresh: 2m ago')).toBeInTheDocument()
       expect(screen.getByText(/last heartbeat:/)).toBeInTheDocument()
       vi.useRealTimers()
@@ -336,7 +322,7 @@ describe('RunnerList UI', () => {
 
     it('shows connected connection state', () => {
       const rows = [makeRow({ connectionState: 'connected', status: 'idle' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('connected')).toBeInTheDocument()
     })
 
@@ -349,7 +335,7 @@ describe('RunnerList UI', () => {
           connectionState: 'connected',
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('2 models: openai/gpt-4.5, anthropic/claude-3')).toBeInTheDocument()
     })
 
@@ -361,7 +347,7 @@ describe('RunnerList UI', () => {
           connectionState: 'connected',
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('capabilities: workflow, workspace-query')).toBeInTheDocument()
     })
   })
@@ -372,10 +358,10 @@ describe('RunnerList UI', () => {
         makeRow({
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf1' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('busy')).toBeInTheDocument()
     })
 
@@ -384,10 +370,10 @@ describe('RunnerList UI', () => {
         makeRow({
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf-123' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf-123', workType: 'workflow' }],
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText(/wf-123/)).toBeInTheDocument()
     })
 
@@ -396,10 +382,10 @@ describe('RunnerList UI', () => {
         makeRow({
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf1', title: 'Fix login bug' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow', title: 'Fix login bug' }],
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText(/Fix login bug/)).toBeInTheDocument()
     })
 
@@ -408,11 +394,13 @@ describe('RunnerList UI', () => {
         makeRow({
           status: 'busy',
           connectionState: 'connected',
-          activeWork: { workId: 'w1', workflowRunId: 'wf1', workType: 'workflow' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
         }),
       ]
-      render(<RunnerList rows={rows} />)
-      expect(screen.getByText('workflow (wf1)')).toBeInTheDocument()
+      renderInRouter(<RunnerList rows={rows} />)
+      const workRow = screen.getByTestId('active-work-row')
+      expect(within(workRow).getByText('workflow')).toBeInTheDocument()
+      expect(within(workRow).getByText('wf1')).toBeInTheDocument()
     })
 
     it('shows capacity slots when available', () => {
@@ -421,37 +409,134 @@ describe('RunnerList UI', () => {
           status: 'busy',
           connectionState: 'connected',
           capacity: { usedSlots: 1, totalSlots: 2 },
-          activeWork: { workId: 'w1', workflowRunId: 'wf1' },
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
         }),
       ]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('1/2 slots')).toBeInTheDocument()
+    })
+
+    it('renders every active work as an independent row (no collapse)', () => {
+      const rows = [
+        makeRow({
+          id: 'r1',
+          status: 'busy',
+          connectionState: 'connected',
+          activeWorks: [
+            { workId: 'w1', ownerKind: 'workflow', ownerId: 'wf-a', workType: 'workflow', title: 'Work A' },
+            { workId: 'w2', ownerKind: 'workflow', ownerId: 'wf-b', workType: 'workflow', title: 'Work B' },
+            { workId: 'w3', ownerKind: 'workflow', ownerId: 'wf-c', workType: 'workflow', title: 'Work C' },
+          ],
+        }),
+      ]
+      renderInRouter(<RunnerList rows={rows} />)
+      expect(screen.getByTestId('runner-active-works')).toHaveAttribute('data-count', '3')
+      expect(screen.getByText('Work A')).toBeInTheDocument()
+      expect(screen.getByText('Work B')).toBeInTheDocument()
+      expect(screen.getByText('Work C')).toBeInTheDocument()
+    })
+
+    it('renders an issue link when the work carries an issue ref', () => {
+      const rows = [
+        makeRow({
+          id: 'r1',
+          status: 'busy',
+          connectionState: 'connected',
+          activeWorks: [
+            {
+              workId: 'w1',
+              ownerKind: 'workflow',
+              ownerId: 'wf-1',
+              workType: 'workflow',
+              title: 'Add dark mode',
+              issue: { projectId: 'proj-x', issueId: 'issue-y', issueNumber: 42 },
+            },
+          ],
+        }),
+      ]
+      renderInRouter(<RunnerList rows={rows} />, { withProject: true })
+      const link = screen.getByTestId('active-work-issue-link')
+      expect(link).toHaveAttribute('href', '/mohist-local/issues/42')
+      expect(link).toHaveTextContent('#42')
+    })
+
+    it('opens the issue link without also navigating the runner row', () => {
+      const rows = [
+        makeRow({
+          id: 'runner-with-issue-link',
+          status: 'busy',
+          connectionState: 'connected',
+          activeWorks: [
+            {
+              workId: 'w1',
+              ownerKind: 'workflow',
+              ownerId: 'wf-1',
+              workType: 'workflow',
+              title: 'Add dark mode',
+              issue: { projectId: 'proj-x', issueId: 'issue-y', issueNumber: 42 },
+            },
+          ],
+        }),
+      ]
+      renderInProjectRoutes(<RunnerList rows={rows} />)
+
+      fireEvent.click(screen.getByTestId('active-work-issue-link'))
+
+      expect(screen.getByTestId('issue-route')).toBeInTheDocument()
+      expect(screen.queryByTestId('runner-route')).not.toBeInTheDocument()
+    })
+
+    it('omits the issue link cleanly when issue ref is absent', () => {
+      const rows = [
+        makeRow({
+          id: 'r1',
+          status: 'busy',
+          connectionState: 'connected',
+          activeWorks: [
+            { workId: 'w1', ownerKind: 'workflow', ownerId: 'wf-1', workType: 'workflow', title: 'No-issue work' },
+          ],
+        }),
+      ]
+      renderInRouter(<RunnerList rows={rows} />)
+      expect(screen.queryByTestId('active-work-issue-link')).not.toBeInTheDocument()
+      expect(screen.getByText('No-issue work')).toBeInTheDocument()
+    })
+
+    it('makes each runner row navigable to its detail page keyed by id', () => {
+      const rows = [
+        makeRow({ id: 'runner-9', status: 'idle', connectionState: 'connected' }),
+      ]
+      renderInRouter(<RunnerList rows={rows} />, { withProject: true })
+      const row = screen.getByTestId('runner-row')
+      expect(row).toHaveAttribute('data-href', '/mohist-local/runners/runner-9')
+      expect(row).toHaveAttribute('role', 'link')
+      expect(row).toHaveAttribute('data-runner-id', 'runner-9')
     })
   })
 
   describe('stale/offline runner rendering', () => {
     it('shows stale status badge', () => {
       const rows = [makeRow({ status: 'stale', connectionState: null })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('stale')).toBeInTheDocument()
     })
 
     it('shows offline status badge', () => {
       const rows = [makeRow({ status: 'offline', connectionState: 'disconnected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('offline')).toBeInTheDocument()
     })
 
     it('shows hostname for stale runner', () => {
       const rows = [makeRow({ hostname: 'old-host', status: 'stale', connectionState: 'disconnected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('old-host')).toBeInTheDocument()
     })
 
     it('shows last heartbeat for stale runner', () => {
       vi.setSystemTime(new Date('2026-01-01T12:10:00Z'))
       const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'stale', connectionState: 'disconnected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('heartbeat stale: 10m ago')).toBeInTheDocument()
       expect(screen.getByText(/last heartbeat:/)).toBeInTheDocument()
       vi.useRealTimers()
@@ -460,7 +545,7 @@ describe('RunnerList UI', () => {
     it('shows explicit heartbeat diagnostic for offline runner', () => {
       vi.setSystemTime(new Date('2026-01-01T14:00:00Z'))
       const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'offline', connectionState: 'disconnected' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('heartbeat offline: 2h ago')).toBeInTheDocument()
       expect(screen.getByText(/last heartbeat:/)).toBeInTheDocument()
       vi.useRealTimers()
@@ -468,8 +553,31 @@ describe('RunnerList UI', () => {
 
     it('shows disconnected connection state', () => {
       const rows = [makeRow({ connectionState: 'disconnected', status: 'stale' })]
-      render(<RunnerList rows={rows} />)
+      renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('disconnected')).toBeInTheDocument()
+    })
+  })
+
+  describe('list summary preservation', () => {
+    it('preserves summary content on busy runner rows (id, kind, scope, status)', () => {
+      const rows = [
+        makeRow({
+          id: 'r1',
+          kind: 'external',
+          scope: { type: 'project', projectId: 'proj-1', projectName: 'My Project' },
+          status: 'busy',
+          connectionState: 'connected',
+          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
+        }),
+      ]
+      renderInRouter(<RunnerList rows={rows} />)
+      const row = screen.getByTestId('runner-row')
+      const content = within(row)
+      expect(content.getByText('r1')).toBeInTheDocument()
+      expect(content.getByText('external')).toBeInTheDocument()
+      expect(content.getByText('My Project')).toBeInTheDocument()
+      expect(content.getByText('busy')).toBeInTheDocument()
+      expect(content.getByText('connected')).toBeInTheDocument()
     })
   })
 })

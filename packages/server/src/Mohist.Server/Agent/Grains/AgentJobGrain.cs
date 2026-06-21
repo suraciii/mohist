@@ -243,7 +243,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return false;
 
         var maxSlots = RunnerCapacity.Normalize(runnerInfo.MaxWorkflowSlots);
-        if (state.ActiveWorkflowRunIds.Count >= maxSlots)
+        if (state.ActiveWorks.Count >= maxSlots)
             return false;
 
         var workId = $"agent-work-{Guid.NewGuid():N}";

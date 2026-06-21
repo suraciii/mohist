@@ -106,4 +106,14 @@ public enum RunnerStatus { Online, Offline }
 public record RunnerRuntimeState(
     RunnerStatus Status,
     DateTimeOffset LastHeartbeatAt,
-    IReadOnlyList<string> ActiveWorkflowRunIds);
+    IReadOnlyList<RunnerActiveWorkItem> ActiveWorks);
+
+[GenerateSerializer]
+public sealed record RunnerActiveWorkItem(
+    [property: Id(0)] string WorkId,
+    [property: Id(1)] string OwnerKind,
+    [property: Id(2)] string OwnerId,
+    [property: Id(3)] string WorkType,
+    [property: Id(4)] string? Stage,
+    [property: Id(5)] string? Title,
+    [property: Id(6)] WorkIssueRef? Issue = null);

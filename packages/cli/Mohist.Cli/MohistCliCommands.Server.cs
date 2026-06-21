@@ -125,6 +125,7 @@ internal static class RunnerCommands
         runner.Subcommands.Add(BuildLogs(installer));
         runner.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallRunnerAsync, installer));
         runner.Subcommands.Add(BuildList(api, environment));
+        runner.Subcommands.Add(BuildShow(api));
 
         return runner;
     }
@@ -176,6 +177,50 @@ internal static class RunnerCommands
                     && string.IsNullOrEmpty(environment.GetEnvironmentVariable("NO_COLOR"));
 
                 return await api.PrintRunnerListAsync(resolvedProjectId, scope.Value, mode, colorEnabled);
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildShow(MohistCliApi api)
+    {
+        var cmd = new Command("show", "Show a single runner's full detail (read-only)");
+        var runnerIdArg = new Argument<string>("runner-id") { Description = "Runner identifier" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(runnerIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var runnerId = ctx.GetValue(runnerIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ShowAsync();
+
+            async Task<int> ShowAsync()
+            {
+                if (string.IsNullOrWhiteSpace(runnerId))
+                {
+                    api.Error.WriteLine("runner-id is required");
+                    return 1;
+                }
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintRunnerShowAsync(
+                    resolvedProjectId,
+                    Uri.EscapeDataString(runnerId!),
+                    mode);
             }
         });
         return cmd;

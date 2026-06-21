@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
+import { ApiError } from '../../../shared/api/client'
 import type { RunnerStatusRow, RunnerStatusSummary } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
-import { getRunners } from './client'
+import { getRunner, getRunners } from './client'
 
 export function useRunners() {
   const { projectId } = useProject()
@@ -10,6 +11,19 @@ export function useRunners() {
     queryFn: () => getRunners(projectId).then(r => r.runners),
     enabled: !!projectId,
     refetchInterval: 5000,
+  })
+}
+
+export function useRunner(runnerId: string | null | undefined) {
+  const { projectId } = useProject()
+  return useQuery<RunnerStatusRow, ApiError>({
+    queryKey: ['runner', projectId, runnerId],
+    queryFn: () => getRunner(projectId, runnerId ?? '').then(r => r.runner),
+    enabled: !!projectId && !!runnerId,
+    retry: (failureCount, error) => {
+      if (error.status === 404) return false
+      return failureCount < 2
+    },
   })
 }
 

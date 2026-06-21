@@ -17,8 +17,22 @@ public static class RunnerStatusRoutes
             return ApiResults.Ok(new RunnerStatusListResponse(runners));
         });
 
+        group.MapGet("/{runnerId}", async (HttpContext context, string runnerId, RunnerStatusService projection) =>
+        {
+            var project = context.GetResolvedProject();
+            var runner = await projection.GetRunnerAsync(project.Id, runnerId);
+            if (runner is null)
+            {
+                return ApiResults.Fail($"Runner '{runnerId}' not found", 404, "runner_not_found");
+            }
+
+            return ApiResults.Ok(new RunnerStatusDetailResponse(runner));
+        });
+
         return app;
     }
 }
 
 public sealed record RunnerStatusListResponse(IReadOnlyList<RunnerStatusView> Runners);
+
+public sealed record RunnerStatusDetailResponse(RunnerStatusView Runner);

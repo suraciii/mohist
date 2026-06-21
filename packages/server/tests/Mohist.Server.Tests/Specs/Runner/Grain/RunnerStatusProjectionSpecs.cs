@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
@@ -115,8 +116,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var view = Assert.Single(result, r => r.Id == runnerId);
         Assert.Equal("busy", view.Status);
-        Assert.NotNull(view.ActiveWork);
-        Assert.Equal(workflowId, view.ActiveWork.WorkflowRunId);
+        var activeWork = Assert.Single(view.ActiveWorks);
+        Assert.Equal(workflowId, activeWork.OwnerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -229,8 +230,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var view = Assert.Single(result, r => r.Id == runnerId);
         Assert.Equal("disconnected", view.ConnectionState);
         Assert.Equal("busy", view.Status);
-        Assert.NotNull(view.ActiveWork);
-        Assert.Equal(workflowId, view.ActiveWork.WorkflowRunId);
+        var activeWork = Assert.Single(view.ActiveWorks);
+        Assert.Equal(workflowId, activeWork.OwnerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -262,7 +263,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.NotNull(view.Capacity);
         Assert.Equal(0, view.Capacity.UsedSlots);
         Assert.Equal(1, view.Capacity.TotalSlots);
-        Assert.Null(view.ActiveWork);
+        Assert.Empty(view.ActiveWorks);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -301,6 +302,257 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("api_key", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRuntimeStateAsync_OnlineIdleRunner_ExposesEmptyActiveWorksList()
+    {
+        var runnerId = await RegisterRunnerAsync("idle-state-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var runtime = await runner.GetRuntimeStateAsync();
+
+        Assert.NotNull(runtime.ActiveWorks);
+        Assert.Empty(runtime.ActiveWorks);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRuntimeStateAsync_BusyRunner_ExposesDispatchContextForActiveWork()
+    {
+        var runnerId = $"runner-active-ctx-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "active-ctx-host", "test-project"));
+
+        var workflowId = $"wf-ctx-{Guid.NewGuid():N}";
+        var issue = new WorkIssueRef("test-project", "issue-abc", 42);
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: workflowId,
+            WorkId: "work-ctx-1",
+            WorkType: "task",
+            Stage: "build",
+            Title: "Task 1",
+            Issue: issue);
+
+        var assign = await runner.AssignWorkAsync(dispatch);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assign.Status);
+
+        var runtime = await runner.GetRuntimeStateAsync();
+        var active = Assert.Single(runtime.ActiveWorks);
+        Assert.Equal(dispatch.WorkId, active.WorkId);
+        Assert.Equal(WorkDispatchOwnerKinds.Workflow, active.OwnerKind);
+        Assert.Equal(workflowId, active.OwnerId);
+        Assert.Equal("task", active.WorkType);
+        Assert.Equal("build", active.Stage);
+        Assert.Equal("Task 1", active.Title);
+        Assert.NotNull(active.Issue);
+        Assert.Equal(issue.ProjectId, active.Issue!.ProjectId);
+        Assert.Equal(issue.IssueId, active.Issue.IssueId);
+        Assert.Equal(issue.IssueNumber, active.Issue.IssueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRuntimeStateAsync_BusyRunnerWithoutIssue_ExposesNullIssue()
+    {
+        var runnerId = $"runner-no-issue-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "no-issue-host", "test-project"));
+
+        var workflowId = $"wf-no-issue-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
+
+        var runtime = await runner.GetRuntimeStateAsync();
+        var active = Assert.Single(runtime.ActiveWorks);
+        Assert.Null(active.Issue);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRuntimeStateAsync_MultiSlotRunner_ExposesAllConcurrentWorks()
+    {
+        var projectId = "test-project-multi";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, $"runner-multi-{Guid.NewGuid():N}", maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var workflowA = $"wf-multi-a-{Guid.NewGuid():N}";
+        var workflowB = $"wf-multi-b-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowA);
+        await AssignActiveWorkForTestAsync(runnerId, workflowB);
+
+        var runtime = await runner.GetRuntimeStateAsync();
+
+        Assert.Equal(2, runtime.ActiveWorks.Count);
+        Assert.Contains(runtime.ActiveWorks, w => w.OwnerId == workflowA);
+        Assert.Contains(runtime.ActiveWorks, w => w.OwnerId == workflowB);
+        Assert.All(runtime.ActiveWorks, w =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(w.WorkId));
+            Assert.Equal(WorkDispatchOwnerKinds.Workflow, w.OwnerKind);
+        });
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRuntimeStateAsync_BusyRunner_ReportsBusyStatus()
+    {
+        var runnerId = $"runner-busy-state-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "busy-state-host", "test-project"));
+
+        var workflowId = $"wf-busy-state-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
+        Assert.Equal("busy", view.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRuntimeStateAsync_OnlineIdleRunner_ReportsIdleStatus()
+    {
+        var runnerId = await RegisterRunnerAsync("idle-state-status-runner");
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
+        Assert.Equal("idle", view.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task ProjectRunnerAsync_BusyMultiSlotRunner_ProjectsEveryActiveWorkIntoList()
+    {
+        var runnerId = await RegisterRunnerForProjectAsync("test-project-multi-proj", $"runner-multi-proj-{Guid.NewGuid():N}", maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var workflowA = $"wf-multi-proj-a-{Guid.NewGuid():N}";
+        var workflowB = $"wf-multi-proj-b-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowA, "task-a.1", "task", "build", "Task A");
+        await AssignActiveWorkForTestAsync(runnerId, workflowB, "task-b.1", "task", "review", "Task B");
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = Assert.Single(await service.GetRunnersAsync("test-project-multi-proj"), r => r.Id == runnerId);
+
+        Assert.Equal(2, view.ActiveWorks.Count);
+        var ownerIds = view.ActiveWorks.Select(w => w.OwnerId).ToArray();
+        Assert.Contains(workflowA, ownerIds);
+        Assert.Contains(workflowB, ownerIds);
+
+        Assert.All(view.ActiveWorks, work =>
+        {
+            Assert.Equal(WorkDispatchOwnerKinds.Workflow, work.OwnerKind);
+            Assert.False(string.IsNullOrWhiteSpace(work.WorkId));
+            Assert.Equal("task", work.WorkType);
+            Assert.False(string.IsNullOrWhiteSpace(work.Stage));
+            Assert.False(string.IsNullOrWhiteSpace(work.Title));
+            Assert.Null(work.Issue);
+        });
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task ProjectRunnerAsync_BusyRunnerWithIssue_ProjectsIssueReference()
+    {
+        var runnerId = $"runner-issue-proj-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "issue-proj-host", "test-project"));
+
+        var workflowId = $"wf-issue-proj-{Guid.NewGuid():N}";
+        var issue = new WorkIssueRef("test-project", "issue-xyz", 9);
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: workflowId,
+            WorkId: "work-issue-proj-1",
+            WorkType: "task",
+            Stage: "build",
+            Title: "Issue Task",
+            Issue: issue);
+        var assign = await runner.AssignWorkAsync(dispatch);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assign.Status);
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
+
+        var work = Assert.Single(view.ActiveWorks);
+        Assert.Equal(workflowId, work.OwnerId);
+        Assert.NotNull(work.Issue);
+        Assert.Equal("test-project", work.Issue!.ProjectId);
+        Assert.Equal("issue-xyz", work.Issue.IssueId);
+        Assert.Equal(9, work.Issue.IssueNumber);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task ProjectRunnerAsync_IdleRunner_HasEmptyActiveWorksList()
+    {
+        var runnerId = await RegisterRunnerAsync($"runner-empty-proj-{Guid.NewGuid():N}");
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);
+        Assert.NotNull(view.ActiveWorks);
+        Assert.Empty(view.ActiveWorks);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunnerAsync_KnownRunner_ReturnsFullDetail()
+    {
+        var runnerId = $"runner-getasync-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "getasync-host", "test-project", ["openai/gpt-4"], "external"));
+        await runner.HeartbeatAsync();
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = await service.GetRunnerAsync("test-project", runnerId);
+
+        Assert.NotNull(view);
+        Assert.Equal(runnerId, view!.Id);
+        Assert.Equal("external", view.Kind);
+        Assert.Equal("getasync-host", view.Hostname);
+        Assert.Empty(view.ActiveWorks);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunnerAsync_UnknownRunnerId_ReturnsNull()
+    {
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = await service.GetRunnerAsync("test-project", $"runner-unknown-{Guid.NewGuid():N}");
+        Assert.Null(view);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunnerAsync_RunnerScopedToDifferentProject_ReturnsNull()
+    {
+        var runnerId = $"runner-other-proj-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "other-proj-host", "other-project"));
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = await service.GetRunnerAsync("test-project", runnerId);
+        Assert.Null(view);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunnerAsync_EmptyRunnerId_ReturnsNull()
+    {
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var view = await service.GetRunnerAsync("test-project", string.Empty);
+        Assert.Null(view);
     }
 }
 

@@ -247,6 +247,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         Assert.Null(await runner.PollAsync());
         var runtime = await runner.GetRuntimeStateAsync();
-        Assert.DoesNotContain(_workflowId, runtime.ActiveWorkflowRunIds);
+        Assert.DoesNotContain(_workflowId, runtime.ActiveWorks.Select(w => w.OwnerId));
     }
 }
