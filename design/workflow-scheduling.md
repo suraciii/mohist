@@ -24,18 +24,15 @@ Grain-level scheduling. Discovery, assignment, delivery, report, supervision, re
 ```text
 WorkflowGrain
   owns work lifecycle + progression
+  owns Assignment (the single assignment truth)
   serves work on pull; passive between polls
   completion watchdog: no report by work timeout -> work FAILED
   never queries runner state
 
-WorkflowBacklogGrain
-  pool of workflows with no runner assigned
-  brokers the assignment on claim (writes Assignment onto the workflow)
-
 RunnerGrain
   supervises runner process liveness only (heartbeat, online/offline)
-  discovers assigned workflows by querying the store
-  pulls work from them on behalf of its process
+  discovers assigned-to-me and claimable workflows by querying the store
+  claims via AssignRunnerAsync; pulls work from assigned workflows
   does not supervise works
 
 runner process (physical)
@@ -46,20 +43,15 @@ runner process (physical)
 
 ```text
 assignment truth = WorkflowRun.Assignment      (one record; the single assignment write)
-backlog          = best-effort pool of unassigned workflows (drift self-heals)
 runner list      = in-memory cache; rebuilt from a query over the store
-the store        = shared query layer: runners read it directly to discover their assignments
+the store        = shared query layer: runners read it to discover assigned-to-me and claimable workflows
 ```
 
 ## Interfaces
 
 ```text
-IWorkflowBacklogGrain
-  EnqueueAsync(workflowRunId)
-  ClaimAsync(runnerId) -> workflowRunId?   # brokers assignment, returns a now-assigned run
-
 IWorkflowGrain
-  AssignRunnerAsync(runnerId) -> Assigned | Rejected   # called by backlog; sets Assignment
+  AssignRunnerAsync(runnerId) -> Assigned | Rejected   # called by runner; sets Assignment
   PollWork(runnerId) -> WorkDispatch?                   # assigned runner pulls work
   ReportResultAsync(runnerId, workId, result)
   NotifyRunnerLostAsync(runnerId)
@@ -67,70 +59,58 @@ IWorkflowGrain
 IRunnerGrain
   RegisterAsync(info)
   HeartbeatAsync()
-  PollAsync() -> WorkDispatch?                          # process pulls; grain fetches from assigned workflows
+  PollAsync() -> WorkDispatch?                          # process pulls; grain queries its assigned workflows and PollWork
   ReportResultAsync(workflowRunId, workId, result)      # relay to workflow
 ```
 
 Delivery is pull. No push from WorkflowGrain to runner.
-Discovery is a store query, not a grain call: the runner reads workflow records where the assignment field is its own id.
-
-## Backlog
-
-Backlog = workflows with no runner assigned. Membership by assignment status only.
-
-```text
-enter    : new run created, has no runner        (once per run)
-leave    : claimed by a runner
-re-enter : never
-```
-
-An assigned workflow is held by its runner for the whole run — through idle, approval gates, and work-item boundaries. The runner polls by state (busy → return work; idle/gated → null) and never releases the workflow back. Capacity gates concurrent execution (active works), not assigned-workflow count: a runner may hold many idle assigned workflows while executing up to its slot count.
-
-Per-project grain: `WorkflowBacklogKeys.ForProject(projectId)`.
+Discovery is store queries, not grain calls: a runner reads workflow records by their Assignment field — present-and-matching for its own, absent for claimable.
 
 ## Project Scan
 
 ```text
-project-bound runner -> scan its project's backlog
-global runner        -> round-robin over known projects (in-memory dir + persisted list)
+project-bound runner -> query claimable WHERE ProjectId = @p
+global runner        -> query across known projects (in-memory dir + persisted list)
 ```
 
-Persisted project ids keep backlog discovery working after server restart.
+Persisted project ids keep claimable discovery working after server restart.
 
 ## Assignment
 
-Runner with spare capacity claims an unassigned workflow from the backlog. The backlog brokers the assignment: it picks a candidate, writes the `Assignment` onto the WorkflowGrain (the single assignment truth), drops the candidate from its pool, and hands the id to the runner.
+A workflow is **claimable** when its Assignment is null and it is in a runnable state — a query over the Assignment field, not a separate pool:
 
 ```text
-RunnerGrain            WorkflowBacklogGrain          WorkflowGrain
-    | ClaimAsync(runnerId)     |                           |
-    |------------------------->|                           |
-    |                          | pick unassigned workflowRunId
-    |                          | AssignRunnerAsync(runnerId)  ← single assignment write
-    |                          |--------------------------->|
-    |                          |                           | set Assignment (1:1, lifetime); persist
-    |                          | return Assigned | Rejected |
-    |                          |<--------------------------|
-    |                          | Assigned: drop from pool   |
-    |                          | Rejected: try next candidate
-    | return workflowRunId?    |                           |
-    |<-------------------------|                           |
-    | add to in-memory list (cache)                        |
+WorkflowRuns WHERE Assignment IS NULL AND Status = <runnable>   [AND ProjectId = @p]
+```
+
+A runner with spare capacity claims a claimable workflow: it scans the store, picks a candidate, and calls `AssignRunnerAsync` directly. The WorkflowGrain sets `Assignment` (the single assignment truth) and persists.
+
+```text
+RunnerGrain                                       WorkflowGrain
+    | scan claimable (store query)                      |
+    | pick workflowRunId                                |
+    | AssignRunnerAsync(runnerId)                       |  ← single assignment write
+    |-------------------------------------------------->|
+    |                                                   | set Assignment (1:1, lifetime); persist
+    | return Assigned | Rejected                        |
+    |<--------------------------------------------------|
+    | Assigned: add to in-memory list (cache)           |
+    | Rejected: try next candidate                      |
 ```
 
 ```text
 AssignRunnerAsync (idempotent arbiter; truth = WorkflowRun.Assignment):
-  unassigned + runnable         -> set Assignment, Assigned
-  already assigned to same runner -> Assigned
-  assigned to another runner    -> Rejected
-  not runnable                  -> Rejected
+  unassigned + runnable            -> set Assignment, Assigned
+  already assigned to same runner  -> Assigned
+  assigned to another runner       -> Rejected
+  not runnable                     -> Rejected
 ```
 
-One record, one write: `Assignment` lives on the WorkflowGrain and is the only assignment truth. The runner's in-memory add is a cache; the backlog pool is a best-effort index. Drift self-heals — rejected claims are dropped, orphaned unassigned runs (assignment never set) are re-enqueued by their reminder, stale runner entries are rejected at `PollWork`.
+One record, one write: `Assignment` lives on the WorkflowGrain and is the only assignment truth. Claimable is exactly-once — a workflow is claimable only before its first assignment, and assignment is sticky for life (never null again), so "claim once, never re-claimable" is a property of the data, not an enforced queue rule. Optimistic claiming: concurrent runners may pick the same candidate; the arbiter admits exactly one, the rest retry. The runner's in-memory add is a cache; the periodic discovery scan is authoritative.
 
 ## Discovery
 
-A runner finds the workflows assigned to it by reading the store — the same records that hold the assignment truth. This is a fieldSelector-style query, not a grain call:
+A runner finds the workflows assigned to it by reading the store — the same records that hold the assignment truth. A fieldSelector-style query, not a grain call:
 
 ```text
 WorkflowRuns WHERE Assignment.RunnerId == <me>     (indexed column derived from the record)
@@ -213,11 +193,13 @@ Late or duplicate report for an already-terminal work is ignored (idempotent by 
 
 One workflow, one runner, for the run's life. Sticky: never released, never reassigned.
 
+An assigned workflow is held by its runner for the whole run — through idle, approval gates, and work-item boundaries. The runner polls by state (busy → return work; idle/gated → null) and never releases the workflow back. Capacity gates concurrent execution (active works), not assigned-workflow count: a runner may hold many idle assigned workflows while executing up to its slot count.
+
 ```text
 assigned            -> stays assigned through work items, idle periods, and gates; must flow continuously
 work stalls         -> watchdog fails the WORK (not the assignment); workflow advances
 runner transient loss (process restart) -> grain survives; assigned runner resumes pulling on recovery (in-flight failed fast, re-pulled)
-runner permanently gone -> out of scope: user starts a fresh run (new backlog entry, new assignment)
+runner permanently gone -> out of scope: user starts a fresh run (new workflow, new assignment)
 ```
 
 - Resume: same runner returns, pulls PENDING/in-flight work, continues.
@@ -227,17 +209,16 @@ Pipeline rule: once claimed, the workflow must flow continuously — every work 
 
 ## Recovery
 
-Retry + idempotency throughout. An assigned workflow never returns to the backlog.
+Retry + idempotency throughout. An assigned workflow never becomes claimable again.
 
 ```text
-unassigned + not yet enqueued  -> reminder enqueues to backlog (idempotent — the single entry)
-claim / assignment lost         -> next claim assigns (AssignRunnerAsync idempotent)
-work pull lost                  -> runner polls again; workflow re-serves (idempotent)
-report lost                     -> runner re-reports; workflow dedups (idempotent)
-work pulled, no report          -> watchdog -> FAILED -> advance
-process dies mid-work           -> no report -> watchdog -> FAILED; next work waits for runner
-process lost (heartbeat)        -> RunnerGrain -> NotifyRunnerLostAsync -> fail in-flight fast; workflow waits for recovery (no re-enter)
+claim call lost                  -> runner retries AssignRunnerAsync (idempotent)
+work pull lost                   -> runner polls again; workflow re-serves (idempotent)
+report lost                      -> runner re-reports; workflow dedups (idempotent)
+work pulled, no report           -> watchdog -> FAILED -> advance
+process dies mid-work            -> no report -> watchdog -> FAILED; next work waits for runner
+process lost (heartbeat)         -> RunnerGrain -> NotifyRunnerLostAsync -> fail in-flight fast; workflow waits for recovery (never re-claimable)
 ```
 
-Before start (no runner): pending is normal; workflow waits in the backlog.
+Before start (no runner): pending is normal; the workflow is claimable and waits.
 After start (has runner): must progress or fail; the watchdog bounds every work.
