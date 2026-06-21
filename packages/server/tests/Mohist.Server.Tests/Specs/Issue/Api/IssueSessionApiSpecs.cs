@@ -108,7 +108,7 @@ public class IssueSessionApiSpecs
         Assert.Equal("Plan session", root.GetProperty("title").GetString());
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
         Assert.True(root.TryGetProperty("completedAt", out _));
-        Assert.True(root.TryGetProperty("model", out _));
+        Assert.False(root.TryGetProperty("model", out _));
         var eventSummary = root.GetProperty("eventSummary");
         var usage = root.GetProperty("usage");
         Assert.Equal("anthropic/claude-sonnet-4", eventSummary.GetProperty("resolvedModel").GetString());

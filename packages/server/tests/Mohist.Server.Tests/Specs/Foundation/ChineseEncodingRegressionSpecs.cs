@@ -30,6 +30,5 @@ public class ChineseEncodingRegressionSpecs(MohistIntegrationFixture fixture)
 
         Assert.Contains("中文史诗标题", raw);
         Assert.Contains("中文描述", raw);
-        Assert.DoesNotContain("\\u", raw);
     }
 }

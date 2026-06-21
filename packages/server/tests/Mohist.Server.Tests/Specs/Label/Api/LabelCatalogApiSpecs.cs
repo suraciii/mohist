@@ -26,7 +26,7 @@ public class LabelCatalogApiSpecs
         var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
             $"/api/projects/{project.Id}/labels/catalog");
 
-        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == "System");
+        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == "system");
         var refactor = Assert.Single(definitions, d => d.Key == "refactor");
         Assert.Contains("without changing observable behavior", refactor.Description, StringComparison.OrdinalIgnoreCase);
     }
@@ -45,8 +45,8 @@ public class LabelCatalogApiSpecs
         var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
             $"/api/projects/{project.Id}/labels/catalog");
 
-        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == "System");
-        Assert.Contains(definitions, d => d.Key == "module" && d.Origin == "User");
+        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == "system");
+        Assert.Contains(definitions, d => d.Key == "module" && d.Origin == "user");
         var module = Assert.Single(definitions, d => d.Key == "module");
         Assert.Equal("Classifies the subsystem", module.Description);
         Assert.NotNull(module.SupportedValues);

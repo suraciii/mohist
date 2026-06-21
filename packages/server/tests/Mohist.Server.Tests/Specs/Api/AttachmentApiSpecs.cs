@@ -130,7 +130,7 @@ public class AttachmentApiSpecs
         Assert.Equal("attachment_count_limit_exceeded", countLimitJson.GetProperty("code").GetString());
 
         var issue = await _fixture.Client.GetDataAsync<JsonElement>($"/api/projects/{projectId}/issues/{issueNumber}");
-        Assert.Null(issue.GetProperty("body").GetString());
+        Assert.False(issue.TryGetProperty("body", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

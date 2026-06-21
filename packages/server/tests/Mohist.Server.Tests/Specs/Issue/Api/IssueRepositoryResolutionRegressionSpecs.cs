@@ -165,10 +165,9 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
-        Assert.True(data.TryGetProperty("repository", out var repository));
-        Assert.Equal(JsonValueKind.Null, repository.ValueKind);
+        Assert.False(data.TryGetProperty("repository", out _));
         var problem = data.GetProperty("repositoryProblem");
-        Assert.Equal("AmbiguousReference", problem.GetProperty("code").GetString());
+        Assert.Equal("ambiguousReference", problem.GetProperty("code").GetString());
         Assert.Equal("main", problem.GetProperty("repositoryRef").GetString());
         var candidates = problem.GetProperty("candidateNames").EnumerateArray().Select(c => c.GetString()).ToList();
         Assert.Contains("main", candidates);
@@ -667,8 +666,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
         var listItem = data.EnumerateArray().Single(item => item.GetProperty("number").GetInt32() == issue.Number);
-        var repository = listItem.GetProperty("repository");
-        Assert.Equal(JsonValueKind.Null, repository.ValueKind);
+        Assert.False(listItem.TryGetProperty("repository", out _));
         var problem = listItem.GetProperty("repositoryProblem");
         Assert.Equal("repositoryNotFound", problem.GetProperty("code").GetString());
         Assert.Equal("secondary", problem.GetProperty("repositoryRef").GetString());
@@ -820,7 +818,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(new[] { firstSecondary.Number, defaultIssue.Number, secondSecondary.Number },
             items.Select(item => item.GetProperty("number").GetInt32()).ToArray());
 
-        var orphans = items.Where(item => item.GetProperty("repository").ValueKind == JsonValueKind.Null).ToList();
+        var orphans = items.Where(item => !item.TryGetProperty("repository", out _)).ToList();
         Assert.Equal(2, orphans.Count);
         Assert.All(orphans, item =>
         {
@@ -832,7 +830,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         // And the surviving default-bound issue still has a resolved repository.
         var surviving = items.Single(item => item.GetProperty("number").GetInt32() == defaultIssue.Number);
         Assert.Equal("main", surviving.GetProperty("repository").GetProperty("name").GetString());
-        Assert.Equal(JsonValueKind.Null, surviving.GetProperty("repositoryProblem").ValueKind);
+        Assert.False(surviving.TryGetProperty("repositoryProblem", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

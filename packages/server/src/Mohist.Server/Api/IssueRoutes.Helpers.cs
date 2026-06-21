@@ -138,7 +138,7 @@ public static partial class IssueRoutes
         var template = state.Template;
         var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
         var profileId = template?.Id ?? state.SourceTemplateId ?? "mohist/default";
-        var updateMode = template is not null ? "Custom" : "Reference";
+        var updateMode = template is not null ? "custom" : "reference";
         var templateSource = state.HasCustomTemplate || template is not null
             ? "custom"
             : !string.IsNullOrWhiteSpace(state.SourceTemplateId)
