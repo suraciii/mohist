@@ -1,12 +1,13 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
+import { PulseZone } from '../../../widgets/dashboard-pulse'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
-import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { DashboardZonePlaceholder } from './DashboardZonePlaceholder'
-import type { DashboardZoneId } from './DashboardZonePlaceholder'
+import { DashboardZone } from './DashboardZone'
+import type { DashboardZoneId } from './DashboardZone'
 
 const DASHBOARD_ZONES: { id: DashboardZoneId; name: string }[] = [
   { id: 'attention', name: 'Attention' },
@@ -14,6 +15,15 @@ const DASHBOARD_ZONES: { id: DashboardZoneId; name: string }[] = [
   { id: 'productivity', name: 'Productivity' },
   { id: 'digest', name: 'Digest' },
 ]
+
+function renderZoneContent(id: DashboardZoneId): ReactNode {
+  switch (id) {
+    case 'pulse':
+      return <PulseZone />
+    default:
+      return null
+  }
+}
 
 export function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useProjects()
@@ -64,13 +74,11 @@ export function DashboardPage() {
         data-testid="dashboard-zones"
         className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
       >
-        {DASHBOARD_ZONES.map((zone) =>
-          zone.id === 'attention' ? (
-            <AttentionHero key={zone.id} />
-          ) : (
-            <DashboardZonePlaceholder key={zone.id} id={zone.id} name={zone.name} />
-          ),
-        )}
+        {DASHBOARD_ZONES.map((zone) => (
+          <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
+            {renderZoneContent(zone.id)}
+          </DashboardZone>
+        ))}
       </div>
     </div>
   )

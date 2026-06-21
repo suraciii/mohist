@@ -24,19 +24,7 @@ The Web App-Shell SHALL resolve the project root route (`/` and `/:projectName`)
 
 ### Requirement: Dashboard provides four zone mount-point slots
 
-The Dashboard page SHALL expose exactly four zone mount-point slots with stable identities: `Attention`, `Pulse`, `Productivity`, and `Digest`. The slots SHALL serve as the composition contract that downstream issues fill. The `Attention` slot SHALL host the Attention Hero view (defined by the `dashboard-attention-hero` capability); the `Pulse`, `Productivity`, and `Digest` slots SHALL render as empty placeholders with no zone content until their respective downstream issues implement them.
-
-#### Scenario: Attention slot hosts the Attention Hero
-
-- **WHEN** the Dashboard page renders for a project that has at least one project
-- **THEN** the `Attention` slot SHALL render the Attention Hero view
-- **AND** the `Attention` slot SHALL NOT render an empty placeholder
-
-#### Scenario: Non-Attention zone slots render as empty placeholders
-
-- **WHEN** the Dashboard page renders
-- **THEN** the `Pulse`, `Productivity`, and `Digest` slots SHALL each render as an empty placeholder
-- **AND** each of those placeholders SHALL be empty
+The Dashboard page SHALL expose exactly four zone mount-point slots with stable identities: `Attention`, `Pulse`, `Productivity`, and `Digest`. Each slot SHALL serve as the composition contract for a zone-specific capability. A slot whose zone capability has been implemented SHALL render that capability's content; a slot whose zone capability has not yet been implemented SHALL render as an empty placeholder. The `Pulse` slot's content SHALL be governed by the `dashboard-pulse` capability.
 
 #### Scenario: Zone slot identities are stable
 
@@ -44,11 +32,23 @@ The Dashboard page SHALL expose exactly four zone mount-point slots with stable 
 - **THEN** the slot identities `Attention`, `Pulse`, `Productivity`, and `Digest` SHALL be stable across renders
 - **AND** a slot SHALL be addressable by its identity as a mount point for zone content
 
-#### Scenario: Non-Attention zone content remains downstream-owned
+#### Scenario: Unimplemented zone slots render empty
 
-- **WHEN** the Dashboard page renders for any project state
-- **THEN** none of the `Pulse`, `Productivity`, or `Digest` slots SHALL render their zone content
-- **AND** their zone content SHALL remain the responsibility of downstream issues
+- **WHEN** the Dashboard page renders and a zone slot has no implemented zone capability
+- **THEN** that slot SHALL render as an empty placeholder
+- **AND** the slot identity SHALL remain stable so a future zone capability can fill it
+
+#### Scenario: Implemented zone slot renders its capability content
+
+- **WHEN** the Dashboard page renders and a zone slot is governed by an implemented zone capability
+- **THEN** that slot SHALL render the content defined by that capability
+- **AND** other slots SHALL remain independently empty or filled according to their own capabilities
+
+#### Scenario: Pulse slot is governed by dashboard-pulse
+
+- **WHEN** the Dashboard page renders the `Pulse` slot
+- **THEN** the slot SHALL render the content defined by the `dashboard-pulse` capability
+- **AND** the slot identity and mount-point contract SHALL remain unchanged from the original skeleton
 
 ### Requirement: Dashboard shows project empty-state
 
