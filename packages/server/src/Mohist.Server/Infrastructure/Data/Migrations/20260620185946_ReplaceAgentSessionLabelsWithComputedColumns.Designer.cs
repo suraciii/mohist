@@ -525,42 +525,42 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("LabelIssueNumber")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/issue-number\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/issue-number\"')", true);
 
                     b.Property<string>("LabelProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/project-id\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/project-id\"')", true);
 
                     b.Property<string>("LabelSessionName")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/session-name\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/session-name\"')", true);
 
                     b.Property<string>("LabelSourceId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-id\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/source-id\"')", true);
 
                     b.Property<string>("LabelSourceKind")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-kind\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/source-kind\"')", true);
 
                     b.Property<string>("LabelStage")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/stage\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/stage\"')", true);
 
                     b.Property<string>("LabelWorkId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-id\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-id\"')", true);
 
                     b.Property<string>("LabelWorkType")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-type\"')", true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')", true);
 
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");

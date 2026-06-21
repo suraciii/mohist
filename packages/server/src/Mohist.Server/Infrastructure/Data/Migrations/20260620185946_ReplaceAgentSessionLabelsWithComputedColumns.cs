@@ -19,14 +19,14 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             // SQLite table rebuild, which emits CREATE TABLE ... AS (...) STORED.
             var labelColumns = new (string Name, string Expression)[]
             {
-                ("LabelIssueNumber", "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/issue-number\"')"),
-                ("LabelProjectId",   "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/project-id\"')"),
-                ("LabelSessionName", "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/session-name\"')"),
-                ("LabelSourceId",    "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-id\"')"),
-                ("LabelSourceKind",  "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/source-kind\"')"),
-                ("LabelStage",       "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/stage\"')"),
-                ("LabelWorkId",      "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-id\"')"),
-                ("LabelWorkType",    "json_extract(\"State\", '$.Metadata.Labels.\"mohist.io/work-type\"')"),
+                ("LabelIssueNumber", "json_extract(\"State\", '$.metadata.labels.\"mohist.io/issue-number\"')"),
+                ("LabelProjectId",   "json_extract(\"State\", '$.metadata.labels.\"mohist.io/project-id\"')"),
+                ("LabelSessionName", "json_extract(\"State\", '$.metadata.labels.\"mohist.io/session-name\"')"),
+                ("LabelSourceId",    "json_extract(\"State\", '$.metadata.labels.\"mohist.io/source-id\"')"),
+                ("LabelSourceKind",  "json_extract(\"State\", '$.metadata.labels.\"mohist.io/source-kind\"')"),
+                ("LabelStage",       "json_extract(\"State\", '$.metadata.labels.\"mohist.io/stage\"')"),
+                ("LabelWorkId",      "json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-id\"')"),
+                ("LabelWorkType",    "json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')"),
             };
 
             foreach (var (name, _) in labelColumns)
