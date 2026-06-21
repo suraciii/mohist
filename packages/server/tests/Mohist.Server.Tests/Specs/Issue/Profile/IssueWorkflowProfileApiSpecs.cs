@@ -76,9 +76,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var initialResult = await initial.Content.ReadFromJsonAsync<JsonElement>();
         var initialData = initialResult.GetProperty("data");
         Assert.Equal("system", initialData.GetProperty("templateSource").GetString());
-        Assert.Equal("Reference", initialData.GetProperty("updateMode").GetString());
+        Assert.Equal("reference", initialData.GetProperty("updateMode").GetString());
         Assert.False(initialData.GetProperty("hasCustomTemplate").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, initialData.GetProperty("yaml").ValueKind);
+        Assert.False(initialData.TryGetProperty("yaml", out _));
 
         var projectRefResponse = await _client.PutAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template",
@@ -86,10 +86,10 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, projectRefResponse.StatusCode);
         var projectRefData = (await projectRefResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal("project", projectRefData.GetProperty("templateSource").GetString());
-        Assert.Equal("Reference", projectRefData.GetProperty("updateMode").GetString());
+        Assert.Equal("reference", projectRefData.GetProperty("updateMode").GetString());
         Assert.False(projectRefData.GetProperty("hasCustomTemplate").GetBoolean());
         Assert.Equal("project-template-marker", projectRefData.GetProperty("sourceTemplateId").GetString());
-        Assert.Equal(JsonValueKind.Null, projectRefData.GetProperty("yaml").ValueKind);
+        Assert.False(projectRefData.TryGetProperty("yaml", out _));
 
         var customYaml = """
             id: source-label-custom-workflow
@@ -106,16 +106,16 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, customResponse.StatusCode);
         var customData = (await customResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal("custom", customData.GetProperty("templateSource").GetString());
-        Assert.Equal("Custom", customData.GetProperty("updateMode").GetString());
+        Assert.Equal("custom", customData.GetProperty("updateMode").GetString());
         Assert.True(customData.GetProperty("hasCustomTemplate").GetBoolean());
-        Assert.Null(customData.GetProperty("sourceTemplateId").GetString());
+        Assert.False(customData.TryGetProperty("sourceTemplateId", out _));
 
         var deleteResponse = await _client.DeleteAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template");
         Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
         var clearedData = (await deleteResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal("system", clearedData.GetProperty("templateSource").GetString());
         Assert.False(clearedData.GetProperty("hasCustomTemplate").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, clearedData.GetProperty("yaml").ValueKind);
+        Assert.False(clearedData.TryGetProperty("yaml", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -146,7 +146,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.NotNull(savedYaml);
         Assert.Contains("custom-issue-workflow", savedYaml);
         Assert.Contains("custom-task", savedYaml);
-        Assert.Equal("Custom", savedData.GetProperty("updateMode").GetString());
+        Assert.Equal("custom", savedData.GetProperty("updateMode").GetString());
         Assert.Equal("custom-issue-workflow", savedData.GetProperty("profileId").GetString());
 
         var projectProfilesResponse = await _client.GetAsync("/api/workflow-templates/system");
@@ -194,7 +194,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var getResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var state = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
         var stateData = state.GetProperty("data");
-        var yaml = stateData.GetProperty("yaml").GetString();
+        var yaml = stateData.TryGetProperty("yaml", out var yamlElement) ? yamlElement.GetString() : null;
         Assert.DoesNotContain("broken", yaml ?? "");
     }
 
@@ -222,7 +222,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var getResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var state = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
         var stateData = state.GetProperty("data");
-        Assert.Equal("Reference", stateData.GetProperty("updateMode").GetString());
+        Assert.Equal("reference", stateData.GetProperty("updateMode").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

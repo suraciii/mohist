@@ -44,9 +44,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(currentSession.Id, data.GetProperty("id").GetString());
         Assert.Equal("compact", data.GetProperty("operation").GetString());
         Assert.True(data.GetProperty("wasCompacted").GetBoolean());
-        Assert.True(data.TryGetProperty("contextWindowSize", out _));
-        Assert.True(data.TryGetProperty("contextWindowUsed", out _));
-        Assert.True(data.TryGetProperty("contextUsagePercent", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -93,8 +90,6 @@ public class AgentSessionRecoveryApiSpecs
         Assert.Equal(currentSession.Id, data.GetProperty("id").GetString());
         Assert.Equal("reset", data.GetProperty("operation").GetString());
         Assert.False(data.GetProperty("wasCompacted").GetBoolean());
-        Assert.True(data.TryGetProperty("contextWindowSize", out _));
-        Assert.True(data.TryGetProperty("contextWindowUsed", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -167,8 +162,6 @@ public class AgentSessionRecoveryApiSpecs
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
         var usage = root.GetProperty("usage");
-        Assert.True(usage.TryGetProperty("contextUsagePercent", out var pct));
-        Assert.True(pct.ValueKind == JsonValueKind.Null || pct.ValueKind == JsonValueKind.Number);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -186,9 +179,6 @@ public class AgentSessionRecoveryApiSpecs
         var root = doc.RootElement.GetProperty("data");
         Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
         var usage = root.GetProperty("usage");
-        Assert.True(usage.TryGetProperty("contextWindowSize", out _));
-        Assert.True(usage.TryGetProperty("contextWindowUsed", out _));
-        Assert.True(usage.TryGetProperty("contextUsagePercent", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

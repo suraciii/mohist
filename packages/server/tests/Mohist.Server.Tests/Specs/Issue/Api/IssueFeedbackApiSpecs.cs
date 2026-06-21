@@ -275,9 +275,8 @@ public class IssueFeedbackApiSpecs
         var entry = data.EnumerateArray().Single(e => e.GetProperty("id").GetString() == created.Id);
 
         Assert.Equal(issueNumber, entry.GetProperty("issueNumber").GetInt32());
-        Assert.True(entry.TryGetProperty("resolution", out var resolution),
-            "list entries must include a top-level 'resolution' field");
-        Assert.Equal(JsonValueKind.Null, resolution.ValueKind);
+        Assert.False(entry.TryGetProperty("resolution", out _),
+            "list entries must omit 'resolution' when null (per WhenWritingNull contract)");
         Assert.False(entry.TryGetProperty("resolutionSummary", out _),
             "list entries must not flatten 'resolutionSummary' to the top level");
     }

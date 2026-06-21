@@ -142,8 +142,8 @@ public class IssueModelVariantApiSpecs
         var detail = await _fixture.Client.GetDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues/{number}");
 
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("model").ValueKind);
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("modelVariant").ValueKind);
+        Assert.False(detail.TryGetProperty("model", out _));
+        Assert.False(detail.TryGetProperty("modelVariant", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -176,8 +176,8 @@ public class IssueModelVariantApiSpecs
         var detail = await _fixture.Client.GetDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues/{number}");
 
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("stageModels").ValueKind);
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("stageModelVariants").ValueKind);
+        Assert.False(detail.TryGetProperty("stageModels", out _));
+        Assert.False(detail.TryGetProperty("stageModelVariants", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -308,7 +308,7 @@ public class IssueModelVariantApiSpecs
             $"/api/projects/{projectId}/issues/{number}");
 
         Assert.Equal("openai/gpt-5.5", detail.GetProperty("model").GetString());
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("modelVariant").ValueKind);
+        Assert.False(detail.TryGetProperty("modelVariant", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -327,8 +327,8 @@ public class IssueModelVariantApiSpecs
         var detail = await _fixture.Client.GetDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues/{issue.GetProperty("number").GetInt32()}");
 
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("model").ValueKind);
-        Assert.Equal(JsonValueKind.Null, detail.GetProperty("modelVariant").ValueKind);
+        Assert.False(detail.TryGetProperty("model", out _));
+        Assert.False(detail.TryGetProperty("modelVariant", out _));
     }
 
     private async Task<string> CreateProjectAsync(string prefix)
