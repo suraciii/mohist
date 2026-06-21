@@ -435,4 +435,304 @@ public class CliRunnerCommandSpecs
         Assert.DoesNotContain("\u001b[", stdout, StringComparison.Ordinal);
         Assert.Contains("idle", stdout, StringComparison.Ordinal);
     }
+
+    private static object RunnerDetail(
+        string id,
+        string status,
+        object[] activeWorks,
+        string connectionState = "connected",
+        string? lastHeartbeatAt = "2026-06-20T12:00:00Z",
+        string? registeredAt = "2026-06-20T11:00:00Z",
+        string? buildGitHash = "abcdef1234567890",
+        string kind = "agent",
+        string hostname = "host-a",
+        string scopeType = "project",
+        string? projectId = null,
+        string[]? capabilities = null,
+        string[]? coderModels = null,
+        object? capacity = null)
+    {
+        var scope = scopeType == "global"
+            ? (object)new { type = "global" }
+            : new { type = "project", projectId = projectId ?? "proj_test", projectName = "test-project" };
+
+        return new
+        {
+            id,
+            kind,
+            hostname,
+            scope,
+            status,
+            registeredAt,
+            lastHeartbeatAt,
+            connectionState,
+            capabilities = capabilities ?? new[] { "spec/*", "workspace-query" },
+            coderModels = coderModels ?? new[] { "openai/gpt-5.5", "anthropic/claude-3" },
+            coderModelCount = (coderModels ?? new[] { "openai/gpt-5.5", "anthropic/claude-3" }).Length,
+            capacity,
+            buildGitHash,
+            activeWorks,
+        };
+    }
+
+    private static object ActiveWork(
+        string workId,
+        string ownerKind,
+        string ownerId,
+        string workType,
+        string? stage = "build",
+        string? title = "Implement feature",
+        object? issue = null)
+    {
+        return new
+        {
+            workId,
+            ownerKind,
+            ownerId,
+            workType,
+            stage,
+            title,
+            issue,
+        };
+    }
+
+    private static object IssueRef(int issueNumber, string projectId = "proj_test", string? issueId = null) =>
+        new
+        {
+            projectId,
+            issueId = issueId ?? $"issue_{issueNumber:000}",
+            issueNumber,
+        };
+
+    [Fact]
+    public async Task RunnerShow_BusyRunner_PrintsIdentityCapabilitiesActiveWorksAndHealth()
+    {
+        var works = new[]
+        {
+            ActiveWork("w-1", "workflow", "wf-1", "build", "implement", "Add feature", IssueRef(214)),
+            ActiveWork("w-2", "workflow", "wf-2", "review", "review", "Review PR", IssueRef(213)),
+        };
+        var detail = RunnerDetail("r-busy", "busy", works,
+            capacity: new { usedSlots = 2, totalSlots = 2 });
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runner = detail },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-busy", "-o", "table"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal($"/api/projects/{ActiveProjectId}/runners/r-busy", request.RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("Identity", stdout, StringComparison.Ordinal);
+        Assert.Contains("Capabilities", stdout, StringComparison.Ordinal);
+        Assert.Contains("Active Works", stdout, StringComparison.Ordinal);
+        Assert.Contains("Health", stdout, StringComparison.Ordinal);
+        Assert.Contains("r-busy", stdout, StringComparison.Ordinal);
+        Assert.Contains("agent", stdout, StringComparison.Ordinal);
+        Assert.Contains("host-a", stdout, StringComparison.Ordinal);
+        Assert.Contains("abcdef1234567890", stdout, StringComparison.Ordinal);
+        Assert.Contains("spec/*", stdout, StringComparison.Ordinal);
+        Assert.Contains("openai/gpt-5.5", stdout, StringComparison.Ordinal);
+        Assert.Contains("maxWorkflowSlots: 2", stdout, StringComparison.Ordinal);
+        Assert.Contains("capacity: 2/2 slots", stdout, StringComparison.Ordinal);
+        Assert.Contains("[1]", stdout, StringComparison.Ordinal);
+        Assert.Contains("[2]", stdout, StringComparison.Ordinal);
+        Assert.Contains("w-1", stdout, StringComparison.Ordinal);
+        Assert.Contains("w-2", stdout, StringComparison.Ordinal);
+        Assert.Contains("Add feature", stdout, StringComparison.Ordinal);
+        Assert.Contains("Review PR", stdout, StringComparison.Ordinal);
+        Assert.Contains("214", stdout, StringComparison.Ordinal);
+        Assert.Contains("213", stdout, StringComparison.Ordinal);
+        Assert.Contains("busy", stdout, StringComparison.Ordinal);
+        Assert.Contains("connected", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerShow_IdleRunner_PrintsDetailWithExplicitNoActiveWorksSection()
+    {
+        var detail = RunnerDetail("r-idle", "idle", Array.Empty<object>());
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runner = detail },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-idle", "-o", "table"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("Identity", stdout, StringComparison.Ordinal);
+        Assert.Contains("Capabilities", stdout, StringComparison.Ordinal);
+        Assert.Contains("Active Works", stdout, StringComparison.Ordinal);
+        Assert.Contains("Health", stdout, StringComparison.Ordinal);
+        Assert.Contains("r-idle", stdout, StringComparison.Ordinal);
+        Assert.Contains("idle", stdout, StringComparison.Ordinal);
+        Assert.Contains("(no active works)", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerShow_UnknownRunner_ReturnsNotFoundAndNonZeroExit()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(
+                new { success = false, error = "Runner 'r-ghost' not found", code = "not_found" },
+                HttpStatusCode.NotFound)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-ghost"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(4, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal($"/api/projects/{ActiveProjectId}/runners/r-ghost", request.RequestUri?.PathAndQuery);
+        var stderr = error.ToString();
+        Assert.Contains("not found", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("r-ghost", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain("Identity", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerShow_ProjectOverride_QueriesThatProject()
+    {
+        var detail = RunnerDetail("r-x", "idle", Array.Empty<object>());
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runner = detail },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-x", "--project", "proj_other"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal($"/api/projects/proj_other/runners/r-x", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task RunnerShow_NoActiveProject_FailsWithStandardError()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called without an active project"), activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-1"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mo project use", error.ToString());
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RunnerShow_JsonOutput_EmitsFullJsonPayload()
+    {
+        var works = new[]
+        {
+            ActiveWork("w-1", "workflow", "wf-1", "build", "implement", "Add feature", IssueRef(214)),
+        };
+        var detail = RunnerDetail("r-busy", "busy", works);
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runner = detail },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-busy", "-o", "json"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        var parsed = JsonNode.Parse(stdout.Trim()) as JsonObject;
+        Assert.NotNull(parsed);
+        Assert.Equal("r-busy", parsed!["id"]?.GetValue<string>());
+        var worksArray = parsed["activeWorks"] as JsonArray;
+        Assert.NotNull(worksArray);
+        Assert.Single(worksArray!);
+        Assert.Equal("w-1", worksArray![0]!["workId"]?.GetValue<string>());
+        Assert.Equal(214, worksArray![0]!["issue"]?["issueNumber"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task RunnerShow_HelpText_ListsShowAndExistingSubcommands()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "--help"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("show", stdout, StringComparison.Ordinal);
+        Assert.Contains("install", stdout, StringComparison.Ordinal);
+        Assert.Contains("start", stdout, StringComparison.Ordinal);
+        Assert.Contains("stop", stdout, StringComparison.Ordinal);
+        Assert.Contains("status", stdout, StringComparison.Ordinal);
+        Assert.Contains("logs", stdout, StringComparison.Ordinal);
+        Assert.Contains("uninstall", stdout, StringComparison.Ordinal);
+        Assert.Contains("list", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerShow_WorkWithoutIssue_RendersWorkWithoutIssueLink()
+    {
+        var works = new[]
+        {
+            ActiveWork("w-no-issue", "workflow", "wf-no-issue", "build", "implement", "Build feature", issue: null),
+        };
+        var detail = RunnerDetail("r-x", "busy", works);
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runner = detail },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-x", "-o", "table"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("w-no-issue", stdout, StringComparison.Ordinal);
+        Assert.Contains("Build feature", stdout, StringComparison.Ordinal);
+        Assert.Contains("wf-no-issue", stdout, StringComparison.Ordinal);
+        var lines = stdout.Split('\n');
+        var workSection = lines.SkipWhile(l => !l.Contains("Active Works", StringComparison.Ordinal))
+            .TakeWhile(l => !l.StartsWith("Health", StringComparison.Ordinal));
+        Assert.DoesNotContain(workSection, l => l.Contains("issue:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunnerShow_TableOutput_ReadsMaxSlotsFromCapacityTotalSlots()
+    {
+        var detail = RunnerDetail(
+            "r-capacity",
+            "idle",
+            Array.Empty<object>(),
+            capacity: new { usedSlots = 0, totalSlots = 7 });
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runner = detail },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "show", "r-capacity", "-o", "table"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/runners/r-capacity", handler.Requests.Single().RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("maxWorkflowSlots: 7", stdout, StringComparison.Ordinal);
+        Assert.Contains("capacity: 0/7 slots", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("maxWorkflowSlots: (unknown)", stdout, StringComparison.Ordinal);
+    }
 }

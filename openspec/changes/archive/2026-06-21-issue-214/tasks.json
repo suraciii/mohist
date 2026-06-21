@@ -1,0 +1,88 @@
+{
+  "project": "mohist-local",
+  "description": "Enrich runner runtime state with full per-work active-work context (workId, stage, title, issue ref) for all works, and expose single-runner detail across server API, Web UI, and CLI. Read-only observability; no protocol or persistence changes.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Enrich runner runtime state with full multi-work active-work context",
+      "spec": "specs/runner-detail/spec.md#each-active-work-carries-full-work-level-context",
+      "description": "At the grain/domain layer, replace `RunnerRuntimeState.ActiveWorkflowRunIds` (list of workflow-run id strings) with an `ActiveWorks` list of `RunnerActiveWorkItem` carrying workId, ownerKind, ownerId (workflowRunId or agentJobId), workType, stage, title, and issue reference. Project these from the existing `RunnerGrain._works` (`RunnerTrackedWork.Dispatch`) in `GetRuntimeStateAsync`, and update `RunnerGrain.DeriveStatus`'s count derivation (busy ⇔ any active work) plus any other in-tree reader of the old field. No new runner→server reporting; the grain already holds this payload from dispatch time.",
+      "acceptanceCriteria": [
+        "`RunnerRuntimeState` exposes an `ActiveWorks` list whose items each carry workId, ownerKind, ownerId, workType, stage, title, and issue (nullable); the old `ActiveWorkflowRunIds` string list is gone and all in-tree readers compile.",
+        "A runner tracking 2 concurrent works (max slots ≥ 2) exposes exactly 2 items via `GetRuntimeStateAsync`, each with its own workId/stage/title/issue; an online idle runner exposes an empty list (not null).",
+        "Active-work field values match the `WorkDispatch` payload at assign time exactly, and a work whose dispatch carried no issue reference yields a null issue (no placeholder object).",
+        "Status derivation still reports `busy` iff there is at least one active work, `idle`/`stale`/`offline` otherwise — unchanged from pre-change behavior.",
+        "Grain-level specs are updated: `RunnerStatusProjectionSpecs` and related runner grain specs pass with the new shape, including a multi-work scenario. `npm test` (server) is green."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `RunnerRuntimeState`, new `RunnerActiveWorkItem` record, updated `RunnerGrain.GetRuntimeStateAsync` + status derivation, and updated grain specs.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D1/D2: source context from `_works` (not workflow grains or runner reports). `RunnerRuntimeState` is `[GenerateSerializer]`; the wire-shape change is acceptable under the project's no-version-compat stance — update every caller in this task."
+    },
+    {
+      "id": "T-002",
+      "title": "Enrich runner list API with multi-item active work and add single-runner detail endpoint",
+      "spec": "specs/runner-detail/spec.md#runner-list-endpoint-exposes-multi-item-active-work-per-runner",
+      "description": "In the HTTP/projection layer, rename `RunnerStatusView.ActiveWork` (singular, nullable) to `ActiveWorks` (`IReadOnlyList<RunnerActiveWorkView>`, empty never null), extend `RunnerActiveWorkView` with `ownerKind`, `ownerId`, and `issue` (`{ projectId, issueId, issueNumber } | null`), and update `RunnerStatusService.ProjectRunnerAsync` to project every active work from the new runtime state (no more `FirstOrDefault()` with empty fields). Add `GET /api/projects/{projectRef}/runners/{runnerId}` returning one runner's full detail (identity, capabilities, all active works, health), reusing `ProjectResolutionEndpointFilter`; return HTTP 404 with a clear `runner_not_found` reason for an id not in the resolved project's eligible set so unknown is distinguishable from idle.",
+      "acceptanceCriteria": [
+        "`GET /api/projects/{projectRef}/runners` returns, for each runner, an `activeWorks` list (never null) where every item carries workId, ownerKind, ownerId, workType, stage, title, and issue when present; a busy multi-slot runner returns N items, an idle runner returns an empty list.",
+        "`GET /api/projects/{projectRef}/runners/{runnerId}` returns HTTP 200 with the single-runner detail view (identity, capabilities, activeWorks, health) for a registered runner; idle runners still return 200 with an empty `activeWorks`.",
+        "`GET /api/projects/{projectRef}/runners/{runnerId}` returns HTTP 404 with a body identifying the runner id as not found when the id is not registered to the resolved project's eligible set.",
+        "The detail endpoint is read-only: it triggers no dispatch, heartbeat, unregister, or tracked-work mutation side effect.",
+        "API specs are updated: `RunnerStatusApiSpecs` covers the multi-work list shape, the new detail endpoint's 200/404 paths, and the no-side-effect guarantee. `npm test` (server) is green."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `RunnerStatusView`/`RunnerActiveWorkView`/`RunnerStatusService`, new detail route in `RunnerStatusRoutes`, and updated/added API specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Per design D3/D4: project-scoped detail endpoint reuses the existing `/api/projects/{projectRef}/runners` group and `ProjectResolutionEndpointFilter`. The singular→plural rename is a breaking shape change; only in-tree consumers (Web types, tests) are affected and are updated in T-003."
+    },
+    {
+      "id": "T-003",
+      "title": "Add Web runner detail page with issue deep-links and list navigation",
+      "spec": "specs/runner-detail/spec.md#web-ui-provides-a-runner-detail-page",
+      "description": "Update `entities/runner/model/types.ts` to the new list-shaped `activeWorks` (each item carrying ownerKind/ownerId/workType/stage/title/issue) and update `RunnerList`/`RunnerSummary` to render the multi-item list. Add a project-scoped runner detail page (e.g. `/:projectName/runners/:runnerId`) with a TanStack Query consuming `GET /api/projects/{projectRef}/runners/{runnerId}`, rendering full identity (kind, hostname, scope, registeredAt, build git hash), capabilities (capabilities, coder models, max slots), every active work as an independent row, and health metrics (status, connectionState, lastHeartbeatAt). Make each `RunnerRow` in the list navigate to its detail page; render a navigable issue link from `issue.projectId` + `issue.issueNumber` using the existing issue-detail route, and omit the link cleanly when `issue` is absent. Surface a clear not-found state on 404.",
+      "acceptanceCriteria": [
+        "`RunnerStatusRow.activeWorks` is an array; `RunnerList`/`RunnerSummary` render every active work (stage, title, workType) without collapsing to one; existing summary fields (identity, status, scope, health) are preserved.",
+        "A runner detail page exists at a project-scoped route and renders identity, capabilities, every active work as an independent row, and health metrics; a runner with 3 concurrent works renders 3 independent rows.",
+        "An active work whose issue reference includes projectId + issueNumber renders a link that navigates to that issue's page; a work without an issue reference renders stage/title with no broken or placeholder link.",
+        "Activating a runner entry in the list navigates to that runner's detail page keyed by its id; the existing list summary content is not displaced.",
+        "Opening the detail page for a runner id that 404s surfaces a clear not-found state (no partially populated runner).",
+        "Web typecheck and tests are green: `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`, including an updated `runner-status.test.ts` and a new detail-page test."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `entities/runner` types + `RunnerList`/`RunnerSummary`, new runner detail page (route + query + component), list-to-detail navigation, and updated/added Web tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Per design D6/D7: issue deep-link is built client-side from the issue ref; the server returns no URL. Route placement follows the existing project-scoped convention."
+    },
+    {
+      "id": "T-004",
+      "title": "Add `mo runner show <runnerId>` CLI subcommand consuming the detail endpoint",
+      "spec": "specs/runner-detail/spec.md#cli-exposes-a-runner-show-subcommand",
+      "description": "Add `show <runnerId>` to the existing top-level `mo runner` command group. `show` resolves the target project via the CLI's standard project selection rules (current project, `--project` override) and consumes `GET /api/projects/{projectRef}/runners/{runnerId}`. It prints the runner's full identity (id, kind, hostname, scope, registeredAt, build git hash), capabilities (capabilities, coder models, max slots), every active work independently (workId, workType, stage, title, issue number when present), and health metrics (status, connectionState, lastHeartbeatAt). On 404 it exits non-zero with a clear not-found message; on an idle runner it prints full detail with an explicit no-active-works section.",
+      "acceptanceCriteria": [
+        "`mo runner show <runnerId>` is wired as a top-level command and prints identity, capabilities, every active work's context (workId, workType, stage, title, issue number when present) as independent entries, and health metrics for a registered runner.",
+        "`mo runner show <runnerId>` on a runner id that 404s exits with a non-zero status and prints a clear not-found message.",
+        "`mo runner show <runnerId>` on an online idle runner prints identity, capabilities, and health, and explicitly indicates there are no active works.",
+        "The existing `mo runner` service-lifecycle subcommands (install/start/stop/restart/status/logs/uninstall) are untouched and still function.",
+        "Project resolution matches `mo issue show` semantics (current project by default, `--project` override).",
+        "CLI test coverage for `show` (success, idle, not-found) passes; `npm run build` succeeds (CLI build is part of the .NET solution build)."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New top-level `mo runner` command group with `show` subcommand, plus CLI tests.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Per design D5: add read-only observability to the existing top-level `mo runner` group without changing service-lifecycle subcommands. Help text must distinguish lifecycle and observability verbs."
+    }
+  ]
+}

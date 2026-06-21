@@ -294,10 +294,21 @@ public class RunnerGrain : Grain, IRunnerGrain
             _status,
             _lastHeartbeat,
             _works.Values
-                .Select(w => OwnerIdentityFor(w.Dispatch))
-                .Where(id => !string.IsNullOrEmpty(id))
-                .Distinct(StringComparer.Ordinal)
+                .Select(ProjectActiveWork)
                 .ToArray()));
+    }
+
+    private static RunnerActiveWorkItem ProjectActiveWork(RunnerTrackedWork work)
+    {
+        var dispatch = work.Dispatch;
+        return new RunnerActiveWorkItem(
+            WorkId: dispatch.WorkId,
+            OwnerKind: dispatch.OwnerKind,
+            OwnerId: OwnerIdentityFor(dispatch),
+            WorkType: dispatch.WorkType,
+            Stage: dispatch.Stage,
+            Title: dispatch.Title,
+            Issue: dispatch.Issue);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)

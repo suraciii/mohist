@@ -1,5 +1,7 @@
-import type { RunnerStatusRow } from '../../../entities/runner'
+import { Link, useNavigate } from 'react-router-dom'
+import type { RunnerActiveWork, RunnerStatusRow } from '../../../entities/runner'
 import { useRunners } from '../../../entities/runner'
+import { useProjectPath } from '../../../entities/project'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
 
@@ -58,9 +60,63 @@ function heartbeatFreshnessLabel(row: RunnerStatusRow) {
   return `heartbeat ${kind}: ${formatHeartbeatAge(row.lastHeartbeatAt)}`
 }
 
-function RunnerRow({ row }: { row: RunnerStatusRow }) {
+function ActiveWorkSummary({
+  work,
+  toProjectPath,
+}: {
+  work: RunnerActiveWork
+  toProjectPath: (path: string) => string
+}) {
+  const label = work.title ?? work.workType ?? work.ownerKind
+  if (work.issue) {
+    return (
+      <div className="mt-1 text-xs text-blue-600" data-testid="active-work-row">
+        <span>{label}</span>
+        <span className="mx-1 text-gray-300">·</span>
+        <Link
+          to={toProjectPath(`/issues/${work.issue.issueNumber}`)}
+          onClick={(event) => event.stopPropagation()}
+          className="text-blue-600 hover:text-blue-700 hover:underline"
+          data-testid="active-work-issue-link"
+          data-work-id={work.workId}
+        >
+          #{work.issue.issueNumber}
+        </Link>
+        {work.stage && <span className="ml-1 text-gray-400">({work.stage})</span>}
+      </div>
+    )
+  }
   return (
-    <div className="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0">
+    <div className="mt-1 text-xs text-blue-600" data-testid="active-work-row">
+      <span>{label}</span>
+      {work.stage && <span className="ml-1 text-gray-400">({work.stage})</span>}
+      <span className="ml-1 text-gray-400 font-mono">{work.ownerId}</span>
+    </div>
+  )
+}
+
+function RunnerRow({ row }: { row: RunnerStatusRow }) {
+  const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
+  const detailHref = toProjectPath(`/runners/${encodeURIComponent(row.id)}`)
+  const activeWorks = row.activeWorks ?? []
+
+  return (
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => navigate(detailHref)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          navigate(detailHref)
+        }
+      }}
+      className="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+      data-testid="runner-row"
+      data-runner-id={row.id}
+      data-href={detailHref}
+    >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-mono text-xs font-medium text-foreground">{row.id}</span>
@@ -80,9 +136,11 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
             </span>
           )}
         </div>
-        {row.activeWork && (
-          <div className="mt-1 text-xs text-blue-600">
-            {row.activeWork.title ?? row.activeWork.workType ?? 'workflow'} ({row.activeWork.workflowRunId})
+        {activeWorks.length > 0 && (
+          <div className="mt-1 space-y-0.5" data-testid="runner-active-works" data-count={activeWorks.length}>
+            {activeWorks.map((work) => (
+              <ActiveWorkSummary key={work.workId} work={work} toProjectPath={toProjectPath} />
+            ))}
           </div>
         )}
         {row.capacity && (

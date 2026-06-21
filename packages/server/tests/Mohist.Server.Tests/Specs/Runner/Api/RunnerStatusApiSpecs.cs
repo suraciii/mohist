@@ -267,9 +267,11 @@ public class RunnerStatusApiSpecs
             var runnerView = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
             Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runnerView.ValueKind);
             Assert.Equal("busy", runnerView.GetProperty("status").GetString());
-            var activeWork = runnerView.GetProperty("activeWork");
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Null, activeWork.ValueKind);
-            Assert.Equal(workflowId, activeWork.GetProperty("workflowRunId").GetString());
+            var activeWorks = runnerView.GetProperty("activeWorks");
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
+            var firstActive = activeWorks.EnumerateArray().First();
+            Assert.Equal(workflowId, firstActive.GetProperty("ownerId").GetString());
+            Assert.Equal("workflow", firstActive.GetProperty("ownerKind").GetString());
         }
         finally
         {
@@ -311,9 +313,10 @@ public class RunnerStatusApiSpecs
             Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runnerView.ValueKind);
             Assert.Equal("disconnected", runnerView.GetProperty("connectionState").GetString());
             Assert.Equal("busy", runnerView.GetProperty("status").GetString());
-            var activeWork = runnerView.GetProperty("activeWork");
-            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Null, activeWork.ValueKind);
-            Assert.Equal(workflowId, activeWork.GetProperty("workflowRunId").GetString());
+            var activeWorks = runnerView.GetProperty("activeWorks");
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
+            var firstActive = activeWorks.EnumerateArray().First();
+            Assert.Equal(workflowId, firstActive.GetProperty("ownerId").GetString());
         }
         finally
         {
@@ -354,7 +357,7 @@ public class RunnerStatusApiSpecs
             Assert.Contains("lastHeartbeatAt", runner.ToString());
             Assert.Contains("capabilities", runner.ToString());
             Assert.Contains("coderModels", runner.ToString());
-            Assert.Contains("activeWork", runner.ToString());
+            Assert.Contains("activeWorks", runner.ToString());
 
             Assert.DoesNotContain(runner.ToString(), "agent");
         }
@@ -395,6 +398,328 @@ public class RunnerStatusApiSpecs
             Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runner.ValueKind);
             Assert.True(runner.TryGetProperty("buildGitHash", out var reportedHash));
             Assert.Equal(hash, reportedHash.GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunners_BusyMultiSlotRunner_ListsEveryActiveWorkIndependently()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"runner-multi-api-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "multi-host",
+            projectId,
+            maxWorkflowSlots = 2,
+        });
+
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.HeartbeatAsync();
+
+        var workflowA = $"wf-multi-a-{Guid.NewGuid():N}";
+        var workflowB = $"wf-multi-b-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowA, "task-a.1", "task", "build", "Task A");
+        await AssignActiveWorkForTestAsync(runnerId, workflowB, "task-b.1", "task", "review", "Task B");
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var runners = payload.GetProperty("data").GetProperty("runners");
+            var runnerView = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
+            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Undefined, runnerView.ValueKind);
+
+            var activeWorks = runnerView.GetProperty("activeWorks");
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
+            Assert.Equal(2, activeWorks.GetArrayLength());
+
+            var ownerIds = activeWorks.EnumerateArray().Select(w => w.GetProperty("ownerId").GetString()).ToArray();
+            Assert.Contains(workflowA, ownerIds);
+            Assert.Contains(workflowB, ownerIds);
+
+            foreach (var work in activeWorks.EnumerateArray())
+            {
+                Assert.Equal("workflow", work.GetProperty("ownerKind").GetString());
+                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("workId").GetString()));
+                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("workType").GetString()));
+                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("stage").GetString()));
+                Assert.False(string.IsNullOrWhiteSpace(work.GetProperty("title").GetString()));
+            }
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunners_IdleRunner_HasEmptyActiveWorksArray()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"runner-idle-api-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "idle-host",
+            projectId,
+        });
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.HeartbeatAsync();
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var runnerView = payload.GetProperty("data").GetProperty("runners").EnumerateArray()
+                .First(r => r.GetProperty("id").GetString() == runnerId);
+            Assert.Equal("idle", runnerView.GetProperty("status").GetString());
+            var activeWorks = runnerView.GetProperty("activeWorks");
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
+            Assert.Equal(0, activeWorks.GetArrayLength());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunner_BusyRunner_Returns200WithFullDetail()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"runner-detail-{Guid.NewGuid():N}";
+        var hash = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "detail-host",
+            projectId,
+            coderModels = new[] { "openai/gpt-4" },
+            buildGitHash = hash,
+        });
+
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var workflowId = $"wf-detail-{Guid.NewGuid():N}";
+        var issue = new WorkIssueRef(projectId, "issue-detail-1", 17);
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: workflowId,
+            WorkId: "work-detail-1",
+            WorkType: "task",
+            Stage: "build",
+            Title: "Detail Task",
+            Issue: issue);
+        var assign = await runner.AssignWorkAsync(dispatch);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assign.Status);
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            Assert.True(payload.GetProperty("success").GetBoolean());
+            var detail = payload.GetProperty("data").GetProperty("runner");
+
+            Assert.Equal(runnerId, detail.GetProperty("id").GetString());
+            Assert.Equal("external", detail.GetProperty("kind").GetString());
+            Assert.Equal("detail-host", detail.GetProperty("hostname").GetString());
+            Assert.Equal("project", detail.GetProperty("scope").GetProperty("type").GetString());
+            Assert.Equal(hash, detail.GetProperty("buildGitHash").GetString());
+            Assert.Equal("busy", detail.GetProperty("status").GetString());
+            Assert.Equal("openai/gpt-4", detail.GetProperty("coderModels")[0].GetString());
+
+            var activeWorks = detail.GetProperty("activeWorks");
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
+            var first = activeWorks.EnumerateArray().Single();
+            Assert.Equal("work-detail-1", first.GetProperty("workId").GetString());
+            Assert.Equal("workflow", first.GetProperty("ownerKind").GetString());
+            Assert.Equal(workflowId, first.GetProperty("ownerId").GetString());
+            Assert.Equal("task", first.GetProperty("workType").GetString());
+            Assert.Equal("build", first.GetProperty("stage").GetString());
+            Assert.Equal("Detail Task", first.GetProperty("title").GetString());
+
+            var issueRef = first.GetProperty("issue");
+            Assert.NotEqual(global::System.Text.Json.JsonValueKind.Null, issueRef.ValueKind);
+            Assert.Equal(projectId, issueRef.GetProperty("projectId").GetString());
+            Assert.Equal("issue-detail-1", issueRef.GetProperty("issueId").GetString());
+            Assert.Equal(17, issueRef.GetProperty("issueNumber").GetInt32());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunner_IdleRunner_Returns200WithEmptyActiveWorks()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"runner-idle-detail-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "idle-detail-host",
+            projectId,
+        });
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.HeartbeatAsync();
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var detail = payload.GetProperty("data").GetProperty("runner");
+
+            Assert.Equal(runnerId, detail.GetProperty("id").GetString());
+            Assert.Equal("idle", detail.GetProperty("status").GetString());
+            var activeWorks = detail.GetProperty("activeWorks");
+            Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
+            Assert.Equal(0, activeWorks.GetArrayLength());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunner_UnknownRunner_Returns404WithRunnerNotFoundReason()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var unknownRunnerId = $"runner-unknown-{Guid.NewGuid():N}";
+
+        var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{unknownRunnerId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("runner_not_found", payload.GetProperty("code").GetString());
+        Assert.Contains(unknownRunnerId, payload.GetProperty("error").GetString()!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunner_RunnerScopedToOtherProject_Returns404()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"runner-foreign-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "foreign-host",
+            projectId = "different-project",
+        });
+
+        try
+        {
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task GetRunner_IsReadOnly_NoDispatchHeartbeatOrUnregisterSideEffect()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"proj-{Guid.NewGuid():N}" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
+
+        var runnerId = $"runner-readonly-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = "readonly-host",
+            projectId,
+        });
+
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.HeartbeatAsync();
+
+        var workflowId = $"wf-readonly-{Guid.NewGuid():N}";
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: workflowId,
+            WorkId: "work-readonly-1",
+            WorkType: "task",
+            Stage: "build",
+            Title: "Readonly Task");
+        var assign = await runner.AssignWorkAsync(dispatch);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assign.Status);
+
+        try
+        {
+            var beforeRuntime = await runner.GetRuntimeStateAsync();
+            var beforeInfo = await runner.GetInfoAsync();
+            var beforeHeartbeatAt = beforeRuntime.LastHeartbeatAt;
+            var beforeRegisteredAt = beforeInfo!.RegisteredAt;
+
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var afterRuntime = await runner.GetRuntimeStateAsync();
+            var afterInfo = await runner.GetInfoAsync();
+
+            Assert.Single(afterRuntime.ActiveWorks);
+            Assert.Equal(workflowId, afterRuntime.ActiveWorks[0].OwnerId);
+            Assert.Equal("work-readonly-1", afterRuntime.ActiveWorks[0].WorkId);
+
+            Assert.Equal(beforeHeartbeatAt, afterRuntime.LastHeartbeatAt);
+            Assert.NotEqual(RunnerStatus.Offline, afterRuntime.Status);
+            Assert.NotNull(afterInfo);
+            Assert.Equal(beforeRegisteredAt, afterInfo.RegisteredAt);
         }
         finally
         {

@@ -427,7 +427,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       hasConnectedCapacity: true,
       connectedIdleCount: 1,
       connectedBusyCount: 0,
-      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected' }],
+      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }],
     })
 
     const queryClient = new QueryClient()
@@ -448,7 +448,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       hasConnectedCapacity: true,
       connectedIdleCount: 0,
       connectedBusyCount: 1,
-      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'busy', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWork: { workId: 'w1', workflowRunId: 'wf1' } }],
+      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'busy', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }] }],
     })
 
     const queryClient = new QueryClient()
@@ -469,7 +469,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       hasConnectedCapacity: false,
       connectedIdleCount: 0,
       connectedBusyCount: 0,
-      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'stale', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: null }],
+      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'stale', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: null, activeWorks: [] }],
     })
 
     const queryClient = new QueryClient()

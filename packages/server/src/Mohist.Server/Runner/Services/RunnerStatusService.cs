@@ -33,6 +33,24 @@ public class RunnerStatusService
         return views;
     }
 
+    public async Task<RunnerStatusView?> GetRunnerAsync(string projectId, string runnerId)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+        {
+            return null;
+        }
+
+        var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
+        var eligible = await registry.ListEligibleRunnersAsync(projectId);
+        var info = eligible.FirstOrDefault(r => string.Equals(r.RunnerId, runnerId, StringComparison.Ordinal));
+        if (info is null)
+        {
+            return null;
+        }
+
+        return await ProjectRunnerAsync(info);
+    }
+
     private async Task<RunnerStatusView> ProjectRunnerAsync(RunnerInfo info)
     {
         var runnerGrain = _grainFactory.GetGrain<IRunnerGrain>(info.RunnerId);
@@ -55,13 +73,10 @@ public class RunnerStatusService
             : new RunnerScopeView("project", info.ProjectId, null);
 
         var capacity = runtime is not null
-            ? new RunnerCapacityView(runtime.ActiveWorkflowRunIds.Count, RunnerCapacity.Normalize(info.MaxWorkflowSlots))
+            ? new RunnerCapacityView(runtime.ActiveWorks.Count, RunnerCapacity.Normalize(info.MaxWorkflowSlots))
             : null;
 
-        var activeWork = runtime?.ActiveWorkflowRunIds.FirstOrDefault();
-        var activeWorkView = activeWork is not null
-            ? new RunnerActiveWorkView(string.Empty, activeWork)
-            : null;
+        var activeWorks = ProjectActiveWorks(runtime?.ActiveWorks);
 
         return new RunnerStatusView(
             info.RunnerId,
@@ -76,8 +91,32 @@ public class RunnerStatusService
             info.CoderModels ?? [],
             info.CoderModels?.Length ?? 0,
             capacity,
-            activeWorkView,
+            activeWorks,
             info.BuildGitHash);
+    }
+
+    private static IReadOnlyList<RunnerActiveWorkView> ProjectActiveWorks(IReadOnlyList<RunnerActiveWorkItem>? activeWorks)
+    {
+        if (activeWorks is null || activeWorks.Count == 0)
+        {
+            return [];
+        }
+
+        var views = new List<RunnerActiveWorkView>(activeWorks.Count);
+        foreach (var work in activeWorks)
+        {
+            views.Add(new RunnerActiveWorkView(
+                work.WorkId,
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkType,
+                work.Stage,
+                work.Title,
+                work.Issue is null
+                    ? null
+                    : new RunnerActiveWorkIssueView(work.Issue.ProjectId, work.Issue.IssueId, work.Issue.IssueNumber)));
+        }
+        return views;
     }
 
     private string DeriveStatus(RunnerInfo info, RunnerRuntimeState? runtime, string connectionState, DateTimeOffset now)
@@ -92,7 +131,7 @@ public class RunnerStatusService
         if (elapsed > StaleThreshold)
             return "stale";
 
-        if (runtime.ActiveWorkflowRunIds.Count > 0)
+        if (runtime.ActiveWorks.Count > 0)
             return "busy";
 
         var requiresLiveConnection = info.Capabilities.Contains("workspace-query", StringComparer.OrdinalIgnoreCase);

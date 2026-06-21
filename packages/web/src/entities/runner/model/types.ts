@@ -9,12 +9,20 @@ export interface RunnerCapacity {
   totalSlots: number
 }
 
+export interface RunnerActiveWorkIssueRef {
+  projectId: string
+  issueId: string
+  issueNumber: number
+}
+
 export interface RunnerActiveWork {
   workId: string
-  workflowRunId: string
-  workType?: string | null
+  ownerKind: string
+  ownerId: string
+  workType: string
   stage?: string | null
   title?: string | null
+  issue?: RunnerActiveWorkIssueRef | null
 }
 
 export interface RunnerStatusRow {
@@ -29,12 +37,18 @@ export interface RunnerStatusRow {
   capabilities: string[]
   coderModels: string[]
   coderModelCount: number
+  maxWorkflowSlots?: number | null
+  buildGitHash?: string | null
   capacity?: RunnerCapacity | null
-  activeWork?: RunnerActiveWork | null
+  activeWorks: RunnerActiveWork[]
 }
 
 export interface RunnerStatusListResponse {
   runners: RunnerStatusRow[]
+}
+
+export interface RunnerStatusDetailResponse {
+  runner: RunnerStatusRow
 }
 
 export interface RunnerStatusSummary {

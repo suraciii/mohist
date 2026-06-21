@@ -228,7 +228,7 @@ public class AgentJobRoutesEndToEndSpecs
             Assert.Equal(runnerId, snapshot.RunnerId);
 
             var finalState = await runnerGrain.GetRuntimeStateAsync();
-            Assert.DoesNotContain(jobKey, finalState.ActiveWorkflowRunIds);
+            Assert.DoesNotContain(jobKey, finalState.ActiveWorks.Select(w => w.OwnerId));
         }
         finally
         {
