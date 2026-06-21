@@ -10,14 +10,13 @@ public static class JSON
 {
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNameCaseInsensitive = true,
-        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
         Converters =
         {
             new UnknownFailureReasonJsonConverter(),
-            new JsonStringEnumConverter(),
+            new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
         }
     };
 

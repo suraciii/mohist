@@ -143,11 +143,6 @@ public static class MohistServiceRegistration
         });
         services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options);
 
-        services.ConfigureHttpJsonOptions(options =>
-        {
-            options.SerializerOptions.Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping;
-        });
-
         return services;
     }
 

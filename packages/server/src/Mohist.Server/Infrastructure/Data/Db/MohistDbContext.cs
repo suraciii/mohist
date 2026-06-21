@@ -119,21 +119,21 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
 
             entity.Property(e => e.LabelProjectId)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/project-id"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/project-id"')""", stored: true);
             entity.Property(e => e.LabelSourceId)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/source-id"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/source-id"')""", stored: true);
             entity.Property(e => e.LabelSessionName)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/session-name"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/session-name"')""", stored: true);
             entity.Property(e => e.LabelIssueNumber)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/issue-number"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/issue-number"')""", stored: true);
             entity.Property(e => e.LabelWorkId)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/work-id"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/work-id"')""", stored: true);
             entity.Property(e => e.LabelWorkType)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/work-type"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/work-type"')""", stored: true);
             entity.Property(e => e.LabelStage)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/stage"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/stage"')""", stored: true);
             entity.Property(e => e.LabelSourceKind)
-                .HasComputedColumnSql("""json_extract("State", '$.Metadata.Labels."mohist.io/source-kind"')""", stored: true);
+                .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/source-kind"')""", stored: true);
 
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");

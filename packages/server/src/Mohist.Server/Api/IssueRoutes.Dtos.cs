@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 
@@ -31,7 +32,7 @@ public record CreateIssueRequest(
 /// </summary>
 public record UpdateIssueRequest
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = JSON.Options;
 
     public string? Title { get; init; }
     public string? Body { get; init; }
