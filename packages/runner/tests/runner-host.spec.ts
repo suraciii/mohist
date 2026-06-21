@@ -49,6 +49,16 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
   })),
 }))
 
+vi.mock("../src/runtime/acp-connection.js", () => ({
+  AcpSessionManager: class {
+    close() {}
+  },
+  createSharedAcpConnection: vi.fn(async () => ({
+    async resume() { return null },
+    async shutdown() {},
+  })),
+}))
+
 describe("RunnerHost", () => {
   it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
     vi.clearAllMocks()

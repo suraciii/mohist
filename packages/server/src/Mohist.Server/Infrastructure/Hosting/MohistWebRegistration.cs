@@ -24,7 +24,16 @@ public static class MohistWebRegistration
 
         app.MapFallback(async context =>
         {
-            if (context.Request.Path.StartsWithSegments("/api"))
+            var path = context.Request.Path;
+            // /api/* and /otel/v1/* have their own route groups; if a
+            // request falls through to the SPA fallback for those
+            // paths it means no route matched (wrong method, no
+            // resource, etc.) and the right answer is 404 — not the
+            // web shell. Without this guard, GET /otel/v1/traces from
+            // the main port would serve index.html and let callers
+            // probe the OTLP listener.
+            if (path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase) ||
+                path.StartsWithSegments("/otel/v1", StringComparison.OrdinalIgnoreCase))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;

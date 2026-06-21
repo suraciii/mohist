@@ -36,6 +36,8 @@ public static class MohistApiRegistration
         app.MapWorkflowArtifactUploadRoutes();
         app.MapHub<RunnerHub>("/hubs/runner");
         app.MapHub<MohistHub>("/hubs/events");
+        app.MapOtlpRoutes();
+        app.MapOtelQueryRoutes();
         return app;
     }
 }

@@ -1,0 +1,111 @@
+{
+  "project": "mohist-local",
+  "description": "Add OTel trace collector as a Mohist Server component — OTLP/JSON ingestion on a dedicated port, independent otel.db persistence, query API on the main port, and mo otel CLI commands.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "OTel 基础设施——配置、otel.db schema 与连接管理",
+      "spec": "specs/otel-trace-collection/spec.md#Trace 数据持久化到独立 otel.db",
+      "description": "建立 OTel collector 的基础设施层：OtelOptions 配置类（Port/DbPath/Enabled，遵循现有 Options 模式，SectionName=\"Mohist:Otel\"）、OtelDb（解析连接字符串到 ~/.mohist/otel.db、执行 DDL 初始化 traces/spans 表与索引、开启 WAL 模式、提供读写与只读连接工厂）、OtelCollectorStatus 单例（跟踪 OTLP 端口绑定状态）。在 MohistServiceRegistration.ConfigureMohistServices 中注册 OtelOptions 绑定与上述服务，使 MohistDbFixture 自动覆盖。",
+      "acceptanceCriteria": [
+        "OtelOptions 可从 Mohist:Otel 配置段绑定，Port 默认 4318，DbPath 默认解析到 ~/.mohist/otel.db，Enabled 默认 true",
+        "OtelDb 在首次调用时创建 otel.db 文件并执行 DDL（traces 表含 trace_id PK / service_name / start_time / end_time / span_count；spans 表含 trace_id / span_id / parent_span_id / name / kind / start_time / end_time / attributes / status_code / status_message / resource_attributes，复合主键 (trace_id, span_id)），索引 idx_traces_service_start / idx_traces_start / idx_spans_trace 均存在",
+        "otel.db 开启 WAL 模式（PRAGMA journal_mode=WAL）",
+        "OtelDb 提供只读连接（Mode=ReadOnly）与读写连接两种工厂方法",
+        "otel.db 与主业务库 mohist.db 物理隔离：写入 otel.db 的数据不出现在 mohist.db，反之亦然",
+        "OtelCollectorStatus 单例可在线程安全地记录与读取 collector 在线状态",
+        "所有新代码遵守 BannedApiAnalyzer 约束（注入 IEnvironmentVariableProvider / IFileSystem，不直接调用 System.Environment / System.IO 静态方法），dotnet build 无 warning（TreatWarningsAsErrors）",
+        "单元测试覆盖：配置默认值与覆盖、schema 初始化幂等（重复调用不报错）、连接字符串解析（自定义 DbPath / 环境变量 / 默认路径）、只读与读写连接均能打开"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Otel/ 目录下 OtelOptions.cs、OtelDb.cs、OtelCollectorStatus.cs；MohistServiceRegistration.cs 追加注册；对应单元测试通过",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "DDL 定义见 design.md Decision 4。时间存储为 ISO 8601 UTC 文本以支持字典序排序。schema 是 server 写入与 CLI 直读共享的契约，后续变更视为 breaking。"
+    },
+    {
+      "id": "T-002",
+      "title": "OTLP trace 接收——双端口绑定、JSON 解析与持久化",
+      "spec": "specs/otel-trace-collection/spec.md#POST /otel/v1/traces 接收 OTLP HTTP JSON trace",
+      "description": "实现 OTLP trace 接收的完整写入链路：(1) 在 Program.cs 中扩展 UseUrls 追加 OTLP 端口（从 Mohist:Otel:Port 读取，默认 4318），绑定失败 try/catch 记录日志但不阻断主 API 端口启动，更新 OtelCollectorStatus；(2) OTLP JSON POCO 模型（ResourceSpans/ScopeSpans/Span/Status）与 AnyValueConverter（处理 oneof value：stringValue/intValue/doubleValue/boolValue/arrayValue/kvlistValue）；(3) TraceIngester 将 OTLP JSON 解析后批量 INSERT OR REPLACE 到 otel.db（startTimeUnixNano/endTimeUnixNano 转换为 ISO 8601 UTC，attributes/resource_attributes 序列化为 JSON 文本，service_name 取第一个 resource 的 service.name）；(4) OtlpRoutes 暴露 POST /otel/v1/traces 端点，用 RequireHost 绑定到 OTLP 端口，Content-Type application/json 接受并返回 OTLP 标准响应 {}，application/x-protobuf 及其他 Content-Type 返回 415，非法 JSON 返回 400；(5) OtelPortIsolationMiddleware 拦截 OTLP 端口上的非 /otel/v1/ 路径返回 404；(6) 在 MohistApiRegistration 注册路由。",
+      "acceptanceCriteria": [
+        "Server 启动后同时监听主 API 端口（3456）与 OTLP 端口（4318 或 Mohist:Otel:Port 配置值）",
+        "POST /otel/v1/traces 接受 Content-Type: application/json 的合法 OTLP JSON（含 resourceSpans），返回 HTTP 200 与响应体 {}",
+        "接收的 trace 数据正确持久化到 otel.db：traces 表与 spans 表均有记录，时间字段为 ISO 8601 格式，attributes/resource_attributes 为可解析的 JSON 文本",
+        "对 application/x-protobuf Content-Type 返回 HTTP 415 Unsupported Media Type",
+        "对非 application/json 的任意 Content-Type 返回 HTTP 415",
+        "对非法 JSON 请求体（Content-Type: application/json）返回 HTTP 400 并包含错误说明",
+        "从 OTLP 端口（4318）请求 GET /otel/api/traces 等 /otel/api/ 路径返回 HTTP 404（端口隔离）",
+        "OTLP 端口绑定失败（如端口被占用）时：主 API 端口正常启动并服务请求，日志记录 OTLP 绑定失败，OtelCollectorStatus 报告离线",
+        "配置标准 OTel SDK 环境变量（OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/otel，OTEL_EXPORTER_OTLP_PROTOCOL=http/json）后发送的 trace 能正确写入 otel.db，可通过直接读 SQLite 验证",
+        "同一 trace 的 span 分多次 OTLP 请求到达时，INSERT OR REPLACE 保证幂等，不产生重复行",
+        "dotnet build 无 warning；集成测试覆盖上述所有场景（使用 TestServer 或 WebApplicationFactory，双端口用 Configure<KestrelServerOptions> 或 UseUrls 模拟）"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Otel/OtlpJson/ 目录（POCO + Converter）、Otel/TraceIngester.cs、Api/OtlpRoutes.cs、Otel/OtelPortIsolationMiddleware.cs；Program.cs 追加双端口绑定逻辑；集成测试通过",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "OTLP 端点不套用 ApiResponse<T> 信封，直接返回 {}（design.md Decision 8）。OTLP JSON POCO 不引入 OpenTelemetry.Protobuf/Google.Protobuf 包（design.md Decision 2）。双端口实现见 design.md Decision 1。"
+    },
+    {
+      "id": "T-003",
+      "title": "Trace 查询 API——列表、SQL 查询与状态端点",
+      "spec": "specs/otel-trace-query-api/spec.md#GET /otel/api/traces 返回最近 trace 列表",
+      "description": "实现主 API 端口上的 /otel/api/ 路由组（3 个端点）：(1) TraceQuerier 服务提供列表查询（GET /otel/api/traces，支持 ?limit= 默认50最大1000、?service= 按 service_name 过滤，按 start_time 降序）、统计查询（trace_count、span_count、db_size_bytes）；(2) OtelQueryRoutes 注册 GET /otel/api/traces、POST /otel/api/query、GET /otel/api/status，套用 ApiResponse<T> 信封；(3) POST /otel/api/query 接受 {\"sql\":\"SELECT ...\"} body，以只读连接执行（design.md Decision 5 三层防护：Mode=ReadOnly + SELECT 关键字检查拒绝写操作 + 5s CommandTimeout），返回 {success:true, data:[行...]}；(4) GET /otel/api/status 返回 collector_online（读 OtelCollectorStatus）、db_size_bytes、trace_count、span_count；(5) 在 MohistApiRegistration.MapMohistApi 追加注册。/otel/api/ 路由只在主端口暴露，不挂 RequireHost 到 OTLP 端口。",
+      "acceptanceCriteria": [
+        "GET /otel/api/traces 返回 ApiResponse 信封包裹的 JSON 数组，每条含 trace_id/service_name/start_time/end_time/span_count，按 start_time 降序",
+        "GET /otel/api/traces?limit=5 最多返回 5 条；?service=runner 只返回 service_name=runner 的记录；?limit=10&service=server 组合生效",
+        "GET /otel/api/traces?limit=5000 最多返回 1000 条（上限截断）",
+        "otel.db 无数据时 GET /otel/api/traces 返回 {success:true, data:[]}",
+        "POST /otel/api/query body {\"sql\":\"SELECT COUNT(*) FROM traces\"} 返回 HTTP 200 与查询结果数组",
+        "POST /otel/api/query 对 DELETE/INSERT/UPDATE/DROP/ALTER/ATTACH/PRAGMA 等非 SELECT 语句返回 HTTP 400 并说明只允许 SELECT",
+        "POST /otel/api/query body 缺少 sql 字段返回 HTTP 400",
+        "POST /otel/api/query SQL 语法错误返回 HTTP 400 并包含 SQLite 错误信息",
+        "POST /otel/api/query 查询不存在的表返回 HTTP 400 并包含 no such table 错误",
+        "GET /otel/api/status 返回 collector_online（boolean）、db_size_bytes、trace_count、span_count；OTLP 端口在线时 collector_online=true，离线时 false",
+        "otel.db 不存在时 GET /otel/api/status 返回 collector_online 反映端口实际状态，db_size_bytes=0，trace_count=0，span_count=0",
+        "POST /otel/api/query 的只读连接物理上不可写（即使绕过关键字检查，INSERT 也因 Mode=ReadOnly 失败）",
+        "/otel/api/ 路由组从主端口（3456）可访问，从 OTLP 端口（4318）不可访问（由 T-002 的隔离中间件保证）",
+        "dotnet build 无 warning；单元/集成测试覆盖上述所有场景"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Otel/TraceQuerier.cs、Api/OtelQueryRoutes.cs；MohistApiRegistration.cs 追加注册；对应单元/集成测试通过",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "SQL 查询安全三层防护见 design.md Decision 5。/otel/api/ 端点套用 ApiResponse<T> 信封（design.md Decision 8）。端口隔离由 T-002 的 OtelPortIsolationMiddleware 保证，本任务不重复实现。"
+    },
+    {
+      "id": "T-004",
+      "title": "CLI mo otel 命令组——query 与 status 子命令",
+      "spec": "specs/otel-cli/spec.md#mo otel query 直接查询 trace 数据库",
+      "description": "实现 mo otel CLI 命令组（MohistCliCommands.Otel.cs，遵循 System.CommandLine 模式，Build(MohistCliApi api) 方法）：(1) 在 CLI csproj 新增 Microsoft.Data.Sqlite 包引用；(2) mo otel query \"<sql>\" 子命令直接以只读模式打开 otel.db 执行 SQL，默认路径 ~/.mohist/otel.db，支持 -d/--db 指定路径，结果以表格输出到 stdout，不依赖 server 运行（不预检 server）；(3) mo otel status 子命令通过 MohistCliApi HTTP 请求 GET /otel/api/status，显示 collector 在线/离线状态与数据库统计，server 未运行时输出标准 'Server is not running. Start with: mo server start' 并以非零 exit code 退出（复用 MohistCliApi 的 HttpRequestException catch 机制）；(4) 在 MohistCliCommands.Build 根命令追加 OtelCommands.Build(api) 注册；(5) mo otel --help 列出 query 与 status 子命令及说明。",
+      "acceptanceCriteria": [
+        "mo --help 输出包含 otel 命令组及简要说明",
+        "mo otel --help 列出 query 与 status 子命令，每个附带简要说明",
+        "mo otel query \"SELECT COUNT(*) FROM traces\" 在 ~/.mohist/otel.db 存在时直接读取并以表格输出结果",
+        "mo otel query \"SELECT * FROM traces\" -d /tmp/custom-otel.db 使用指定路径",
+        "mo otel query 在 server 未运行时正常执行并输出结果（不因 server 不可用报错）",
+        "mo otel query 在数据库文件不存在时以非零 exit code 退出并输出明确的数据库未找到错误",
+        "mo otel query \"SELECT * FROM nonexistent\" 在 SQL 引用不存在的表时以非零 exit code 退出并输出 SQLite 错误信息",
+        "mo otel query 不带 SQL 参数时以非零 exit code 退出并提示需要 SQL 参数",
+        "mo otel query 以只读连接打开数据库（Mode=ReadOnly），不执行关键字拒绝（用户自担风险）",
+        "mo otel status 在 server 运行且 OTLP 端口在线时输出 collector 在线状态及数据库大小/trace 条数/span 条数",
+        "mo otel status 在 server 运行但 OTLP 端口离线时输出 collector 离线状态及可用的统计信息",
+        "mo otel status 在 server 未运行时输出 'Server is not running. Start with: mo server start' 并以非零 exit code 退出，不输出 ECONNREFUSED 堆栈",
+        "dotnet build 无 warning；CLI 测试覆盖上述场景（query 的直接 SQLite 访问用临时 otel.db 文件，status 用 mock HTTP）"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/Mohist.Cli/MohistCliCommands.Otel.cs；MohistCliCommands.cs 根命令追加注册；Mohist.Cli.csproj 追加 Microsoft.Data.Sqlite 包引用；对应测试通过",
+      "dependsOn": ["T-003"],
+      "notes": "query 子命令的 otel.db schema 依赖 T-001 定义的契约；status 子命令的 HTTP 端点依赖 T-003 实现。默认数据目录解析复用 CLI 现有 Environment.GetFolderPath(UserProfile)+.mohist 内联模式。"
+    }
+  ]
+}

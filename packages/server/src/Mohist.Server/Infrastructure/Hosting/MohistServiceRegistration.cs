@@ -1,4 +1,3 @@
-using System.Text.Encodings.Web;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Events.Hub;
@@ -35,6 +34,7 @@ using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Label.Services;
+using Mohist.Server.Otel;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -132,6 +132,21 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        services.Configure<OtelOptions>(configuration.GetSection(OtelOptions.SectionName));
+        services.PostConfigure<OtelOptions>(options =>
+        {
+            if (!string.IsNullOrWhiteSpace(options.DbPath))
+                return;
+
+            var mainDbPath = ResolveSqliteDatabasePath(configuration);
+            var mainDbDirectory = Path.GetDirectoryName(Path.GetFullPath(mainDbPath));
+            if (!string.IsNullOrWhiteSpace(mainDbDirectory))
+                options.DbPath = Path.Combine(mainDbDirectory, OtelDb.DefaultDatabaseFileName);
+        });
+        services.AddSingleton<OtelDb>();
+        services.AddSingleton<OtelCollectorStatus>();
+        services.AddSingleton<TraceIngester>();
+        services.AddSingleton<TraceQuerier>();
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<RunnerConnectionTracker>();
@@ -156,6 +171,13 @@ public static class MohistServiceRegistration
         if (!string.IsNullOrWhiteSpace(configured))
             return configured;
 
+        var dbPath = ResolveSqliteDatabasePath(configuration);
+
+        return $"Data Source={dbPath}";
+    }
+
+    public static string ResolveSqliteDatabasePath(IConfiguration configuration)
+    {
         var dbPath = configuration["Mohist:DbPath"]
             ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(DbPathEnvironmentVariable);
 
@@ -174,7 +196,7 @@ public static class MohistServiceRegistration
                 Directory.CreateDirectory(dir);
         }
 
-        return $"Data Source={dbPath}";
+        return dbPath;
     }
 
     private static string? ResolveRunnerRoot(IConfiguration configuration)
