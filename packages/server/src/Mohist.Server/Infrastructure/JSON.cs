@@ -10,6 +10,7 @@ public static class JSON
 {
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNameCaseInsensitive = true,
         Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),

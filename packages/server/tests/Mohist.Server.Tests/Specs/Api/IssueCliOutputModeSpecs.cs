@@ -98,6 +98,34 @@ public class IssueCliOutputModeSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task PrintWithOutputAsync_Json_KeepsChineseCharacters_Unescaped()
+    {
+        const string json = """
+            {
+              "success": true,
+              "data": {
+                "id": "issue_1",
+                "number": 168,
+                "title": "[Dashboard] 视图",
+                "body": "中文内容测试"
+              }
+            }
+            """;
+
+        var output = new StringWriter();
+        var api = BuildApiWithOutput(BuildHandler(json), output, new StringWriter());
+
+        await api.PrintWithOutputAsync("/api/projects/proj_1/issues/168", "json", "IssueShow");
+
+        var result = output.ToString();
+        Assert.Contains("视图", result);
+        Assert.Contains("中文内容测试", result);
+        Assert.DoesNotContain("\\u", result);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task PrintWithOutputAsync_JsonAndTable_SendSameHttpRequest()
     {
         var jsonHandler = BuildHandler("""
@@ -157,6 +185,14 @@ public class IssueCliOutputModeSpecs
             new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") },
             new StringWriter(),
             new StringWriter(),
+            new FakeFileSystem(),
+            new NoopCommandExecutor());
+
+    private static MohistCliApi BuildApiWithOutput(HttpMessageHandler handler, StringWriter output, StringWriter error) =>
+        new(
+            new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") },
+            output,
+            error,
             new FakeFileSystem(),
             new NoopCommandExecutor());
 
