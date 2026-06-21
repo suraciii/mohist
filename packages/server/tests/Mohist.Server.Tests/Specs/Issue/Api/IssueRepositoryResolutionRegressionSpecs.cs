@@ -670,7 +670,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var repository = listItem.GetProperty("repository");
         Assert.Equal(JsonValueKind.Null, repository.ValueKind);
         var problem = listItem.GetProperty("repositoryProblem");
-        Assert.Equal("RepositoryNotFound", problem.GetProperty("code").GetString());
+        Assert.Equal("repositoryNotFound", problem.GetProperty("code").GetString());
         Assert.Equal("secondary", problem.GetProperty("repositoryRef").GetString());
         var candidates = problem.GetProperty("candidateNames").EnumerateArray().Select(c => c.GetString()).ToList();
         Assert.Contains("main", candidates);
@@ -825,7 +825,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.All(orphans, item =>
         {
             var problem = item.GetProperty("repositoryProblem");
-            Assert.Equal("RepositoryNotFound", problem.GetProperty("code").GetString());
+            Assert.Equal("repositoryNotFound", problem.GetProperty("code").GetString());
             Assert.Equal("secondary", problem.GetProperty("repositoryRef").GetString());
         });
 
