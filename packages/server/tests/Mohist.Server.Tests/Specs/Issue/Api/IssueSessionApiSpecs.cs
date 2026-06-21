@@ -107,8 +107,8 @@ public class IssueSessionApiSpecs
         Assert.Equal(work.Stage, root.GetProperty("stage").GetString());
         Assert.Equal("Plan session", root.GetProperty("title").GetString());
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
-        Assert.True(root.TryGetProperty("completedAt", out _));
-        Assert.False(root.TryGetProperty("model", out _));
+        Assert.False(root.TryGetProperty("completedAt", out _));
+        Assert.True(root.TryGetProperty("model", out _));
         var eventSummary = root.GetProperty("eventSummary");
         var usage = root.GetProperty("usage");
         Assert.Equal("anthropic/claude-sonnet-4", eventSummary.GetProperty("resolvedModel").GetString());
@@ -319,7 +319,7 @@ public class IssueSessionApiSpecs
             var transcriptRoot = transcriptDoc.RootElement.GetProperty("data");
             Assert.True(transcriptRoot.TryGetProperty("turns", out _));
             Assert.True(transcriptRoot.TryGetProperty("partCount", out _));
-            Assert.True(transcriptRoot.TryGetProperty("lastActivityAt", out _));
+            Assert.False(transcriptRoot.TryGetProperty("lastActivityAt", out _));
             Assert.False(transcriptRoot.TryGetProperty("events", out _));
             Assert.False(transcriptRoot.TryGetProperty("assistant", out _));
             Assert.False(transcriptRoot.TryGetProperty("workflowLogs", out _));
