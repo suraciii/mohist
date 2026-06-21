@@ -9,15 +9,16 @@ var builder = WebApplication.CreateBuilder(args);
 // 加载 ~/.mohist/config.jsonc，环境变量（MOHIST__*）会自动覆盖它
 builder.Configuration.AddMohistConfigFile();
 
-// 主 API 端口。尊重用户已经显式设置的 urls / ASPNETCORE_URLS，
+// 主 API 端口。优先尊重用户已经显式设置的 urls / ASPNETCORE_URLS，
 // 否则使用 Mohist:Host / Mohist:Port（默认 localhost:3456）。
-if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]) &&
-    string.IsNullOrWhiteSpace(builder.Configuration["ASPNETCORE_URLS"]))
-{
-    var host = builder.Configuration["Mohist:Host"] ?? "localhost";
-    var port = builder.Configuration.GetValue<int?>("Mohist:Port") ?? 3456;
-    builder.WebHost.UseUrls($"http://{host}:{port}");
-}
+// 注意：Kestrel 一旦在 ConfigureKestrel 中显式调用 Listen()，就会完全
+// 忽略 IConfiguration["urls"] / --urls / ASPNETCORE_URLS，所以我们必须
+// 在 ConfigureKestrel 内部用 Listen() 同时声明主 API 端口与 OTLP 端口。
+var mainHost = builder.Configuration["urls"]
+    ?? builder.Configuration["ASPNETCORE_URLS"]
+    ?? $"http://{builder.Configuration["Mohist:Host"] ?? "localhost"}:" +
+       (builder.Configuration.GetValue<int?>("Mohist:Port") ?? 3456);
+var mainUri = new Uri(mainHost);
 
 // OTel 启用时为 Kestrel 追加一个独立监听端口。绑定失败仅记录日志，
 // 不阻断主 API —— spec 要求"OTLP 端口失败不阻断主 API"。
@@ -25,23 +26,28 @@ if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]) &&
 // Kestrel 的 Listen 调用只是把 listen option 排入队列，并不真的
 // bind 套接字；真正的 bind 在 KestrelServer.StartAsync 内执行
 // （即 app.StartAsync() 阶段）。因此我们必须：
-//   1. 在 ConfigureKestrel 里登记 listen option；
+//   1. 在 ConfigureKestrel 里登记 listen option（主 API + 可选 OTLP）；
 //   2. 在 app.StartAsync() 周围用 try/catch 兜住 bind 失败；
 //   3. 失败时记录日志、保持 OtelCollectorStatus = 离线，main API
 //      继续运行。
 var otelOptions = new OtelOptions();
 builder.Configuration.GetSection(OtelOptions.SectionName).Bind(otelOptions);
 
-if (otelOptions.Enabled)
+builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    builder.WebHost.ConfigureKestrel(kestrel =>
+    var mainAddress = mainUri.Host == "0.0.0.0" || mainUri.Host == "*"
+        ? System.Net.IPAddress.Any
+        : System.Net.IPAddress.Loopback;
+    kestrel.Listen(mainAddress, mainUri.Port);
+
+    if (otelOptions.Enabled)
     {
         var address = otelOptions.BindHost == "0.0.0.0" || otelOptions.BindHost == "*"
             ? System.Net.IPAddress.Any
             : System.Net.IPAddress.Loopback;
         kestrel.Listen(address, otelOptions.Port);
-    });
-}
+    }
+});
 
 builder.Host.UseOrleans(silo => silo.ConfigureMohistSilo(builder.Configuration));
 
@@ -97,13 +103,18 @@ static WebApplication BuildAlternateApp(string[] args)
 {
     var fresh = WebApplication.CreateBuilder(args);
     fresh.Configuration.AddMohistConfigFile();
-    if (string.IsNullOrWhiteSpace(fresh.Configuration["urls"]) &&
-        string.IsNullOrWhiteSpace(fresh.Configuration["ASPNETCORE_URLS"]))
+    var altMainHost = fresh.Configuration["urls"]
+        ?? fresh.Configuration["ASPNETCORE_URLS"]
+        ?? $"http://{fresh.Configuration["Mohist:Host"] ?? "localhost"}:" +
+           (fresh.Configuration.GetValue<int?>("Mohist:Port") ?? 3456);
+    var altMainUri = new Uri(altMainHost);
+    fresh.WebHost.ConfigureKestrel(kestrel =>
     {
-        var host = fresh.Configuration["Mohist:Host"] ?? "localhost";
-        var port = fresh.Configuration.GetValue<int?>("Mohist:Port") ?? 3456;
-        fresh.WebHost.UseUrls($"http://{host}:{port}");
-    }
+        var mainAddress = altMainUri.Host == "0.0.0.0" || altMainUri.Host == "*"
+            ? System.Net.IPAddress.Any
+            : System.Net.IPAddress.Loopback;
+        kestrel.Listen(mainAddress, altMainUri.Port);
+    });
     // 关键：临时把 OtelOptions.Enabled 设为 false，跳过 OTLP listen。
     // OtelCollectorStatus 仍为 false（默认），/otel/api/status 会
     // 如实报告离线。
