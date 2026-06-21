@@ -181,15 +181,14 @@ stages:
           title: Fix failing tests/build
           uses: mohist/acp-agent
           with:
-            session: build
-            prompt: |
-              The verify check failed: the project did not build, typecheck, or its
-              tests did not pass. Read the check output to see the exact failures.
-              Fix them at the root cause — prefer correcting code or tests over
-              weakening assertions. Re-run the same commands from the check to
-              confirm all suites (server dotnet tests, web typecheck + tests,
-              runner typecheck + tests) pass before finishing.
+            prompt: ${{ prompts.fix-tests }}
             agent: ${{ vars.agent }}
+            expect:
+              markers:
+                - path: _output
+                  oneOf:
+                    - <promise>done</promise>
+                    - <promise>unfinished</promise>
 
   - stage: check
     requiresApproval: true

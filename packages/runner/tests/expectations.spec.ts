@@ -178,6 +178,115 @@ describe("verifyExpectations", () => {
 
     expect(result.satisfied).toBe(true)
   })
+
+  it("OutputMarkers_DoneMarker_SatisfiesAndReturnsMatched", async () => {
+    const dir = mkTestDir()
+    const agentText = "Fixed all test failures. All suites pass.\n\n<promise>done</promise>"
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+        }],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(true)
+    expect(result.matched).toBe("<promise>done</promise>")
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+  })
+
+  it("OutputMarkers_UnfinishedMarker_SatisfiesAndReturnsMatched", async () => {
+    const dir = mkTestDir()
+    const agentText = "Could not finish fixing all tests.\n\n<promise>unfinished</promise>"
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+        }],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(true)
+    expect(result.matched).toBe("<promise>unfinished</promise>")
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+  })
+
+  it("OutputMarkers_LastMatchWins_IgnoresEarlierReferences", async () => {
+    const dir = mkTestDir()
+    const agentText = "I haven't finished yet (this is <promise>unfinished</promise>).\n\nNow all work is done.\n\n<promise>done</promise>"
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+        }],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(true)
+    expect(result.matched).toBe("<promise>done</promise>")
+  })
+
+  it("OutputMarkers_NoMarker_ReturnsUnsatisfied", async () => {
+    const dir = mkTestDir()
+    const agentText = "Fixed all test failures. All suites pass."
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+        }],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(false)
+    expect(result.matched).toBeUndefined()
+    expect(result.missingArtifactMarkers).toHaveLength(1)
+    expect(result.missingArtifactMarkers[0].path).toBe("_output")
+  })
+
+  it("OutputMarkers_NoAgentText_ReturnsUnsatisfied", async () => {
+    const dir = mkTestDir()
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.matched).toBeUndefined()
+    expect(result.missingArtifactMarkers).toHaveLength(1)
+    expect(result.missingArtifactMarkers[0].path).toBe("_output")
+  })
+
+  it("OutputMarkers_MixedWithFileMarkers_BothSatisfied", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "<promise>PASS</promise>")
+    const agentText = "All work done.\n\n<promise>done</promise>"
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [
+          { path: "review.md", oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"] },
+          { path: "_output", oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"] },
+        ],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(true)
+    expect(result.matched).toBe("<promise>done</promise>")
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+  })
 })
 
 function mkTestDir(): string {
