@@ -640,13 +640,11 @@ function resolveRequestedModel(context: ActionContext, agentConfig?: AgentConfig
   const composedVariant = variant?.trim() ? variant.trim() : undefined
   const agentModel = agentConfig?.model
   if (agentModel?.trim()) {
-    const composed = composedVariant ? `${agentModel.trim()}:${composedVariant}` : agentModel.trim()
-    return { model: composed, variant: composedVariant, source: "agent.model" }
+    return { model: agentModel.trim(), variant: composedVariant, source: "agent.model" }
   }
   const withModel = stringInput(context.with, "model")
   if (withModel?.trim()) {
-    const composed = composedVariant ? `${withModel.trim()}:${composedVariant}` : withModel.trim()
-    return { model: composed, variant: composedVariant, source: "with.model" }
+    return { model: withModel.trim(), variant: composedVariant, source: "with.model" }
   }
   return { source: "none" }
 }
