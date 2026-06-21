@@ -52,5 +52,6 @@ public static class Traits
         public const string Api = "Api";
         public const string Architecture = "Architecture";
         public const string Foundation = "Foundation";
+        public const string Telemetry = "Telemetry";
     }
 }

@@ -59,6 +59,22 @@ public static class JSON
     private static JsonSerializerOptions CloneIndented(JsonSerializerOptions source) =>
         new(source) { WriteIndented = true };
 
+    /// <summary>
+    /// Options for deserializing wire-format payloads that tolerate
+    /// comments and trailing commas (OTLP HTTP/JSON, etc.). Derived from
+    /// <see cref="Options"/> so all shared converters (e.g.
+    /// <see cref="UnknownFailureReasonJsonConverter"/>) are inherited.
+    /// </summary>
+    public static JsonSerializerOptions TolerantWireFormatOptions()
+    {
+        var options = new JsonSerializerOptions(Options)
+        {
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        };
+        return options;
+    }
+
     internal sealed class UnknownFailureReasonJsonConverter : JsonConverter<FailureReason>
     {
         public override FailureReason Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
