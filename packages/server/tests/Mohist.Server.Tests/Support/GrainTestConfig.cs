@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Mohist.Server.Agent.Grains;
@@ -26,7 +25,6 @@ public static class GrainTestConfig
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
         return new MohistDbContext(options);
     }
@@ -40,8 +38,7 @@ public static class GrainTestConfig
         siloBuilder.UseInMemoryReminderService();
         siloBuilder.AddMemoryGrainStorageAsDefault();
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
-            .UseSqlite(connectionString)
-            .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
+            .UseSqlite(connectionString));
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
