@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -105,8 +104,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IDbContextFactory<MohistDbContext>>();
             services.AddDbContextFactory<MohistDbContext>(options =>
                 options
-                    .UseSqlite(_connectionString)
-                    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
+                    .UseSqlite(_connectionString));
         });
     }
 
