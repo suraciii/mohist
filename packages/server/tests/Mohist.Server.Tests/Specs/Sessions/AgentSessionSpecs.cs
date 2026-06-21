@@ -980,7 +980,7 @@ public class AgentSessionSpecs
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
             await db.Database.ExecuteSqlRawAsync(
-                """UPDATE AgentSessions SET State = json_set(State, '$.Metadata.Labels."mohist.io/stage"', {0}) WHERE Id = {1}""",
+                """UPDATE AgentSessions SET State = json_set(State, '$.metadata.labels."mohist.io/stage"', {0}) WHERE Id = {1}""",
                 "Plan", session.Id);
         }
 
