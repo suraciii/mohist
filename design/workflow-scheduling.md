@@ -76,13 +76,12 @@ Delivery is pull. No push from WorkflowGrain to runner.
 Backlog = workflows with no runner assigned. Membership by claim-status only.
 
 ```text
-enter    : created / resumed / exited approval gate, and has no runner
+enter    : new run created, has no runner        (once per run)
 leave    : claimed by a runner
-re-enter : binding released (runner lost)
-never    : a bound workflow does not re-enter between work items
+re-enter : never
 ```
 
-A bound workflow is served exclusively by its runner; the next work item is pulled directly, not re-queued.
+A bound workflow is held by its runner for the whole run — through idle, approval gates, and work-item boundaries. The runner polls by state (busy → return work; idle/gated → null) and never releases the workflow back. Capacity gates concurrent execution (active works), not bound-workflow count: a runner may hold many idle bound workflows while executing up to its slot count.
 
 Per-project grain: `WorkflowBacklogKeys.ForProject(projectId)`.
 
@@ -97,34 +96,47 @@ Persisted project ids keep backlog discovery working after server restart.
 
 ## Bind
 
-Runner with spare capacity claims an unbound workflow from the backlog.
+Runner with spare capacity claims an unbound workflow from the backlog. Write order is **record-then-bind** so the "bound but runner forgot" state is structurally impossible.
 
 ```text
 RunnerGrain            WorkflowBacklogGrain          WorkflowGrain
-    |                          |                           |
     | ClaimAsync(runnerId)     |                           |
     |------------------------->|                           |
     |                          | pick unbound workflowRunId|
-    |                          | AssignRunnerAsync(runnerId)|
-    |                          |--------------------------->|
-    |                          |                           | bind runner (1:1, lifetime)
-    |                          |                           | remove self from backlog
-    |                          | return Assigned           |
-    |                          |<--------------------------|
+    |                          | (optimistic remove)       |
     | return workflowRunId?    |                           |
     |<-------------------------|                           |
-    | record bound workflow    |                           |
+    | record wfId TENTATIVE (persist)   ← first durable write
+    |                                                      |
+    | AssignRunnerAsync(runnerId)             ← second durable write (truth)
+    |----------------------------------------------------->|
+    |                                                      | bind (1:1, lifetime)
+    | return Assigned | Rejected                           |
+    |<-----------------------------------------------------|
+    | Assigned -> mark CONFIRMED (persist)                 |
+    | Rejected  -> drop wfId                               |
 ```
 
 ```text
-AssignRunnerAsync:
+AssignRunnerAsync (idempotent arbiter; truth = WorkflowGrain binding):
   unassigned + runnable         -> bind runner, Assigned
   already bound to same runner  -> Assigned
   bound to another runner       -> Rejected
   not runnable                  -> Rejected
 ```
 
-Lazy cleanup: a claim that gets Rejected is dropped from the backlog; the next candidate is tried.
+Lazy cleanup: a Rejected claim's candidate is dropped from the backlog; the next candidate is tried.
+
+### Eventual consistency (boundList ↔ binding)
+
+The three writes (backlog optimistic-remove, Runner record, Workflow bind) cannot be atomic across grains. Converge via write-order + idempotency — no forward call from WorkflowGrain:
+
+- **record-then-bind**: Runner records the candidate BEFORE binding, so "bound but runner forgot" never happens.
+- **Activation reconfirm**: on Runner activation, re-run `AssignRunnerAsync` for any TENTATIVE entries (crash between record and bind) — idempotent → Assigned (confirm) or Rejected (drop).
+- **Orphan re-enqueue**: if backlog optimistically removed a candidate but no one bound it (runner crashed before record), the workflow's reminder re-enqueues (unbound + not in backlog).
+- **Stale cleanup (direction 2)**: a stale RunnerGrain entry (has W, W not bound to it) → activation reconfirm Rejected, or `PollWork` validation rejects → Runner drops W.
+
+Result: boundList and binding are eventually consistent in both directions.
 
 ## Pull Work
 
@@ -199,33 +211,32 @@ Late or duplicate report for an already-terminal work is ignored (idempotent by 
 
 ## Binding Lifecycle
 
-One workflow, one runner, for the workflow's life. Never reassigned.
+One workflow, one runner, for the run's life. Sticky: never released, never reassigned.
 
 ```text
-bound              -> stays bound through all work items; must flow continuously
+bound              -> stays bound through work items, idle periods, and gates; must flow continuously
 work stalls        -> watchdog fails the WORK (not the binding); workflow advances
-runner lost        -> fault: workflow has no executor and cannot proceed until the
-                      runner recovers or the run is rerun. Not a legitimate stall.
-runner recovers    -> bound runner resumes pulling; in-flight work resumes
+runner transient loss (process restart) -> grain survives; bound runner resumes pulling on recovery (in-flight failed fast, re-pulled)
+runner permanently gone -> out of scope: user starts a fresh run (new backlog entry, new binding)
 ```
 
-- Resume: same runner returns, pulls in-flight work, continues.
-- Rerun: runner permanently gone; start a fresh run with a new binding. The only way to change runners.
+- Resume: same runner returns, pulls PENDING/in-flight work, continues.
+- Permanent runner loss is a user operation (start a new run). No automatic failover or reassignment.
 
-Pipeline rule: once a runner is assigned, the workflow must flow continuously — every work reaches COMPLETED or FAILED (report or watchdog). Any stall after assignment is a bug. Pending before assignment is normal waiting, not a stall. Runner loss after assignment is a fault, resolved by recovery or rerun.
+Pipeline rule: once claimed, the workflow must flow continuously — every work reaches COMPLETED or FAILED (report or watchdog). Any stall after assignment is a bug. Pending before assignment is normal waiting, not a stall.
 
 ## Recovery
 
-Retry + idempotency throughout.
+Retry + idempotency throughout. A bound workflow never returns to the backlog.
 
 ```text
-unbound + has work            -> reminder re-enqueue to backlog (idempotent)
-claim / assignment lost       -> next claim re-binds (AssignRunnerAsync idempotent)
+unbound + not yet enqueued   -> reminder enqueues to backlog (idempotent — the single entry)
+claim / assignment lost       -> next claim binds (AssignRunnerAsync idempotent)
 work pull lost                -> runner polls again; workflow re-serves (idempotent)
 report lost                   -> runner re-reports; workflow dedups (idempotent)
 work pulled, no report        -> watchdog -> FAILED -> advance
-process dies mid-work         -> no report -> watchdog -> FAILED -> next work waits for runner
-process lost (heartbeat)      -> RunnerGrain -> NotifyRunnerLostAsync -> workflow marks waiting
+process dies mid-work         -> no report -> watchdog -> FAILED; next work waits for runner
+process lost (heartbeat)      -> RunnerGrain -> NotifyRunnerLostAsync -> fail in-flight fast; workflow waits for recovery (no re-enter)
 ```
 
 Before start (no runner): pending is normal; workflow waits in the backlog.
