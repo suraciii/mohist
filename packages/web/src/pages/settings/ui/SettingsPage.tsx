@@ -8,6 +8,7 @@ import {
   GitBranchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
+  TagIcon,
 } from 'lucide-react'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
@@ -16,6 +17,7 @@ import { SystemSettingsSection } from './SystemSettingsSection'
 import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 import { RepositoriesSection } from './RepositoriesSection'
 import { TemplatesSection } from './TemplatesSection'
+import { LabelCatalogSection } from './LabelCatalogSection'
 import { OnboardingBanner } from './OnboardingBanner'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -33,6 +35,7 @@ const VALID_SECTIONS = [
   'repositories',
   'workflows',
   'templates',
+  'label-catalog',
   'system',
   'preferences',
 ] as const
@@ -45,6 +48,7 @@ const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
   { key: 'repositories', label: 'Repositories', icon: <FolderTreeIcon /> },
   { key: 'workflows', label: 'Workflows', icon: <GitBranchIcon /> },
   { key: 'templates', label: 'Templates', icon: <FileTextIcon /> },
+  { key: 'label-catalog', label: 'Label catalog', icon: <TagIcon /> },
   { key: 'system', label: 'System', icon: <SettingsIcon /> },
   { key: 'preferences', label: 'Preferences', icon: <SlidersHorizontalIcon /> },
 ]
@@ -71,6 +75,12 @@ function SectionContent({ section }: { section: Section }) {
       return <WorkflowProfilesSection />
     case 'templates':
       return <TemplatesSection />
+    case 'label-catalog':
+      return currentProject ? (
+        <LabelCatalogSection />
+      ) : (
+        <div className="text-sm text-muted-foreground">No project selected</div>
+      )
     case 'system':
       return <SystemSettingsSection />
     case 'preferences':

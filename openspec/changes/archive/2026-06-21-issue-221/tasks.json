@@ -1,0 +1,54 @@
+{
+  "project": "mohist-local",
+  "description": "Add `mo label update <key>` to the CLI and a project-scoped label catalog management page to the Web UI. Both consume the existing catalog CRUD API (including PATCH); no server or domain change.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "CLI: add `mo label update <key>` with partial-field updates",
+      "spec": "specs/cli-interface/spec.md#mo label update modifies user catalog entries",
+      "description": "Add an `update` subcommand to the `label` command group in `packages/cli/Mohist.Cli/MohistCliCommands.Label.cs`, registered alongside `list`/`add`/`remove`. It accepts `<key>`, optional `--description`, optional `--supported-values` (comma-separated), the shared `--project`/`--project-id` overrides. It validates the key with `LabelDelta.ValidateKey`, requires at least one field, validates provided fields (non-empty description; non-empty supported-values entries), then sends only the provided fields via the existing `api.PrintPatchAsync` to `PATCH /api/projects/{projectRef}/labels/catalog/{key}`. Server errors (404 unknown key, 400 validation, 409 conflict / system-entry protection) are surfaced clearly with a non-zero exit.",
+      "acceptanceCriteria": [
+        "`mo label update <key> --description \"...\"` sends PATCH to `/api/projects/{projectRef}/labels/catalog/<key>` carrying only `description`, leaving `supportedValues` unchanged (partial update).",
+        "`mo label update <key> --supported-values a,b,c` sends only `supportedValues`, leaving `description` unchanged; supplying both sends both.",
+        "An invalid key (e.g. `Module`), an empty `--description`, or an empty `--supported-values` entry is rejected client-side with a clear error, non-zero exit, and no HTTP request sent.",
+        "A no-op invocation (neither `--description` nor `--supported-values`) is rejected client-side with a clear error.",
+        "An unknown key (API 404) and an attempt to modify a system-origin entry (API 409) are surfaced as clear errors with a non-zero exit; the CLI does not report success.",
+        "New tests are added to `packages/cli/tests/Mohist.Cli.Tests/CliLabelCatalogSpecs.cs` covering: description-only update, supported-values-only update, both-fields update, invalid-key pre-validation, empty-description rejection, unknown-key 404 mapping, and system-entry 409 mapping.",
+        "`npm test` passes (solution builds with `TreatWarningsAsErrors` and the CLI test suite is green); existing server label-catalog API specs remain green, confirming no API regression."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "`packages/cli/Mohist.Cli/MohistCliCommands.Label.cs` gains `BuildUpdate` and registers it; `packages/cli/tests/Mohist.Cli.Tests/CliLabelCatalogSpecs.cs` extended; `npm test` green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Reuse `api.PrintPatchAsync` (already in `MohistCliApi.cs`) — do not add a new HTTP helper. Omit absent fields from the PATCH body rather than sending null, so 'keep current' stays distinct from 'clear'."
+    },
+    {
+      "id": "T-002",
+      "title": "Web UI: project-scoped label catalog management Settings tab",
+      "spec": "specs/web-ui/spec.md#Web UI provides a project-scoped label catalog management page",
+      "description": "Add a new `entities/label-catalog` data slice (`model/types.ts`, `api/client.ts`, `api/queries.ts`) over the existing catalog endpoints (`GET/POST/PATCH/DELETE /api/projects/{projectRef}/labels/catalog`) using the shared `request()` + `projectApiPath()` helpers, plus a `pages/settings/ui/LabelCatalogSection.tsx` component registered as a new tab in `SettingsPage.tsx` (`VALID_SECTIONS`, `SECTION_META`, and the `SectionContent` switch). The section lists every entry (key/description/supportedValues/origin), lets users add user-origin definitions, edit an entry's description and supportedValues (key immutable), and delete user entries (delete hidden/disabled for origin=system). Client-side validation enforces `key =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, non-empty description, and non-empty supported values; API errors are surfaced in-page.",
+      "acceptanceCriteria": [
+        "The Settings page exposes a new 'Label catalog' tab reachable at `/settings/<section>`, registered in `VALID_SECTIONS`, `SECTION_META`, and the `SectionContent` switch in `packages/web/src/pages/settings/ui/SettingsPage.tsx`.",
+        "The tab lists every catalog entry showing `key`, `description`, `supportedValues` (when present), and `origin` (system/user).",
+        "An add form creates user-origin entries (`key`, `description`, optional `supportedValues`) via `POST /api/projects/{projectRef}/labels/catalog`; the new entry appears with `origin: user`.",
+        "Editing an entry updates `description` and/or `supportedValues` via `PATCH /api/projects/{projectRef}/labels/catalog/<key>`; the `key` field is not editable in the form.",
+        "Deleting a user-origin entry sends `DELETE /api/projects/{projectRef}/labels/catalog/<key>` and removes it from the list.",
+        "For `origin: system` rows, both the edit and delete actions are hidden or disabled and no modifying or destructive request is sent (system definitions are read-only).",
+        "An invalid key (uppercase, leading dash, etc.) or whitespace-only description is rejected before any request with a clear in-page validation error.",
+        "API failures (400 / 404 / 409) are surfaced in-page with the server-provided message and the list is not left in an inconsistent state (TanStack Query cache invalidated/rolled back appropriately).",
+        "Adding, editing, or removing a catalog entry does not modify any issue's labels (the catalog stays advisory).",
+        "Component tests in `packages/web/src/pages/settings/ui/` (and the slice's `queries.test.ts` where applicable) cover: list render, add, edit (key immutable), delete, system-entry read-only protection (edit + delete), and client-side validation rejection.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New `entities/label-catalog/` slice; new `pages/settings/ui/LabelCatalogSection.tsx`; `SettingsPage.tsx` registration; component + slice tests; web typecheck and test runs green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Placement follows RepositoriesSection as the closest project-scoped CRUD analog. supportedValues editor is a comma/newline-separated text input parsed to a string[] (a chip/tag editor is explicitly deferred). Omit absent fields on PATCH rather than sending null. Do NOT touch the issue-level LabelEditor."
+    }
+  ]
+}

@@ -139,6 +139,7 @@ describe('SettingsPage', () => {
       'settings-tab-repositories',
       'settings-tab-workflows',
       'settings-tab-templates',
+      'settings-tab-label-catalog',
       'settings-tab-system',
       'settings-tab-preferences',
     ]) {
