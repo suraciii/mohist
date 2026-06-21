@@ -39,8 +39,10 @@ const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
 const CANCEL_TIMEOUT_MS = 5_000
+const WIND_DOWN_TIMEOUT_MS = 5_000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
+const WIND_DOWN_PROMPT = "The session is about to time out. Record your current progress in progress.txt, commit any safe changes, then output <promise>unfinished</promise>. Do not start new work."
 
 const DEFAULT_COMPACTION_THRESHOLD = 0.8
 const DEFAULT_COMPACTION_STRATEGY = "summary"
@@ -492,8 +494,8 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
 
   const result = await runAcpWorkflowAgentSession(context, prompt)
   await restoreAgentToolNoise(context)
-  const verification = result.expectation ?? await verifyExpectations(context)
-  const ok = result.success && verification.satisfied
+  const verification = result.expectation ?? await verifyExpectations(context, result.text)
+  const ok = result.success && verification.satisfied && (verification.matched === undefined || verification.matched === "<promise>done</promise>")
   const agentConfig = resolveAgentConfig(context.with)
   const failureCategory = ok ? null : result.failureCategory ?? null
   await emitSessionEvent(context, SESSION_CLOSED_EVENT, { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
@@ -506,7 +508,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
 }
 
 async function satisfyExpectations(context: ActionContext, result: AcpSessionResult, runPrompt: AcpPromptRunner): Promise<TaskArtifactExpectation> {
-  let verification = await verifyExpectations(context)
+  let verification = await verifyExpectations(context, result.text)
   if (verification.satisfied) return verification
 
   const repairLimit = expectationRepairLimit(context)
@@ -528,7 +530,7 @@ async function satisfyExpectations(context: ActionContext, result: AcpSessionRes
       result.exitCode = result.exitCode ?? 1
       return verification
     }
-    verification = await verifyExpectations(context)
+    verification = await verifyExpectations(context, result.text)
   }
 
   return verification
@@ -1187,7 +1189,24 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
         providerError: diagnostic,
         postProbeActivity: hasPostProbeActivity(options.livenessState),
       })
-      await cancelAndReturn(options.acpProcess, connection, sessionId, `Timed out after ${options.timeoutMs / 1000}s`)
+      let cancelled = false
+      try {
+        await Promise.race([
+          connection.cancel({ sessionId }).then(() => { cancelled = true }),
+          timeout(CANCEL_TIMEOUT_MS),
+        ])
+      } catch {}
+      if (cancelled) {
+        try {
+          await Promise.race([
+            connection.prompt({ sessionId, prompt: [{ type: "text", text: WIND_DOWN_PROMPT }] }),
+            timeout(WIND_DOWN_TIMEOUT_MS),
+          ])
+        } catch {}
+      }
+      if (options.acpProcess) {
+        await options.acpProcess.cleanup()
+      }
       return {
         error: appendOpencodeDiagnostic(`Timed out after ${options.timeoutMs / 1000}s`, diagnostic),
         providerError: diagnostic,
