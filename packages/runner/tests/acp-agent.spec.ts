@@ -1034,7 +1034,7 @@ describe("mohist/acp-agent compaction config helpers", () => {
 })
 
 describe("mohist/acp-agent reasoning variant delivery", () => {
-  it("VariantInAgentBlock_AcpSessionStarts_SetsComposedModelIdBeforePrompt", async () => {
+  it("VariantInAgentBlock_AcpSessionStarts_SetsBareModelIdBeforePrompt", async () => {
     const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
@@ -1045,14 +1045,15 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
     expect(result.status).toBe("success")
     const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
     expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5:high")
+    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
+    expect(typeof setModelCall?.value === "string" && setModelCall.value.includes(":")).toBe(false)
     const setModelIndex = fixture.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
     const promptIndex = fixture.agent.calls.findIndex((entry) => entry.event === "prompt")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
   })
 
-  it("VariantInTopLevelWith_AcpSessionStarts_SetsComposedModelIdBeforePrompt", async () => {
+  it("VariantInTopLevelWith_AcpSessionStarts_SetsBareModelIdBeforePrompt", async () => {
     const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
@@ -1064,7 +1065,8 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
     expect(result.status).toBe("success")
     const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
     expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5:max")
+    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
+    expect(typeof setModelCall?.value === "string" && setModelCall.value.includes(":")).toBe(false)
     const setModelIndex = fixture.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
     const promptIndex = fixture.agent.calls.findIndex((entry) => entry.event === "prompt")
     expect(setModelIndex).toBeLessThan(promptIndex)
@@ -1085,8 +1087,8 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
     expect(setModelCall?.value?.includes(":")).toBe(false)
   })
 
-  it("VariantSet_AgentRejectsComposedModelId_RunStillSucceedsWithoutVariantRecordedAsFailure", async () => {
-    const fixture = createFixture("rejects-composed-model")
+  it("VariantSet_AgentReceivesBareModelId_RunSucceedsWithoutVariantInModelId", async () => {
+    const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
       prompt: "do the work",
@@ -1098,9 +1100,7 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
     expect(result.message ?? "").not.toContain("reject")
     const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
     expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5:high")
-    const fallbackCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel")
-    expect(fallbackCall?.modelId).toBe("anthropic/claude-sonnet-4-5:high")
+    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt")).toBe(true)
 
     const terminal = fixture.serverConnection.calls
@@ -1112,10 +1112,10 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
     expect(String(terminal?.failureReason ?? "")).not.toMatch(/variant/i)
   })
 
-  it("ExistingSharedSessionWithSameBaseModelAndSameVariant_ReusesCachedSession", async () => {
+  it("ExistingSharedSessionWithSameBaseModel_ReusesCachedSessionRegardlessOfVariant", async () => {
     const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "anthropic/claude-sonnet-4-5:high",
-      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5:high" },
+      cachedModel: "anthropic/claude-sonnet-4-5",
+      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5" },
     })
 
     const result = await acpAgentAction(contextWithOverrides({
@@ -1131,14 +1131,13 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
     const setModelCall = shared.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5:high")
+    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
   })
 
-  it("ExistingSharedSessionWithSameBaseModelButDifferentVariant_DoesNotReuse_StartsFreshSessionWithNewComposedId", async () => {
+  it("ExistingSharedSessionSameBaseModelDifferentVariant_ReusesSession_VariantNotInModelIdentity", async () => {
     const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "anthropic/claude-sonnet-4-5:high",
-      newSessionId: "replacement-session-1",
-      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5:high" },
+      cachedModel: "anthropic/claude-sonnet-4-5",
+      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5" },
     })
 
     const result = await acpAgentAction(contextWithOverrides({
@@ -1152,42 +1151,7 @@ describe("mohist/acp-agent reasoning variant delivery", () => {
 
     expect(result.status).toBe("success")
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
-    expect(shared.serverConnection.calls).toContainEqual(expect.objectContaining({
-      event: "attachWorkflowAgentSession",
-      sessionName: "shared-session",
-      body: expect.objectContaining({ agentSessionId: "replacement-session-1", model: "anthropic/claude-sonnet-4-5:max" }),
-    }))
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.sessionId === "replacement-session-1" && entry.value === "anthropic/claude-sonnet-4-5:max")
-    const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "replacement-session-1")
-    expect(setModelIndex).toBeGreaterThanOrEqual(0)
-    expect(setModelIndex).toBeLessThan(promptIndex)
-  })
-
-  it("ExistingSharedSessionWithSameBareModelAndNewVariant_ProviderCacheKeyedOnComposedId_SelectsFreshSession", async () => {
-    const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "anthropic/claude-sonnet-4-5",
-      newSessionId: "variant-flip-session-1",
-      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5" },
-    })
-
-    const result = await acpAgentAction(contextWithOverrides({
-      prompt: "add a variant to a previously bare-model session",
-      session: "shared-session",
-      agent: { model: "anthropic/claude-sonnet-4-5", variant: "low" },
-      livenessQuietThresholdMs: 5_000,
-      probeTimeoutMs: 5_000,
-      timeout: 5_000,
-    }, undefined, shared.context()))
-
-    expect(result.status).toBe("success")
-    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
-    expect(shared.serverConnection.calls).toContainEqual(expect.objectContaining({
-      event: "attachWorkflowAgentSession",
-      sessionName: "shared-session",
-      body: expect.objectContaining({ agentSessionId: "variant-flip-session-1", model: "anthropic/claude-sonnet-4-5:low" }),
-    }))
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
   })
 })
 
