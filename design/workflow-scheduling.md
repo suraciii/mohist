@@ -29,11 +29,13 @@ WorkflowGrain
   never queries runner state
 
 WorkflowBacklogGrain
-  index of workflows with no runner assigned
+  pool of workflows with no runner assigned
+  brokers the bind on claim (writes Claim onto WorkflowGrain)
 
 RunnerGrain
   supervises runner process liveness only (heartbeat, online/offline)
-  pulls work from bound workflows on behalf of its process
+  discovers bound workflows by querying the store
+  pulls work from them on behalf of its process
   does not supervise works
 
 runner process (physical)
@@ -43,10 +45,10 @@ runner process (physical)
 ```
 
 ```text
-work truth    = WorkflowGrain
-runner truth  = RunnerGrain
-backlog truth = WorkflowBacklogGrain
-grains cooperate by calls only; no shared state
+binding truth = WorkflowGrain.Claim          (one record; the single binding write)
+backlog       = best-effort pool of unbound workflows (drift self-heals)
+runner list   = in-memory cache; rebuilt from a query over the store
+the store     = shared query layer: runners read it directly to discover their bindings
 ```
 
 ## Interfaces
@@ -54,10 +56,10 @@ grains cooperate by calls only; no shared state
 ```text
 IWorkflowBacklogGrain
   EnqueueAsync(workflowRunId)
-  ClaimAsync(runnerId) -> workflowRunId?
+  ClaimAsync(runnerId) -> workflowRunId?   # brokers bind, returns a now-bound run
 
 IWorkflowGrain
-  AssignRunnerAsync(runnerId) -> Assigned | Rejected   # backlog bind
+  AssignRunnerAsync(runnerId) -> Assigned | Rejected   # called by backlog; sets Claim
   PollWork(runnerId) -> WorkDispatch?                   # bound runner pulls work
   ReportResultAsync(runnerId, workId, result)
   NotifyRunnerLostAsync(runnerId)
@@ -70,6 +72,7 @@ IRunnerGrain
 ```
 
 Delivery is pull. No push from WorkflowGrain to runner.
+Discovery is a store query, not a grain call: the runner reads workflow records where the binding field is its own id.
 
 ## Backlog
 
@@ -96,47 +99,44 @@ Persisted project ids keep backlog discovery working after server restart.
 
 ## Bind
 
-Runner with spare capacity claims an unbound workflow from the backlog. Write order is **record-then-bind** so the "bound but runner forgot" state is structurally impossible.
+Runner with spare capacity claims an unbound workflow from the backlog. The backlog brokers the bind: it picks a candidate, writes `Claim` onto the WorkflowGrain (the single binding truth), drops the candidate from its pool, and hands the id to the runner.
 
 ```text
 RunnerGrain            WorkflowBacklogGrain          WorkflowGrain
     | ClaimAsync(runnerId)     |                           |
     |------------------------->|                           |
     |                          | pick unbound workflowRunId|
-    |                          | (optimistic remove)       |
+    |                          | AssignRunnerAsync(runnerId)  ← single binding write
+    |                          |--------------------------->|
+    |                          |                           | set Claim (1:1, lifetime); persist
+    |                          | return Assigned | Rejected |
+    |                          |<--------------------------|
+    |                          | Assigned: drop from pool   |
+    |                          | Rejected: try next candidate
     | return workflowRunId?    |                           |
     |<-------------------------|                           |
-    | record wfId TENTATIVE (persist)   ← first durable write
-    |                                                      |
-    | AssignRunnerAsync(runnerId)             ← second durable write (truth)
-    |----------------------------------------------------->|
-    |                                                      | bind (1:1, lifetime)
-    | return Assigned | Rejected                           |
-    |<-----------------------------------------------------|
-    | Assigned -> mark CONFIRMED (persist)                 |
-    | Rejected  -> drop wfId                               |
+    | add to in-memory list (cache)                        |
 ```
 
 ```text
-AssignRunnerAsync (idempotent arbiter; truth = WorkflowGrain binding):
-  unassigned + runnable         -> bind runner, Assigned
+AssignRunnerAsync (idempotent arbiter; truth = WorkflowGrain.Claim):
+  unassigned + runnable         -> set Claim, Assigned
   already bound to same runner  -> Assigned
   bound to another runner       -> Rejected
   not runnable                  -> Rejected
 ```
 
-Lazy cleanup: a Rejected claim's candidate is dropped from the backlog; the next candidate is tried.
+One record, one write: `Claim` lives on the WorkflowGrain and is the only binding truth. The runner's in-memory add is a cache; the backlog pool is a best-effort index. Drift self-heals — rejected claims are dropped, orphaned unbound runs (claim never set) are re-enqueued by their reminder, stale runner entries are rejected at `PollWork`.
 
-### Eventual consistency (boundList ↔ binding)
+## Discovery
 
-The three writes (backlog optimistic-remove, Runner record, Workflow bind) cannot be atomic across grains. Converge via write-order + idempotency — no forward call from WorkflowGrain:
+A runner finds the workflows bound to it by reading the store — the same records that hold the binding truth. This is a fieldSelector-style query, not a grain call:
 
-- **record-then-bind**: Runner records the candidate BEFORE binding, so "bound but runner forgot" never happens.
-- **Activation reconfirm**: on Runner activation, re-run `AssignRunnerAsync` for any TENTATIVE entries (crash between record and bind) — idempotent → Assigned (confirm) or Rejected (drop).
-- **Orphan re-enqueue**: if backlog optimistically removed a candidate but no one bound it (runner crashed before record), the workflow's reminder re-enqueues (unbound + not in backlog).
-- **Stale cleanup (direction 2)**: a stale RunnerGrain entry (has W, W not bound to it) → activation reconfirm Rejected, or `PollWork` validation rejects → Runner drops W.
+```text
+WorkflowRuns WHERE Claim.RunnerId == <me>     (indexed column derived from the record)
+```
 
-Result: boundList and binding are eventually consistent in both directions.
+The runner scans periodically and on activation, and reconciles its in-memory list from the result. The list is a disposable cache: stale entries are safe (PollWork is gated by the WorkflowGrain's own Claim), and the scan rebuilds it after any loss.
 
 ## Pull Work
 
@@ -158,7 +158,7 @@ runner process     RunnerGrain                WorkflowGrain
     |<-----------------|
 ```
 
-No forward call from WorkflowGrain to runner. The bound-workflow set on RunnerGrain is disposable; truth is the WorkflowGrain binding.
+No forward call from WorkflowGrain to runner. The runner's bound set is the discovery cache; the WorkflowGrain's Claim is the truth.
 
 ## Work State Machine
 
