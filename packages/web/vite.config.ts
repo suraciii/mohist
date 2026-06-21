@@ -40,6 +40,13 @@ export default defineConfig({
     testTimeout: 10_000,
     hookTimeout: 10_000,
     forceExit: true,
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        maxForks: 1,
+        minForks: 1,
+      },
+    },
     exclude: [
       '**/*.a11y.spec.ts',
       '**/node_modules/**',
