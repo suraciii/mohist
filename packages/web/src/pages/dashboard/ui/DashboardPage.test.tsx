@@ -8,7 +8,16 @@ import { ProjectProvider } from '../../../entities/project'
 const mocks = vi.hoisted(() => ({
   projects: [] as any[],
   isLoading: false,
-  agentStatus: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } as any,
+  agentStatus: {
+    running: false,
+    issueId: null,
+    issueNumber: null,
+    activeAgents: [],
+    capacity: { active: 0, max: 8 },
+    runnerAvailable: true,
+    runnerMessage: null,
+  } as any,
+  issues: [] as any[],
   createProjectMutate: vi.fn(),
 }))
 
@@ -30,6 +39,14 @@ vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: mocks.agentStatus }),
 }))
 
+vi.mock('../../../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue')>()
+  return {
+    ...actual,
+    useIssues: () => ({ data: mocks.issues, isLoading: false }),
+  }
+})
+
 vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => ({
   CreateProjectDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
     open ? (
@@ -43,12 +60,20 @@ vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => (
 
 import { DashboardPage } from './DashboardPage'
 
+const demoProject = {
+  id: 'p1',
+  name: 'demo',
+  createdAt: '',
+  updatedAt: '',
+  repositories: [],
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider>
-        <MemoryRouter initialEntries={['/']}>
+      <ProjectProvider initialProjectId="p1" initialProjects={[demoProject]}>
+        <MemoryRouter initialEntries={['/demo']}>
           <DashboardPage />
         </MemoryRouter>
       </ProjectProvider>
@@ -59,37 +84,59 @@ function renderPage() {
 describe('DashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.projects = []
+    mocks.projects = [demoProject]
     mocks.isLoading = false
+    mocks.issues = []
+    mocks.agentStatus = {
+      running: false,
+      issueId: null,
+      issueNumber: null,
+      activeAgents: [],
+      capacity: { active: 0, max: 8 },
+      runnerAvailable: true,
+      runnerMessage: null,
+    }
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders the four zone placeholders with stable identities when projects exist', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
-
+  it('renders the Attention Hero in the attention slot and placeholders in the other three slots', () => {
     renderPage()
 
     const attention = screen.getByTestId('dashboard-zone-attention')
+    expect(attention).toHaveAttribute('data-zone', 'attention')
+
     const pulse = screen.getByTestId('dashboard-zone-pulse')
     const productivity = screen.getByTestId('dashboard-zone-productivity')
     const digest = screen.getByTestId('dashboard-zone-digest')
 
-    expect(attention).toHaveAttribute('data-zone', 'attention')
     expect(pulse).toHaveAttribute('data-zone', 'pulse')
     expect(productivity).toHaveAttribute('data-zone', 'productivity')
     expect(digest).toHaveAttribute('data-zone', 'digest')
   })
 
-  it('does not render the Kanban board on the dashboard', () => {
-    mocks.projects = [
-      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-    ]
+  it('does not render the generic placeholder for the attention slot', () => {
+    renderPage()
 
+    const attentionNodes = screen.getAllByTestId('dashboard-zone-attention')
+    expect(attentionNodes).toHaveLength(1)
+  })
+
+  it('keeps the placeholder testids stable for the non-attention slots', () => {
+    renderPage()
+
+    const pulse = screen.getByTestId('dashboard-zone-pulse')
+    const productivity = screen.getByTestId('dashboard-zone-productivity')
+    const digest = screen.getByTestId('dashboard-zone-digest')
+
+    expect(pulse.querySelector('[data-testid="attention-items"]')).toBeNull()
+    expect(productivity.querySelector('[data-testid="attention-items"]')).toBeNull()
+    expect(digest.querySelector('[data-testid="attention-items"]')).toBeNull()
+  })
+
+  it('does not render the Kanban board on the dashboard', () => {
     renderPage()
 
     expect(screen.queryByTestId('needs-attention-summary')).not.toBeInTheDocument()

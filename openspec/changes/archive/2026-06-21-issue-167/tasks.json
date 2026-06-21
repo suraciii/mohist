@@ -1,0 +1,37 @@
+{
+  "project": "mohist-local",
+  "description": "Dashboard Attention Hero — a self-adaptive two-state view that mounts into the Dashboard Attention slot, renders shared attention items plus runner-down status, and offers direct navigate/Approve/Resume actions.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement Attention Hero widget and mount it in the Dashboard Attention slot",
+      "spec": "specs/dashboard-attention-hero/spec.md",
+      "description": "Add a new widget at packages/web/src/widgets/attention-hero/ exporting an AttentionHero component. It derives state exclusively from deriveAttentionItems(useIssues(), useAgentStatus()) with no local copy of the four attention rules, and renders two states: a has-attention state listing each AttentionItem (label + detail, in derivation order) with per-item direct actions (navigate to issue detail via useProjectPath; Approve via approveIssue for 'Approval needed' items; Resume via resumeIssue for Interrupted/Needs action/Integration failed items), plus a visually distinct Runner-down entry when agentStatus.runnerAvailable === false that links to /activity; and an all-clear state showing an 'All clear' message with a copy-only Productivity placeholder when no items and runner available. Wire AttentionHero into DashboardPage in place of DashboardZonePlaceholder for the attention slot only, preserving the data-testid=\"dashboard-zone-attention\" / data-zone=\"attention\" hook on the Hero root; the other three slots (Pulse/Productivity/Digest) remain placeholders. Reuse the IssueCard mutation pattern (invalidate ['issues'] + ['agent-status'] on success). Add unit tests for both states, per-item actions, runner-down entry (including the empty-items + runner-down case), all-clear, and the DashboardPage integration.",
+      "acceptanceCriteria": [
+        "packages/web/src/widgets/attention-hero/ exports a public AttentionHero component with a full unit test suite.",
+        "AttentionHero imports deriveAttentionItems and AttentionItem from entities/issue and contains no local copy of any of the four attention rules (approval/integrate/interrupted/blocked).",
+        "When deriveAttentionItems returns a non-empty list, the Hero renders one entry per AttentionItem in evaluation order, each showing the item's label and detail, and does NOT render the all-clear state.",
+        "An AttentionItem whose label is 'Approval needed' exposes an Approve action that invokes approveIssue(issueNumber, projectId); activating it invalidates ['issues'] and ['agent-status'].",
+        "An AttentionItem whose underlying issue accepts a resume call (Interrupted/Needs action/Integration failed) exposes a Resume action that invokes resumeIssue(issueNumber, projectId); activating it invalidates ['issues'] and ['agent-status'].",
+        "Activating an entry's navigation affordance navigates to the issue detail route (issues/:number) via useProjectPath.",
+        "When agentStatus.runnerAvailable === false, the Hero renders a visually distinct Runner-down entry (even when deriveAttentionItems returns an empty list), showing agentStatus.runnerMessage ?? 'No runner is connected.' with a link to toProjectPath('/activity'), and does NOT render the all-clear state.",
+        "When agentStatus.runnerAvailable is true or undefined (loading), the Hero renders no Runner-down entry.",
+        "When deriveAttentionItems returns an empty list and agentStatus.runnerAvailable is not false, the Hero renders the all-clear state with an 'All clear' message and a copy-only Productivity placeholder (no live Productivity content, no extra fetches).",
+        "Surfacing an attention item triggers no notification, push, toast, or workflow-state mutation; mutations occur only on explicit user action.",
+        "DashboardPage renders AttentionHero in the Attention slot (not the generic placeholder); the Pulse, Productivity, and Digest slots still render DashboardZonePlaceholder.",
+        "The Attention Hero root carries data-testid=\"dashboard-zone-attention\" and data-zone=\"attention\" so existing zone-identity assertions remain meaningful; DashboardPage.test.tsx is updated to assert the Hero in the attention slot and placeholders in the other three.",
+        "Hero and Kanban produce identical attention items for the same (issues, agentStatus) input (verified by importing the same deriveAttentionItems).",
+        "npm run typecheck -w packages/web passes.",
+        "npm run test:run -w packages/web passes, including the new widget tests and the updated DashboardPage tests.",
+        "npx openspec validate issue-167 --strict passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/widgets/attention-hero/ (component + tests), updated packages/web/src/pages/dashboard/ui/DashboardPage.tsx and DashboardPage.test.tsx; typecheck + tests green; openspec validate issue-167 --strict green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Pure consumption UI — no server/domain changes. Reuse existing seams: useIssues (entities/issue), useAgentStatus (entities/agent), deriveAttentionItems/AttentionItem (entities/issue), approveIssue/resumeIssue (entities/issue/api/client), useProjectPath (entities/project). Reference patterns: KanbanBoard.tsx:542 (deriveAttentionItems usage), NeedsAttentionSummary (KanbanBoard.tsx:392), RunnerUnavailableBanner (KanbanBoard.tsx:449), IssueCard.tsx:203 (resume mutation + invalidation). Per spec, key Runner-down off agentStatus.runnerAvailable === false (treats undefined/loading as available); note Kanban's banner uses useRunnerSummary().hasConnectedCapacity — this divergence is an accepted trade-off, not a bug. Also satisfies the dashboard-shell MODIFIED requirement (Attention slot hosts the Hero; other three slots remain placeholders)."
+    }
+  ]
+}
