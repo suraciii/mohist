@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
+import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { DashboardZonePlaceholder } from './DashboardZonePlaceholder'
@@ -63,9 +64,13 @@ export function DashboardPage() {
         data-testid="dashboard-zones"
         className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
       >
-        {DASHBOARD_ZONES.map((zone) => (
-          <DashboardZonePlaceholder key={zone.id} id={zone.id} name={zone.name} />
-        ))}
+        {DASHBOARD_ZONES.map((zone) =>
+          zone.id === 'attention' ? (
+            <AttentionHero key={zone.id} />
+          ) : (
+            <DashboardZonePlaceholder key={zone.id} id={zone.id} name={zone.name} />
+          ),
+        )}
       </div>
     </div>
   )
