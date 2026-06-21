@@ -317,4 +317,195 @@ public class CliLabelCatalogSpecs
         Assert.Equal(HttpMethod.Delete, req.Method);
         Assert.Contains("/labels/catalog/module", req.RequestUri?.PathAndQuery ?? "");
     }
+
+    [Fact]
+    public async Task LabelUpdate_DescriptionOnly_SendsPartialPatch()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/module", StringComparison.Ordinal))
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { key = "module", description = "New desc", origin = "User" },
+                });
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "module", "--description", "New desc"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Patch, req.Method);
+        Assert.Equal("/api/projects/proj_abc/labels/catalog/module", req.RequestUri?.PathAndQuery);
+        var body = req.Body ?? "";
+        Assert.Contains("\"description\"", body);
+        Assert.Contains("New desc", body);
+        Assert.DoesNotContain("supportedValues", body);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_SupportedValuesOnly_SendsPartialPatch()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/module", StringComparison.Ordinal))
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { key = "module", description = "Unchanged", origin = "User", supportedValues = new[] { "auth", "ui", "persistence" } },
+                });
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "module", "--supported-values", "auth,ui,persistence"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Patch, req.Method);
+        var body = req.Body ?? "";
+        Assert.Contains("supportedValues", body);
+        Assert.Contains("auth", body);
+        Assert.Contains("ui", body);
+        Assert.Contains("persistence", body);
+        Assert.DoesNotContain("description", body);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_BothFields_SendsBothInBody()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/module", StringComparison.Ordinal))
+            {
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { key = "module", description = "Updated", origin = "User", supportedValues = new[] { "auth", "ui" } },
+                });
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "module", "--description", "Updated", "--supported-values", "auth,ui"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var req = handler.Requests.Last();
+        Assert.Equal(HttpMethod.Patch, req.Method);
+        var body = req.Body ?? "";
+        Assert.Contains("\"description\"", body);
+        Assert.Contains("Updated", body);
+        Assert.Contains("\"supportedValues\"", body);
+        Assert.Contains("auth", body);
+        Assert.Contains("ui", body);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_InvalidKey_ExitsWithErrorAndNoRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "Module", "--description", "Whatever"], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.NotEqual("", error.ToString());
+    }
+
+    [Fact]
+    public async Task LabelUpdate_EmptyDescription_ExitsWithErrorAndNoRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "module", "--description", "   "], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("description", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_NoFieldsProvided_ExitsWithErrorAndNoRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "module"], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--description", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("--supported-values", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_EmptySupportedValueEntry_ExitsWithErrorAndNoRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "module", "--supported-values", "auth,,ui"], output, error, fs, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("non-empty", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_UnknownKey_404_SurfacesAsError()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/unknown", StringComparison.Ordinal))
+            {
+                return RecordingHttpHandler.JsonError(
+                    "Key 'unknown' not found in the project catalog.",
+                    "not_found",
+                    HttpStatusCode.NotFound);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "unknown", "--description", "Anything"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("unknown", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LabelUpdate_SystemKey_409_SurfacesAsError()
+    {
+        var (handler, http, output, error, fs, executor) = CreateHarness();
+        handler.SetResponder(async (req, _) =>
+        {
+            if (req.Method == HttpMethod.Patch && (req.RequestUri?.AbsolutePath ?? "").EndsWith("/labels/catalog/refactor", StringComparison.Ordinal))
+            {
+                return RecordingHttpHandler.JsonError(
+                    "System definition 'refactor' is immutable and cannot be modified.",
+                    "conflict",
+                    HttpStatusCode.Conflict);
+            }
+            return RecordingHttpHandler.Json(new { success = true, data = new { } });
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["label", "update", "refactor", "--description", "Trying to change"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("refactor", error.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
 }

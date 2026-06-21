@@ -11,6 +11,7 @@ internal static class LabelCommands
 
         label.Subcommands.Add(BuildList(api));
         label.Subcommands.Add(BuildAdd(api));
+        label.Subcommands.Add(BuildUpdate(api));
         label.Subcommands.Add(BuildRemove(api));
 
         return label;
@@ -115,6 +116,86 @@ internal static class LabelCommands
                     description,
                     supportedValues,
                 });
+            }
+        });
+
+        return cmd;
+    }
+
+    private static Command BuildUpdate(MohistCliApi api)
+    {
+        var cmd = new Command("update", "Update a label definition in the project catalog (partial update)");
+        var keyArg = new Argument<string>("key") { Description = "Label key (lowercase, dashes allowed)" };
+        var descriptionOpt = new Option<string?>("--description") { Description = "New description of when to use this label" };
+        var supportedValuesOpt = new Option<string?>("--supported-values")
+            { Description = "Comma-separated list of recommended values (omit to keep current)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+
+        cmd.Arguments.Add(keyArg);
+        cmd.Options.Add(descriptionOpt);
+        cmd.Options.Add(supportedValuesOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+
+        cmd.SetAction(ctx =>
+        {
+            var key = ctx.GetValue(keyArg);
+            var description = ctx.GetValue(descriptionOpt);
+            var supportedValuesStr = ctx.GetValue(supportedValuesOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            return UpdateAsync();
+
+            async Task<int> UpdateAsync()
+            {
+                var keyError = LabelDelta.ValidateKey(key!);
+                if (keyError is not null)
+                {
+                    api.Error.WriteLine(keyError);
+                    return 1;
+                }
+
+                var hasDescription = description is not null;
+                var hasSupportedValues = !string.IsNullOrWhiteSpace(supportedValuesStr);
+
+                if (!hasDescription && !hasSupportedValues)
+                {
+                    api.Error.WriteLine("At least one of --description or --supported-values must be provided.");
+                    return 1;
+                }
+
+                if (hasDescription && string.IsNullOrWhiteSpace(description))
+                {
+                    api.Error.WriteLine("--description must be a non-empty, non-whitespace string.");
+                    return 1;
+                }
+
+                List<string>? supportedValues = null;
+                if (hasSupportedValues)
+                {
+                    supportedValues = supportedValuesStr!.Split(',')
+                        .Select(v => v.Trim())
+                        .ToList();
+                    if (supportedValues.Any(v => v.Length == 0))
+                    {
+                        api.Error.WriteLine("Each supported value must be a non-empty, non-whitespace string.");
+                        return 1;
+                    }
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var path = $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/labels/catalog/{MohistCliCommands.Escape(key!)}";
+
+                var body = new Dictionary<string, object?>();
+                if (hasDescription)
+                    body["description"] = description;
+                if (supportedValues is not null)
+                    body["supportedValues"] = supportedValues;
+
+                return await api.PrintPatchAsync(path, body);
             }
         });
 
