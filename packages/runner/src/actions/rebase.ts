@@ -333,30 +333,30 @@ export function applyWorkflowAgentDefault(with_: JsonObject, variables: JsonObje
 function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: number): string {
   const fileList = conflicts.map((f) => `- ${f}`).join("\n")
   return [
-    `## Complete Git Rebase Conflict Resolution (attempt ${attempt})`,
+    `## Rebase Conflict Resolution (attempt ${attempt})`,
     "",
-    `A \`git rebase ${baseBranch}\` produced merge conflicts. You are now inside an in-progress rebase.`,
+    `A \`git rebase ${baseBranch}\` is in progress and has merge conflicts.`,
     "",
-    "Current conflict files:",
+    "<task>",
+    "Resolve every conflict and bring the rebase to full completion.",
+    "The rebase may have conflicts in multiple commits — keep going until it finishes.",
+    "",
+    "Conflicted files:",
     fileList,
+    "</task>",
     "",
-    "Resolution rules:",
-    "1. Preserve both sides. Never drop or overwrite either side's intentional changes.",
-    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>` across the repository; no markers may remain.",
-    "3. Stage resolved files and continue the rebase yourself.",
-    "4. The rebase may have conflicts in multiple commits. Keep looping until the rebase is fully complete.",
-    "5. If verification fails because of your resolution, fix it before finishing.",
-    "6. After the rebase fully completes, run focused verification relevant to the conflicted files. Avoid broad evidence-generation tests or unrelated full-suite commands unless the conflict requires them.",
+    "<rules>",
+    "- Preserve both sides. Never drop or overwrite either side's intentional changes.",
+    "- If the resolution introduces compilation or test failures, fix them as part of this work.",
+    "</rules>",
     "",
-    "Steps - loop until complete:",
-    "1. Read each conflict file.",
-    "2. For each block, understand what the base branch changed and what the issue branch changed.",
-    "3. Merge both changes intelligently and remove all conflict markers.",
-    "4. Run `git add` for resolved files.",
-    "5. Run `GIT_EDITOR=true git rebase --continue`.",
-    "6. If more conflicts appear, go back to step 1. Do not stop after only one commit.",
-    "7. When rebase completes, verify there is no rebase in progress and no conflict markers remain.",
-    "8. Run focused verification relevant to the conflicted files. If anything fails, fix it before finishing.",
+    "<verify>",
+    "When you finish, all of the following must be true:",
+    "- The rebase is fully complete (no `.git/rebase-merge` or `.git/rebase-apply`).",
+    "- No conflict markers remain anywhere in the repository.",
+    "- The worktree is clean — no staged, unstaged, or untracked changes. Commit everything you change.",
+    "- You are on a named branch, not a detached HEAD.",
+    "</verify>",
   ].join("\n")
 }
 
@@ -445,9 +445,17 @@ async function verifyRebaseComplete(context: ActionContext, baseBranch: string) 
   const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
   const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal)
   const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseBranch, "HEAD"], context.signal) : null
+  const branch = await git(context.workDir, ["branch", "--show-current"], context.signal)
+  const statusPorcelain = await git(context.workDir, ["status", "--porcelain"], context.signal)
+
+  const detached = branch.exitCode !== 0 || !branch.stdout.trim() || branch.stdout.trim() === "HEAD"
+  const dirty = statusPorcelain.success && statusPorcelain.stdout.trim().length > 0
+
   const ok =
     !rebaseInProgress &&
     conflicts.length === 0 &&
+    !detached &&
+    !dirty &&
     head.success &&
     base.success &&
     mergeBase?.success === true &&
@@ -455,6 +463,8 @@ async function verifyRebaseComplete(context: ActionContext, baseBranch: string) 
   const output = [
     rebaseInProgress ? "Rebase is still in progress." : "",
     conflicts.length > 0 ? `Conflicts remain:\n${conflicts.join("\n")}` : "",
+    detached ? `HEAD is detached (branch: ${branch.stdout.trim()})` : "",
+    dirty ? `Worktree is not clean:\n${statusPorcelain.stdout.trim()}` : "",
     head.combinedOutput,
     base.combinedOutput,
     mergeBase?.combinedOutput ?? "",

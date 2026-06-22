@@ -474,6 +474,8 @@ describe("mohist/rebase", () => {
           return ok("/fake/worktree/.git/rebase-apply\n")
         case "status --porcelain":
           return ok("")
+        case "branch --show-current":
+          return ok("feature-branch\n")
         case "rev-parse master":
           return ok("base\n")
         case "rev-parse HEAD":
