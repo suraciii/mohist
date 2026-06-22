@@ -21,7 +21,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 type: "TEXT",
                 nullable: true,
                 computedColumnSql: "COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))",
-                stored: true);
+                stored: false);
 
             migrationBuilder.AddColumn<DateTime>(
                 name: "CreatedAt",
@@ -29,7 +29,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 type: "TEXT",
                 nullable: true,
                 computedColumnSql: "json_extract(State, '$.metadata.createdAt')",
-                stored: true);
+                stored: false);
 
             migrationBuilder.CreateIndex(
                 name: "IX_WorkflowRuns_AssignedRunnerId",

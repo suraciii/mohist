@@ -992,7 +992,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("AssignedRunnerId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", false);
 
                     b.Property<long>("ETag")
                         .IsConcurrencyToken()
@@ -1006,7 +1006,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTime?>("CreatedAt")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", true);
+                        .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", false);
 
                     b.Property<string>("State")
                         .IsRequired()

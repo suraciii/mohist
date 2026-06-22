@@ -301,9 +301,9 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.MetadataProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);
             entity.Property(e => e.CreatedAt)
-                .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: true);
+                .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: false);
             entity.Property(e => e.AssignedRunnerId)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: false);
             entity.HasIndex(e => e.MetadataProjectId);
             entity.HasIndex(e => e.AssignedRunnerId);
             entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedRunnerId, e.CreatedAt });
