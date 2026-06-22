@@ -57,6 +57,11 @@ public sealed class TraceIngester
         ArgumentNullException.ThrowIfNull(payload);
 
         var request = JsonSerializer.Deserialize<OtlpTraceRequest>(payload, OtlpJsonSerializer.Options());
+        return Ingest(request, ct);
+    }
+
+    internal int Ingest(OtlpTraceRequest? request, CancellationToken ct = default)
+    {
         if (request?.ResourceSpans is null || request.ResourceSpans.Count == 0)
             return 0;
 

@@ -12,6 +12,7 @@ public static class MohistSiloRegistration
     public static ISiloBuilder ConfigureMohistSilo(this ISiloBuilder silo, IConfiguration configuration)
     {
         silo.UseLocalhostClustering();
+        silo.AddActivityPropagation();
         silo.UseAdoNetReminderService(options =>
         {
             options.Invariant = "System.Data.SQLite";
