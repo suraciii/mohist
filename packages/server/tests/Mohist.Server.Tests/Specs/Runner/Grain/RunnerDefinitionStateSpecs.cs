@@ -210,8 +210,10 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             WorkflowRunId: $"wf-offline-{Guid.NewGuid():N}",
             WorkId: "task-1.1",
             OwnerKind: WorkDispatchOwnerKinds.Workflow);
+        // The RunnerGrain assigns work even when offline — work is queued
+        // in _works and served via PollAsync when the runner reconnects.
         var assignment = await runner.AssignWorkAsync(dispatch);
-        Assert.Equal(RunnerWorkAssignmentStatus.Rejected, assignment.Status);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assignment.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

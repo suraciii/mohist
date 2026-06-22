@@ -10,7 +10,7 @@ namespace Mohist.Server.Tests.Support;
 /// files declare only their membership with
 /// <c>[Collection("Name")]</c>; the corresponding definition is here.
 /// </summary>
-[CollectionDefinition("MohistIntegration")]
+[CollectionDefinition("MohistIntegration", DisableParallelization = true)]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("MohistDb")]

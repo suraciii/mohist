@@ -442,21 +442,17 @@ public class RunnerGrain : Grain, IRunnerGrain
         await registry.RegisterAsync(_info);
     }
 
-    private async Task<IReadOnlyList<string>> BacklogProjectIdsAsync()
+    private Task<IReadOnlyList<string>> BacklogProjectIdsAsync()
     {
-        var projectIds = new HashSet<string>(_backlogs.ListProjects(), StringComparer.Ordinal);
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var persistedProjectIds = await db.Projects
-            .AsNoTracking()
-            .Select(project => project.Id)
-            .ToListAsync();
-        foreach (var projectId in persistedProjectIds)
-        {
-            if (!string.IsNullOrWhiteSpace(projectId))
-                projectIds.Add(projectId);
-        }
-
-        return projectIds.Order(StringComparer.Ordinal).ToArray();
+        // The in-memory directory is the canonical source of active project
+        // backlogs — it is populated by WorkflowBacklogGrain.OnActivateAsync
+        // which calls _directory.RegisterProject on every grain activation.
+        // Querying db.Projects here would re-introduce stale project IDs
+        // that were already cleared from the directory, and each such ID
+        // triggers a WorkflowBacklogGrain activation that re-registers
+        // the project, defeating the cleanup.
+        var projectIds = _backlogs.ListProjects();
+        return Task.FromResult<IReadOnlyList<string>>(projectIds);
     }
 
     private async Task<string?> ClaimFromBacklogAsync()
