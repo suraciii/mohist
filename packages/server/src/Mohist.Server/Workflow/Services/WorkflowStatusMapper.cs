@@ -148,9 +148,19 @@ public static class WorkflowStatusMapper
         var failure = failureOverride ?? run.Failure;
         if (run.Status == WorkflowRunStatus.Failed && failure is not null)
         {
-            if (failure.Reason is FailureReason.TaskFailed && failure.TaskId is not null)
+            var taskId = failure.TaskId;
+            if (failure.Reason is FailureReason.TaskFailed)
             {
-                actions.Add(new AvailableActionView("retry", "Retry failed task", failure.TaskId));
+                if (taskId is null && failure.Stage is not null)
+                {
+                    var failedStage = run.Stages.FirstOrDefault(s => s.Id == failure.Stage);
+                    taskId = failedStage?.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id;
+                }
+
+                if (taskId is not null)
+                {
+                    actions.Add(new AvailableActionView("retry", "Retry failed task", taskId));
+                }
             }
             else if (failure.Reason is FailureReason.CheckUnrepaired && failure.CheckName is not null)
             {
