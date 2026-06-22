@@ -172,9 +172,11 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work)
     {
-        if (_status == RunnerStatus.Offline)
-            return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "offline"));
-
+        // Accept work even when the runner is offline. The RunnerGrain
+        // tracks pending work in _works and serves it via PollAsync when
+        // the runner reconnects. The IsWorkRunnableAsync gate ensures
+        // stale entries (e.g. from a grain reactivation that produced a
+        // new WorkId) are silently dropped.
         switch (work.OwnerKind)
         {
             case WorkDispatchOwnerKinds.Workflow:
@@ -386,8 +388,10 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task HandleTimeoutAsync()
     {
+        // Notify affected workflows so they can fail running tasks,
+        // but keep _works intact — pending check dispatches are still
+        // valid and will be served when the runner reconnects.
         await NotifyTrackedWorkflowRunnersLostAsync();
-        _works.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.UnregisterAsync(RunnerId);
