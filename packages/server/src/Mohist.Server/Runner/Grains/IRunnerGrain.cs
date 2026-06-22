@@ -9,11 +9,10 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task UnregisterAsync();
     Task HeartbeatAsync();
     Task HeartbeatRepairAsync(RunnerInfo info);
-    [AlwaysInterleave]
-    Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work);
+    Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work);
     Task<WorkDispatch?> PollAsync();
-    Task<RunnerWorkReportResult> ReportResultAsync(WorkDispatch work, string workId, WorkResult result);
-    Task<bool> IsAvailableAsync();
+    Task<RunnerWorkReportResult> ReportWorkflowResultAsync(string workflowRunId, string workId, WorkResult result);
+    Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result);
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
     Task<RunnerInfo?> GetInfoAsync();

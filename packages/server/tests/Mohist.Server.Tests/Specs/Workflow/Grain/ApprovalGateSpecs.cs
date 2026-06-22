@@ -58,7 +58,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, check2, "build-ok");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -113,7 +113,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback[0].Status);
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

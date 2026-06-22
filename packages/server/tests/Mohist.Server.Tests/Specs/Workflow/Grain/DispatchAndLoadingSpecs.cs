@@ -46,7 +46,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
 
         Assert.Null(await runner.PollAsync());
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -91,7 +91,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, check, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -481,7 +481,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, load.WorkId, "failed", "loader failed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
 
         var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
         Assert.Equal("Failed", status);

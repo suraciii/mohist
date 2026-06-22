@@ -73,7 +73,16 @@ public static class AgentRoutes
         foreach (var runner in globalRunners)
         {
             var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
-            if (await grain.IsAvailableAsync())
+            RunnerRuntimeState runtime;
+            try
+            {
+                runtime = await grain.GetRuntimeStateAsync();
+            }
+            catch
+            {
+                continue;
+            }
+            if (runtime.Status == RunnerStatus.Online)
                 available.Add(runner);
         }
         return available;

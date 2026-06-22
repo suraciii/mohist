@@ -25,7 +25,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await runner.UnregisterAsync();
 
         Assert.Equal("Failed", await workflow.GetRunStatusAsync());
-        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
         Assert.Null(await workflow.GetCurrentWorkIdAsync());
 
         var run = await LoadRunAsync(work.WorkflowRunId);
@@ -77,6 +77,33 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task RunningTask_WithoutReport_TimesOutWithoutQueryingRunner()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, _) = await PollWorkAnyAsync();
+
+        var run = await LoadRunAsync(work.WorkflowRunId);
+        var task = run.Stages.Single().Tasks.Single();
+        task.StartedAt = DateTimeOffset.UtcNow.AddMinutes(-30);
+        await _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<Mohist.Server.Infrastructure.Data.Workflow.IWorkflowRunStore>()
+            .SaveAsync(run);
+        await DeactivateWorkflowAsync(work.WorkflowRunId);
+        workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        run = await LoadRunAsync(work.WorkflowRunId);
+        task = run.Stages.Single().Tasks.Single();
+        Assert.Equal(TaskRunStatus.Failed, task.Status);
+        Assert.Equal("work-timeout", run.Failure?.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task Heartbeat_WithOnlineRunner_PreservesRunningTask()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
@@ -92,13 +119,13 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         Assert.Equal("Running", await workflow.GetRunStatusAsync());
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
-        Assert.True(await Grains.GetGrain<IRunnerGrain>(runnerId).IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task Heartbeat_WithOfflineRunner_FailsOrphanedRunningTask()
+    public async Task Reactivation_WithOfflineRunner_DoesNotQueryRunner_AndRunnerLostNotificationFailsRunningTask()
     {
         var workflowId = $"wf-orphan-{Guid.NewGuid():N}";
         var runnerId = $"offline-runner-{Guid.NewGuid():N}";
@@ -121,41 +148,14 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await DeactivateWorkflowAsync(workflowId);
 
         var reactivatedWorkflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        Assert.Equal("Running", await reactivatedWorkflow.GetRunStatusAsync());
+
+        await reactivatedWorkflow.NotifyRunnerLostAsync(runnerId);
         Assert.Equal("Failed", await reactivatedWorkflow.GetRunStatusAsync());
 
         run = await LoadRunAsync(workflowId);
         Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);
         Assert.Equal("runner-lost", run.Failure?.Message);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public async Task NotifyTrackedWorkflowRunnersLostAsync_ContinuesAfterNotificationFailure()
-    {
-        var notified = new List<string>();
-        var failures = new List<string>();
-        var trackedWork = new[]
-        {
-            new WorkDispatch("wf-failing", "task-1.1"),
-            new WorkDispatch("wf-ok", "task-2.1"),
-            new WorkDispatch("wf-agent", "agent-work", OwnerKind: WorkDispatchOwnerKinds.AgentJob, AgentJobId: "job-1"),
-        };
-
-        await RunnerGrain.NotifyTrackedWorkflowRunnersLostAsync(
-            trackedWork,
-            "runner-1",
-            workflowRunId =>
-            {
-                notified.Add(workflowRunId);
-                if (workflowRunId == "wf-failing")
-                    throw new InvalidOperationException("boom");
-                return Task.CompletedTask;
-            },
-            (_, workflowRunId) => failures.Add(workflowRunId));
-
-        Assert.Equal(["wf-failing", "wf-ok"], notified);
-        Assert.Equal(["wf-failing"], failures);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -183,7 +183,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.NotNull(info);
         Assert.Equal(4, info!.MaxWorkflowSlots);
         Assert.Equal(2, info.CoderModels?.Length);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -198,7 +198,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await workflow.StopAsync("test-stop");
 
         Assert.Equal("Stopped", await workflow.GetRunStatusAsync());
-        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());

@@ -39,7 +39,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task DispatchedCheckRunnerIdDerivesFromWorkflowClaim()
+    public async Task DispatchedCheckRunnerIdDerivesFromWorkflowAssignment()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var (taskWork, runnerId) = await PollWorkAnyAsync();
@@ -49,14 +49,14 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
 
-        Assert.Equal(runnerId, run.Claim!.RunnerId);
+        Assert.Equal(runnerId, run.Assignment!.RunnerId);
         Assert.Equal(StageCheckStatus.Pending, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task CheckResultFromRunnerOutsideWorkflowClaimIsIgnored()
+    public async Task CheckResultFromRunnerOutsideWorkflowAssignmentIsIgnored()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var (taskWork, runnerId) = await PollWorkAnyAsync();
@@ -69,7 +69,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
         Assert.Equal(StageCheckStatus.Pending, check.Status);
-        Assert.Equal(runnerId, run.Claim!.RunnerId);
+        Assert.Equal(runnerId, run.Assignment!.RunnerId);
         Assert.Equal(WorkflowRunStatus.Running, run.Status);
     }
 

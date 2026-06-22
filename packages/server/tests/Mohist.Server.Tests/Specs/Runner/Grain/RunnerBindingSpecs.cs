@@ -94,7 +94,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         var first = await runner.PollAsync();
         Assert.NotNull(first);
         Assert.StartsWith("task-1.", first.WorkId);
-        var report = await runner.ReportResultAsync(first, first.WorkId, new WorkResult("completed"));
+        var report = await runner.ReportWorkflowResultAsync(first.WorkflowRunId, first.WorkId, new WorkResult("completed"));
         Assert.True(report.Tracked);
 
         var second = await runner.PollAsync();
@@ -127,7 +127,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);
         Assert.Equal("wf-report-1", work1.WorkflowRunId);
-        var report = await runner.ReportResultAsync(work1, work1.WorkId, new WorkResult("completed"));
+        var report = await runner.ReportWorkflowResultAsync(work1.WorkflowRunId, work1.WorkId, new WorkResult("completed"));
         Assert.True(report.Tracked);
 
         var nextPoll = await runner.PollAsync();
@@ -151,7 +151,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         await AssignWorkflowToRunnerAsync("wf-runtime-read", runnerId);
 
         var runtime = await runner.GetRuntimeStateAsync();
-        Assert.Contains("wf-runtime-read", runtime.ActiveWorks.Select(w => w.OwnerId));
+        Assert.DoesNotContain("wf-runtime-read", runtime.ActiveWorks.Select(w => w.OwnerId));
 
         var work = await runner.PollAsync();
         Assert.NotNull(work);

@@ -144,7 +144,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task WorkflowInBacklog_RunnerClaimsOnFirstPoll()
+    public async Task WorkflowInBacklog_RunnerAssignsOnFirstPoll()
     {
         await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
@@ -171,7 +171,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task PausedWorkflowInBacklog_RunnerClaimsButNoWork()
+    public async Task PausedWorkflowInBacklog_RunnerAssignsButNoWork()
     {
         await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());

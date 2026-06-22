@@ -44,7 +44,6 @@ public class MohistDbContext : DbContext
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
-    public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
     public DbSet<ProjectPromptTemplateRow> ProjectPromptTemplates { get; set; } = null!;
@@ -301,20 +300,19 @@ public class MohistDbContext : DbContext
             entity.Property<long>("ETag").IsConcurrencyToken();
             entity.Property(e => e.MetadataProjectId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", stored: true);
+            entity.Property(e => e.CreatedAt)
+                .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", stored: true);
+            entity.Property(e => e.AssignedRunnerId)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
+            entity.HasIndex(e => e.AssignedRunnerId);
+            entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedRunnerId, e.CreatedAt });
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>
         {
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.State).IsRequired();
-        });
-
-        modelBuilder.Entity<BacklogStateRow>(entity =>
-        {
-            entity.HasKey(e => e.ProjectId);
-            entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.State).IsRequired();
         });
 

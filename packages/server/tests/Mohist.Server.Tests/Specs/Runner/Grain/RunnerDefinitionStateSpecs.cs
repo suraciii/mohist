@@ -158,7 +158,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
 
         Assert.Null(await runner.PollAsync());
 
-        await runner.ReportResultAsync(work1, work1.WorkId, new WorkResult("completed"));
+        await runner.ReportWorkflowResultAsync(work1.WorkflowRunId, work1.WorkId, new WorkResult("completed"));
 
         var work3 = await runner.PollAsync();
         Assert.NotNull(work3);
@@ -168,7 +168,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task Dispatch_AgentJobWork_DoesNotConsumeWorkflowClaimSlot()
+    public async Task Dispatch_AgentJobWork_DoesNotConsumeWorkflowAssignmentSlot()
     {
         var projectId = $"test-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId);
@@ -179,7 +179,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             WorkId: $"agent-work-{Guid.NewGuid():N}",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
             AgentJobId: $"agent-job-{Guid.NewGuid():N}");
-        var assignment = await runner.AssignWorkAsync(agentJobDispatch);
+        var assignment = await runner.AssignAgentJobAsync(agentJobDispatch);
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assignment.Status);
 
         var workflowId = $"wf-agent-slot-{Guid.NewGuid():N}";
@@ -196,7 +196,7 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task OfflineRunner_DoesNotClaimOrAcceptNewWork()
+    public async Task OfflineRunner_DoesNotAssignmentOrAcceptNewWork()
     {
         var projectId = $"test-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId);
@@ -210,10 +210,10 @@ public class RunnerDefinitionStateSpecs : WorkflowGrainSpecs
             WorkflowRunId: $"wf-offline-{Guid.NewGuid():N}",
             WorkId: "task-1.1",
             OwnerKind: WorkDispatchOwnerKinds.Workflow);
-        // The RunnerGrain assigns work even when offline — work is queued
-        // in _works and served via PollAsync when the runner reconnects.
-        var assignment = await runner.AssignWorkAsync(dispatch);
-        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assignment.Status);
+        // Workflow delivery no longer accepts direct runner-side assignment.
+        var assignment = await runner.AssignAgentJobAsync(dispatch);
+        Assert.Equal(RunnerWorkAssignmentStatus.Rejected, assignment.Status);
+        Assert.Equal("invalid-work", assignment.Reason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

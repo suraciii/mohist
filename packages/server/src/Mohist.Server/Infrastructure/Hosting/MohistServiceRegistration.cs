@@ -68,6 +68,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        services.AddScoped<WorkflowRunQuerier>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
@@ -95,7 +96,6 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowDispatchBuilder>();
         services.AddScoped<ProjectWorkflowProfileManager>();
         services.AddScoped<IssueWorkflowProfileManager>();
-        services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<ConnectionSubscriptionRegistry>();
@@ -132,6 +132,7 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentJobArtifactUploadService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
+        services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         services.Configure<OtelOptions>(configuration.GetSection(OtelOptions.SectionName));
         services.PostConfigure<OtelOptions>(options =>

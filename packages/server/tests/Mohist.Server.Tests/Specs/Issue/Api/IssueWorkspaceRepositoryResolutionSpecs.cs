@@ -61,7 +61,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary-old", "develop");
         var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -131,7 +131,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         // Given an issue bound to a project repository whose base branch is later changed.
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Base branch drifts", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -157,7 +157,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         // Given an issue bound to a project repository whose configuration is later removed.
         var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary", "develop");
         var issue = await CreateIssueAsync(projectId, "Rebase orphan", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -228,7 +228,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             json.GetProperty("data").GetProperty("number").GetInt32());
     }
 
-    private async Task StartIssueAndClaimRunnerAsync(string projectId, int number)
+    private async Task StartIssueAndAssignmentRunnerAsync(string projectId, int number)
     {
         await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
 

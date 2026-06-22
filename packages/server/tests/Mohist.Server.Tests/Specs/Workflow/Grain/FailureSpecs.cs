@@ -20,7 +20,7 @@ public class FailureSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "failed", "compile error");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -37,6 +37,6 @@ public class FailureSpecs : WorkflowGrainSpecs
         await ReportChecksFailAsync(r2, check, "check-1", "typecheck errors");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 }

@@ -215,7 +215,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Rebase context embeds", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -261,7 +261,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Rebase no fallback", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -318,7 +318,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Commits resolve", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -348,7 +348,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         _fixture.Git.BranchExists = true;
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop");
         var issue = await CreateIssueAsync(projectId, "File content orphan", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         await _grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
 
@@ -396,7 +396,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Workspace base drifts", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -769,7 +769,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync("develop-old");
         var issue = await CreateIssueAsync(projectId, "Rebase response drifts", "secondary");
-        await StartIssueAndClaimRunnerAsync(projectId, issue.Number);
+        await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -984,7 +984,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             repository);
     }
 
-    private async Task StartIssueAndClaimRunnerAsync(string projectId, int number)
+    private async Task StartIssueAndAssignmentRunnerAsync(string projectId, int number)
     {
         await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
 

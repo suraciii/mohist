@@ -14,4 +14,10 @@ public class WorkflowRunRow
 
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? MetadataProjectId { get; set; }
+
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    public DateTime? CreatedAt { get; set; }
+
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
+    public string? AssignedRunnerId { get; set; }
 }

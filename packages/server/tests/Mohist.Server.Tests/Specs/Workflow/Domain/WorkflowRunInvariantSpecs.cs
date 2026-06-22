@@ -32,33 +32,33 @@ public class WorkflowRunInvariantSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void SecondClaimRejectedWhenOneExists()
+    public void SecondAssignmentRejectedWhenOneExists()
     {
         var run = BuildRun();
-        run.ClaimBy("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            run.ClaimBy("runner-2", DateTimeOffset.UtcNow));
+            run.AssignTo("runner-2", DateTimeOffset.UtcNow));
 
-        Assert.Contains("already claimed", ex.Message);
-        Assert.True(run.IsClaimedBy("runner-1"));
-        Assert.Equal("runner-1", run.Claim!.RunnerId);
-        Assert.False(run.IsClaimedBy("runner-2"));
+        Assert.Contains("already assigned", ex.Message);
+        Assert.True(run.IsAssignedTo("runner-1"));
+        Assert.Equal("runner-1", run.Assignment!.RunnerId);
+        Assert.False(run.IsAssignedTo("runner-2"));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void RunningTaskRunnerIdEqualsClaimRunnerId()
+    public void RunningTaskRunnerIdEqualsAssignmentRunnerId()
     {
         var run = BuildRun();
-        run.ClaimBy("runner-1", DateTimeOffset.UtcNow);
+        run.AssignTo("runner-1", DateTimeOffset.UtcNow);
 
         run.StartTask("work-1", "runner-1");
         var task = run.CurrentStage().Tasks[0];
 
         Assert.Equal(TaskRunStatus.Running, task.Status);
-        Assert.Equal(run.Claim!.RunnerId, task.RunnerId);
+        Assert.Equal(run.Assignment!.RunnerId, task.RunnerId);
         Assert.Equal("runner-1", task.RunnerId);
     }
 

@@ -117,7 +117,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StartedWorkflow_RunnerClaimsFromBacklog()
+    public async Task StartedWorkflow_RunnerAssignsFromBacklog()
     {
         await ClearBacklogAsync();
         var workflowId = $"wf-{Guid.NewGuid():N}";
@@ -138,7 +138,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StartWithoutRunner_RunnerClaimsFromBacklogLater()
+    public async Task StartWithoutRunner_RunnerAssignsFromBacklogLater()
     {
         var workflow = await CreateWorkflowAsync();
         await SeedWorkflowTemplateAsync(_workflowId!, SingleStage());
@@ -167,7 +167,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(WorkflowAssignmentStatus.Rejected, duplicateAssignment.Status);
         Assert.Equal("already-assigned", duplicateAssignment.Reason);
 
-        var assignedRunner = await workflow.GetClaimedRunnerIdAsync();
+        var assignedRunner = await workflow.GetAssignedRunnerIdAsync();
         Assert.Equal(r1, assignedRunner);
     }
 
@@ -187,7 +187,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal("already-assigned", firstAttempt.Reason);
         Assert.Equal(WorkflowAssignmentStatus.Rejected, secondAttempt.Status);
         Assert.Equal("already-assigned", secondAttempt.Reason);
-        Assert.Equal(ownerRunnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(ownerRunnerId, await workflow.GetAssignedRunnerIdAsync());
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
 
     }
@@ -205,12 +205,32 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var secondAttempt = await workflow.AssignRunnerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, firstAttempt.Status);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, secondAttempt.Status);
-        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
         Assert.Equal(firstWork.WorkId, await workflow.GetCurrentWorkIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());
 
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task TaskDelivery_IsCompletedWhenRunnerReports()
+    {
+        await StartWorkflowAsync(SingleStage(checks: []));
+
+        var (work, runnerId) = await PollWorkAnyAsync();
+        var running = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal(WorkflowWorkDeliveryStatus.Started, running.WorkDelivery?.Status);
+        Assert.Equal("task", running.WorkDelivery?.WorkType);
+        Assert.Equal(work.WorkId, running.WorkDelivery?.WorkId);
+
+        await ReportAsync(runnerId, work, "completed");
+
+        var completed = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal(WorkflowWorkDeliveryStatus.Completed, completed.WorkDelivery?.Status);
+        Assert.NotNull(completed.WorkDelivery?.FinishedAt);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -224,18 +244,18 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
-        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StoppedClaimedWorkflow_RequestWorkRejectsAsNotRunnable()
+    public async Task StoppedAssignedWorkflow_RequestWorkRejectsAsNotRunnable()
     {
-        var runnerId = await RegisterRunnerAsync("stopped-claimed-runner");
+        var runnerId = await RegisterRunnerAsync("stopped-assigned-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var workflow = await CreateWorkflowAsync("wf-stopped-claimed");
+        var workflow = await CreateWorkflowAsync("wf-stopped-assigned");
         await SeedWorkflowTemplateAsync(_workflowId!, SingleStage(checks: []));
         await workflow.StartAsync(TestInput());
         await AssignWorkflowToRunnerAsync(_workflowId!, runnerId);

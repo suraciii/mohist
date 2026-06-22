@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using Mohist.Server.Tests.Support;
@@ -24,6 +26,34 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     private static FixedTimeProvider TimeAt(DateTimeOffset now)
     {
         return new FixedTimeProvider(now);
+    }
+
+    private async Task<WorkDispatch> StartIssueWorkflowWorkAsync(
+        string runnerId,
+        string workflowId,
+        string projectId,
+        string issueId,
+        int issueNumber,
+        string title = "Issue Task")
+    {
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(
+            tasks: [new("task-1", title, "spec/task")],
+            checks: []), projectId);
+        await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
+            Name: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Annotations: new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["projectId"] = projectId,
+                ["issueId"] = issueId,
+                ["issueNumber"] = issueNumber.ToString(),
+            })));
+        await workflow.AssignRunnerAsync(runnerId);
+
+        var work = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        Assert.NotNull(work);
+        return work;
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -351,16 +381,13 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var workflowId = $"wf-ctx-{Guid.NewGuid():N}";
         var issue = new WorkIssueRef("test-project", "issue-abc", 42);
-        var dispatch = new WorkDispatch(
-            WorkflowRunId: workflowId,
-            WorkId: "work-ctx-1",
-            WorkType: "task",
-            Stage: "build",
-            Title: "Task 1",
-            Issue: issue);
-
-        var assign = await runner.AssignWorkAsync(dispatch);
-        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assign.Status);
+        var dispatch = await StartIssueWorkflowWorkAsync(
+            runnerId,
+            workflowId,
+            issue.ProjectId,
+            issue.IssueId,
+            issue.IssueNumber,
+            "Task 1");
 
         var runtime = await runner.GetRuntimeStateAsync();
         var active = Assert.Single(runtime.ActiveWorks);
@@ -490,15 +517,12 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var workflowId = $"wf-issue-proj-{Guid.NewGuid():N}";
         var issue = new WorkIssueRef("test-project", "issue-xyz", 9);
-        var dispatch = new WorkDispatch(
-            WorkflowRunId: workflowId,
-            WorkId: "work-issue-proj-1",
-            WorkType: "task",
-            Stage: "build",
-            Title: "Issue Task",
-            Issue: issue);
-        var assign = await runner.AssignWorkAsync(dispatch);
-        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assign.Status);
+        await StartIssueWorkflowWorkAsync(
+            runnerId,
+            workflowId,
+            issue.ProjectId,
+            issue.IssueId,
+            issue.IssueNumber);
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
         var view = Assert.Single(await service.GetRunnersAsync("test-project"), r => r.Id == runnerId);

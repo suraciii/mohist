@@ -53,7 +53,7 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
         // Every agent-job spec shares the in-memory backlog directory and
         // global runner registry with the rest of the [Collection("WorkflowGrain")]
         // cluster. Without a reset here, a stale runner from a prior spec
-        // claims this job before the new runner can, which makes the
+        // assigns this job before the new runner can, which makes the
         // assertions on snapshot.RunnerId non-deterministic. Clear both
         // before each registration.
         await ClearBacklogAsync();
@@ -125,8 +125,8 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var report = await runner.ReportResultAsync(
-            dispatch,
+        var report = await runner.ReportAgentJobResultAsync(
+            jobKey,
             workId,
             new WorkResult("completed", "ok", Output: "{}", ExitCode: 0, ArtifactUploadIds: ["artifact-1"]));
         Assert.True(report.Tracked);
@@ -163,8 +163,8 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var report = await runner.ReportResultAsync(
-            dispatch,
+        var report = await runner.ReportAgentJobResultAsync(
+            jobKey,
             workId,
             new WorkResult("failed", "boom", Output: "{\"error\":\"x\"}", ExitCode: 1));
         Assert.True(report.Tracked);
@@ -199,15 +199,15 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportResultAsync(dispatch, workId, new WorkResult("completed", "first result"));
+        await runner.ReportAgentJobResultAsync(jobKey, workId, new WorkResult("completed", "first result"));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var firstTerminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Completed, firstTerminal.Status);
         Assert.Equal("first result", firstTerminal.Message);
 
-        await runner.ReportResultAsync(
-            dispatch,
+        await runner.ReportAgentJobResultAsync(
+            jobKey,
             workId,
             new WorkResult("failed", "second result"));
 
@@ -294,7 +294,7 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
-    public async Task SubmitAsync_DoesNotCallIWorkflowBacklogGrain()
+    public async Task SubmitAsync_DoesNotUseWorkflowAssignment()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-bypass-runner-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-bypass-{Guid.NewGuid():N}";
@@ -304,9 +304,10 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
-        var claimed = await backlog.ClaimAsync(runnerId);
-        Assert.Null(claimed);
+        var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync();
+        Assert.NotNull(polled);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, polled.OwnerKind);
+        Assert.Equal(jobKey, polled.AgentJobId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

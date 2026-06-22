@@ -202,8 +202,8 @@ public class AgentJobRoutesEndToEndSpecs
                 OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportResultAsync(
-                dispatch,
+            await runnerGrain.ReportAgentJobResultAsync(
+                jobKey,
                 workId,
                 new WorkResult(
                     Status: "completed",
@@ -271,8 +271,8 @@ public class AgentJobRoutesEndToEndSpecs
                 OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportResultAsync(
-                dispatch,
+            await runnerGrain.ReportAgentJobResultAsync(
+                jobKey,
                 workId,
                 new WorkResult(
                     Status: "failed",
@@ -344,8 +344,8 @@ public class AgentJobRoutesEndToEndSpecs
                 AgentJobId: jobKey,
                 OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-            await runnerGrain.ReportResultAsync(
-                dispatch,
+            await runnerGrain.ReportAgentJobResultAsync(
+                jobKey,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
 
@@ -461,8 +461,8 @@ public class AgentJobRoutesEndToEndSpecs
                 AgentJobId: jobKey,
                 OwnerKind: WorkDispatchOwnerKinds.AgentJob);
             var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportResultAsync(
-                dispatch,
+            await runnerGrain.ReportAgentJobResultAsync(
+                jobKey,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
 

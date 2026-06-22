@@ -34,7 +34,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
         Assert.Null(await runner.PollAsync());
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -67,7 +67,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, check, "check-1");
 
         var runner2 = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.True(await runner2.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner2.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
