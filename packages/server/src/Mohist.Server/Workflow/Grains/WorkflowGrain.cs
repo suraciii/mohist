@@ -202,8 +202,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         EnsureRun();
         var failure = _run.Failure;
-        var failedTaskId = failure?.TaskId;
         var stageId = _run.CurrentStageId;
+        var failedTaskId = failure?.TaskId
+            ?? (stageId is not null
+                ? _run.Stages.FirstOrDefault(s => s.Id == stageId)?.Tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed)?.Id
+                : null);
 
         await _sessionHealth.CheckAndEnforceAsync(
             failedTaskId, stageId, GrainKey, _run,
