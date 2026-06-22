@@ -9,9 +9,15 @@ import type { Project } from '../../../entities/project'
 import type { RunnerStatusRow } from '../../../entities/runner'
 import { RunnerDetailPage } from './RunnerDetailPage'
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
+vi.mock('sonner', () => ({
+  toast: { error: toastError },
+}))
+
 const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
   useRunner: vi.fn(),
+  useUpdateRunnerSlots: vi.fn(),
 }))
 
 vi.mock('../../../entities/runner', async (importOriginal) => {
@@ -19,6 +25,7 @@ vi.mock('../../../entities/runner', async (importOriginal) => {
   return {
     ...actual,
     useRunner: mocks.useRunner,
+    useUpdateRunnerSlots: mocks.useUpdateRunnerSlots,
   }
 })
 
@@ -79,6 +86,7 @@ describe('RunnerDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.useProject.mockReturnValue({ projectId: TEST_PROJECT.id, currentProject: TEST_PROJECT })
+    mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
   afterEach(() => {
@@ -144,7 +152,7 @@ describe('RunnerDetailPage', () => {
       expect(within(screen.getByTestId('runner-detail-capability-list')).getByText('workflow')).toBeInTheDocument()
       expect(within(screen.getByTestId('runner-detail-capability-list')).getByText('workspace-query')).toBeInTheDocument()
       expect(screen.getByTestId('runner-detail-coder-models')).toHaveTextContent('openai/gpt-4.5')
-      expect(screen.getByTestId('runner-detail-max-slots')).toHaveTextContent('2')
+      expect(screen.getByTestId('runner-detail-max-slots')).toContainElement(screen.getByTestId('slots-editor'))
 
       const statusBadges = screen.getAllByTestId('runner-status-badge')
       expect(statusBadges.length).toBeGreaterThanOrEqual(1)
@@ -248,6 +256,84 @@ describe('RunnerDetailPage', () => {
       mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
       renderPage()
       expect(screen.getByTestId('runner-detail-no-active-works')).toBeInTheDocument()
+    })
+  })
+
+  describe('slots editor', () => {
+    it('renders the input with the maxSlots value', () => {
+      const runner = makeRunner({ maxWorkflowSlots: 2 })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+      const input = screen.getByTestId('slots-editor-input') as HTMLInputElement
+      expect(input.value).toBe('2')
+    })
+
+    it('renders "—" when maxSlots is null', () => {
+      const runner = makeRunner({ maxWorkflowSlots: undefined, capacity: undefined })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+      expect(screen.getByTestId('runner-detail-max-slots')).toHaveTextContent('—')
+      expect(screen.queryByTestId('slots-editor')).not.toBeInTheDocument()
+    })
+
+    it('calls mutate on increase button click', () => {
+      const mutate = vi.fn()
+      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate, isPending: false })
+      const runner = makeRunner({ maxWorkflowSlots: 2 })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+
+      fireEvent.click(screen.getByTestId('slots-editor-increase'))
+      expect(mutate).toHaveBeenCalledWith(
+        { runnerId: 'runner-7', slots: 3 },
+        expect.any(Object),
+      )
+    })
+
+    it('calls mutate on decrease button click', () => {
+      const mutate = vi.fn()
+      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate, isPending: false })
+      const runner = makeRunner({ maxWorkflowSlots: 2 })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+
+      fireEvent.click(screen.getByTestId('slots-editor-decrease'))
+      expect(mutate).toHaveBeenCalledWith(
+        { runnerId: 'runner-7', slots: 1 },
+        expect.any(Object),
+      )
+    })
+
+    it('disables decrease button at value 1', () => {
+      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: false })
+      const runner = makeRunner({ maxWorkflowSlots: 1 })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+
+      expect(screen.getByTestId('slots-editor-decrease')).toBeDisabled()
+    })
+
+    it('shows saving indicator when mutation is pending', () => {
+      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate: vi.fn(), isPending: true })
+      const runner = makeRunner({ maxWorkflowSlots: 2 })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+
+      expect(screen.getByTestId('slots-editor-saving')).toBeInTheDocument()
+    })
+
+    it('shows toast on mutation error', () => {
+      toastError.mockClear()
+      const mutate = vi.fn().mockImplementation((_vars, { onError }: { onError: (err: Error) => void }) => {
+        onError(new Error('boom'))
+      })
+      mocks.useUpdateRunnerSlots.mockReturnValue({ mutate, isPending: false })
+      const runner = makeRunner({ maxWorkflowSlots: 2 })
+      mocks.useRunner.mockReturnValue({ data: runner, isLoading: false, error: null })
+      renderPage()
+
+      fireEvent.click(screen.getByTestId('slots-editor-increase'))
+      expect(toastError).toHaveBeenCalledWith('Failed to update slots: boom')
     })
   })
 

@@ -1,3 +1,3 @@
-export { useRunner, useRunners, useRunnerSummary, deriveRunnerSummary } from './api/queries'
-export { getRunner, getRunners } from './api/client'
+export { useRunner, useRunners, useRunnerSummary, deriveRunnerSummary, useUpdateRunnerSlots } from './api/queries'
+export { getRunner, getRunners, updateRunnerSlots } from './api/client'
 export * from './model/types'

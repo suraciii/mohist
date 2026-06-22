@@ -7,6 +7,7 @@ import { useProjectPath } from '../../../entities/project'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Card } from '@/shared/ui/components/card'
 import { Button } from '@/shared/ui/components/button'
+import { SlotsEditor } from '../../../widgets/runner-status/ui/SlotsEditor'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -204,8 +205,17 @@ function RunnerDetailContent({ row }: { row: RunnerStatusRow }) {
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-muted-foreground">Max workflow slots</dt>
-              <dd className="text-foreground" data-testid="runner-detail-max-slots">{maxSlots ?? '—'}</dd>
+              <dd className="text-foreground" data-testid="runner-detail-max-slots">
+                {maxSlots != null ? (
+                  <SlotsEditor runnerId={row.id} value={maxSlots} />
+                ) : (
+                  '—'
+                )}
+              </dd>
             </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Limits concurrent workflow work dispatched from the backlog.
+            </p>
           </div>
         </CardSection>
 

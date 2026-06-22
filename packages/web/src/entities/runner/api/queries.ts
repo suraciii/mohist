@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../../../shared/api/client'
 import type { RunnerStatusRow, RunnerStatusSummary } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
-import { getRunner, getRunners } from './client'
+import { getRunner, getRunners, updateRunnerSlots } from './client'
 
 export function useRunners() {
   const { projectId } = useProject()
@@ -23,6 +23,18 @@ export function useRunner(runnerId: string | null | undefined) {
     retry: (failureCount, error) => {
       if (error.status === 404) return false
       return failureCount < 2
+    },
+  })
+}
+
+export function useUpdateRunnerSlots() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ runnerId, slots }: { runnerId: string; slots: number }) =>
+      updateRunnerSlots(runnerId, slots),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['runners'] })
+      qc.invalidateQueries({ queryKey: ['runner'] })
     },
   })
 }
