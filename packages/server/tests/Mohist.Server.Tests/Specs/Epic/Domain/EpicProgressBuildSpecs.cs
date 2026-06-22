@@ -201,6 +201,95 @@ public class EpicProgressBuildSpecs
         Assert.Equal(2, progress.TotalIssueCount);
     }
 
+    [Fact]
+    public void Build_IgnoresPrerequisiteNumbersAndExternalPrerequisitesFields()
+    {
+        var withoutPrereqs = new[]
+        {
+            Issue("issue_1", number: 1, title: "Done A", status: "done"),
+            Issue("issue_2", number: 2, title: "Done B", status: "done"),
+        };
+        var withPrereqs = new[]
+        {
+            Issue("issue_1", number: 1, title: "Done A", status: "done",
+                prerequisiteNumbers: [42, 43],
+                externalPrerequisites:
+                [
+                    new IssuePrerequisiteRefDto { Number = 42, Title = "External 42", Stage = "in_progress", Status = "active" },
+                    new IssuePrerequisiteRefDto { Number = 43, Title = "External 43", Stage = "done", Status = "done" },
+                ]),
+            Issue("issue_2", number: 2, title: "Done B", status: "done",
+                prerequisiteNumbers: [99]),
+        };
+
+        var baseline = EpicProgress.Build(withoutPrereqs);
+        var withData = EpicProgress.Build(withPrereqs);
+
+        Assert.Equal(baseline.DeliveredCount, withData.DeliveredCount);
+        Assert.Equal(baseline.TotalIssueCount, withData.TotalIssueCount);
+        Assert.Equal(baseline.ReadyToMarkDone, withData.ReadyToMarkDone);
+        Assert.Equal(baseline.NextIssue?.Id, withData.NextIssue?.Id);
+        Assert.Equal(baseline.NextIssue?.Number, withData.NextIssue?.Number);
+        Assert.Equal(baseline.NextIssue?.Title, withData.NextIssue?.Title);
+        Assert.Equal(baseline.NextIssueReason, withData.NextIssueReason);
+        Assert.Equal(baseline.ActiveIssues.Count, withData.ActiveIssues.Count);
+        Assert.Equal(baseline.BlockedIssues.Count, withData.BlockedIssues.Count);
+        for (var i = 0; i < baseline.ActiveIssues.Count; i++)
+        {
+            Assert.Equal(baseline.ActiveIssues[i].Id, withData.ActiveIssues[i].Id);
+            Assert.Equal(baseline.ActiveIssues[i].Number, withData.ActiveIssues[i].Number);
+            Assert.Equal(baseline.ActiveIssues[i].Title, withData.ActiveIssues[i].Title);
+            Assert.Equal(baseline.ActiveIssues[i].Health, withData.ActiveIssues[i].Health);
+        }
+        for (var i = 0; i < baseline.BlockedIssues.Count; i++)
+        {
+            Assert.Equal(baseline.BlockedIssues[i].Id, withData.BlockedIssues[i].Id);
+            Assert.Equal(baseline.BlockedIssues[i].Number, withData.BlockedIssues[i].Number);
+            Assert.Equal(baseline.BlockedIssues[i].Title, withData.BlockedIssues[i].Title);
+            Assert.Equal(baseline.BlockedIssues[i].Health, withData.BlockedIssues[i].Health);
+        }
+    }
+
+    [Fact]
+    public void Build_OutputsAreUnchangedWhenPrerequisiteFieldsArePopulated()
+    {
+        var linked = new[]
+        {
+            Issue("issue_low", number: 1, title: "P4 startable", priority: "p4", health: "active", canStart: true,
+                prerequisiteNumbers: [10],
+                externalPrerequisites: [new IssuePrerequisiteRefDto { Number = 10, Title = "Upstream", Stage = "in_progress", Status = "active" }]),
+            Issue("issue_blocked", number: 2, title: "Blocked by #99", priority: "p0", health: "blocked",
+                canStart: false, blocker: WaitingFor(99),
+                prerequisiteNumbers: [99],
+                externalPrerequisites: [new IssuePrerequisiteRefDto { Number = 99, Title = "Missing", Stage = "", Status = "" }]),
+            Issue("issue_draft", number: 3, title: "Draft", priority: "p2", health: "active",
+                canStart: false, blocker: new IssueStartBlockerDto.DraftBlocker(),
+                prerequisiteNumbers: [50, 60]),
+        };
+
+        var progress = EpicProgress.Build(linked);
+
+        Assert.Equal(0, progress.DeliveredCount);
+        Assert.Equal(3, progress.TotalIssueCount);
+        Assert.NotNull(progress.NextIssue);
+        Assert.Equal("issue_low", progress.NextIssue!.Id);
+        Assert.Equal(1, progress.NextIssue.Number);
+        Assert.Null(progress.NextIssueReason);
+        Assert.False(progress.ReadyToMarkDone);
+        Assert.Equal(2, progress.ActiveIssues.Count);
+        Assert.Single(progress.BlockedIssues);
+        Assert.Equal("issue_blocked", progress.BlockedIssues[0].Id);
+    }
+
+    [Fact]
+    public void Build_EmptyPrerequisiteFieldsAreTheDefault()
+    {
+        var issue = Issue("issue_x", number: 7, title: "Plain", canStart: true);
+
+        Assert.Empty(issue.PrerequisiteNumbers);
+        Assert.Empty(issue.ExternalPrerequisites);
+    }
+
     private static LinkedIssueDto Issue(
         string id,
         int number,
@@ -209,9 +298,21 @@ public class EpicProgressBuildSpecs
         string? priority = "p2",
         string health = "active",
         bool canStart = false,
-        IssueStartBlockerDto? blocker = null) =>
-        new(id, number, title, status, Stage: "", Health: health, Priority: priority,
-            CanStart: canStart, StartBlocker: blocker);
+        IssueStartBlockerDto? blocker = null,
+        int[]? prerequisiteNumbers = null,
+        IReadOnlyList<IssuePrerequisiteRefDto>? externalPrerequisites = null) =>
+        new(
+            Id: id,
+            Number: number,
+            Title: title,
+            Status: status,
+            Stage: "",
+            Health: health,
+            Priority: priority,
+            CanStart: canStart,
+            StartBlocker: blocker,
+            PrerequisiteNumbers: prerequisiteNumbers ?? [],
+            ExternalPrerequisites: externalPrerequisites ?? []);
 
     private static IssueStartBlockerDto.WaitingForBlocker WaitingFor(int prerequisiteNumber) =>
         new() { Issue = new IssuePrerequisiteRefDto { Number = prerequisiteNumber } };

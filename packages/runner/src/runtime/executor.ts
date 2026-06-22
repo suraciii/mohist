@@ -109,7 +109,7 @@ export class WorkExecutor {
 
   private async verifyBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
-      const info = await this.workspaceManager.verify(work, signal)
+      const info = await this.workspaceManager.ensure(work, signal)
       return { kind: "ok", workspace: infoToResolved(info) }
     } catch (error) {
       return { kind: "failure", result: workspaceMaterializationFailureFromError(work, error) }

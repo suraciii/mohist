@@ -42,6 +42,13 @@ export interface EpicWithProgress extends Epic {
   progress: EpicProgress
 }
 
+export interface LinkedIssueExternalPrerequisite {
+  number: number
+  title: string
+  stage: string
+  status: string
+}
+
 export interface LinkedIssue {
   id: string
   number: number
@@ -52,6 +59,8 @@ export interface LinkedIssue {
   priority: string | null
   canStart: boolean
   startBlocker: IssueStartBlocker | null
+  prerequisiteNumbers: number[]
+  externalPrerequisites: LinkedIssueExternalPrerequisite[]
 }
 
 export interface EpicDetail extends Epic {

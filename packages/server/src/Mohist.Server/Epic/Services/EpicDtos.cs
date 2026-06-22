@@ -44,16 +44,49 @@ public sealed record EpicWithProgressDto(
     EpicProgressDto Progress,
     string? PauseReason = null);
 
-public sealed record LinkedIssueDto(
-    string Id,
-    int Number,
-    string Title,
-    string Status,
-    string Stage,
-    string Health,
-    string? Priority,
-    bool CanStart = false,
-    IssueStartBlockerDto? StartBlocker = null);
+public sealed record LinkedIssueDto
+{
+    public string Id { get; init; } = "";
+    public int Number { get; init; }
+    public string Title { get; init; } = "";
+    public string Status { get; init; } = "";
+    public string Stage { get; init; } = "";
+    public string Health { get; init; } = "";
+    public string? Priority { get; init; }
+    public bool CanStart { get; init; }
+    public IssueStartBlockerDto? StartBlocker { get; init; }
+    public int[] PrerequisiteNumbers { get; init; } = [];
+    public IReadOnlyList<IssuePrerequisiteRefDto> ExternalPrerequisites { get; init; } = [];
+
+    public LinkedIssueDto() { }
+
+    public LinkedIssueDto(
+        string Id,
+        int Number,
+        string Title,
+        string Status,
+        string Stage,
+        string Health,
+        string? Priority,
+        bool CanStart = false,
+        IssueStartBlockerDto? StartBlocker = null,
+        int[]? PrerequisiteNumbers = null,
+        IReadOnlyList<IssuePrerequisiteRefDto>? ExternalPrerequisites = null)
+        : this()
+    {
+        this.Id = Id;
+        this.Number = Number;
+        this.Title = Title;
+        this.Status = Status;
+        this.Stage = Stage;
+        this.Health = Health;
+        this.Priority = Priority;
+        this.CanStart = CanStart;
+        this.StartBlocker = StartBlocker;
+        this.PrerequisiteNumbers = PrerequisiteNumbers ?? [];
+        this.ExternalPrerequisites = ExternalPrerequisites ?? [];
+    }
+}
 
 public sealed record EpicDetailDto(
     string Id,

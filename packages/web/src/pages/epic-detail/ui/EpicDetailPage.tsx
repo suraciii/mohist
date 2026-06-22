@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { IssueStatus, type Issue } from '../../../entities/issue'
@@ -30,6 +30,7 @@ import {
   DialogTitle,
 } from '@/shared/ui/components/dialog'
 import { MarkdownReader } from '@/shared/ui'
+import { DependencyGraphWidget, type Renderability } from '../../../widgets/epic-dependency-graph'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -390,6 +391,11 @@ export function EpicDetailPage() {
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
   const [pauseReason, setPauseReason] = useState('')
+  const [linkedIssuesView, setLinkedIssuesView] = useState<'list' | 'graph'>('list')
+  const [graphRenderable, setGraphRenderable] = useState<{ renderable: boolean; reason: Renderability | null }>({
+    renderable: false,
+    reason: null,
+  })
 
   const availableIssues = useMemo(() => {
     if (!issues || !epic) return []
@@ -442,6 +448,12 @@ export function EpicDetailPage() {
   const isClosed = epic.status === EpicStatus.Closed
   const isDone = epic.status === EpicStatus.Done
   const linkedIssueCount = epic.linkedIssues.length
+  const graphAvailable = linkedIssueCount >= 2
+  const graphSelected = graphAvailable && linkedIssuesView === 'graph'
+  const showList = !graphSelected || graphRenderable.reason === 'cyclic' || graphRenderable.reason === 'empty'
+  const handleGraphRenderabilityChange = useCallback((state: { renderable: boolean; reason: Renderability | null }) => {
+    setGraphRenderable(state)
+  }, [])
 
   function handleConfirmClose() {
     closeEpic.mutate(epicId, {
@@ -625,7 +637,48 @@ export function EpicDetailPage() {
       </Card>
 
       <Card className="p-6">
-        <h2 className="text-lg font-semibold text-foreground">Linked Issues</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-foreground">Linked Issues</h2>
+          {graphAvailable && (
+            <div
+              role="tablist"
+              aria-label="Linked Issues view"
+              data-testid="linked-issues-view-toggle"
+              className="inline-flex items-center rounded-md border bg-muted/40 p-0.5 text-sm"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={linkedIssuesView === 'list'}
+                data-testid="linked-issues-view-list"
+                data-view="list"
+                onClick={() => setLinkedIssuesView('list')}
+                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                  linkedIssuesView === 'list'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                List
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={linkedIssuesView === 'graph'}
+                data-testid="linked-issues-view-graph"
+                data-view="graph"
+                onClick={() => setLinkedIssuesView('graph')}
+                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                  linkedIssuesView === 'graph'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Graph
+              </button>
+            </div>
+          )}
+        </div>
         <form onSubmit={handleAddIssue} className="mt-4 flex flex-col gap-3 sm:flex-row">
           <EpicIssueSelector
             candidates={availableIssues}
@@ -648,24 +701,43 @@ export function EpicDetailPage() {
           </div>
         )}
 
-        <div className="mt-6 space-y-3">
-          {epic.linkedIssues.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-              No linked issues yet.
-            </div>
-          ) : (
-            epic.linkedIssues.map(issue => (
-              <LinkedIssueRow
-                key={issue.id}
-                issue={issue}
-                onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
-                onStart={handleStartIssue}
-                disabled={removeEpicIssue.isPending}
-                startPending={pendingStartIssueNumber === issue.number}
-              />
-            ))
-          )}
-        </div>
+        {graphSelected ? (
+          <div
+            className="mt-6"
+            data-testid="linked-issues-graph-region"
+            data-renderability={graphRenderable.renderable ? 'renderable' : (graphRenderable.reason ?? 'loading')}
+          >
+            <DependencyGraphWidget
+              linkedIssues={epic.linkedIssues}
+              onRenderabilityChange={handleGraphRenderabilityChange}
+            />
+          </div>
+        ) : null}
+
+        {showList ? (
+          <div
+            className="mt-6 space-y-3"
+            data-testid="linked-issues-list-region"
+            data-fallback-for={graphSelected ? graphRenderable.reason ?? undefined : undefined}
+          >
+            {epic.linkedIssues.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                No linked issues yet.
+              </div>
+            ) : (
+              epic.linkedIssues.map(issue => (
+                <LinkedIssueRow
+                  key={issue.id}
+                  issue={issue}
+                  onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
+                  onStart={handleStartIssue}
+                  disabled={removeEpicIssue.isPending}
+                  startPending={pendingStartIssueNumber === issue.number}
+                />
+              ))
+            )}
+          </div>
+        ) : null}
 
         {removeEpicIssue.isError && (
           <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">

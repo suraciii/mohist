@@ -6,17 +6,21 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicStatus } from '../../../entities/epic'
 import type { LinkedIssue } from '../../../entities/epic'
+import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 import { EpicDetailPage } from './EpicDetailPage'
 import { ApiError } from '../../../shared/api/client'
 
-function linkedIssue(overrides: Partial<LinkedIssue> & Pick<LinkedIssue, 'id' | 'number' | 'title'>): LinkedIssue {
+function linkedIssue(overrides: Pick<LinkedIssue, 'id' | 'number'> & Partial<Omit<LinkedIssue, 'id' | 'number'>>): LinkedIssue {
   return {
-    status: 'backlog' as LinkedIssue['status'],
-    stage: 'plan' as LinkedIssue['stage'],
-    health: 'active' as LinkedIssue['health'],
+    title: 'Issue one',
+    status: IssueStatus.Backlog,
+    stage: WorkflowStage.Plan,
+    health: IssueHealth.Active,
     priority: 'p2',
     canStart: true,
     startBlocker: null,
+    prerequisiteNumbers: [],
+    externalPrerequisites: [],
     ...overrides,
   }
 }
@@ -91,8 +95,8 @@ const epic = {
     readyToMarkDone: false,
   },
   linkedIssues: [
-    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
-    linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'blocked' as LinkedIssue['health'], priority: 'p1', canStart: false }),
+    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+    linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
   ],
 }
 
@@ -269,9 +273,9 @@ describe('EpicDetailPage lifecycle guards', () => {
           readyToMarkDone: false,
         },
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
-          { id: 'issue-2', number: 2, title: 'Active issue', status: 'in_progress', stage: 'build', priority: 'p1' },
-          { id: 'issue-3', number: 3, title: 'Backlog issue', status: 'backlog', stage: 'plan', priority: 'p3' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
         ],
       }),
       isLoading: false,
@@ -298,8 +302,8 @@ describe('EpicDetailPage lifecycle guards', () => {
           readyToMarkDone: false,
         },
         linkedIssues: [
-          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
-          linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'blocked' as LinkedIssue['health'], priority: 'p1', canStart: false }),
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p1' }),
         ],
       }),
       isLoading: false,
@@ -325,7 +329,7 @@ describe('EpicDetailPage lifecycle guards', () => {
           readyToMarkDone: true,
         },
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       isLoading: false,
@@ -346,9 +350,9 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
-          { id: 'issue-2', number: 2, title: 'Active issue', status: 'in_progress', stage: 'build', priority: 'p1' },
-          { id: 'issue-3', number: 3, title: 'Backlog issue', status: 'backlog', stage: 'plan', priority: 'p3' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Backlog issue', status: IssueStatus.Backlog, stage: WorkflowStage.Plan, priority: 'p3' }),
         ],
       }),
       isLoading: false,
@@ -373,7 +377,7 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       isLoading: false,
@@ -403,7 +407,7 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       isLoading: false,
@@ -431,7 +435,7 @@ describe('EpicDetailPage lifecycle guards', () => {
           readyToMarkDone: true,
         },
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       isLoading: false,
@@ -441,7 +445,7 @@ describe('EpicDetailPage lifecycle guards', () => {
 
     expect(screen.queryByTestId('mark-epic-done')).toBeNull()
     expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
-    expect(screen.getByText('done')).toBeTruthy()
+    expect(screen.getByTestId('epic-number').parentElement).toHaveTextContent('done')
   })
 
   it('hides Mark Done and Close Epic for closed epics', () => {
@@ -458,7 +462,7 @@ progress: {
           readyToMarkDone: true,
         },
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       isLoading: false,
@@ -491,7 +495,7 @@ progress: {
           readyToMarkDone: false,
         },
   linkedIssues: [
-    { id: 'issue-1', number: 1, title: 'Active issue', status: 'in_progress', stage: 'build', priority: 'p1' },
+    linkedIssue({ id: 'issue-1', number: 1, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
   ],
 }
 
@@ -553,7 +557,7 @@ describe('EpicDetailPage numbered display', () => {
 const searchEpic = {
   ...epic,
   linkedIssues: [
-    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: 'done' as LinkedIssue['status'], stage: 'done' as LinkedIssue['stage'], health: 'done' as LinkedIssue['health'], canStart: false }),
+    linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
   ],
 }
 
@@ -728,7 +732,7 @@ progress: {
     readyToMarkDone: false,
   },
       linkedIssues: [
-        { id: 'issue-1', number: 1, title: 'Member issue', status: 'in_progress', stage: 'build', priority: 'p2' },
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Member issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p2' }),
       ],
     }
   }
@@ -829,14 +833,14 @@ progress: {
     renderPage()
 
     expect(screen.getByText('Member issue')).toBeTruthy()
-    expect(screen.getByText('active')).toBeTruthy()
+    expect(screen.getByTestId('linked-issues-list-region')).toHaveTextContent('active')
 
     fireEvent.click(screen.getByTestId('edit-epic-button'))
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(screen.getByText('Member issue')).toBeTruthy()
-    expect(screen.getByText('active')).toBeTruthy()
+    expect(screen.getByTestId('linked-issues-list-region')).toHaveTextContent('active')
   })
 
   it('disables the save button while the update is pending', () => {
@@ -999,8 +1003,8 @@ describe('EpicDetailPage current activity listing', () => {
         readyToMarkDone: false,
       },
       linkedIssues: [
-        { id: 'issue-1', number: 1, title: 'Active issue', status: 'in_progress', stage: 'build', priority: 'p1' },
-        { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress', stage: 'build', priority: 'p2' },
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Active issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Blocked issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Blocked, priority: 'p2' }),
       ],
       ...overrides,
     }
@@ -1098,7 +1102,7 @@ describe('EpicDetailPage current activity listing', () => {
           readyToMarkDone: true,
         },
         linkedIssues: [
-          { id: 'issue-1', number: 1, title: 'Done issue', status: 'done', stage: 'done', priority: 'p2' },
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, priority: 'p2' }),
         ],
       }),
       isLoading: false,
@@ -1373,7 +1377,7 @@ describe('EpicDetailPage next issue reason display', () => {
         readyToMarkDone: false,
       },
       linkedIssues: [
-        { id: 'issue-1', number: 1, title: 'Pending issue', status: 'in_progress', stage: 'build', priority: 'p1' },
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Pending issue', status: IssueStatus.InProgress, stage: WorkflowStage.Build, priority: 'p1' }),
       ],
       ...overrides,
     }
@@ -1660,5 +1664,196 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
 
     expect(startButton).toBeDisabled()
     expect(startButton.textContent).toBe('Starting...')
+  })
+})
+
+describe('EpicDetailPage linked issues view toggle', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  const makeLinkedIssue = linkedIssue
+
+  function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
+    return {
+      id: 'epic-12345678',
+      number: 7,
+      title: 'Graph epic',
+      description: 'Epic description',
+      priority: 'p1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: linkedIssues.length,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('defaults to the list view and shows the toggle when the epic has 2+ linked issues', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        makeLinkedIssue({ id: 'issue-1', number: 1 }),
+        makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    const toggle = screen.getByTestId('linked-issues-view-toggle')
+    expect(toggle).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
+  })
+
+  it('switches to the graph view when the Graph tab is clicked and does not mutate data', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        makeLinkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByTestId('linked-issues-list-region')).toBeNull()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-graph-region')).toBeInTheDocument()
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('linked-issues-list-region')).toBeNull()
+
+    expect(addMutate).not.toHaveBeenCalled()
+    expect(removeMutate).not.toHaveBeenCalled()
+    expect(updateMutate).not.toHaveBeenCalled()
+  })
+
+  it('returns to the list view when the List tab is clicked after the graph is shown', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        makeLinkedIssue({ id: 'issue-1', number: 1 }),
+        makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    await waitFor(() => {
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-list'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+  })
+
+  it('hides the toggle entirely when the epic has zero linked issues and shows the list', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    expect(screen.queryByTestId('linked-issues-view-toggle')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+  })
+
+  it('hides the toggle when the epic has exactly one linked issue and shows the list', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Lone issue' }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    expect(screen.queryByTestId('linked-issues-view-toggle')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+  })
+
+  it('falls back to the list view when the graph reports a cycle', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        makeLinkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
+        makeLinkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await waitFor(() => {
+      const region = screen.queryByTestId('linked-issues-graph-region')
+      if (region) {
+        expect(region.getAttribute('data-renderability')).toBe('cyclic')
+      }
+      expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
+  })
+
+  it('keeps the Linked Issues list and add-issue selector fully functional when the graph is the default tab', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        makeLinkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+        makeLinkedIssue({ id: 'issue-2', number: 2, title: 'L-2' }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    expect(screen.getByTestId('epic-issue-selector-trigger')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2)
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0])
+    expect(removeMutate).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' })
   })
 })

@@ -14,6 +14,8 @@ function makeLinkedIssue(overrides: Partial<LinkedIssue> = {}): LinkedIssue {
     priority: 'p2',
     canStart: true,
     startBlocker: null,
+    prerequisiteNumbers: [],
+    externalPrerequisites: [],
     ...overrides,
   }
 }

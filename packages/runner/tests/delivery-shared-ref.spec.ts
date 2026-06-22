@@ -39,9 +39,9 @@ async function initRepo(path: string) {
   await git(path, "config", "user.name", "Test User")
 }
 
-describe("rebase + push delivery end-to-end", () => {
-  it("RebaseSquashThenPush_LandsSingleFastForwardCommitFromWorkspace", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-delivery-rebase-push-"))
+describe("prepare + publish end-to-end", () => {
+  it("PublishInProjectRepo_ReadsSharedMoIssueBranchRefAfterPrepareRebaseInWorktree", { timeout: 30_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-delivery-shared-ref-"))
     tempDirs.push(root)
 
     const remote = join(root, "remote.git")
@@ -125,5 +125,5 @@ describe("rebase + push delivery end-to-end", () => {
     expect(remoteMasterHead).toBe(pushOutput.landedCommit)
     expect((await git(repo, "log", "origin/master", "-1", "--format=%s")).stdout.trim()).toBe("Complete issue #141")
     expect((await git(workspace, "rev-parse", "--abbrev-ref", "HEAD")).stdout.trim()).toBe("mo/issue-141")
-  }, 15_000)
+  })
 })
