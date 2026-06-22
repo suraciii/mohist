@@ -1,0 +1,244 @@
+# Issue #169 — Productivity zone progress
+
+## Codebase Patterns
+
+- **Mocking TanStack Query hooks in tests:** to mock a hook (e.g. `useIssues`) whose value is consumed indirectly through a non-mocked hook (e.g. `useCompletionSnapshot` reads from `useIssues` internally), `vi.mock` must target the underlying source path — `vi.mock('../../../entities/issue/api/queries', ...)` — not the entity index `'../../../entities/issue'`. Mocking the entity index re-exports the wrapper but the non-mocked hook keeps the original implementation. This is a key gotcha for test isolation.
+
+- **Per-section empty states live inside the section component:** each zone sub-component owns its own `data-state="empty"` block (no outer dispatcher). The `ProductivityZone` (T-005) just composes them — the zone is not blank when sources are empty.
+
+- **`useCompletionSnapshot()` returns zeros in two distinct cases** (the data is `undefined` OR the list is empty OR all timestamps fall outside the trailing 7-day window). Sub-components that need to distinguish "no issues at all" from "no recent activity" must consult the underlying `useIssues()` data length, not just the snapshot's numeric values.
+
+- **Dashboard slot wrapper contract:** `data-testid="dashboard-zone-<id>"` + `data-zone="<id>"` on the slot wrapper is stable across the productivity-slot swap (T-005). Inner content changes; the wrapper attributes do not.
+
+- **Snapshot counts are not enough to detect "no issues"** — the snapshot hook returns `{0,0,0}` for both "no issues" and "no recent activity". Pair it with `useIssues()` to detect the empty-project case.
+
+- **`fetchCompletionTrend` + `useCompletionTrend` colocated file:** both the client and the hook live in `packages/web/src/entities/issue/api/completion-trend.ts` (single-file pattern, matching the compact footprint of `client.ts`/`queries.ts`). The hook reads `projectId` from `useProject()`; the client is plain (`projectApiPath(projectId, '/issues/metrics/completion?bucket=week')`).
+
+- **Mocking the completion-trend hook in component tests:** the pattern established in T-001/T-002 still holds — mock `'../../../entities/issue/api/completion-trend'` directly (not the entity index `'../../../entities/issue'`) so the indirect `useCompletionTrend` call inside `<CompletionTrend/>` is intercepted.
+
+- **`useCompletionTrend` is safe to call without `projectId`:** the hook is `enabled: !!projectId`, so dashboard renders that haven't yet selected a project don't trigger a 400 from `projectApiPath`. This matches the gating pattern of the other completion/issue hooks in `queries.ts`.
+
+## Task T-001: Weekly completion snapshot section
+
+### What was implemented
+
+- New `packages/web/src/pages/dashboard/productivity/SnapshotRow.tsx` — a self-contained section component that reads `useCompletionSnapshot()` for the three counts and uses `useIssues()` to detect the no-issues empty state. Renders three labeled count blocks (Completed, Failed, New) with tonal coloring, and a `data-state="empty"` block when there are no issues at all.
+- New `packages/web/src/pages/dashboard/productivity/SnapshotRow.test.tsx` — co-located test covering (1) labeled-counts case (5 completed / 1 failed / 8 new), (2) all-zero-stay-visible case (existing issues but no recent activity), (3) no-issues empty state (`data: []` → empty block with `data-state="empty"`), (4) undefined-data empty state.
+
+### Files changed
+
+- Added: `packages/web/src/pages/dashboard/productivity/SnapshotRow.tsx`
+- Added: `packages/web/src/pages/dashboard/productivity/SnapshotRow.test.tsx`
+
+### Learnings for future tasks:
+
+- **Decisions made:**
+  - The component consumes `useCompletionSnapshot()` (counts) and `useIssues()` (empty-state detection) — both hooks are already wired into the same underlying query, so no new fetch is introduced (criterion 4).
+  - The empty-state block uses a meaningful message ("No issues this week — counts will appear once issues are created.") rather than a blank block (criterion 3).
+  - Each count block exposes its own `data-testid` (`productivity-snapshot-{completed,failed,new}`) and the empty block exposes `productivity-snapshot-empty`, so T-005 can assert the all-data-empty case in the composition layer.
+  - Styling follows the existing dashboard card pattern (`rounded-lg border bg-card/50 p-4`) so T-005 can stack sections without bespoke spacing.
+
+- **Gotchas discovered:**
+  - Mocking `'../../../entities/issue'` with `importOriginal` + `useIssues: mock` does **not** intercept the call that `useCompletionSnapshot` makes internally — that call goes through the original `api/queries` module. Tests must mock `'../../../entities/issue/api/queries'` directly.
+  - This matters for T-003 (completion-trend hook test) too: the new `useCompletionTrend` hook should be testable by mocking the underlying `client.ts` (or whichever path `fetchCompletionTrend` lives at), not the entity index.
+
+- **Patterns / API shapes established:**
+  - `data-testid="productivity-<section>-<variant>"` naming for the four zone sections (snapshot row, epic list, trend, investment). T-002/T-003/T-004 should follow `productivity-epic-list`, `productivity-trend`, `productivity-investment` for slot-level testids; per-item testids can be `<section>-item-<n>` or similar.
+  - `data-state="empty"` attribute on the section wrapper when the section is in its empty state — T-005 can rely on this for the all-data-empty assertion.
+  - Section-level styling baseline: `rounded-lg border border-border bg-card/50 p-4` with a `h3` title in `text-xs font-semibold uppercase tracking-wide text-muted-foreground`.
+
+- **Cross-task invariants:**
+  - The slot wrapper for the `productivity` zone (created in T-005) MUST keep `data-testid="dashboard-zone-productivity"` and `data-zone="productivity"`; the inner content swaps to `<ProductivityZone/>`.
+  - No new server endpoint, controller, query, or persistence field — already enforced by the proposal; this task only added a UI consumer of existing hooks.
+  - The snapshot hook stays as a client-derivation approximation (per design D3 and #165's reservation contract). The Non-Goal that defers the snapshot→endpoint swap remains in force.
+
+## Task T-002: In-progress Epic progress bars section
+
+### What was implemented
+
+- New `packages/web/src/pages/dashboard/productivity/EpicProgressList.tsx` — a self-contained section component that reads `useEpics()`, filters to `EpicStatus.Active`, sorts by priority (`p0` < `p1` < ... < `p4`) then by `deliveredCount/totalIssueCount`, and renders up to 3 bars using the **exact** width-% pattern from `EpicListPage.tsx:112-121` (`bg-muted rounded-full h-1.5` outer + `bg-blue-600 h-1.5 rounded-full transition-all` inner). The zero-total guard `totalIssueCount > 0 ? ... : '0%'` is preserved verbatim. A `+N more` affordance is shown when more than 3 active Epics exist. Renders an empty state (`data-state="empty"`) when fewer than 2 active Epics exist or when `useEpics()` returns undefined.
+- New `packages/web/src/pages/dashboard/productivity/EpicProgressList.test.tsx` — co-located test covering (1) ≥2 active Epics render proportional bars, (2) sort order by priority then ratio, (3) cap at 3 with `+N more` affordance, (4) no `+N more` when exactly 3, (5) empty state for <2 active, (6) empty state when only Done/Closed Epics exist, (7) empty state when `useEpics()` data is undefined, (8) `totalIssueCount === 0` guard renders 0% with no NaN.
+
+### Files changed
+
+- Added: `packages/web/src/pages/dashboard/productivity/EpicProgressList.tsx`
+- Added: `packages/web/src/pages/dashboard/productivity/EpicProgressList.test.tsx`
+
+### Learnings for future tasks:
+
+- **Decisions made:**
+  - Followed design D6 verbatim: filter `status === EpicStatus.Active`, sort by priority then ratio, cap at 3, render empty state when fewer than 2 active Epics. Open design question OQ3 (definition) was resolved as `Active` only; OQ4 (cap) as 3 with `+N more`.
+  - The bar visual is **byte-for-byte identical** to `EpicListPage.tsx:112-121` (outer wrapper, inner fill, height, colors, transition). This was a hard requirement to keep visual consistency with the rest of the app.
+  - The zero-total guard is the same ternary as `EpicListPage`: `totalIssueCount > 0 ? ${(deliveredCount / totalIssueCount) * 100}% : '0%'`. Tests assert both 0% width and that no NaN appears in the inline style.
+  - Each row exposes `data-testid="productivity-epic-list-item-<n>"` and each bar `data-testid="productivity-epic-list-bar-<n>"`. The section wrapper carries `data-testid="productivity-epic-list"` and conditionally `data-state="empty"`. T-005 can use these for the all-data-empty assertion.
+  - The `+N more` affordance is a plain muted `<span>` (not a link/button) — it is informational; clicking into Epics already has its own canonical UI in `EpicListPage`.
+  - `useEpics()` data being `undefined` (loading / no project) is treated the same as the empty state — this matches how `EpicListPage` handles it (`epics && epics.length === 0`).
+
+- **Gotchas discovered:**
+  - Mocking the entity index `'../../../entities/epic'` re-exports `useEpics` but the wrapper is invoked through it; `vi.mock('.../api/queries')` (matching T-001's pattern) is what intercepts. Confirmed: the test only passes when the queries-path mock is in place.
+  - The priority sort uses an `EpicPriority → rank` lookup because `EpicPriority` is a string union, not a numeric type. Sorting strings alphabetically (`'p0' < 'p1' < 'p2'`) happens to work, but the explicit rank map is robust to future priority-string renames (e.g. `p0-high`).
+  - `useMemo` is used to keep the filtered+sorted+truncated view stable across renders — matters for T-005's composition because multiple sections re-render together.
+
+- **Patterns / API shapes established:**
+  - Section-level styling matches T-001's `SnapshotRow`: `rounded-lg border border-border bg-card/50 p-4` with a `h3` title in `text-xs font-semibold uppercase tracking-wide text-muted-foreground`. T-003/T-004 should follow the same.
+  - `data-testid="productivity-epic-list"` for the section wrapper, `productivity-epic-list-empty` for the empty block, `productivity-epic-list-item-<n>` / `productivity-epic-list-bar-<n>` for items.
+  - The bar pattern (outer `bg-muted rounded-full h-1.5`, inner `bg-blue-600 ...` with the zero-total ternary) is now established as the **canonical Epic progress bar** — any future Epic progress UI in the app should mirror this exact pattern.
+
+- **Cross-task invariants:**
+  - The `useEpics()` hook is the **only** data source for this section. No new fetch, endpoint, or domain query. (Criterion 4 of the task.)
+  - The slot wrapper's `data-testid`/`data-zone` contract (set by T-005) is untouched by this task — this task only adds a self-contained section component.
+  - T-005 should compose `<EpicProgressList/>` like `<SnapshotRow/>` — both self-contained, each owning its own empty state via `data-state="empty"`.
+
+## Task T-003: Completion trend section (endpoint consumer + inline SVG sparkline)
+
+### What was implemented
+
+- New `packages/web/src/entities/issue/api/completion-trend.ts` — exports `fetchCompletionTrend(projectId)` (calls `GET /api/projects/{ref}/issues/metrics/completion?bucket=week` via `request<>` + `projectApiPath`), `useCompletionTrend()` (TanStack Query hook reading `projectId` from `useProject()`; query key `['issues','metrics','completion','week', projectId]`; `staleTime: 60_000`; gated by `enabled: !!projectId`), and the `CompletionBucketPoint` / `CompletionTrendResponse` types matching the server DTOs (`{boundary, completed, failed}` buckets, `{from, to}` window, `bucket: 'week'`).
+- New `packages/web/src/pages/dashboard/productivity/CompletionTrend.tsx` — a self-contained section component that renders an inline `<svg>` sparkline (120×40 viewBox, no axes chrome beyond a faint dashed zero baseline) over the `completed` counts of the returned weekly buckets. Plotted via `<polyline>` with one point per bucket in order; `safeMax = max(completed) || 1` keeps the geometry stable when every value is zero. Section exposes `data-testid="productivity-trend"`; wrapper conditionally carries `data-state="empty"`; the empty block uses `data-testid="productivity-trend-empty"`. The sparkline uses `data-testid="productivity-trend-sparkline"`, the polyline `data-testid="productivity-trend-polyline"`, and the baseline `data-testid="productivity-trend-baseline"`. A small `{N} weeks` meta line uses `data-testid="productivity-trend-meta"` for the count.
+- New `packages/web/src/entities/issue/api/completion-trend.test.ts` — co-located hook test that mocks `useProject` + `useQuery` + the global `fetch`, asserting: (1) exact query key, (2) query key scopes to whatever `useProject()` returns, (3) `queryFn` issues `GET .../metrics/completion?bucket=week` (and never `bucket=day`), (4) `staleTime` is in the 30s–5min range, (5) `enabled` toggles correctly on `projectId` presence, (6) dense 12-week response is decoded into the typed shape.
+- New `packages/web/src/pages/dashboard/productivity/CompletionTrend.test.tsx` — co-located component test asserting: (1) one `<polyline>` point per returned bucket in order, (2) only `completed` influences polyline y-coordinates (failed counts don't perturb the curve), (3) empty state on `buckets: []`, (4) empty state on all-zero `completed` (no broken chart), (5) no user-facing bucket-size/time-range control (no `<select>`/`<input>`/`<button>` inside the section), (6) empty state when the hook returns `data: undefined`.
+- Updated `packages/web/src/entities/issue/index.ts` — re-exports `fetchCompletionTrend`, `useCompletionTrend`, and the two response types so consumers can import from the entity barrel.
+
+### Files changed
+
+- Added: `packages/web/src/entities/issue/api/completion-trend.ts`
+- Added: `packages/web/src/entities/issue/api/completion-trend.test.ts`
+- Added: `packages/web/src/pages/dashboard/productivity/CompletionTrend.tsx`
+- Added: `packages/web/src/pages/dashboard/productivity/CompletionTrend.test.tsx`
+- Modified: `packages/web/src/entities/issue/index.ts` (added 3 re-exports + 2 type re-exports)
+
+### Learnings for future tasks:
+
+- **Decisions made:**
+  - Single file for client + hook (`completion-trend.ts`), matching the compact footprint of `queries.ts` + `client.ts` rather than splitting into two files. The hook is only ~12 lines and the client function is one line; a separate file would be overhead.
+  - Used `safeMax = max(...) || 1` so that all-zero series still produce a valid (flat-at-baseline) polyline path. The empty-state guard in `<CompletionTrend>` then short-circuits to the labeled block, so the all-zero chart is never actually rendered. Both guards belt-and-braces: the math doesn't crash, and the user sees a meaningful empty state.
+  - Query key shape `['issues','metrics','completion','week', projectId]` was hard-coded so the value `week` is part of the key — this is fine because v1 only ships `week`, but future T-005 work that adds a `day` view would want a separate key family. Worth noting in the codebase patterns if day bucketing ever becomes user-facing.
+  - The polyline path is built once per `completedCounts` change via `useMemo`, so re-renders triggered by TanStack Query state changes (`isLoading`, `isFetching`) don't recompute geometry.
+
+- **Gotchas discovered:**
+  - SVG y-axis is inverted: higher y = lower on screen. The first `failed-only` assertion in the sparkline test had this flipped (expected `ys[0] > ys[2]` for completed `[2, 4, 1]`, but a higher `completed` value produces a *lower* y). Fixed by asserting the *minimum* y belongs to the largest completed value.
+  - `projectApiPath` throws `ApiError('Project is required', 400)` when `projectId` is null/undefined. The hook's `enabled: !!projectId` guard must be set or the call will throw before the query layer even sees the request. Confirmed by following the same `enabled` pattern as `useIssueEvents`, `useIssueDiff`, etc. in `queries.ts`.
+  - Mocking the entity index `'../../../entities/issue'` does **not** intercept the new `useCompletionTrend` import — same gotcha flagged in T-001. Component tests mock `'../../../entities/issue/api/completion-trend'` directly.
+  - The pre-existing `MarkdownReader.test.tsx` failures (4 tests, `TypeError: Cannot delete property 'ResizeObserver'`) **pre-date** this task — confirmed by stashing T-003 changes and re-running. They are unrelated to T-003; do not be tempted to "fix" them here.
+
+- **Patterns / API shapes established:**
+  - Section styling matches T-001/T-002: `rounded-lg border border-border bg-card/50 p-4` with the `text-xs font-semibold uppercase tracking-wide text-muted-foreground` `h3` title.
+  - Testid naming: `productivity-trend` (section), `productivity-trend-empty` (empty block), `productivity-trend-sparkline` (svg), `productivity-trend-polyline` (curve), `productivity-trend-baseline` (zero line), `productivity-trend-meta` (week count). T-005 can use `data-testid="productivity-trend"` plus `data-state="empty"` for the all-data-empty assertion.
+  - Hook test pattern for `useQuery`-based hooks (mocking `useQuery` + `useProject` + the module's own exports) is now triplicated across `useIssueEvents` (queries.test.ts), `useCompletionTrend` (completion-trend.test.ts). Future metrics hooks (e.g. usage time-series when D lands) can follow the same shape verbatim.
+  - Server DTO mirroring convention: a minimal client type (`CompletionBucketPoint` / `CompletionTrendResponse`) lives next to the hook that consumes it, and is re-exported through the entity barrel. No `zod`/`io-ts` schemas are introduced (matches the existing client.ts style).
+
+- **Cross-task invariants:**
+  - The productivity slot wrapper's `data-testid`/`data-zone` contract (T-005) is unchanged by this task. `<CompletionTrend/>` is a self-contained section that T-005 will compose alongside `<SnapshotRow/>` and `<EpicProgressList/>`.
+  - No new server endpoint, controller, query, or persistence field — the only new files are in `packages/web/src`. Verified by `git status` (5 web-only files: 4 added, 1 modified).
+  - No charting dependency added — `packages/web/package.json` is untouched. Confirmed by grep for `recharts|chart|victory|nivo|visx|d3`.
+  - The fixed by-week bucketing is enforced by hard-coding `bucket=week` in `fetchCompletionTrend`. The component exposes no user-facing control to change bucket size or time range — explicitly verified by a test that asserts no `<select>`/`<input>`/`<button>` inside the section.
+  - The `useCompletionTrend` hook's `enabled` gate depends on `projectId`, not the URL params. T-005's composition layer (which already wraps everything in `<ProjectProvider>`) inherits the same gating semantics — no extra wiring needed.
+
+## Task T-004: Investment panel (collapsed by default, caliber annotation, D-degradation)
+
+### What was implemented
+
+- New `packages/web/src/pages/dashboard/productivity/InvestmentPanel.tsx` — a self-contained section component that renders an "Investment" header with a Collapse/Expand toggle (chevron icon from `lucide-react` + `aria-expanded` + `aria-controls` for a11y), collapsed on first render via `useState(false)`. When expanded, the body reveals (1) a labeled caliber-annotation slot with both a `Window / Population` label and a non-empty value (`"per-project agent/session usage, trailing 7 days"`), and (2) an explicit `data-state="empty"` empty-state paragraph beginning `"Data unavailable — aggregated agent/session usage metrics are not yet provided…"`. The empty-state copy explicitly flags that figures will appear "when the usage aggregation hook lands", keeping the panel wire-ready for D without claiming data that isn't present.
+- New `packages/web/src/pages/dashboard/productivity/InvestmentPanel.test.tsx` — co-located test covering (1) default-collapsed state (`aria-expanded="false"`, body/caliber/empty absent, section has no `data-state="empty"`), (2) expand reveals a labeled caliber annotation (`label.textContent` matches both `/window/i` and `/population/i`; value text non-empty), (3) the D-unavailable empty state is explicitly labeled (text matches `/data unavailable/i`, has `data-state="empty"`), (4) toggle behavior — second click collapses again and the body/caliber/empty blocks are no longer in the DOM.
+
+### Files changed
+
+- Added: `packages/web/src/pages/dashboard/productivity/InvestmentPanel.tsx`
+- Added: `packages/web/src/pages/dashboard/productivity/InvestmentPanel.test.tsx`
+
+### Learnings for future tasks:
+
+- **Decisions made:**
+  - The panel renders **no data fetch of its own** — zero `use*` queries, zero `fetch`/`useQuery`/`axios`. It is purely structural. This satisfies the "no new server endpoint or domain query" Non-Goal at the component level, and matches design D7's wire-ready posture: only the body content swaps when D's aggregated usage hook arrives.
+  - Caliber annotation is rendered as a **labeled slot** (label + value), not a free-form string, so future D work can swap the value (`INVESTMENT_CALIBER_BASIS` constant → dynamic value from D) without restructuring the markup. Both label and value carry their own `data-testid` (`productivity-investment-caliber-label`, `productivity-investment-caliber-value`).
+  - The empty state lives **inside** the expanded body — it is not a fallback for the collapsed state. This way, the spec's "caliber annotation on expand" scenario and the "data unavailable empty state" scenario are exercised by the same expand click (no separate empty-vs-non-empty branches to maintain). The collapse state remains a single, simple `useState(false)`.
+  - Caliber value copy (`"per-project agent/session usage, trailing 7 days"`) explicitly states both the population (per-project) and the window (trailing 7 days), matching the spec's "identify what window or population the figures cover" wording. When D's hook ships with a different window basis (e.g. by-week buckets), the value can be swapped to a dynamic string without changing the slot's identity.
+  - Toggle is a real `<button type="button">` with `aria-expanded` + `aria-controls="productivity-investment-body"` — keyboard/screen-reader navigable out of the box. The chevron rotates 90° via a `transition-transform` + `rotate-90` class when expanded, which keeps the visual signal in sync with the aria state without re-rendering the icon.
+  - No `ProjectProvider` is consumed (unlike other sections that wrap with it) — the component has no project-scoped hooks, so wrapping would be dead weight. The test still renders under `<ProjectProvider>` + `<QueryClientProvider>` + `<MemoryRouter>` to match the broader dashboard testbed pattern from T-001..T-003.
+
+- **Gotchas discovered:**
+  - The InvestmentPanel **must not import or reference `AgentSessionUsage`** anywhere — even though the type exists in `entities/coder-session/model/types.ts`. Loading the per-session usage to compute a rollup would constitute a new client-side query path and violate the Non-Goal (design D7 explicit warning). Verified by grep that the file references neither the type nor any usage-fetching hook.
+  - The body's `id="productivity-investment-body"` must stay in sync with the toggle's `aria-controls` — if one is renamed, both must move together. The id is duplicated in code (one as a testid, one as the DOM id) but kept close to the relevant JSX so a future edit catches both.
+  - `useState(false)` is fine even when the panel might want a "remember user preference" feature later — that would be D's hook territory (a new query/storage decision), so we defer it. The collapsed-by-default baseline is a Non-Goal-aware starting point and is enforced by the first test.
+  - `lucide-react` `ChevronRightIcon` rotates via class rather than swapping to `ChevronDownIcon` — keeps the icon stable across renders and avoids a hydration mismatch on any future SSR work.
+
+- **Patterns / API shapes established:**
+  - Section styling matches T-001/T-002/T-003: `rounded-lg border border-border bg-card/50 p-4` with a `h3` title in `text-xs font-semibold uppercase tracking-wide text-muted-foreground`. The header row uses `flex items-center justify-between mb-3` so the title sits left and the toggle sits right.
+  - Testid naming: `productivity-investment` (section), `productivity-investment-toggle` (button), `productivity-investment-body` (expanded container), `productivity-investment-caliber` (caliber slot), `productivity-investment-caliber-label` / `productivity-investment-caliber-value` (the two halves of the caliber), `productivity-investment-empty` (the empty-state paragraph). T-005 can use `productivity-investment` for the section-level all-data-empty assertion.
+  - The panel's "labeled slot" pattern (label-span + value-span, both with their own testid) is reusable for any future component that needs to declare a basis/window/caliber — the snapshot, trend, and Epic sections do not need this today because their data semantics are obvious from the numbers, but if any of them later gains a non-obvious basis, the same `*-label` / `*-value` pair shape can be reused.
+  - The component's no-data-fetch posture (`grep -rn "fetch\|axios\|useQuery" InvestmentPanel.tsx` → no matches) is a new pattern — T-001/T-002/T-003 all consume at least one hook. The "structurally complete, swap body when data lands" pattern is now triplicated: panel collapse/expand (T-004), per-section empty states (T-001/T-002/T-003), and the slot identity contract (T-005 wrapper).
+
+- **Cross-task invariants:**
+  - The productivity slot wrapper's `data-testid`/`data-zone` contract (T-005) is unchanged by this task. `<InvestmentPanel/>` is a self-contained section that T-005 will compose alongside `<SnapshotRow/>`, `<EpicProgressList/>`, and `<CompletionTrend/>`.
+  - No new server endpoint, controller, query, persistence field, or npm dependency — verified by `git status` (2 web-only files added, nothing else) and `grep` of `InvestmentPanel.tsx` for any fetch/query/usage-aggregation symbol.
+  - When D's aggregated usage hook lands, the swap point is the `INVESTMENT_CALIBER_BASIS` constant + the `<p data-testid="productivity-investment-empty">` body. The collapse/expand behavior and the caliber slot's labeled structure (label-span + value-span) remain — only the rendered content changes. The label/value testids make that future swap testable without rewriting the slot assertions.
+  - Design Open Question 1 (D's actual surface — endpoint vs hook) remains open from design.md; the panel explicitly defers to it via the empty-state copy ("when the usage aggregation hook lands"). Flagged in T-004's task notes; if the run lands under a name not yet found, T-005's composition work should revisit this section.
+
+## Task T-005: Productivity zone composition + Dashboard slot mount
+
+### What was implemented
+
+- New `packages/web/src/pages/dashboard/productivity/ProductivityZone.tsx` — the zone index that composes the four T-001..T-004 section components (`<SnapshotRow/>`, `<EpicProgressList/>`, `<CompletionTrend/>`, `<InvestmentPanel/>`) into a single `data-testid="productivity-zone"` wrapper. Pure composition: zero new data hooks, zero new fetches — each child owns its own data source.
+- Updated `packages/web/src/pages/dashboard/ui/DashboardPage.tsx` — swapped the `productivity` slot from `<DashboardZonePlaceholder/>` to a hand-rolled `<section>` wrapper that keeps `data-testid="dashboard-zone-productivity"` + `data-zone="productivity"` and mounts `<ProductivityZone/>`. The Attention/Pulse/Digest slots continue to use `<DashboardZonePlaceholder/>` (unchanged border-dashed visual).
+- Updated `packages/web/src/pages/dashboard/ui/DashboardPage.test.tsx` — replaced the old "four placeholders" test with three tests: (1) slot identities remain stable, (2) the productivity slot mounts the zone content (with `data-testid="productivity-zone"`, plus the four sub-section testids inside) while the other three slots stay as `border-dashed` placeholders, and (3) the all-data-empty case asserts four labeled per-section empty states (snapshot/no-issues, epic-list/<2-active, trend/no-buckets, investment/data-unavailable after expand).
+
+### Files changed
+
+- Added: `packages/web/src/pages/dashboard/productivity/ProductivityZone.tsx`
+- Modified: `packages/web/src/pages/dashboard/ui/DashboardPage.tsx` (swap productivity slot)
+- Modified: `packages/web/src/pages/dashboard/ui/DashboardPage.test.tsx` (rewrite + add all-data-empty case; mocks for `useIssues`, `useEpics`, `useCompletionTrend`)
+
+### Learnings for future tasks:
+
+- **Decisions made:**
+  - The wrapper that replaces `DashboardZonePlaceholder` for the productivity slot is hand-rolled (not a new shared `DashboardZoneFilled` primitive) because only one slot needs the filled layout today. Premature abstraction avoided; the pattern is one section wide and one CSS class deep.
+  - The wrapper deliberately **drops** the `border-dashed` class that `DashboardZonePlaceholder` carries — the filled zone uses `border border-border bg-card/50 p-4`, matching each section's own section styling. The test asserts `productivity.className NOT toMatch(/border-dashed/)` so the visual distinction is locked in.
+  - The composition order (Snapshot → Epic → Trend → Investment) reads top-to-bottom as "headline number → work-in-progress → historical trajectory → optional cost-detail". This is the satisfaction-then-detail funnel called out in the issue's user voice.
+  - The zone itself does **not** introduce any new testids beyond the single `productivity-zone` wrapper — every assertion about sub-sections uses the testids the four section components already own. The composition layer is testid-thin on purpose.
+
+- **Gotchas discovered:**
+  - The four sub-components each conditionally render `data-state="empty"` on their own `<section>` wrapper, **not** on the `productivity-zone` div. The all-data-empty test therefore asserts `snapshotEmpty.parentElement` (the section wrapper) has `data-state="empty"`, not the empty `<p>` itself. This matches the per-section-empty-state convention documented in T-001's progress entry.
+  - The investment panel is collapsed by default, so the empty-state `<p>` is not in the DOM until the user clicks the toggle. The all-data-empty test must `fireEvent.click` the toggle *before* asserting on `productivity-investment-empty`. Easy to miss if you only check that the toggle exists.
+  - `DashboardPage.tsx`'s existing zone map iterates an array; the swap was implemented as a ternary inside the `.map()` callback rather than extracting a separate map. That keeps the file small and the slot identity readable in one place, but it does mean future zone swaps would land in the same spot. If a second slot flips to filled, the ternary should be promoted to a `Record<DashboardZoneId, ReactNode>` to avoid growing the inline conditional.
+  - The unused `DashboardZoneId` import is still needed for the `DASHBOARD_ZONES` literal type annotation, so it's not safe to remove even though we now bypass the placeholder for one of the four ids. Keeping the type here also documents that the zone id set is exhaustive over the four slot identities.
+
+- **Patterns / API shapes established:**
+  - Composition-root pattern: `ProductivityZone.tsx` is a 12-line index with one wrapper div and four sibling section components. No logic, no hooks, no data. The composition root is purely structural; every testable concern lives in its child.
+  - `data-testid="productivity-zone"` is the canonical handle for the composition root — used by both the DashboardPage test (mounts-in-slot check) and any future integration test that wants to assert "the productivity zone is in the page" without naming each section.
+  - The dashboard-shell slot identity contract (`data-testid="dashboard-zone-<id>"` + `data-zone="<id>"` on the slot wrapper, inner content free to change) is now exercised by both the existing slot-attribute test and the new mounts-the-zone test — future zone fills (Attention/Pulse/Digest) should follow the same two-assertion shape: (a) `data-testid`/`data-zone` still on the wrapper, (b) the new zone content is now inside the wrapper.
+  - The "all-data-empty case renders four labeled empty states" assertion is the canonical regression check for design D8 (zone never blank). The next time someone adds a fifth section to the zone, they need to extend this single test (one more `expect(...).toBeInTheDocument()` block) — the test pattern is now the contract for "what does an empty Productivity zone look like".
+
+- **Cross-task invariants:**
+  - The four section components (T-001..T-004) keep their own testids and their own empty-state logic. T-005 adds zero new testids to them; the composition layer is purely additive.
+  - No new server endpoint, controller, query, or persistence field — confirmed by `git status` (1 file added, 2 modified, all under `packages/web/`).
+  - No new npm dependency — `packages/web/package.json` is untouched by this task.
+  - `grep -nE "fetch|axios|useQuery" ProductivityZone.tsx` returns no matches — the zone owns no data fetch. All data is read indirectly via the four section component hooks (`useCompletionSnapshot`/`useIssues`/`useEpics`/`useCompletionTrend`).
+  - The slot wrapper's `data-testid="dashboard-zone-productivity"` and `data-zone="productivity"` are preserved across the placeholder→zone swap. Any future zone fill (Attention/Pulse/Digest) MUST preserve the same wrapper identity contract; the slot testid is part of the dashboard-shell contract, not the productivity zone's.
+  - The dashboard-shell spec scenario "Productivity slot renders zone content while other slots stay empty" is now satisfied by the new `DashboardPage` test ("renders the productivity zone content..."). The scenario "Zone slot identities are stable" remains satisfied by the existing slot-attribute assertions, which are unchanged.
+
+## Task fix-tests: Fix failing build / typecheck
+
+### What was the failure
+
+- `npm run typecheck -w packages/web` reported `Cannot find module './DashboardZonePlaceholder' or its corresponding type declarations` from `DashboardPage.tsx:8-9` (two import sites).
+- Root cause: the placeholder file was renamed/replaced with a new shared `DashboardZone` component (`packages/web/src/pages/dashboard/ui/DashboardZone.tsx`, exports `DashboardZone` and `DashboardZoneId`). T-005's hand-rolled productivity wrapper kept the same `data-testid`/`data-zone` contract but was never paired with an update of the import statement + the still-placeholder slots in `DashboardPage.tsx`. The other three slots (`attention`/`pulse`/`digest`) kept importing/rendering the now-missing `DashboardZonePlaceholder`.
+- Bonus: `tsc -b` initially reported missing `@xyflow/react` and `dagre` modules, but those went away after `npm install --workspace packages/web` (these are declared in `packages/web/package.json` but weren't installed in the previous runner's workspace). Not caused by T-005 code, but worth knowing for future `fix-tests` runs: a cold workspace needs `npm install` first.
+
+### Fix applied
+
+- In `packages/web/src/pages/dashboard/ui/DashboardPage.tsx`: import `DashboardZone` (value) and `DashboardZoneId` (type) from `./DashboardZone` instead of `./DashboardZonePlaceholder`. Update the `<DashboardZonePlaceholder/>` render to `<DashboardZone/>`. The productivity slot keeps its hand-rolled `<section>` wrapper (border, no `border-dashed`) per design D2 + T-005's progress note — only the placeholder slots flip to the new shared `DashboardZone`.
+
+### Verification after fix
+
+- `npm run typecheck -w packages/web` → clean (no errors).
+- `npm run test:run -w packages/web` → 2051 passed, 1 skipped (2052 total) across 141 test files.
+- `npm run typecheck -w packages/runner` → clean.
+- `npm test -w packages/runner` → 412 passed across 32 test files.
+- `npm test` (server `dotnet test`) → 2336 passed, 0 failed, 10 skipped (2346 total). Build + vite build both clean.
+
+### Learnings
+
+- **Always grep the new file before declaring the rename "done":** when a placeholder component is renamed, the rename must update *every* importer, not just the producers. A simple `rg DashboardZonePlaceholder` across the tree would have caught this at T-005 commit time.
+- **`DashboardZone` (shared) ≠ `DashboardZonePlaceholder` (old):** the new `DashboardZone` is a generic wrapper that bakes in the `border-dashed` placeholder visual but accepts `children`. The productivity slot needs the *non-dashed* visual, so it stays as a hand-rolled `<section>` (matches the T-005 progress note exactly). Future zone fills (Attention/Pulse/Digest) can use `<DashboardZone>` + `children` directly if they want a unified look.
+- **Workspace install drift can look like a code error:** the initial typecheck cascade included `Cannot find module 'dagre'` and `Cannot find module '@xyflow/react'` even though both are declared in `packages/web/package.json`. A cold workspace + node_modules that's missing packages produces typecheck errors that look like build errors but are really install drift. `npm install --workspace packages/web` resolved them.
+- **Fix-tests is intentionally minimal:** the only diff in this task is 4 lines in `DashboardPage.tsx` (two import lines + one JSX element). No test changes, no new files, no spec changes. The test suite's failure was a missing module, not a wrong assertion — so weakening or rewriting tests would have been wrong.

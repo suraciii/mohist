@@ -24,7 +24,14 @@ The Web App-Shell SHALL resolve the project root route (`/` and `/:projectName`)
 
 ### Requirement: Dashboard provides four zone mount-point slots
 
-The Dashboard page SHALL expose exactly four zone mount-point slots with stable identities: `Attention`, `Pulse`, `Productivity`, and `Digest`. Each slot SHALL serve as the composition contract for a zone-specific capability. A slot whose zone capability has been implemented SHALL render that capability's content; a slot whose zone capability has not yet been implemented SHALL render as an empty placeholder. The `Pulse` slot's content SHALL be governed by the `dashboard-pulse` capability.
+The Dashboard page SHALL expose exactly four zone mount-point slots with stable identities: `Attention`, `Pulse`, `Productivity`, and `Digest`. Each slot SHALL serve as the composition contract that the corresponding downstream zone issue fills. The `Productivity` slot SHALL render Productivity zone content (owned by the `dashboard-productivity` capability). The `Attention`, `Pulse`, and `Digest` slots SHALL remain empty placeholders with no zone content until their downstream zone issues land.
+
+#### Scenario: Productivity slot renders zone content while other slots stay empty
+
+- **WHEN** the Dashboard page renders
+- **THEN** the page SHALL contain four zone mount-point slots named `Attention`, `Pulse`, `Productivity`, and `Digest`
+- **AND** the `Productivity` slot SHALL render the Productivity zone content
+- **AND** the `Attention`, `Pulse`, and `Digest` slots SHALL render as empty placeholders with no zone content
 
 #### Scenario: Zone slot identities are stable
 
@@ -32,23 +39,11 @@ The Dashboard page SHALL expose exactly four zone mount-point slots with stable 
 - **THEN** the slot identities `Attention`, `Pulse`, `Productivity`, and `Digest` SHALL be stable across renders
 - **AND** a slot SHALL be addressable by its identity as a mount point for zone content
 
-#### Scenario: Unimplemented zone slots render empty
+#### Scenario: Unfilled zone slots defer content to downstream issues
 
-- **WHEN** the Dashboard page renders and a zone slot has no implemented zone capability
-- **THEN** that slot SHALL render as an empty placeholder
-- **AND** the slot identity SHALL remain stable so a future zone capability can fill it
-
-#### Scenario: Implemented zone slot renders its capability content
-
-- **WHEN** the Dashboard page renders and a zone slot is governed by an implemented zone capability
-- **THEN** that slot SHALL render the content defined by that capability
-- **AND** other slots SHALL remain independently empty or filled according to their own capabilities
-
-#### Scenario: Pulse slot is governed by dashboard-pulse
-
-- **WHEN** the Dashboard page renders the `Pulse` slot
-- **THEN** the slot SHALL render the content defined by the `dashboard-pulse` capability
-- **AND** the slot identity and mount-point contract SHALL remain unchanged from the original skeleton
+- **WHEN** the Dashboard page renders for any project state
+- **THEN** the `Attention`, `Pulse`, and `Digest` slots SHALL NOT render their respective zone content
+- **AND** the zone content for those three slots SHALL remain the responsibility of their downstream issues
 
 ### Requirement: Dashboard shows project empty-state
 

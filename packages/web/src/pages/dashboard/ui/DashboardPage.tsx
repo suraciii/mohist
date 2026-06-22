@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import type { ReactNode } from 'react'
 import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
-import { PulseZone } from '../../../widgets/dashboard-pulse'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { ProductivityZone } from '../productivity/ProductivityZone'
 import { DashboardZone } from './DashboardZone'
 import type { DashboardZoneId } from './DashboardZone'
 
@@ -15,15 +14,6 @@ const DASHBOARD_ZONES: { id: DashboardZoneId; name: string }[] = [
   { id: 'productivity', name: 'Productivity' },
   { id: 'digest', name: 'Digest' },
 ]
-
-function renderZoneContent(id: DashboardZoneId): ReactNode {
-  switch (id) {
-    case 'pulse':
-      return <PulseZone />
-    default:
-      return null
-  }
-}
 
 export function DashboardPage() {
   const { data: projects, isLoading: projectsLoading } = useProjects()
@@ -75,9 +65,19 @@ export function DashboardPage() {
         className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
       >
         {DASHBOARD_ZONES.map((zone) => (
-          <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
-            {renderZoneContent(zone.id)}
-          </DashboardZone>
+          zone.id === 'productivity' ? (
+            <section
+              key={zone.id}
+              data-testid={`dashboard-zone-${zone.id}`}
+              data-zone={zone.id}
+              aria-label={zone.name}
+              className="rounded-lg border border-border bg-card/50 p-4"
+            >
+              <ProductivityZone />
+            </section>
+          ) : (
+            <DashboardZone key={zone.id} id={zone.id} name={zone.name} />
+          )
         ))}
       </div>
     </div>

@@ -1,0 +1,113 @@
+{
+  "project": "mohist-local",
+  "description": "Dashboard Productivity zone (issue #169): pure web-layer composition that fills the empty `productivity` slot with a weekly completion snapshot (C), in-progress Epic progress bars (useEpics), a by-week completion trend (C endpoint via a new web consumer, inline SVG — no chart lib), and a collapsed investment panel (D, degrading to an empty state). No new server endpoint or domain query.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Weekly completion snapshot section",
+      "spec": "specs/dashboard-productivity/spec.md#Productivity zone renders the weekly completion snapshot",
+      "description": "Add a `SnapshotRow` component under `packages/web/src/pages/dashboard/productivity/` that reads the existing `useCompletionSnapshot()` (from `entities/issue/lib/completion-snapshot.ts`) and renders this week's `completed` / `failed` / `new` counts, each labeled. Reuse the existing hook unchanged — do not add a new data path. Include the zero-counts-stay-visible behavior and a per-section empty state when there are no issues.",
+      "acceptanceCriteria": [
+        "`SnapshotRow` renders the three counts returned by `useCompletionSnapshot()` labeled as completed, failed, and new.",
+        "When the snapshot returns all zeros for the week, the zeros are rendered visibly (the row is not hidden or removed).",
+        "When the project has no issues, the section renders a meaningful empty state rather than a blank block.",
+        "Counts come only from `useCompletionSnapshot()`; no new fetch, endpoint, or domain query is introduced by this section.",
+        "Co-located component tests cover the labeled-counts case, the all-zero case, and the no-issues empty state.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/dashboard/productivity/SnapshotRow.tsx (+ co-located test)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D3: keep the client-derivation snapshot (`updatedAt` approximation) — swapping it to the endpoint is an explicit Non-Goal deferred to #165's reservation. This section is self-contained and parallel to T-002/T-003/T-004."
+    },
+    {
+      "id": "T-002",
+      "title": "In-progress Epic progress bars section",
+      "spec": "specs/dashboard-productivity/spec.md#Productivity zone renders in-progress Epic progress bars",
+      "description": "Add an `EpicProgressList` component under `packages/web/src/pages/dashboard/productivity/` that reads the existing `useEpics()`, filters to `EpicStatus.Active` (in-progress), sorts by priority then by `deliveredCount/totalIssueCount`, and renders up to a small cap (start with 3) progress bars reusing the exact width-% bar pattern from `packages/web/src/pages/epics/ui/EpicListPage.tsx` (lines ~112-121). Guard `totalIssueCount === 0` to render 0% fill without dividing by zero. Render the Epic-progress empty state when fewer than 2 in-progress Epics exist.",
+      "acceptanceCriteria": [
+        "When `useEpics()` returns ≥2 Epics with `status === 'active'`, the section renders progress bars for at least two of them, each filled proportionally to `deliveredCount / totalIssueCount`.",
+        "When fewer than 2 in-progress Epics exist, the section renders an Epic-progress empty state (not a single partial bar presented as the full view).",
+        "An in-progress Epic with `totalIssueCount === 0` renders an empty (0%) bar with no divide-by-zero / NaN.",
+        "Data comes only from `useEpics()`; no new fetch, endpoint, or domain query is introduced.",
+        "Co-located component tests cover: ≥2 bars with proportional fill, the <2 empty state, and the zero-total guard.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/dashboard/productivity/EpicProgressList.tsx (+ co-located test)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D6. Open design OQ3/OQ4: 'in-progress' defaults to `EpicStatus.Active` only; cap defaults to 3 with a '+N more' affordance if more active Epics exist. The bar visual MUST mirror EpicListPage to stay consistent with the rest of the app."
+    },
+    {
+      "id": "T-003",
+      "title": "Completion trend section (endpoint consumer + inline SVG sparkline)",
+      "spec": "specs/dashboard-productivity/spec.md#Productivity zone renders the completion trend",
+      "description": "Add a web consumer for the ALREADY-SHIPPED endpoint: `fetchCompletionTrend(projectId)` + a `useCompletionTrend()` TanStack Query hook under `packages/web/src/entities/issue/api/`, calling `GET /api/projects/{projectRef}/issues/metrics/completion?bucket=week` (hard-code `bucket=week`; query key `['issues','metrics','completion','week', projectId]`; modest `staleTime` ~60s). Then add a `CompletionTrend` component under `packages/web/src/pages/dashboard/productivity/` that plots the `completed` count over the returned 12 weekly buckets as an inline `<svg>` sparkline (a `<polyline>` plus a zero baseline; minimal, no axes chrome beyond the satisfaction signal). No third-party charting library. Empty state when there are no buckets / no data. No configurable time range.",
+      "acceptanceCriteria": [
+        "`useCompletionTrend()` calls the existing `GET .../issues/metrics/completion?bucket=week` endpoint; no new server route, controller, or query is added (verify by grep — no new server-side file).",
+        "The trend visualization renders one point per returned weekly bucket reflecting the `completed` count, in bucket order, as an inline SVG polyline.",
+        "The fixed by-week bucketing is used as-is; the UI exposes no custom bucket-size or custom time-range control.",
+        "No charting dependency is added to the web package (verify `packages/web/package.json` gains no charting lib).",
+        "When the endpoint returns no buckets / all-zero data, the section renders a meaningful empty state rather than a broken chart.",
+        "Co-located tests cover the hook (mocked fetch returning dense 12-week buckets) and the sparkline rendering + empty state.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/entities/issue/api/completion-trend.ts (client + hook) + packages/web/src/pages/dashboard/productivity/CompletionTrend.tsx (+ co-located tests)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D4 + D5. This is a new web CONSUMER of an existing endpoint (shipped by #165), explicitly permitted by the 'no new domain query' Non-Goal, which scopes to server-side queries/endpoints. The endpoint returns dense buckets: `{ bucket, window:{from,to}, buckets:[{boundary, completed, failed}, ...] }`. Plot `completed` only for v1 (design OQ5)."
+    },
+    {
+      "id": "T-004",
+      "title": "Investment panel (collapsed by default, caliber annotation, D-degradation)",
+      "spec": "specs/dashboard-productivity/spec.md#Investment section is collapsed by default with caliber annotation",
+      "description": "Add an `InvestmentPanel` component under `packages/web/src/pages/dashboard/productivity/` that is collapsed by default on first render and, when expanded, shows a caliber-annotation slot that identifies the window/population of the displayed figures (e.g. token/cost aggregation basis). Because D's (#166) aggregated usage surface is absent from the codebase (verified: no aggregation endpoint or hook exists, only per-session `AgentSessionUsage`), render an explicit labeled 'data unavailable' empty state at launch. Build the panel structurally complete (collapse/expand + caliber slot) so it is wire-ready: when D's hook lands, only the body swaps from empty state to figures.",
+      "acceptanceCriteria": [
+        "The panel is collapsed on first render; its detailed figures are not visible without an explicit user expand action.",
+        "Expanding the panel reveals a caliber annotation that identifies what window or population the figures cover (the annotation slot is present and labeled, not omitted).",
+        "At launch the panel renders an explicitly labeled 'data unavailable' empty state (not a blank panel) because D's aggregated usage surface is not present.",
+        "No new server endpoint or domain query is introduced; no client-side usage rollup that loads all project sessions (which would be a new query path).",
+        "Co-located component tests cover: default-collapsed state, expand reveals caliber annotation, and the D-unavailable empty state.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/dashboard/productivity/InvestmentPanel.tsx (+ co-located test)",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Per design D7 + risk R1. The panel is wire-ready for D: when a usage aggregation hook becomes available, swap the empty-state body for figures — the collapse/expand + caliber layout stays. Do NOT compute a client-side rollup from per-session AgentSessionUsage (that would require loading all sessions = a new query, violating the Non-Goal). Flag the D-surface absence as design Open Question 1."
+    },
+    {
+      "id": "T-005",
+      "title": "Productivity zone composition + Dashboard slot mount",
+      "spec": "specs/dashboard-shell/spec.md#Dashboard provides four zone mount-point slots",
+      "description": "Add `ProductivityZone.tsx` (index) under `packages/web/src/pages/dashboard/productivity/` that composes the four section components from T-001..T-004 (each already owning its per-section empty state). In `packages/web/src/pages/dashboard/ui/DashboardPage.tsx`, swap the `productivity` slot from `DashboardZonePlaceholder` to `<ProductivityZone/>`, KEEPING the slot wrapper's stable `data-testid=\"dashboard-zone-productivity\"` and `data-zone=\"productivity\"` attributes (design D2). Update `packages/web/src/pages/dashboard/ui/DashboardPage.test.tsx` so the productivity slot asserts the zone content is now present while the Attention/Pulse/Digest slots remain empty placeholders, and add an all-data-empty case asserting four labeled empty states (no blank panel).",
+      "acceptanceCriteria": [
+        "The Dashboard `productivity` slot renders `<ProductivityZone/>`; it no longer renders the generic `DashboardZonePlaceholder`.",
+        "The slot wrapper retains `data-testid=\"dashboard-zone-productivity\"` and `data-zone=\"productivity\"` (slot identity stays stable for the dashboard-shell contract).",
+        "The Attention, Pulse, and Digest slots still render as empty placeholders (unchanged).",
+        "The zone composes only the four existing data sources (`useCompletionSnapshot`, `useCompletionTrend`, `useEpics`, and the investment panel); grep confirms no new fetch/endpoint/domain query is introduced by the zone beyond the four section hooks.",
+        "When all data sources are empty, the zone renders four labeled per-section empty states (no blank/broken panel).",
+        "`DashboardPage.test.tsx` is updated and passes: productivity slot has zone content, the other three slots are still empty placeholders, and the all-empty case renders four empty states.",
+        "`npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/dashboard/productivity/ProductivityZone.tsx (index) + updated packages/web/src/pages/dashboard/ui/DashboardPage.tsx + updated DashboardPage.test.tsx",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Per design D1, D2, D8 and the MODIFIED dashboard-shell requirement. This task is the single point that flips the productivity slot from empty placeholder to filled and therefore satisfies the dashboard-shell delta. Coordinate file creation under pages/dashboard/productivity/ with T-001..T-004 (each owns its own component file; this task owns the index + the DashboardPage swap + the existing dashboard test update)."
+    }
+  ]
+}
