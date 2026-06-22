@@ -23,11 +23,12 @@ public class WorkflowRunContextExhaustionBlockSpecs
     [Fact]
     public void BlockStageWithContextExhaustion_OverwritesTaskFailureWithContextExhaustion()
     {
-        var run = WorkflowRun.Create("wr-block-1", BuildDefinition());
+        var def = BuildDefinition();
+        var run = WorkflowRun.Create("wr-block-1", def);
         run.Start();
-
-        // Simulate a previous task failure.
-        run.FailStage("compile error");
+        run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.StartTask("work-1", "runner-1");
+        run.FailTask(new TaskResult("failed", "compile error"));
         Assert.Equal(FailureReason.TaskFailed, run.Failure?.Reason);
 
         var events = run.BlockStageWithContextExhaustion(
@@ -55,9 +56,12 @@ public class WorkflowRunContextExhaustionBlockSpecs
     [Fact]
     public void BlockStageWithContextExhaustion_WithoutPercent_StillRecordsBlockingMessage()
     {
-        var run = WorkflowRun.Create("wr-block-2", BuildDefinition());
+        var def = BuildDefinition();
+        var run = WorkflowRun.Create("wr-block-2", def);
         run.Start();
-        run.FailStage("boom");
+        run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.StartTask("work-2", "runner-2");
+        run.FailTask(new TaskResult("failed", "boom"));
 
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: null, sessionId: null);
 
@@ -75,9 +79,12 @@ public class WorkflowRunContextExhaustionBlockSpecs
         // a stage that is now blocked by context exhaustion. The retry
         // helper must refuse (throw) and the status mapper must not
         // surface a retry action.
-        var run = WorkflowRun.Create("wr-block-3", BuildDefinition());
+        var def = BuildDefinition();
+        var run = WorkflowRun.Create("wr-block-3", def);
         run.Start();
-        run.FailStage("boom");
+        run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.StartTask("work-3", "runner-3");
+        run.FailTask(new TaskResult("failed", "boom"));
         run.BlockStageWithContextExhaustion(taskId: "task-1.1", contextUsagePercent: 95d, sessionId: null);
 
         var ex = Assert.Throws<InvalidOperationException>(() => _ = run.Retry());
@@ -133,9 +140,12 @@ public class WorkflowRunContextExhaustionBlockSpecs
         // The grain should not touch a failure that is not a context
         // exhaustion block (e.g. regular TaskFailed). The demotion
         // helper is a no-op in that case.
-        var run = WorkflowRun.Create("wr-block-5", BuildDefinition());
+        var def = BuildDefinition();
+        var run = WorkflowRun.Create("wr-block-5", def);
         run.Start();
-        run.FailStage("compile error");
+        run.InitializeStage(def.Stages[0].Tasks, def.Stages[0].Checks);
+        run.StartTask("work-5", "runner-5");
+        run.FailTask(new TaskResult("failed", "compile error"));
         var original = run.Failure;
         Assert.Equal(FailureReason.TaskFailed, original?.Reason);
 

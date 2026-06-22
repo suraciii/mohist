@@ -21,8 +21,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
-    Task<WorkflowStartMaterializationDispatch?> PrepareStartMaterializationAsync(string runnerId);
-    Task RecordStartMaterializationFailureAsync(string runnerId, string? message);
     Task NotifyRunnerLostAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkResult result);
     Task<string?> GetRunStatusAsync();
@@ -80,10 +78,6 @@ public sealed record WorkflowAssignmentResult(
     [property: Id(0)] WorkflowAssignmentStatus Status,
     [property: Id(1)] string? OwnerRunnerId = null,
     [property: Id(2)] string? Reason = null);
-
-[GenerateSerializer]
-public sealed record WorkflowStartMaterializationDispatch(
-    [property: Id(0)] WorkDispatch Dispatch);
 
 public enum WorkflowAssignmentStatus
 {

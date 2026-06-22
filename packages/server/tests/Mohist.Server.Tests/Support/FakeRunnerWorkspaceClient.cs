@@ -9,7 +9,6 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
 {
     private readonly object _gate = new();
     private readonly List<RemoveWorkspaceCall> _removeWorkspaceCalls = [];
-    private readonly List<MaterializeWorkspaceCall> _materializeWorkspaceCalls = [];
 
     public WorkspaceStatus WorkspaceStatus { get; set; } = new() { Exists = false, Reason = "workspace_removed" };
     public RunnerWorkspaceDiffResult? Diff { get; set; }
@@ -23,12 +22,6 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
         get { lock (_gate) return _removeWorkspaceCalls.ToList(); }
     }
 
-    public IReadOnlyList<MaterializeWorkspaceCall> MaterializeWorkspaceCalls
-    {
-        get { lock (_gate) return _materializeWorkspaceCalls.ToList(); }
-    }
-    public WorkspaceMaterializationResult MaterializationResult { get; set; } = new(true, "/fake/workspace", "mohist/run-test", null, null);
-
     public void Reset()
     {
         WorkspaceStatus = new WorkspaceStatus { Exists = false, Reason = "workspace_removed" };
@@ -37,48 +30,11 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
         CommitDiffs.Clear();
         FileContent = new RunnerWorkspaceFileContentResult(null, null, "workspace_removed");
         WorkspaceRemoval = new WorkspaceRemovalResult(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed");
-        MaterializationResult = new WorkspaceMaterializationResult(true, "/fake/workspace", "mohist/run-test", null, null);
         Throw = null;
         lock (_gate)
         {
             _removeWorkspaceCalls.Clear();
-            _materializeWorkspaceCalls.Clear();
         }
-    }
-
-    public async Task<IReadOnlyList<MaterializeWorkspaceCall>> WaitForMaterializeWorkspaceCallsAsync(
-        string workflowRunId,
-        int count,
-        TimeSpan? timeout = null)
-    {
-        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(2));
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            var calls = MaterializeWorkspaceCalls
-                .Where(c => c.WorkflowRunId == workflowRunId)
-                .ToList();
-            if (calls.Count >= count)
-                return calls;
-
-            await Task.Delay(20);
-        }
-
-        var observed = MaterializeWorkspaceCalls
-            .Where(c => c.WorkflowRunId == workflowRunId)
-            .ToList();
-        throw new TimeoutException(
-            $"Expected at least {count} materialization call(s) for workflow '{workflowRunId}', " +
-            $"but observed {observed.Count}: {string.Join(", ", observed.Select(c => c.WorkId))}");
-    }
-
-    public Task<WorkspaceMaterializationResult> MaterializeWorkspaceAsync(string projectId, string runnerId, WorkDispatch dispatch, CancellationToken ct = default)
-    {
-        MaybeThrow();
-        lock (_gate)
-        {
-            _materializeWorkspaceCalls.Add(new MaterializeWorkspaceCall(projectId, runnerId, dispatch.WorkflowRunId, dispatch.WorkId));
-        }
-        return Task.FromResult(MaterializationResult);
     }
 
     public Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
@@ -127,5 +83,3 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
             throw Throw;
     }
 }
-
-public sealed record MaterializeWorkspaceCall(string ProjectId, string RunnerId, string WorkflowRunId, string WorkId);

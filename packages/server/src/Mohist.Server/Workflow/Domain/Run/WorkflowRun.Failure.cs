@@ -8,19 +8,6 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> FailStage(string reason)
-        {
-            var current = run.CurrentStage();
-            current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, Message: reason);
-            run.Failure = current.Failure;
-            current.Status = StageRunStatus.Failed;
-            run.Status = WorkflowRunStatus.Failed;
-            return [
-                new StageFailed(current.Id, reason),
-                new WorkflowRunFailed(reason)
-            ];
-        }
-
         /// <summary>
         /// Non-mutating evaluation: returns true when the current stage is
         /// failed and represents a retryable failure that <see cref="Retry"/>
