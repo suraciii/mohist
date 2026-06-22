@@ -808,6 +808,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (result.Status == "completed")
         {
             WorkflowDispatchHelpers.CaptureTaskOutputs(run, currentTask, result.CapturedOutputs);
+            if (currentTask is not null) currentTask.Output = result.Output;
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
                 var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, result.Output);
@@ -822,6 +823,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
         else
         {
+            if (currentTask is not null) currentTask.Output = result.Output;
             events.AddRange(run.FailTask(new TaskResult("failed", result.Message)));
         }
 

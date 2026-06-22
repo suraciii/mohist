@@ -24,6 +24,7 @@ export interface WorkflowTimelineTask {
   requiredFiles?: WorkflowTaskRequiredFile[]
   classification?: 'UserFacing' | 'Orchestration'
   artifactSummaries?: WorkflowArtifactSummary[]
+  output?: string | null
 }
 
 export interface WorkflowTimelineCheck {

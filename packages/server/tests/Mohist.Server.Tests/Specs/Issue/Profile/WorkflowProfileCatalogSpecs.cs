@@ -35,8 +35,9 @@ public class WorkflowProfileCatalogSpecs
 
         var list = registry.List();
 
-        var profile = Assert.Single(list);
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, profile.Id);
+        Assert.Equal(2, list.Count);
+        Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.DefaultId);
+        Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.PrId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -46,9 +47,10 @@ public class WorkflowProfileCatalogSpecs
     {
         var registry = BuildRegistry();
 
-        var profile = Assert.Single(registry.List());
+        var list = registry.List();
+        var defaultEntry = Assert.Single(list, p => p.IsDefault);
 
-        Assert.True(profile.IsDefault);
+        Assert.Equal(IssueWorkflowProfiles.DefaultId, defaultEntry.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -59,8 +61,8 @@ public class WorkflowProfileCatalogSpecs
         var registry = BuildRegistry();
         var descriptions = registry.List().Select(info => info.Description).ToList();
 
-        var description = Assert.Single(descriptions);
-        Assert.False(string.IsNullOrWhiteSpace(description));
+        Assert.Equal(2, descriptions.Count);
+        Assert.All(descriptions, d => Assert.False(string.IsNullOrWhiteSpace(d)));
     }
 
     // ===================== System templates =====================
@@ -74,8 +76,9 @@ public class WorkflowProfileCatalogSpecs
 
         var templates = await manager.ListSystemTemplatesAsync();
 
-        var template = Assert.Single(templates);
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, template.Id);
+        Assert.Equal(2, templates.Count);
+        Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.DefaultId);
+        Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.PrId);
     }
 
     // ===================== GetSystemTemplateDefinition =====================
@@ -172,7 +175,7 @@ public class WorkflowProfileCatalogSpecs
         var manager = BuildManager();
         var templates = await manager.ListSystemTemplatesAsync();
 
-        var defaultInfo = Assert.Single(templates);
+        var defaultInfo = Assert.Single(templates, t => t.IsDefault);
 
         Assert.Equal("Mohist Default", defaultInfo.Name);
         Assert.True(defaultInfo.IsDefault);

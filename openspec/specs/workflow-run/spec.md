@@ -34,7 +34,7 @@ WorkflowRun SHALL be the current runtime state root and consistency boundary. `s
 
 ### Requirement: REQ-WR-005 Integrate runtime work is first-class WorkflowRun state
 
-Integrate stage progress SHALL be represented in WorkflowRun using standard task and check entities. The Integrate StageRun SHALL expose ordered tasks `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, and `integrate:publish`, plus check `health:integrate`; delivery metadata (prepared base, published commit, push ownership) and post-publish freeze state SHALL be persisted as WorkflowRun facts.
+Integrate stage progress SHALL be represented in WorkflowRun using standard task and check entities. The Integrate StageRun SHALL expose ordered tasks `integrate:spec-sync`, `integrate:archive-change`, `integrate:prepare`, and `integrate:publish`, plus check `health:integrate`; delivery metadata (prepared base, published commit, push ownership, and — for PR-based delivery — GitHub PR identifiers) and post-publish freeze state SHALL be persisted as WorkflowRun facts.
 
 #### Scenario: Integrate stage is seeded with visible work
 
@@ -50,9 +50,17 @@ Integrate stage progress SHALL be represented in WorkflowRun using standard task
 
 #### Scenario: Integrate publish records delivery facts and freezes
 
-- **WHEN** `integrate:publish` completes successfully
+- **WHEN** `integrate:publish` completes successfully under the direct delivery shape
 - **THEN** the task result SHALL record `targetBranch`, `baseSha`, the landed commit sha, and that the change was pushed to the remote
 - **AND** the Integrate StageRun SHALL record a freeze point that prevents later automatic code-modifying tasks
+
+#### Scenario: Integrate publish records PR delivery metadata for the PR-based shape
+
+- **WHEN** `integrate:publish` completes successfully under the PR-based delivery shape
+- **THEN** the task result SHALL record `prNumber`, `prUrl`, and `mergeCommitSha` from the merged GitHub PR
+- **AND** it SHALL record `targetBranch`, `baseSha`, and that the change was delivered to the remote
+- **AND** the Integrate StageRun SHALL record a freeze point that prevents later automatic code-modifying tasks
+- **AND** the PR metadata SHALL be readable through the existing WorkflowRun task-result read model without a new schema
 
 #### Scenario: Post-publish health failure is non-repairable
 

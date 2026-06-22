@@ -99,7 +99,8 @@ public sealed record TaskStatusView(
     IReadOnlyList<ArtifactSummaryView>? ArtifactSummaries = null,
     DateTimeOffset? StartedAt = null,
     DateTimeOffset? CompletedAt = null,
-    long? DurationMs = null);
+    long? DurationMs = null,
+    string? Output = null);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

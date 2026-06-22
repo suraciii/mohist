@@ -29,10 +29,15 @@ public class ProjectWorkflowProfileManager
 
     private static SystemTemplateInfo[] BuildSystemTemplates()
     {
-        var definition = MohistWorkflow.Definition;
-        var defaultDescription = string.IsNullOrWhiteSpace(definition.Description)
+        var defaultDefinition = MohistWorkflow.Definition;
+        var defaultDescription = string.IsNullOrWhiteSpace(defaultDefinition.Description)
             ? "No description provided"
-            : definition.Description!;
+            : defaultDefinition.Description!;
+
+        var prDescription = string.IsNullOrWhiteSpace(MohistPrIssueWorkflowProfile.PrDescription)
+            ? "No description provided"
+            : MohistPrIssueWorkflowProfile.PrDescription.TrimEnd();
+
         return
         [
             new SystemTemplateInfo(
@@ -40,6 +45,11 @@ public class ProjectWorkflowProfileManager
                 Name: "Mohist Default",
                 Description: defaultDescription,
                 IsDefault: true),
+            new SystemTemplateInfo(
+                Id: IssueWorkflowProfiles.PrId,
+                Name: "Mohist PR",
+                Description: prDescription,
+                IsDefault: false),
         ];
     }
 
@@ -74,6 +84,8 @@ public class ProjectWorkflowProfileManager
     {
         if (string.Equals(templateId, IssueWorkflowProfiles.DefaultId, StringComparison.Ordinal))
             return MohistWorkflow.Definition;
+        if (string.Equals(templateId, IssueWorkflowProfiles.PrId, StringComparison.Ordinal))
+            return MohistWorkflow.PrWorkflowDefinition;
         return null;
     }
 

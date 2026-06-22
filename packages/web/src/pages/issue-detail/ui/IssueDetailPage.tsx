@@ -10,7 +10,7 @@ import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
@@ -528,6 +528,12 @@ export function IssueDetailPage() {
           <div className="mb-8" data-testid="workflow-view-frame">
             <WorkflowView issue={issue} />
           </div>
+
+          {workflowTimeline && (
+            <div className="mb-8" data-testid="pr-delivery-summary-frame">
+              <PrDeliverySummary timeline={workflowTimeline} />
+            </div>
+          )}
 
           <div className="mb-8" data-testid="workflow-profile-editor-frame">
             <IssueWorkflowProfileEditor issueNumber={issueNumber} />

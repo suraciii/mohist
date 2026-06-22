@@ -40,6 +40,17 @@ function formatDuration(ms: number): string {
   return `${m}m ${s}s`
 }
 
+function parseTimelineTaskOutput(raw: string | null | undefined): unknown {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return raw
+  }
+}
+
 function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
@@ -146,7 +157,7 @@ function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflow
         duration: task.durationMs ?? 0,
         artifacts: [],
         artifactSummaries: task.artifactSummaries,
-        output: task.message,
+        output: parseTimelineTaskOutput(task.output),
         startedAt: task.startedAt,
         completedAt: task.completedAt,
         updatedAt: task.completedAt ?? task.startedAt ?? '',
@@ -634,7 +645,11 @@ function isDeliveryFailureTask(task: StageTaskState): boolean {
   if (typeof uses !== 'string') {
     return typeof task.taskId === 'string' && (task.taskId.startsWith('integrate:prepare') || task.taskId.startsWith('integrate:publish'))
   }
-  return uses === 'mohist/prepare' || uses === 'mohist/publish'
+  return (
+    uses === 'mohist/prepare' ||
+    uses === 'mohist/publish' ||
+    uses === 'mohist/publish-via-pr'
+  )
 }
 
 function DeliveryFailureBanner({
@@ -667,6 +682,9 @@ function DeliveryFailureBanner({
     'workspace-missing': 'border-rose-300 bg-rose-50 text-rose-800',
     'workspace-corrupt': 'border-rose-300 bg-rose-50 text-rose-800',
     'workspace-identity-mismatch': 'border-rose-300 bg-rose-50 text-rose-800',
+    'config-error': 'border-orange-300 bg-orange-50 text-orange-800',
+    'protection-conflict': 'border-orange-300 bg-orange-50 text-orange-800',
+    'pr-state-conflict': 'border-orange-300 bg-orange-50 text-orange-800',
   }
   const isWorkspaceMaterialization =
     failureKind === 'workspace-missing' ||
