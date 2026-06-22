@@ -13,6 +13,9 @@ internal static class DeliveryFailureGuidance
     public const string WorkspaceMissing = "workspace-missing";
     public const string WorkspaceCorrupt = "workspace-corrupt";
     public const string WorkspaceIdentityMismatch = "workspace-identity-mismatch";
+    public const string ConfigError = "config-error";
+    public const string ProtectionConflict = "protection-conflict";
+    public const string PrStateConflict = "pr-state-conflict";
 
     private static readonly Dictionary<string, (string Label, string NextAction)> Guidance =
         new(StringComparer.Ordinal)
@@ -38,6 +41,15 @@ internal static class DeliveryFailureGuidance
             [WorkspaceIdentityMismatch] = (
                 Label: "Workflow workspace materialization failure",
                 NextAction: "The workflow workspace at the run's bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue."),
+            [ConfigError] = (
+                Label: "Runner environment is misconfigured",
+                NextAction: "Install the GitHub CLI (`gh`) on the runner host and run `gh auth login` to authenticate with GitHub. Then re-run the issue. The workflow will not auto-retry this kind — environment fixes need a human before the next attempt."),
+            [ProtectionConflict] = (
+                Label: "Branch protection blocked the merge",
+                NextAction: "GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository's branch-protection rules (or switch this issue to the `mohist/default` workflow) and re-run. The workflow will not auto-retry this kind."),
+            [PrStateConflict] = (
+                Label: "Pull request state changed externally",
+                NextAction: "The pull request was closed or its state changed outside the runner between workflow steps (for example, by a human via the GitHub UI). Decide whether to re-open the PR or abandon it, then re-run or close the issue. The workflow will not auto-retry this kind."),
         };
 
     public static readonly IReadOnlyList<string> AllKinds = new[]
@@ -49,6 +61,9 @@ internal static class DeliveryFailureGuidance
         WorkspaceMissing,
         WorkspaceCorrupt,
         WorkspaceIdentityMismatch,
+        ConfigError,
+        ProtectionConflict,
+        PrStateConflict,
     };
 
     public static readonly IReadOnlyList<string> WorkspaceMaterializationKinds = new[]
@@ -59,7 +74,7 @@ internal static class DeliveryFailureGuidance
     };
 
     private static readonly Regex KindInMessage = new(
-        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch)\)",
+        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch|config-error|protection-conflict|pr-state-conflict)\)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex BranchInvariantInMessage = new(

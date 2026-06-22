@@ -1,14 +1,14 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionContext, ActionResult } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
 import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
-import { pushAction } from "./push.js"
 import { git as defaultGit } from "./git.js"
+import { publishViaPrAction } from "./publish-via-pr.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 type GitRunner = typeof defaultGit
@@ -45,7 +45,7 @@ export function createDefaultRegistry() {
   registry.register("mohist/rebase", rebaseAction)
   registry.register("mohist/rebase-status", rebaseStatusAction)
   registry.register("mohist/merge-ready", mergeReadyAction)
-  registry.register("mohist/push", pushAction)
+  registry.register("mohist/publish-via-pr", publishViaPrAction)
   return registry
 }
 
@@ -114,37 +114,40 @@ function isPromiseVerdict(value: string) {
 export async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
   const remote = stringInput(context.with, "remote") ?? "origin"
-  const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
-  const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
   const baseRef = `${remote}/${baseBranch}`
+  const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
+  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const checkedAt = new Date().toISOString()
 
-  // Ref-only preflight: the run branch already contains the latest base
-  // tip iff `git merge-base --is-ancestor origin/<base> <runBranch>`
-  // exits 0. No checkout, no landing clone, no working-tree mutation —
-  // the workspace stays on `workspace.branch`.
+  // Ref-only preflight: the workflow workspace never has its branch
+  // switched. The branch-stable contract requires this action to never
+  // run `checkout`, `merge --squash`, `fetch`, or any clone — only
+  // `rev-parse` and `merge-base` against the workflow workspace refs.
   const base = await git(workDir, ["rev-parse", baseRef], context.signal)
-  if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseRef}'`, base.exitCode, [], new Date().toISOString())
+  if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseRef}'`, base.exitCode, [], checkedAt)
 
   const head = await git(workDir, ["rev-parse", source], context.signal)
-  if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve source", head.exitCode, [], new Date().toISOString())
+  if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve source", head.exitCode, [], checkedAt)
 
   const mergeBase = await git(workDir, ["merge-base", baseRef, source], context.signal)
-  const checkedAt = new Date().toISOString()
-  const ancestor = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal)
-  const canMerge = ancestor.success
-  const error = canMerge ? null : ancestor.combinedOutput || `Source '${source}' does not contain the latest '${baseRef}' tip; rebase is required before merging.`
+  const ancestorCheck = await git(workDir, ["merge-base", "--is-ancestor", baseRef, source], context.signal)
+  const mergeBaseSha = mergeBase.success ? mergeBase.stdout.trim() : null
 
-  return mergeReadyResult(
-    canMerge,
-    baseBranch,
-    base.stdout.trim(),
-    head.stdout.trim(),
-    mergeBase.success ? mergeBase.stdout.trim() : null,
-    error,
-    ancestor.exitCode,
-    [],
-    checkedAt,
-  )
+  if (!ancestorCheck.success) {
+    return mergeReadyResult(
+      false,
+      baseBranch,
+      base.stdout.trim(),
+      head.stdout.trim(),
+      mergeBaseSha,
+      `Merge candidate '${source}' does not contain the latest '${baseRef}' tip; rebase is required.`,
+      ancestorCheck.exitCode,
+      [],
+      checkedAt,
+    )
+  }
+
+  return mergeReadyResult(true, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBaseSha, null, 0, [], checkedAt)
 }
 
 function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null, conflictFiles: string[], checkedAt: string): ActionResult {

@@ -120,10 +120,13 @@ public class IssueApiSpecs
     {
         var profiles = await _client.GetDataAsync<WorkflowProfileDto[]>("/api/workflow-templates/system");
 
-        var profile = Assert.Single(profiles);
-        Assert.Equal("mohist/default", profile.Id);
-        Assert.Equal("Mohist Default", profile.Name);
-        Assert.Contains("Mohist pipeline", profile.Description);
+        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/default");
+        Assert.Equal("Mohist Default", defaultProfile.Name);
+        Assert.Contains("Mohist pipeline", defaultProfile.Description);
+
+        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/pr");
+        Assert.Equal("Mohist PR", prProfile.Name);
+        Assert.Contains("Mohist pipeline", prProfile.Description);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -133,13 +136,21 @@ public class IssueApiSpecs
     {
         var profiles = await _client.GetDataAsync<WorkflowProfileDescriptionDto[]>("/api/workflow-profiles");
 
-        var profile = Assert.Single(profiles);
-        Assert.Equal("mohist/default", profile.Id);
-        Assert.Equal("Mohist Default", profile.DisplayName);
-        Assert.Contains("Mohist pipeline", profile.Description);
-        Assert.NotNull(profile.SuitableFor);
-        Assert.NotEmpty(profile.SuitableFor);
-        Assert.All(profile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
+        Assert.Equal(2, profiles.Length);
+
+        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/default");
+        Assert.Equal("Mohist Default", defaultProfile.DisplayName);
+        Assert.Contains("Mohist pipeline", defaultProfile.Description);
+        Assert.NotNull(defaultProfile.SuitableFor);
+        Assert.NotEmpty(defaultProfile.SuitableFor);
+        Assert.All(defaultProfile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
+
+        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/pr");
+        Assert.Equal("Mohist PR", prProfile.DisplayName);
+        Assert.Contains("Mohist pipeline", prProfile.Description);
+        Assert.NotNull(prProfile.SuitableFor);
+        Assert.NotEmpty(prProfile.SuitableFor);
+        Assert.All(prProfile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

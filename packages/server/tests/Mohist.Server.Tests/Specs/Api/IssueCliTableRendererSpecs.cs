@@ -349,6 +349,9 @@ public class IssueCliTableRendererSpecs
         new object[] { DeliveryFailureGuidance.WorkspaceMissing, "Workflow workspace materialization failure", "workflow-start materialization pipeline" },
         new object[] { DeliveryFailureGuidance.WorkspaceCorrupt, "Workflow workspace materialization failure", "re-materialize the workflow workspace" },
         new object[] { DeliveryFailureGuidance.WorkspaceIdentityMismatch, "Workflow workspace materialization failure", "belongs to a different workflow run" },
+        new object[] { DeliveryFailureGuidance.ConfigError, "Runner environment is misconfigured", "gh auth login" },
+        new object[] { DeliveryFailureGuidance.ProtectionConflict, "Branch protection blocked the merge", "branch protection" },
+        new object[] { DeliveryFailureGuidance.PrStateConflict, "Pull request state changed externally", "auto-retry this kind" },
     };
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -376,6 +379,9 @@ public class IssueCliTableRendererSpecs
     [InlineData("workflow workspace materialization failure (workspace-missing): workspace path does not exist", DeliveryFailureGuidance.WorkspaceMissing, "Workflow workspace materialization failure")]
     [InlineData("workflow workspace materialization failure (workspace-corrupt): marker missing or unreadable", DeliveryFailureGuidance.WorkspaceCorrupt, "Workflow workspace materialization failure")]
     [InlineData("workflow workspace materialization failure (workspace-identity-mismatch): workspace belongs to wr_other", DeliveryFailureGuidance.WorkspaceIdentityMismatch, "Workflow workspace materialization failure")]
+    [InlineData("Publish failed (config-error): gh CLI is not installed", DeliveryFailureGuidance.ConfigError, "Runner environment is misconfigured")]
+    [InlineData("Publish failed (protection-conflict): required status checks missing", DeliveryFailureGuidance.ProtectionConflict, "Branch protection blocked the merge")]
+    [InlineData("Publish failed (pr-state-conflict): PR was closed externally", DeliveryFailureGuidance.PrStateConflict, "Pull request state changed externally")]
     public void DeliveryFailureGuidance_ResolveFailureKindFromMessage_ExtractsKind(
         string message, string expectedKind, string expectedLabel)
     {
@@ -392,11 +398,22 @@ public class IssueCliTableRendererSpecs
     [InlineData(DeliveryFailureGuidance.Conflict)]
     [InlineData(DeliveryFailureGuidance.BaseMoved)]
     [InlineData(DeliveryFailureGuidance.RetrySafe)]
+    [InlineData(DeliveryFailureGuidance.ConfigError)]
+    [InlineData(DeliveryFailureGuidance.ProtectionConflict)]
+    [InlineData(DeliveryFailureGuidance.PrStateConflict)]
     public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_ExtractsKind(string kind)
     {
+        var taskKind = kind switch
+        {
+            DeliveryFailureGuidance.BaseMoved => "publish",
+            DeliveryFailureGuidance.ConfigError => "publish-via-pr",
+            DeliveryFailureGuidance.ProtectionConflict => "publish-via-pr",
+            DeliveryFailureGuidance.PrStateConflict => "publish-via-pr",
+            _ => "prepare",
+        };
         var output = JsonNode.Parse($$"""
             {
-              "kind": "{{(kind == DeliveryFailureGuidance.BaseMoved ? "publish" : "prepare")}}",
+              "kind": "{{taskKind}}",
               "status": "failed",
               "failureKind": "{{kind}}"
             }
@@ -575,6 +592,9 @@ public class IssueCliTableRendererSpecs
     [InlineData("Prepare failed (conflict): CONFLICT in foo.ts", DeliveryFailureGuidance.Conflict)]
     [InlineData("Publish failed (base-moved): non-fast-forward", DeliveryFailureGuidance.BaseMoved)]
     [InlineData("Prepare failed (retry-safe): network reset", DeliveryFailureGuidance.RetrySafe)]
+    [InlineData("Publish failed (config-error): gh CLI is not installed", DeliveryFailureGuidance.ConfigError)]
+    [InlineData("Publish failed (protection-conflict): required status checks missing", DeliveryFailureGuidance.ProtectionConflict)]
+    [InlineData("Publish failed (pr-state-conflict): PR was closed externally", DeliveryFailureGuidance.PrStateConflict)]
     public async Task RenderTable_WorkflowStatus_SurfacesDeliveryFailureKindLabelAndNextAction(
         string failureMessage, string expectedKind)
     {
@@ -845,6 +865,9 @@ public class IssueCliTableRendererSpecs
         Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.BaseMoved));
         Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.RetrySafe));
         Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.BranchInvariantViolation));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.ConfigError));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.ProtectionConflict));
+        Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(DeliveryFailureGuidance.PrStateConflict));
         Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(null));
         Assert.False(DeliveryFailureGuidance.IsWorkspaceMaterializationKind(""));
     }

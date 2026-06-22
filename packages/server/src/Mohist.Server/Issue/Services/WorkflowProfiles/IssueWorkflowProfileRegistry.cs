@@ -15,9 +15,11 @@ public class IssueWorkflowProfileRegistry
         IDbContextFactory<MohistDbContext> dbFactory)
     {
         var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, dbFactory);
+        var pr = new MohistPrIssueWorkflowProfile(promptLoader, dbFactory);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
             [defaults.Id] = defaults,
+            [pr.Id] = pr,
         };
     }
 

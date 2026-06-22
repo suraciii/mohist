@@ -33,6 +33,7 @@ public sealed class TaskRun
     public List<TaskOutputDefinition>? Outputs { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
     public string? CausedByFeedbackId { get; init; }
+    public string? Output { get; set; }
 }
 
 public static class TaskRunExtensions

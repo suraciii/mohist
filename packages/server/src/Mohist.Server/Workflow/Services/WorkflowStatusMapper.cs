@@ -106,7 +106,8 @@ public static class WorkflowStatusMapper
                     CompletedAt: t.FinishedAt,
                     DurationMs: t.StartedAt is not null && t.FinishedAt is not null
                         ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
-                        : null))
+                        : null,
+                    Output: t.Output))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);

@@ -30,7 +30,7 @@ const EXPECTED_GUIDANCE: Record<DeliveryFailureKind, { label: string; nextAction
   },
   'base-moved': {
     label: 'Base branch moved',
-    nextAction: 'The base branch moved during publish. Prepare the branch again, then publish.',
+    nextAction: 'The base branch moved during publish. Prepare the branch again, then publish. The workflow integrate retry will re-fetch and rebase before re-attempting the merge.',
   },
   'retry-safe': {
     label: 'Transient failure',
@@ -51,6 +51,18 @@ const EXPECTED_GUIDANCE: Record<DeliveryFailureKind, { label: string; nextAction
   'workspace-identity-mismatch': {
     label: 'Workflow workspace materialization failure',
     nextAction: 'The workflow workspace at the run\'s bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue.',
+  },
+  'config-error': {
+    label: 'Runner environment is misconfigured',
+    nextAction: 'Install the GitHub CLI (`gh`) on the runner host and run `gh auth login` to authenticate with GitHub. Then re-run the issue. The workflow will not auto-retry this kind — environment fixes need a human before the next attempt.',
+  },
+  'protection-conflict': {
+    label: 'Branch protection blocked the merge',
+    nextAction: 'GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository\'s branch-protection rules (or switch this issue to the `mohist/default` workflow) and re-run. The workflow will not auto-retry this kind.',
+  },
+  'pr-state-conflict': {
+    label: 'Pull request state changed externally',
+    nextAction: 'The pull request was closed or its state changed outside the runner between workflow steps (for example, by a human via the GitHub UI). Decide whether to re-open the PR or abandon it, then re-run or close the issue. The workflow will not auto-retry this kind.',
   },
 }
 
@@ -80,7 +92,7 @@ describe('delivery-failure guidance mapping', () => {
     it('extracts the conflict kind from a prepare failure message', () => {
       const result = resolveDeliveryFailureFromMessage('Prepare failed (conflict): CONFLICT in foo.ts')
       expect(result.failureKind).toBe<DeliveryFailureKind>('conflict')
-      expect(result.guidance).toEqual({
+      expect(result.guidance).toMatchObject({
         failureKind: 'conflict',
         label: EXPECTED_GUIDANCE.conflict.label,
         nextAction: EXPECTED_GUIDANCE.conflict.nextAction,
@@ -417,19 +429,31 @@ vi.mock('../src/entities/issue', async (importOriginal) => {
 const mockedUseWorkflowTimeline = vi.mocked(useWorkflowTimeline)
 
 type FailureKind = Exclude<DeliveryFailureKind, 'branch-invariant-violation'>
-const DELIVERY_TASK_KIND: Record<FailureKind, 'prepare' | 'publish'> = {
+const DELIVERY_TASK_KIND: Record<FailureKind, 'prepare' | 'publish' | 'publish-via-pr'> = {
   conflict: 'prepare',
   'base-moved': 'publish',
   'retry-safe': 'prepare',
   'workspace-missing': 'prepare',
   'workspace-corrupt': 'prepare',
   'workspace-identity-mismatch': 'prepare',
+  'config-error': 'publish-via-pr',
+  'protection-conflict': 'publish-via-pr',
+  'pr-state-conflict': 'publish-via-pr',
 }
 
 function makeFailureTimeline(kind: FailureKind): WorkflowTimeline {
-  const taskId = `integrate:${DELIVERY_TASK_KIND[kind]}.1`
-  const title = DELIVERY_TASK_KIND[kind] === 'publish' ? 'Publish changes' : 'Prepare branch'
-  const uses = DELIVERY_TASK_KIND[kind] === 'publish' ? 'mohist/publish' : 'mohist/prepare'
+  const taskKind = DELIVERY_TASK_KIND[kind]
+  const taskId = `integrate:${taskKind}.1`
+  const title = taskKind === 'publish' || taskKind === 'publish-via-pr'
+    ? taskKind === 'publish-via-pr'
+      ? 'Publish via PR'
+      : 'Publish changes'
+    : 'Prepare branch'
+  const uses = taskKind === 'publish'
+    ? 'mohist/publish'
+    : taskKind === 'publish-via-pr'
+      ? 'mohist/publish-via-pr'
+      : 'mohist/prepare'
   const failureMessage =
     kind === 'conflict'
       ? 'Prepare failed (conflict): CONFLICT in foo.ts'
@@ -441,7 +465,14 @@ function makeFailureTimeline(kind: FailureKind): WorkflowTimeline {
             ? 'workflow workspace materialization failure (workspace-missing): workspace path does not exist'
             : kind === 'workspace-corrupt'
               ? 'workflow workspace materialization failure (workspace-corrupt): marker is missing'
-              : 'workflow workspace materialization failure (workspace-identity-mismatch): workspace bound to a different run'
+              : kind === 'workspace-identity-mismatch'
+                ? 'workflow workspace materialization failure (workspace-identity-mismatch): workspace bound to a different run'
+                : kind === 'config-error'
+                  ? 'Publish via PR failed (config-error): gh CLI not found'
+                  : kind === 'protection-conflict'
+                    ? 'Publish via PR failed (protection-conflict): required status checks are not satisfied'
+                    : 'Publish via PR failed (pr-state-conflict): PR was closed externally'
+  const structuredOutput = JSON.stringify({ kind: 'publish-via-pr', failureKind: kind })
   return {
     workflowRunId: 'workflow-run-1',
     status: 'failed',
@@ -466,6 +497,7 @@ function makeFailureTimeline(kind: FailureKind): WorkflowTimeline {
             durationMs: 60000,
             attempts: 1,
             message: failureMessage,
+            output: structuredOutput,
           },
         ],
         checks: [],
@@ -500,7 +532,8 @@ function makeBranchViolationTimeline(): WorkflowTimeline {
             completedAt: '2026-01-01T00:01:00.000Z',
             durationMs: 60000,
             attempts: 1,
-            message: JSON.stringify({
+            message: 'branch-invariant violation at start boundary for Prepare branch: expected branch \'mohist/run-wr-1\', observed \'master\'',
+            output: JSON.stringify({
               kind: 'branch-invariant-violation',
               boundary: 'start',
               expectedBranch: 'mohist/run-wr-1',
@@ -789,7 +822,8 @@ describe('WorkflowView delivery failure rendering', () => {
               completedAt: '2026-01-01T00:01:00.000Z',
               durationMs: 60000,
               attempts: 1,
-              message: JSON.stringify({
+              message: 'workflow workspace materialization failure (workspace-identity-mismatch): workspace bound to a different run',
+              output: JSON.stringify({
                 kind: 'workspace-identity-mismatch',
                 workspacePath: '/home/runner/workspaces/proj_x/wr_abc',
                 expected: { workflowRunId: 'wr_abc' },

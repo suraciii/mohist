@@ -83,7 +83,11 @@ public class WorkflowQuerier
                     task.RequiredFiles,
                     task.Classification,
                     SessionName: task.SessionName,
-                    ArtifactSummaries: summaries);
+                    ArtifactSummaries: summaries,
+                    StartedAt: task.StartedAt,
+                    CompletedAt: task.CompletedAt,
+                    DurationMs: task.DurationMs,
+                    Output: task.Output);
             }
         }
     }

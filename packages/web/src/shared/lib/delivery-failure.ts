@@ -6,11 +6,15 @@ export type DeliveryFailureKind =
   | 'workspace-missing'
   | 'workspace-corrupt'
   | 'workspace-identity-mismatch'
+  | 'config-error'
+  | 'protection-conflict'
+  | 'pr-state-conflict'
 
 export interface DeliveryFailureGuidance {
   failureKind: DeliveryFailureKind
   label: string
   nextAction: string
+  retryable: boolean
 }
 
 export interface BranchInvariantEvidence {
@@ -34,6 +38,9 @@ export const DELIVERY_FAILURE_KINDS: readonly DeliveryFailureKind[] = [
   'workspace-missing',
   'workspace-corrupt',
   'workspace-identity-mismatch',
+  'config-error',
+  'protection-conflict',
+  'pr-state-conflict',
 ] as const
 
 export const WORKSPACE_MATERIALIZATION_FAILURE_KINDS: readonly DeliveryFailureKind[] = [
@@ -47,36 +54,61 @@ const DELIVERY_FAILURE_GUIDANCE: Record<DeliveryFailureKind, DeliveryFailureGuid
     failureKind: 'conflict',
     label: 'Conflict needs attention',
     nextAction: 'Conflicts could not be resolved automatically. Inspect the conflicting files, resolve them on the issue branch, and rerun prepare.',
+    retryable: false,
   },
   'base-moved': {
     failureKind: 'base-moved',
     label: 'Base branch moved',
-    nextAction: 'The base branch moved during publish. Prepare the branch again, then publish.',
+    nextAction: 'The base branch moved during publish. Prepare the branch again, then publish. The workflow integrate retry will re-fetch and rebase before re-attempting the merge.',
+    retryable: true,
   },
   'retry-safe': {
     failureKind: 'retry-safe',
     label: 'Transient failure',
     nextAction: 'Retry the task — the failure is unrelated to conflicts or base movement.',
+    retryable: true,
   },
   'branch-invariant-violation': {
     failureKind: 'branch-invariant-violation',
     label: 'Runner / action branch-invariant violation',
     nextAction: 'This is a runner or action bug: the workflow workspace left its expected run branch. Retry the task — the runner will restore the run branch automatically — and report the issue if it recurs. Issue work is not the cause.',
+    retryable: true,
   },
   'workspace-missing': {
     failureKind: 'workspace-missing',
     label: 'Workflow workspace materialization failure',
     nextAction: 'The runner could not find the workflow workspace bound to this run. Issue work is not the cause — the workflow-start materialization pipeline must be repaired (rebind the workspace, or investigate the runner\'s workspace root) before this run can continue.',
+    retryable: false,
   },
   'workspace-corrupt': {
     failureKind: 'workspace-corrupt',
     label: 'Workflow workspace materialization failure',
     nextAction: 'The runner\'s workflow workspace is unreadable or its workspace marker is missing/corrupt. Issue work is not the cause — re-materialize the workflow workspace at the run\'s bound path before this run can continue.',
+    retryable: false,
   },
   'workspace-identity-mismatch': {
     failureKind: 'workspace-identity-mismatch',
     label: 'Workflow workspace materialization failure',
     nextAction: 'The workflow workspace at the run\'s bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue.',
+    retryable: false,
+  },
+  'config-error': {
+    failureKind: 'config-error',
+    label: 'Runner environment is misconfigured',
+    nextAction: 'Install the GitHub CLI (`gh`) on the runner host and run `gh auth login` to authenticate with GitHub. Then re-run the issue. The workflow will not auto-retry this kind — environment fixes need a human before the next attempt.',
+    retryable: false,
+  },
+  'protection-conflict': {
+    failureKind: 'protection-conflict',
+    label: 'Branch protection blocked the merge',
+    nextAction: 'GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository\'s branch-protection rules (or switch this issue to the `mohist/default` workflow) and re-run. The workflow will not auto-retry this kind.',
+    retryable: false,
+  },
+  'pr-state-conflict': {
+    failureKind: 'pr-state-conflict',
+    label: 'Pull request state changed externally',
+    nextAction: 'The pull request was closed or its state changed outside the runner between workflow steps (for example, by a human via the GitHub UI). Decide whether to re-open the PR or abandon it, then re-run or close the issue. The workflow will not auto-retry this kind.',
+    retryable: false,
   },
 }
 
@@ -88,7 +120,10 @@ export function isDeliveryFailureKind(value: unknown): value is DeliveryFailureK
     value === 'branch-invariant-violation' ||
     value === 'workspace-missing' ||
     value === 'workspace-corrupt' ||
-    value === 'workspace-identity-mismatch'
+    value === 'workspace-identity-mismatch' ||
+    value === 'config-error' ||
+    value === 'protection-conflict' ||
+    value === 'pr-state-conflict'
   )
 }
 
@@ -114,7 +149,7 @@ export interface DeliveryFailureResolution {
 }
 
 const KIND_IN_MESSAGE =
-  /\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch)\)/i
+  /\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch|config-error|protection-conflict|pr-state-conflict)\)/i
 const BRANCH_INVARIANT_IN_MESSAGE = /\bbranch-invariant\s+violation\b(?:\s+at\s+(start|end)\s+boundary)?/i
 const BRANCH_EVIDENCE_IN_MESSAGE =
   /expected\s+branch\s+'(?<expected>[^']*)'.*?observed\s+(?:'(?<observed>[^']*)'|detached\s+at\s+(?<ref>\S+))/i

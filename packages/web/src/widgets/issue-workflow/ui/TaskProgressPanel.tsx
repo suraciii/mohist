@@ -5,6 +5,17 @@ import type { StageTaskState, WorkflowStage } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
 import { resolveDeliveryFailureFromMessage, resolveDeliveryFailureFromOutput } from '../../../shared/lib/delivery-failure'
 
+function parseTaskOutput(raw: string | null | undefined): unknown {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return raw
+  }
+}
+
 interface TaskProgressPanelProps {
   issueNumber: number
   currentStage: WorkflowStage
@@ -180,7 +191,11 @@ function isDeliveryFailureTask(task: StageTaskState): boolean {
   if (typeof uses !== 'string') {
     return typeof task.taskId === 'string' && (task.taskId.startsWith('integrate:prepare') || task.taskId.startsWith('integrate:publish'))
   }
-  return uses === 'mohist/prepare' || uses === 'mohist/publish'
+  return (
+    uses === 'mohist/prepare' ||
+    uses === 'mohist/publish' ||
+    uses === 'mohist/publish-via-pr'
+  )
 }
 
 function ProgressBar({ completed, failed, total }: { completed: number; failed: number; total: number }) {
@@ -219,7 +234,7 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
     attempts: task.attempts,
     duration: task.durationMs ?? 0,
     artifacts: [],
-    output: null,
+    output: parseTaskOutput(task.output),
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     updatedAt: task.completedAt ?? task.startedAt ?? new Date().toISOString(),

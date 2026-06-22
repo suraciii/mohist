@@ -1,0 +1,329 @@
+description: |
+  Full Mohist pipeline for shipping user-visible changes end-to-end.
+  Stages: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (spec sync, archive, merge, push).
+  Requires human approval at the plan and check stages, with the workflow merging and pushing the working branch into the repository base branch on completion.
+  Typical duration: 20-60 minutes for a focused change.
+  Best suited for: new features, user-visible behavior changes, changes that need a design document or spec delta.
+  Not suited for: simple bug fixes, exploration or throwaway prototypes, or pure refactors with no behavior change.
+
+variables:
+  agent:
+    type: opencode
+
+approval:
+  feedback:
+    task:
+      id: apply-feedback
+      title: Apply approval feedback
+      uses: mohist/acp-agent
+      with:
+        session: ${{ stage.name }}
+        prompt: ${{ prompts.apply-feedback }}
+
+stages:
+  - stage: plan
+    requiresApproval: true
+    tasks:
+      - id: proposal
+        title: Generate proposal
+        uses: mohist/acp-agent
+        with:
+          session: plan
+          prompt: ${{ prompts.proposal }} 
+          agent: ${{ vars.agent }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/proposal.md
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/proposal.md
+      - id: specs
+        title: Write specs
+        uses: mohist/acp-agent
+        with:
+          session: plan
+          prompt: ${{ prompts.specs }}
+          agent: ${{ vars.agent }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/specs
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/specs
+      - id: design
+        title: Create design
+        uses: mohist/acp-agent
+        with:
+          session: plan
+          prompt: ${{ prompts.design }}
+          agent: ${{ vars.agent }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/design.md
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/design.md
+      - id: tasks
+        title: Generate tasks
+        uses: mohist/acp-agent
+        with:
+          session: plan
+          prompt: ${{ prompts.tasks }}
+          agent: ${{ vars.agent }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/tasks.json
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/tasks.json
+      - id: self-review
+        title: Self review
+        uses: mohist/acp-agent
+        with:
+          session: plan
+          prompt: ${{ prompts.self-review }}
+          agent: ${{ vars.agent }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/self-review.md
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/self-review.md
+    checks:
+      - name: proposal-complete
+        title: Proposal complete
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/proposal.md
+      - name: specs-complete
+        title: Specs complete
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/specs
+      - name: design-complete
+        title: Design complete
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/design.md
+      - name: tasks-valid
+        title: Tasks valid
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/tasks.json
+      - name: self-review-passed
+        title: Self review passed
+        uses: core/marker
+        with:
+          path: ${{ openspecChangeDir }}/self-review.md
+          expect: <promise>PASS</promise>
+        repairLimit: 1
+        repairTask:
+          id: fix-plan-review
+          title: Fix plan review findings
+          uses: mohist/acp-agent
+          with:
+            session: plan
+            prompt: |
+              Fix the plan review findings in ${{ openspecChangeDir }}.
+              Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
+            agent: ${{ vars.agent }}
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+
+  - stage: build
+    tasks:
+      - id: load-tasks
+        title: Load tasks from plan
+        uses: mohist/openspec-tasks
+        with:
+          path: ${{ openspecChangeDir }}/tasks.json
+          task:
+            uses: mohist/acp-agent
+            with:
+              agent: ${{ vars.agent }}
+              prompt:
+                uses: mohist/openspec-task-prompt
+                with:
+                  file: ${{ openspecChangeDir }}/tasks.json
+                  items: tasks
+                  base: ${{ prompts.build }}
+    checks:
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+        repairLimit: 1
+        repairTask:
+          id: fix-build-health
+          title: Fix build health
+          uses: mohist/acp-agent
+          with:
+            session: build
+            prompt: |
+              Fix the build-stage health failure reported by `git diff --check`.
+              Keep changes focused on whitespace and patch formatting issues.
+            agent: ${{ vars.agent }}
+      - name: verify
+        title: Build & full test suite
+        uses: core/script
+        with:
+          run: ${{ vars.ci.verify }}
+          timeout: 1500000
+        repairLimit: 2
+        repairTask:
+          id: fix-tests
+          title: Fix failing tests/build
+          uses: mohist/acp-agent
+          with:
+            session: build
+            prompt: |
+              The verify check failed: the project did not build, typecheck, or its
+              tests did not pass. Read the check output to see the exact failures.
+              Fix them at the root cause — prefer correcting code or tests over
+              weakening assertions. Re-run the same commands from the check to
+              confirm all suites (server dotnet tests, web typecheck + tests,
+              runner typecheck + tests) pass before finishing.
+            agent: ${{ vars.agent }}
+
+  - stage: check
+    requiresApproval: true
+    tasks:
+      - id: ai-review
+        title: AI review
+        uses: mohist/acp-agent
+        with:
+          session: check
+          prompt: ${{ prompts.review }}
+          agent: ${{ vars.agent }}
+          expect:
+            markers:
+              - path: ${{ openspecChangeDir }}/review.md
+                oneOf:
+                  - <promise>PASS</promise>
+                  - <promise>FAIL</promise>
+        artifacts:
+          files:
+            - path: ${{ openspecChangeDir }}/review.md
+    checks:
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+        repairLimit: 1
+        repairTask:
+          id: fix-check-health
+          title: Fix check health
+          uses: mohist/acp-agent
+          with:
+            session: check
+            prompt: |
+              Fix the check-stage health failure reported by `git diff --check`.
+              Keep changes focused on whitespace and patch formatting issues.
+            agent: ${{ vars.agent }}
+      - name: review-passed
+        title: Review passed
+        uses: core/marker
+        with:
+          path: ${{ openspecChangeDir }}/review.md
+          expect: <promise>PASS</promise>
+        repairLimit: 2
+        repairTask:
+          id: fix-review-findings
+          title: Fix review findings
+          uses: mohist/acp-agent
+          with:
+            session: check
+            prompt: ${{ prompts.auto-fix }}
+            agent: ${{ vars.agent }}
+        verifyTask:
+          id: ai-review
+          title: AI review
+          uses: mohist/acp-agent
+          with:
+            session: check
+            prompt: ${{ prompts.review }}
+            agent: ${{ vars.agent }}
+            expect:
+              markers:
+                - path: ${{ openspecChangeDir }}/review.md
+                  oneOf:
+                    - <promise>PASS</promise>
+                    - <promise>FAIL</promise>
+      - name: merge-ready
+        title: Merge ready
+        uses: mohist/merge-ready
+        repairLimit: 1
+        repairTask:
+          id: rebase-onto-base
+          title: Rebase onto base branch
+          uses: mohist/rebase
+          with:
+            baseBranch: ${{ repository.baseBranch }}
+            remote: origin
+            conflictResolver:
+              title: Resolve rebase conflicts
+              with:
+                description: "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes."
+
+  - stage: integrate
+    lockBehavior: sequential
+    resources:
+      - project-integration
+    tasks:
+      - id: integrate:spec-sync
+        title: Sync specs
+        uses: mohist/acp-agent
+        with:
+          session: integrate
+          prompt: ${{ prompts.spec-sync }}
+          agent: ${{ vars.agent }}
+      - id: integrate:archive-change
+        title: Archive change
+        uses: mohist/archive-change
+        with:
+          changeDir: ${{ openspecChangeDir }}
+      - id: integrate:rebase
+        title: Rebase branch
+        uses: mohist/rebase
+        with:
+          baseBranch: ${{ repository.baseBranch }}
+          remote: origin
+          squash: false
+          conflictResolver:
+            title: Resolve rebase conflicts
+            with:
+              description: "Resolve rebase conflicts, stage resolved files, and continue until the rebase completes."
+      - id: integrate:publish
+        title: Publish changes
+        uses: mohist/publish-via-pr
+        with:
+          source: ${{ workspace.branch }}
+          target: ${{ repository.baseBranch }}
+          remote: origin
+          message: "Complete issue #${{ issue.number }}"
+    checks:
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+        repairLimit: 1
+        repairTask:
+          id: fix-integrate-health
+          title: Fix integrate health
+          uses: mohist/acp-agent
+          with:
+            session: integrate
+            prompt: |
+              Fix the integrate-stage health failure reported by `git diff --check`.
+              Keep changes focused on whitespace and patch formatting issues.
+            agent: ${{ vars.agent }}
