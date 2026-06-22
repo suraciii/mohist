@@ -1,0 +1,96 @@
+{
+  "project": "mohist-local",
+  "description": "Runner 配置：slots 上收控制平面（定义态持久化 + 权威来源切换）+ Runner 全局化 + PATCH 配置 API",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Runner 定义态持久化层（表 + Store + EF migration）",
+      "spec": "specs/runner-management/spec.md#Runner definition state is persisted",
+      "description": "新增 Runner 定义态的数据持久化基础：RunnerRow 实体（Id/Slots/CreatedAt/UpdatedAt）、MohistDbContext 注册、RunnerDefinitionStore（提供 GetOrInitAsync(runnerId) 与 UpdateSlotsAsync(runnerId, slots)）、以及创建 Runners 表的 EF Core migration。GetOrInitAsync 对未知 runner 初始化 Slots=1 并落库。",
+      "acceptanceCriteria": [
+        "RunnerRow 实体定义包含 Id(PK)、Slots(int)、CreatedAt、UpdatedAt 列",
+        "MohistDbContext 注册 Runners DbSet 并配置映射（Id 设主键、Slots 为正整数）",
+        "RunnerDefinitionStore.GetOrInitAsync 对未知 runnerId 返回 Slots=1 并持久化该行，对已知 runnerId 返回已持久化的 Slots",
+        "RunnerDefinitionStore.UpdateSlotsAsync 落库新值并更新 UpdatedAt",
+        "新增的 EF migration（AddRunnerDefinitionTable）在空库与现有库上均能正向 apply 且生成 ModelSnapshot 一致",
+        "新增 Store 行为的单元测试覆盖：默认初始化、GetOrInit 幂等、UpdateSlots 持久化往返",
+        "dotnet build Mohist.sln 通过（TreatWarningsAsErrors 当 lint）"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerRow + MohistDbContext 注册 + RunnerDefinitionStore + EF migration + 单元测试",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "纯数据层，不涉及 grain 行为。匹配现有 AgentRow/AgentStore 范式但用真实列（slots 是标量容量契约）。"
+    },
+    {
+      "id": "T-002",
+      "title": "RunnerGrain 持久化 slots 权威来源 + write-through 缓存",
+      "spec": "specs/runner-management/spec.md#Persisted slots are the sole authoritative source for dispatch capacity",
+      "description": "把 RunnerGrain 的派发容量权威来源切换为持久化定义态：grain 持有 _slots 缓存，在 RegisterAsync/OnActivateAsync 经 RunnerDefinitionStore 加载；PollAsync 的 slot 上限（RunnerGrain.cs:133/150）改读缓存而非 _info.MaxWorkflowSlots；新增 UpdateAsync(slots) 做 write-through（先落库再更新缓存）与 GetSlotsAsync()。同步把两个外部容量消费点（AgentJobGrain.TryAssignToRunnerAsync:244、RunnerStatusService.ProjectRunnerAsync:58）改为从 grain 取 slots，registry 的 RunnerInfo.MaxWorkflowSlots 降级为非权威。",
+      "acceptanceCriteria": [
+        "RunnerGrain.PollAsync 的容量上界改读持久化 _slots 缓存，不再读 _info.MaxWorkflowSlots",
+        "RegisterAsync 首次接入经 GetOrInitAsync 加载并缓存 slots；OnActivateAsync 重激活时从 DB 重载",
+        "UpdateAsync(slots) write-through：先 UpdateSlotsAsync 落库，再更新内存缓存",
+        "GetSlotsAsync() 返回当前持久化 slots",
+        "runner 经 register/heartbeat 上报的 MaxWorkflowSlots 不再影响派发容量（spec: Reported MaxWorkflowSlots does not govern dispatch）",
+        "AgentJobGrain.TryAssignToRunnerAsync 的 maxSlots 改读 grain，不再读 runnerInfo.MaxWorkflowSlots",
+        "RunnerStatusService capacity view 的 slots 来源改读 grain",
+        "新增/更新测试：grain 回收重激活后 slots 不重置（修掉 capacity 易失根因）、UpdateAsync 后下一轮派发立即生效新容量、上报值被忽略、slot 不变量 |assignedWorkflows| ≤ slots 成立",
+        "既有 lifecycle/ownership/global-uniqueness 行为保持（回归）：offline 不接新 work、只执行 claim 过的 workflow",
+        "更新 WorkflowGrainTestHelpers 等共享测试辅助以适配新 slots 来源",
+        "dotnet build Mohist.sln 通过，受影响 server 测试通过"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerGrain/IRunnerGrain slots 缓存与 write-through + GetSlotsAsync + AgentJobGrain/RunnerStatusService 来源切换 + 测试更新",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "保留 RunnerInfo.MaxWorkflowSlots 字段（runner 线兼容，非权威）。这是修掉 capacity 易失结构性根因的核心任务。"
+    },
+    {
+      "id": "T-003",
+      "title": "Runner 全局化——移除 project scope 路由",
+      "spec": "specs/runner-management/spec.md#Runner is a global execution resource",
+      "description": "去掉 Runner 的 project scope：RunnerGrain 移除 _projectId 与 RunnerRegistryKey() 分支，registry 路由恒为 RunnerRegistryKeys.Global。把所有 registry 消费点迁移到 Global（RunnerStatusService:22、AgentRoutes:65-66 双查、OpencodeRoutes:25、RunnerIdentityRoutes:18、RunnerWorkspaceClient:115、AgentJobGrain:215-218），并简化 RunnerRegistryGrain.ListEligibleRunnersAsync 为返回 global 全量（去掉跨 registry 合并）。保留 RunnerInfo.ProjectId 与请求字段（非权威、线兼容），保留 BacklogProjectIdsAsync 的跨 project round-robin 公平认领。",
+      "acceptanceCriteria": [
+        "RunnerGrain 不再持有 _projectId，registry 路由恒为 Global",
+        "所有 registry 消费点（RunnerStatusService/AgentRoutes/OpencodeRoutes/RunnerIdentityRoutes/RunnerWorkspaceClient/AgentJobGrain）统一使用 RunnerRegistryKeys.Global，无 project-scoped registry 路径残留",
+        "RunnerRegistryGrain.ListEligibleRunnersAsync 不再做 global/project 跨 registry 合并，直接返回当前 registry 全量",
+        "global runner 仍跨所有 project backlog round-robin 公平认领（BacklogProjectIdsAsync global 分支行为不变）",
+        "RunnerInfo.ProjectId 与 RunnerRegisterRequest/RunnerHeartbeatRequest 的 ProjectId 字段保留（非权威）",
+        "更新受影响测试：RunnerRegistrySpecs、RunnerBindingSpecs、BacklogSpecs、RuntimeEntrySpecs 等移除 project-scoped registry 断言、改为 global 断言并通过",
+        "dotnet build Mohist.sln 通过，受影响 server 测试通过"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerGrain 去项目化 + 全 registry 消费点迁移 Global + ListEligibleRunnersAsync 简化 + 测试更新",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "与 T-002 共改 RunnerGrain 与 AgentJobGrain，故序列在后避免冲突。RunnerRegistryKeys.ForProject/GrainKey.RunnerRegistry(projectId) 调用点清零后，helper 可标 Obsolete 或删除（见 design Open Questions）。"
+    },
+    {
+      "id": "T-004",
+      "title": "PATCH slots 配置 API",
+      "spec": "specs/http-api/spec.md#Runner slots configuration endpoint",
+      "description": "在 RunnerRoutes.cs 的 /api/runner/{runnerId} 组下新增 MapPatch 端点：body { slots: int }，校验 slots 为正整数（否则 400），调用 RunnerGrain.UpdateAsync(slots)（write-through），返回更新后的定义态视图 { runnerId, slots }。",
+      "acceptanceCriteria": [
+        "PATCH /api/runner/{runnerId} 接受 { slots } body，调用 RunnerGrain.UpdateAsync 并返回 { runnerId, slots }",
+        "slots 非正整数时返回 400 且持久化值不变",
+        "PATCH 成功后下一轮派发周期使用新容量（与 T-002 的 write-through 缓存协同）",
+        "新增 API 测试覆盖：合法更新往返、非正值拒绝、响应反映新值",
+        "dotnet build Mohist.sln 通过，受影响 server 测试通过"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerRoutes MapPatch 端点 + 请求/响应 record + API 测试",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "调用 grain 而非直接写 DB，确保与 grain 缓存一致（design Decision 5）。UI 配置入口由 #214 详情页承载，不在本任务范围。"
+    }
+  ]
+}

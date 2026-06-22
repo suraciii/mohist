@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -40,6 +41,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
             .UseSqlite(connectionString));
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();

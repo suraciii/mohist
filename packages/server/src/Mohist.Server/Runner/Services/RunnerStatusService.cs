@@ -19,7 +19,7 @@ public class RunnerStatusService
 
     public async Task<IReadOnlyList<RunnerStatusView>> GetRunnersAsync(string projectId)
     {
-        var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
+        var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
 
         var eligible = await registry.ListEligibleRunnersAsync(projectId);
 
@@ -40,7 +40,7 @@ public class RunnerStatusService
             return null;
         }
 
-        var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
+        var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var eligible = await registry.ListEligibleRunnersAsync(projectId);
         var info = eligible.FirstOrDefault(r => string.Equals(r.RunnerId, runnerId, StringComparison.Ordinal));
         if (info is null)
@@ -55,9 +55,14 @@ public class RunnerStatusService
     {
         var runnerGrain = _grainFactory.GetGrain<IRunnerGrain>(info.RunnerId);
         RunnerRuntimeState? runtime = null;
+        int? slots = null;
         try
         {
             runtime = await runnerGrain.GetRuntimeStateAsync();
+            // Slots come from the runner grain (persisted definition state),
+            // not from the runner-reported MaxWorkflowSlots field on the
+            // registry RunnerInfo. The grain is the single source of truth.
+            slots = await runnerGrain.GetSlotsAsync();
         }
         catch
         {
@@ -68,12 +73,22 @@ public class RunnerStatusService
         var connectionState = DeriveConnectionState(info.RunnerId);
         var status = DeriveStatus(info, runtime, connectionState, now);
 
-        var scope = string.IsNullOrWhiteSpace(info.ProjectId)
-            ? new RunnerScopeView("global")
-            : new RunnerScopeView("project", info.ProjectId, null);
+        // Runners are global execution resources (issue-222 Decision 4): the
+        // RunnerInfo.ProjectId field is preserved on the wire for runner-line
+        // compatibility but does not bind the runner to any project. The
+        // scope view is therefore always "global".
+        var scope = new RunnerScopeView("global");
 
-        var capacity = runtime is not null
-            ? new RunnerCapacityView(runtime.ActiveWorks.Count, RunnerCapacity.Normalize(info.MaxWorkflowSlots))
+        var activeWorkflowCount = runtime is not null
+            ? runtime.ActiveWorks
+                .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow)
+                .Select(w => w.OwnerId)
+                .Distinct(StringComparer.Ordinal)
+                .Count()
+            : 0;
+
+        var capacity = runtime is not null && slots.HasValue
+            ? new RunnerCapacityView(activeWorkflowCount, slots.Value)
             : null;
 
         var activeWorks = ProjectActiveWorks(runtime?.ActiveWorks);

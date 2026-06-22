@@ -24,8 +24,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
             runnerId,
             ["spec/*"],
             "test-host",
-            TestProjectId(checkWork.WorkflowRunId),
-            MaxWorkflowSlots: RunnerCapacity.DefaultMaxWorkflowSlots));
+            TestProjectId(checkWork.WorkflowRunId)));
 
         workflow = Grains.GetGrain<Mohist.Server.Workflow.Grains.IWorkflowGrain>(checkWork.WorkflowRunId);
 

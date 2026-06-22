@@ -66,7 +66,14 @@ public abstract class WorkflowGrainSpecs
     {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, MaxWorkflowSlots: maxWorkflowSlots));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
+        {
+            // The runner-reported MaxWorkflowSlots field is non-authoritative.
+            // Tests that want a non-default capacity must update the
+            // persisted definition state via UpdateAsync.
+            await runner.UpdateAsync(maxWorkflowSlots);
+        }
         return runnerId;
     }
 
@@ -156,8 +163,33 @@ public abstract class WorkflowGrainSpecs
         db.BacklogStates.RemoveRange(db.BacklogStates);
         await db.SaveChangesAsync();
 
+        // The in-memory backlog directory accumulates one entry per
+        // project that ever enqueued a workflow in this test silo. Without
+        // resetting it, RunnerGrain.BacklogProjectIdsAsync walks an
+        // ever-growing list of project backlogs on every poll and the
+        // per-poll grain-call cost eventually exceeds the 30s test timeout.
+        _fixture.ClearBacklogDirectory();
+
+        // The global runner registry is shared across every test in this
+        // collection. Without resetting it, tests that submit agent jobs
+        // see work claimed by stale runners registered in earlier specs.
+        await ClearGlobalRunnerRegistryAsync();
+
         var management = Grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
+    }
+
+    protected async Task ClearRunnerRegistryAsync(string registryKey)
+    {
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(registryKey);
+        var ids = await registry.ListRunnerIdsAsync();
+        foreach (var id in ids)
+            await registry.UnregisterAsync(id);
+    }
+
+    protected async Task ClearGlobalRunnerRegistryAsync()
+    {
+        await ClearRunnerRegistryAsync(RunnerRegistryKeys.Global);
     }
 
     protected async Task EnqueueWorkflowForTestAsync(string workflowId, string? projectId = null)
@@ -223,8 +255,7 @@ public abstract class WorkflowGrainSpecs
             runnerId,
             ["spec/*"],
             "test-host",
-            TestProjectId(_workflowId),
-            MaxWorkflowSlots: RunnerCapacity.DefaultMaxWorkflowSlots));
+            TestProjectId(_workflowId)));
     }
 
     protected async Task ReportAsync(string runnerId, string workId, string status, string? message = null)

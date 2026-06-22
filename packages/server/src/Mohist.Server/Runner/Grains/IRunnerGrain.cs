@@ -17,6 +17,23 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
     Task<RunnerInfo?> GetInfoAsync();
+
+    /// <summary>
+    /// Returns the current persisted dispatch capacity (slots). Sourced
+    /// exclusively from the control-plane definition state — a value
+    /// reported by the runner process via register/heartbeat SHALL NOT
+    /// influence the returned value.
+    /// </summary>
+    [AlwaysInterleave]
+    Task<int> GetSlotsAsync();
+
+    /// <summary>
+    /// Updates the persisted dispatch capacity (slots). Write-through:
+    /// the value is persisted to the definition store before the in-memory
+    /// cache is updated, so the next dispatch cycle honors the new value
+    /// without requiring the runner process to re-register or restart.
+    /// </summary>
+    Task UpdateAsync(int slots);
 }
 
 public static class RunnerCapacity
@@ -36,6 +53,12 @@ public record RunnerInfo(
     string[]? CoderModels = null,
     string Kind = "external",
     DateTimeOffset? RegisteredAt = null,
+    /// <summary>
+    /// Reported dispatch capacity from the runner process. Non-authoritative:
+    /// the persisted definition state (queried via <see cref="IRunnerGrain.GetSlotsAsync"/>)
+    /// is the sole source of dispatch capacity. This field is preserved for
+    /// runner-line compatibility and registry telemetry only.
+    /// </summary>
     int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null);

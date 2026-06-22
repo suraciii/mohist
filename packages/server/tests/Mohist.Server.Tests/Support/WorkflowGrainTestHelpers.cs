@@ -69,7 +69,14 @@ public static class WorkflowGrainTestHelpers
     {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, MaxWorkflowSlots: maxWorkflowSlots));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
+        {
+            // The runner-reported MaxWorkflowSlots field is non-authoritative.
+            // Tests that want a non-default capacity must update the
+            // persisted definition state via UpdateAsync.
+            await runner.UpdateAsync(maxWorkflowSlots);
+        }
         return runnerId;
     }
 
@@ -142,6 +149,18 @@ public static class WorkflowGrainTestHelpers
         db.BacklogStates.RemoveRange(db.BacklogStates);
         await db.SaveChangesAsync();
 
+        // The in-memory backlog directory accumulates one entry per
+        // project that ever enqueued a workflow in this test silo. Without
+        // resetting it, RunnerGrain.BacklogProjectIdsAsync walks an
+        // ever-growing list of project backlogs on every poll and the
+        // per-poll grain-call cost eventually exceeds the 30s test timeout.
+        // The directory is registered as a singleton in both the in-process
+        // test silo and the integration web host; resetting through the
+        // IGrainFactory's ServiceProvider works for both.
+        var serviceProvider = (grains as IServiceProvider)?.GetService(typeof(IWorkflowBacklogDirectory))
+            as IWorkflowBacklogDirectory;
+        serviceProvider?.Clear();
+
         var management = grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
     }
@@ -191,8 +210,7 @@ public static class WorkflowGrainTestHelpers
             runnerId,
             ["spec/*"],
             "test-host",
-            TestProjectId(workflowId),
-            MaxWorkflowSlots: RunnerCapacity.DefaultMaxWorkflowSlots));
+            TestProjectId(workflowId)));
 
         for (var attempt = 0; attempt < 100; attempt++)
         {

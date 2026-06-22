@@ -42,7 +42,11 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var projectId = _workflowId is null ? "test-project" : TestProjectId(_workflowId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, MaxWorkflowSlots: maxWorkflowSlots));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
+        {
+            await runner.UpdateAsync(maxWorkflowSlots);
+        }
         return runnerId;
     }
 

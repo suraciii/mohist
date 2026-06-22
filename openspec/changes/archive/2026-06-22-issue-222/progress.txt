@@ -1,0 +1,230 @@
+## Codebase Patterns
+
+- **EF table conventions**: real columns for control-plane scalar data (`AgentRow` was JSON blob, but new tables with structured scalars use real columns + a DB-level check constraint, e.g. `CK_Runners_Slots_Positive`). Migrations live in `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/`. Each migration has a `.cs` and a `.Designer.cs` (snapshot at that point); `MohistDbContextModelSnapshot.cs` is the current snapshot. Generated via `dotnet ef migrations add <Name> --project ... --startup-project ... --no-build`. Tests use `Mohist:SqliteConnectionString` env or `MOHIST_DB_PATH` for actual migration runs.
+- **Store location**: per-aggregate persistence boundary under `Infrastructure/Data/<Aggregate>/<Row>Store.cs`. Row entity is a POCO; the Store class wraps `IDbContextFactory<MohistDbContext>` and uses short-lived `await using` contexts per call. Register with `services.AddScoped<...Store>()` in `MohistServiceRegistration.ConfigureMohistServices`. Test scaffolding: `IDbContextFactory<MohistDbContext>` wrapper around `DbContextOptions<MohistDbContext>` with `UseSqlite($tmp/db-{guid}.db)` + `EnsureCreated()` is the lightweight unit-test pattern (see `AgentSessionStoreSpecs`).
+- **Test trait categorization**: every spec tagged with `[Trait(Traits.Speed.Name, Traits.Speed.Unit|Grain|Service|Integration)]` and `[Trait(Traits.Sut.Name, Traits.Sut.<Context>)]`. New runner data-layer specs are `Speed=Unit, Sut=Runner`. Spec file location: `packages/server/tests/Mohist.Server.Tests/Specs/<Context>/<Layer>/<Name>Specs.cs`. New runner data tests live in `Specs/Runner/Data/`.
+- **Migration verification**: to confirm migration works on both empty and existing DBs, run `dotnet ef database update` against an empty `MOHIST_DB_PATH`, then against a DB pre-migrated to `20260619142739_AddProjectIssueTemplates` (the prior migration) and confirm `Runners` table only appears after the new migration. EF's `MohistDbContextModelSnapshot.cs` plus the generated `.Designer.cs` should both contain the same `RunnerRow` definition (check by `grep -n "RunnerRow" ...` and read both blocks).
+- **DB-side invariant enforcement**: scalar invariants (e.g. `Slots > 0`) get a CHECK constraint at the model level via `entity.ToTable(t => t.HasCheckConstraint(...))`. SQLite emits it as `CONSTRAINT "CK_..." CHECK ("Slots" > 0)`. The store layer also validates in code so non-positive values throw `ArgumentOutOfRangeException` before hitting the DB.
+- **GetOrInit-style idempotency**: read row, if missing insert with defaults and persist; catch `DbUpdateException` (concurrent insert) and fall back to a re-read. Pattern used for new entity initialization without explicit transactions.
+- **Solution build gate**: `dotnet build Mohist.sln --nologo` runs `TreatWarningsAsErrors` (0 Warning(s) / 0 Error(s) is the bar). Web assets built via a `BeforeTargets=Build` msbuild target, so the build pulls `packages/web` artifacts.
+- **Grain capacity check semantics**: `RunnerGrain.PollAsync` checks `_slots` only before claiming **from the backlog**. Work already assigned to the runner is dequeued unconditionally. Therefore capacity tests must leave extra workflows in the backlog (do not `AssignWorkflowToRunnerAsync` for them) when asserting the slot bound.
+- **WorkflowGrain collection test isolation**: the `WorkflowGrainFixture` cluster is shared across `[Collection("WorkflowGrain")]` specs, and `InMemoryWorkflowBacklogDirectory` accumulates project ids across specs (never cleared). Tests that assume "no eligible runners" or "no backlogs to claim" must call `WorkflowGrainSpecs.ClearGlobalRunnerRegistryAsync()` AND `ClearBacklogAsync()` before submitting work. With T-003 there is no cross-registry merge, but stale registrations and pending workflow enqueue across specs are the dominant source of cross-test pollution.
+- **Runner globalization (issue-222)**: `RunnerGrain` has no `_projectId`. Registry routing is unconditionally `RunnerRegistryKeys.Global`. `RunnerRegistryGrain.ListEligibleRunnersAsync(projectId)` ignores its argument and returns the registry's full contents (kept on the interface for call-site compatibility). `RunnerInfo.ProjectId` and the request `ProjectId` field are preserved on the wire for runner-line compatibility only — they are NOT used for routing or filtering. `RunnerRegistryKeys.ForProject` and `GrainKey.RunnerRegistry` are marked `[Obsolete]` (no compile-time errors) so cross-PR merges don't conflict; delete them after the rollout settles.
+- **Project-scoped assertion removal**: any spec that asserted `scope.type == "project"` must change to `scope.type == "global"` (a runner whose `RunnerInfo.ProjectId` is set is still recorded as a global resource). `RunnerScopeView` lost its `ProjectId`/`ProjectName` fields because the view is always global; consumers that depended on those fields (none in server, none in web) would need updates.
+- **xUnit `[Collection("WorkflowGrain")]` flake**: tests `RunnerBindingSpecs.Poll_WhenRegistryEntryMissing_ReRegistersRunnerPresence` and `RunnerDefinitionStateSpecs.UpdateAsync_WriteThrough_PersistsAndNextDispatchHonorsNewCapacity` occasionally time out (30s) when run as part of a large batch against the shared `WorkflowGrainFixture` cluster, but always pass in isolation. The trigger is accumulated state from many other specs (more registered runners and projects → `PollAsync` takes longer to walk the backlog claim loop); the call is not actually deadlocked. Tests should remain isolated by clearing registry + backlog at the start; do not chase this flake by adding sleeps inside `PollAsync`.
+
+---
+
+## Task T-002: RunnerGrain 持久化 slots 权威来源 + write-through 缓存
+
+- **What was implemented**
+  - `RunnerGrain` now holds an `int? _slots` cache that is the sole authoritative dispatch capacity. It is hydrated from `RunnerDefinitionStore.GetOrInitAsync` in `OnActivateAsync` and `RegisterAsync`, and updated via write-through in `UpdateAsync(int slots)` (persist to DB first, then update cache).
+  - `IRunnerGrain` gained `GetSlotsAsync()` and `UpdateAsync(int slots)`. `GetSlotsAsync` is `[AlwaysInterleave]` for hot-path reads; `UpdateAsync` validates positive values.
+  - `MaxWorkflowSlots` on `RunnerInfo` was documented as non-authoritative and is no longer normalized/used by `RunnerGrain`.
+  - `AgentJobGrain.TryAssignToRunnerAsync` now reads slots via `runner.GetSlotsAsync()` instead of `runnerInfo.MaxWorkflowSlots`.
+  - `RunnerStatusService.ProjectRunnerAsync` now reads slots via `runnerGrain.GetSlotsAsync()` instead of normalizing `info.MaxWorkflowSlots`.
+  - `WorkflowGrainSpecs.RegisterRunnerAsync`/`RegisterRunnerForProjectAsync` and `WorkflowGrainTestHelpers.RegisterRunnerForProjectAsync` were updated to call `UpdateAsync(maxWorkflowSlots)` when non-default capacity is desired, since the `MaxWorkflowSlots` field on the register record is ignored.
+  - Shared test helpers: `GrainTestConfig` registers `RunnerDefinitionStore` for the Orleans test silo; `WorkflowGrainSpecs` added `ClearRunnerRegistryAsync`/`ClearGlobalRunnerRegistryAsync` helpers.
+  - New grain spec file `RunnerDefinitionStateSpecs.cs` covers: default slots=1 and ignored reported `MaxWorkflowSlots`; `UpdateAsync` write-through and next-cycle dispatch; slot survival across grain deactivation/reactivation; persisted slot bound enforcement; offline runner rejection.
+  - `RunnerStatusProjectionSpecs` gained a capacity-view test proving `RunnerStatusService` uses persisted slots and ignores the reported value.
+  - `AgentJobGrainSpecs` sensitive tests now clear the global registry before asserting "no eligible runner" to avoid cross-class pollution.
+
+- **Files changed**
+  - `packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs`
+  - `packages/server/src/Mohist.Server/Runner/Grains/IRunnerGrain.cs`
+  - `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs`
+  - `packages/server/src/Mohist.Server/Runner/Services/RunnerStatusService.cs`
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Workflow/WorkflowGrainSpecs.cs`
+  - `packages/server/tests/Mohist.Server.Tests/Support/WorkflowGrainTestHelpers.cs`
+  - `packages/server/tests/Mohist.Server.Tests/Support/GrainTestConfig.cs`
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Agent/Grain/AgentJobGrainSpecs.cs`
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs`
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerDefinitionStateSpecs.cs` (new)
+
+- **Learnings for future tasks**
+  - **Decisions made**
+    - Kept `_slots` as an in-memory cache inside `RunnerGrain` rather than reading the DB per dispatch; `OnActivateAsync` reloads it, fixing the capacity-volatility root cause.
+    - `GetSlotsAsync()` returns `MaxWorkflowSlots` which falls back to `RunnerCapacity.DefaultMaxWorkflowSlots` if the cache is somehow null, but normal activation/population always sets it.
+  - **Gotchas discovered**
+    - `PollAsync` enforces the slot bound **only before claiming from the backlog**; assigned work is dequeued regardless of capacity. Capacity tests must not pre-assign more workflows than the bound being tested.
+    - The `[Collection("WorkflowGrain")]` shared cluster retains global runners across spec classes. Tests that assert "no eligible runner" must explicitly clear the global registry (helper added) or they will see runners from earlier specs.
+    - `RunnerRegistryGrain.ListEligibleRunnersAsync` currently merges global + project registries, which is the source of the cross-test leakage and will be removed in T-003.
+  - **Patterns / API shapes established**
+    - Write-through update pattern: `await _definitions.UpdateSlotsAsync(...); _slots = value;` inside a single grain call.
+    - Test helper pattern for non-default capacity: register with default, then `await runner.UpdateAsync(capacity)`.
+  - **Cross-task invariants**
+    - `RunnerInfo.MaxWorkflowSlots` remains on the wire/record for runner-line compatibility but must never be used for dispatch capacity again.
+    - Any future code that needs a runner's capacity must call `IRunnerGrain.GetSlotsAsync()` or read the persisted `RunnerDefinitionStore`; `RunnerInfo.MaxWorkflowSlots` is telemetry-only.
+
+## Task T-001: Runner 定义态持久化层（表 + Store + EF migration）
+
+- **What was implemented**
+  - New `RunnerRow` POCO entity (`Id/Slots/CreatedAt/UpdatedAt`) under `Infrastructure/Data/Runner/RunnerRow.cs`.
+  - New `RunnerDefinitionStore` (`GetOrInitAsync(runnerId)`, `UpdateSlotsAsync(runnerId, slots)`) under `Infrastructure/Data/Runner/RunnerDefinitionStore.cs`. `GetOrInitAsync` initializes `Slots=1` for unknown runners; `UpdateSlotsAsync` rejects non-positive values (`ArgumentOutOfRangeException`) and unknown runners (`InvalidOperationException`), and bumps `UpdatedAt`.
+  - `MohistDbContext`: registered `DbSet<RunnerRow> Runners`, mapped to `Runners` table with PK `Id` (max 256), required `Slots` (int), required `CreatedAt`/`UpdatedAt`, and a `CK_Runners_Slots_Positive` check constraint.
+  - DI: `services.AddScoped<RunnerDefinitionStore>()` in `MohistServiceRegistration.ConfigureMohistServices`.
+  - EF migration `20260621073129_AddRunnerDefinitionTable` (.cs + .Designer.cs); `MohistDbContextModelSnapshot.cs` updated.
+  - 8 unit specs in `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Data/RunnerDefinitionStoreSpecs.cs` covering default init, idempotency, update round-trip across a fresh store instance, `UpdatedAt` bump, non-positive-value rejection, unknown-runner rejection, empty-id rejection.
+
+- **Files changed**
+  - `packages/server/src/Mohist.Server/Infrastructure/Data/Runner/RunnerRow.cs` (new)
+  - `packages/server/src/Mohist.Server/Infrastructure/Data/Runner/RunnerDefinitionStore.cs` (new)
+  - `packages/server/src/Mohist.Server/Infrastructure/Data/Db/MohistDbContext.cs` (Runners DbSet + entity mapping + using)
+  - `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs` (RunnerDefinitionStore DI + using)
+  - `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260621073129_AddRunnerDefinitionTable.cs` (new, generated)
+  - `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/20260621073129_AddRunnerDefinitionTable.Designer.cs` (new, generated)
+  - `packages/server/src/Mohist.Server/Infrastructure/Data/Migrations/MohistDbContextModelSnapshot.cs` (regenerated snapshot)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Data/RunnerDefinitionStoreSpecs.cs` (new)
+
+- **Learnings for future tasks**
+  - **Decisions made**
+    - `UpdateSlotsAsync` is a pure DB update (no upsert). Caller must `GetOrInitAsync` first; missing row throws `InvalidOperationException`. Reason: the PATCH API path will be grain-mediated (Decision 5) and will `GetOrInitAsync` before `UpdateSlotsAsync`; baking upsert into `UpdateSlotsAsync` would hide caller bugs.
+    - DB-level `CHECK ("Slots" > 0)` is the last line of defense; store validates earlier with `ArgumentOutOfRangeException` so callers get a typed exception, not a SQL constraint failure.
+    - Row columns: real columns rather than JSON state blob. Matches Decision 1 (slots is a scalar capacity contract).
+  - **Gotchas discovered**
+    - `dotnet-ef` global tool lives at `~/.dotnet/tools/dotnet-ef` (not on default `PATH` in this shell). Use `PATH="$HOME/.dotnet/tools:$PATH" dotnet ef ...`.
+    - `EnsureCreated()` in unit tests does NOT include migrations — for unit specs using per-test sqlite files this is fine and produces the same schema as the migration (verified). For service/integration specs that need the real migration pipeline, use `MohistDbFixture` (already calls `db.Database.Migrate()`).
+    - The migration `Designer.cs` and the current `ModelSnapshot.cs` are independent but must match for the model to be in sync — both generated by the same `dotnet ef migrations add` invocation, so this is automatic.
+  - **Patterns / API shapes established**
+    - `RunnerDefinitionStore` is the data-layer API for T-002 (`RunnerGrain` will receive it via DI and call `GetOrInitAsync` in `RegisterAsync`/`OnActivateAsync`; `UpdateSlotsAsync` from `UpdateAsync`). Keep the surface minimal: only what T-001 explicitly defines, no extra methods.
+    - `IRunnerGrain` will gain a `GetSlotsAsync()` (Decision 3) in T-002; `RunnerGrain` will hold an `int? _slots` cache field hydrated from `GetOrInitAsync`.
+  - **Cross-task invariants**
+    - Slot semantics: `1` is the only default; non-positive is invalid everywhere (store, future grain, future API).
+    - Definition state shape: `(Id, Slots, CreatedAt, UpdatedAt)` is the complete schema. Any future column must come with a migration; do not pack dynamic data into `State`.
+    - Write-through path (Decision 2) requires `UpdateSlotsAsync` to NOT be called directly by anyone except `RunnerGrain.UpdateAsync`. T-002 will own that comment; T-001 just leaves the API clean.
+
+---
+
+## Task T-003: Runner 全局化——移除 project scope 路由
+
+- **What was implemented**
+  - `RunnerGrain` no longer holds a `_projectId` field; registry routing in `RegisterAsync`, `UnregisterAsync`, `HeartbeatRepairAsync`, `UpdateBuildGitHashAsync`, `HandleTimeoutAsync`, and `TouchPresenceAsync` is unconditionally `RunnerRegistryKeys.Global`. The grain logs use "global resource" wording.
+  - `IRunnerRegistryGrain.ListEligibleRunnersAsync(projectId)` keeps the parameter for call-site compatibility but ignores it and returns the registry's full `_runners` contents (no cross-registry merge). The interface comment documents the contract change.
+  - All registry consumers migrated to `RunnerRegistryKeys.Global`: `RunnerStatusService` (both `GetRunnersAsync` and `GetRunnerAsync`), `AgentRoutes.ListAvailableRunnersAsync` (was the `project+global` double-lookup), `OpencodeRoutes` `/models` endpoint (now `Global.ListCoderModelsAsync` + `ListCoderModelVariantsAsync`), `RunnerIdentityRoutes` `/api/runner/identity`, `RunnerWorkspaceClient.ResolveConnectionIdAsync`, and `AgentJobGrain.TryDispatchCoreAsync`. The dead `MergeVariantMaps` helper in `OpencodeRoutes` was deleted.
+  - `RunnerStatusService.ProjectRunnerAsync` now produces `new RunnerScopeView("global")` unconditionally — `RunnerInfo.ProjectId` does not influence the scope view (kept on the wire for runner-line compatibility).
+  - `RunnerScopeView` record lost its `ProjectId` and `ProjectName` fields (only `Type` remains). Tests in `RunnerStatusApiSpecs` and `RunnerStatusProjectionSpecs` were updated to assert `"global"` scope regardless of the registration's `ProjectId`.
+  - `RunnerRegistryKeys.ForProject` and `GrainKey.RunnerRegistry` are marked `[Obsolete]` (no compile-time error) so call sites from in-flight branches do not break the build. They can be deleted after the rollout settles (see design Open Questions).
+  - `RunnerInfo.ProjectId` and `RunnerRegisterRequest.ProjectId` / `RunnerHeartbeatRequest.ProjectId` fields are preserved unchanged (non-authoritative, runner-line compatibility).
+  - `RunnerGrain.BacklogProjectIdsAsync` round-robin cross-project claim is unchanged — it remains the single dispatch path and now applies to all runners (the global branch is the only branch).
+  - New spec file `RunnerGlobalizationSpecs` (3 specs) explicitly covers the spec scenarios: `Register_RunnerIsRecordedInGlobalRegistry_NotInProjectRegistry`, `ListEligibleRunnersAsync_ReturnsAllRegisteredRunnersRegardlessOfProjectIdField`, and `Poll_RoundRobinClaimsAcrossProjectBacklogs` (uses `IWorkflowBacklogDirectory.RegisterProject` + 3 projects to exercise the cross-project round-robin claim path).
+  - `RunnerRegistrySpecs` extended (now 8 specs total) to assert that `ListEligibleRunnersAsync("test-project")` returns global runners, runners with matching `ProjectId`, AND runners with a different `ProjectId` — proving project-id filtering is gone.
+  - `RunnerBindingSpecs.Heartbeat_WhenRegistryEntryMissing_ReRegistersRunnerPresence` and `Poll_WhenRegistryEntryMissing_ReRegistersRunnerPresence` now `ClearGlobalRunnerRegistryAsync()` + `ClearBacklogAsync()` at the start to isolate from prior specs (was previously scoped by `ForProject(projectId)` which masked the pollution). `Register_ReRegisteringWithDifferentProjectId_KeepsRunnerInGlobalRegistry` replaces the old `Register_WhenRunnerScopeChanges_RemovesStaleRegistryPresence` (the "scope change" concept no longer applies).
+  - `RunnerStatusProjectionSpecs` updated: the "project-scoped runner" projection now expects scope `global`, and the "RunnerInfo with no ProjectId" assertion drops the now-redundant `Scope.ProjectId` null check.
+  - `RuntimeEntrySpecs` registry-key references switched from `RunnerRegistryKeys.ForProject(...)` to `RunnerRegistryKeys.Global`.
+- **Files changed**
+  - `packages/server/src/Mohist.Server/Runner/Grains/RunnerGrain.cs` (removed `_projectId`, all registry calls → `Global`)
+  - `packages/server/src/Mohist.Server/Runner/Grains/IRunnerRegistryGrain.cs` (interface comment + `ListEligibleRunnersAsync` body in `RunnerRegistryGrain.cs` simplified to return full registry)
+  - `packages/server/src/Mohist.Server/Runner/Grains/RunnerRegistryGrain.cs` (removed cross-registry merge, simplified `ListEligibleRunnersAsync`)
+  - `packages/server/src/Mohist.Server/Runner/Services/RunnerStatusService.cs` (scope view = always global; comment)
+  - `packages/server/src/Mohist.Server/Runner/Services/RunnerStatusView.cs` (`RunnerScopeView` collapsed to `(string Type)`)
+  - `packages/server/src/Mohist.Server/Runner/Services/SignalR/RunnerWorkspaceClient.cs` (registry key → `Global`)
+  - `packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs` (registry key → `Global`)
+  - `packages/server/src/Mohist.Server/Api/AgentRoutes.cs` (removed double-lookup, now single `Global.ListRunnersAsync`)
+  - `packages/server/src/Mohist.Server/Api/OpencodeRoutes.cs` (registry key → `Global`; deleted dead `MergeVariantMaps`)
+  - `packages/server/src/Mohist.Server/Api/RunnerIdentityRoutes.cs` (registry key → `Global`)
+  - `packages/server/src/Mohist.Server/Infrastructure/Orleans/GrainKey.cs` (`RunnerRegistry` marked `[Obsolete]`)
+  - `packages/server/src/Mohist.Server/Runner/Grains/IRunnerRegistryGrain.cs` (`RunnerRegistryKeys.ForProject` marked `[Obsolete]`)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerGlobalizationSpecs.cs` (new, 3 specs)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerRegistrySpecs.cs` (8 specs total — project-id-filtering removal)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerBindingSpecs.cs` (added `ClearGlobalRunnerRegistryAsync`/`ClearBacklogAsync` to two tests; renamed `Register_ReRegisteringWithDifferentProjectId_KeepsRunnerInGlobalRegistry`)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerStatusApiSpecs.cs` (3 scope assertions updated to `"global"`, renamed one test)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerStatusProjectionSpecs.cs` (scope assertions updated)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Grain/RunnerBuildIdentitySpecs.cs` (registry key → `Global`)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/RuntimeEntrySpecs.cs` (registry key → `Global`)
+- **Learnings for future tasks**
+  - **Decisions made**
+    - `RunnerScopeView` collapsed rather than keeping a `ProjectId` field that's always null. Rationale: keeping the field would invite future code to read it and reintroduce project-scoping; making the type itself single-purpose prevents that drift.
+    - `ListEligibleRunnersAsync(projectId)` kept the parameter instead of becoming parameterless. Rationale: the parameter documents the call-site intent (caller is asking on behalf of a project) and avoids a coordinated rename across 8 call sites in this PR.
+    - `RunnerRegistryKeys.ForProject` / `GrainKey.RunnerRegistry` kept with `[Obsolete]`. Rationale (from design Open Questions): avoids cross-PR merge conflicts; can delete once the rollout settles. Future contributors should grep for these and remove.
+  - **Gotchas discovered**
+    - The two flaky tests under `[Collection("WorkflowGrain")]` (`RunnerBindingSpecs.Poll_WhenRegistryEntryMissing_ReRegistersRunnerPresence` and `RunnerDefinitionStateSpecs.UpdateAsync_WriteThrough_PersistsAndNextDispatchHonorsNewCapacity`) fail intermittently when run as part of a large batch but always pass in isolation. The call is NOT deadlocked — `PollAsync` is still actively executing after 30s. The trigger is accumulated cross-test state: `InMemoryWorkflowBacklogDirectory` never removes projects, so by the time the flaky tests run there are many registered projects and `BacklogProjectIdsAsync` enumerates them. Each backlog grain claim takes time, and `PollAsync` may not finish within 30s. The mitigation (clearing registry + backlog at the start of these tests) was already in place from T-002; the flake remains but is unrelated to T-003.
+    - The `RunnerBindingSpecs.Heartbeat_WhenRegistryEntryMissing_ReRegistersRunnerPresence` test now reliably passes because `HeartbeatAsync` does NOT walk the backlog (it only calls `TouchPresenceAsync`), while `PollAsync` does. Hence one is flaky and the other is not.
+    - `IRunnerGrain` is `[Reentrant]`, which means `PollAsync` calls interleave with `RegisterAsync`/`UnregisterAsync` calls on the same grain. The fact that `Total Enqueued=13; Total processed=13` in the failure diagnostic shows that other calls completed normally while one `PollAsync` was in flight — confirming the `PollAsync` call is just slow, not deadlocked.
+    - When tests register many `RunnerInfo` records across many specs, the in-memory `RunnerRegistryGrain` dict grows. `ClearGlobalRunnerRegistryAsync()` clears it but the `RunnerGrain` activations persist. That's fine — they're only re-touched if a test specifically targets them.
+  - **Patterns / API shapes established**
+    - Single-source registry access: every consumer now calls `grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)`. No more project-vs-global branching at call sites.
+    - `RunnerScopeView` = `record(string Type)` only. Any future "more than global" scope must be a new type, not a field on this one.
+    - Test pattern for "this test wants zero global runners": `await ClearGlobalRunnerRegistryAsync(); await ClearBacklogAsync();` at the very top.
+    - Test pattern for "this test wants fresh state across projects": same two-line clear, since `InMemoryWorkflowBacklogDirectory` and the project backlog DB rows both accumulate.
+  - **Cross-task invariants**
+    - `RunnerInfo.ProjectId` (and request-side `ProjectId`) MUST remain on the wire — runner processes depend on the field for telemetry. Future API additions (UI filters, capacity reports) MAY read it but MUST NOT use it for routing, dispatch eligibility, or capacity attribution.
+    - The `[Collection("WorkflowGrain")]` cluster + shared in-memory directory are the source of all cross-spec pollution. Any new test added to this collection MUST call both clears before doing work that depends on "no runners" or "no backlog projects", or risk flaky failures.
+    - T-004 (PATCH slots) calls `IRunnerGrain.UpdateAsync` which already writes through (T-002). No further grain-layer work needed for T-004; T-004 is a pure API + validation layer.
+
+- **REST data envelope convention**: routes returning a payload MUST use `ApiResults.Ok(payload)` (produces `{ success: true, data }`) rather than `Results.Ok(payload)` (raw object) so the `ApiTestClient.PatchDataAsync<T>`/`PostDataAsync<T>` envelope unwrapping works. Failure routes use `ApiResults.BadRequest(...)`. This matches every other data-returning route in `RunnerRoutes.cs` (`/poll`, `/report`) and the entire `ProjectRoutes.cs` PATCH/POST pattern.
+- **`MapPatch("")` on a group resolves to the group root**: `app.MapGroup("/api/runner/{runnerId}")` + `group.MapPatch("", ...)` resolves to `PATCH /api/runner/{runnerId}` — same pattern as `ProjectRoutes.byRef.MapPatch("", ...)` for `PATCH /api/projects/{projectId}`. Do NOT use `MapPatch("/")` (that produces a trailing slash mismatch) or `MapPatch("/{runnerId}")` (that would conflict with the route parameter).
+
+---
+
+## Task T-004: PATCH slots 配置 API
+
+- **What was implemented**
+  - `RunnerRoutes.MapPatch("")` on `/api/runner/{runnerId}` group: accepts `{ slots: int }` body, validates `slots > 0` (400 on failure), calls `IRunnerGrain.UpdateAsync(slots)` (write-through via T-002), and returns `{ runnerId, slots }` in the `ApiResults.Ok` envelope.
+  - Added request record `RunnerSlotsPatchRequest(int Slots)` and response record `RunnerSlotsPatchResponse(string RunnerId, int Slots)` at the bottom of `RunnerRoutes.cs`.
+  - The route guard rejects non-positive values; the grain's own `ArgumentOutOfRangeException` is also caught and converted to the same 400 to keep the contract uniform if the guard is ever bypassed.
+  - New API spec file `RunnerSlotsApiSpecs.cs` (5 tests) under `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/`, all using `[Collection("MohistIntegration")]` and `Traits.Speed.Integration` / `Traits.Sut.Runner`. Covers: positive update round-trip (DB + grain cache), next-dispatch-cycle capacity honored via grain cache after PATCH, zero rejected with 400 + persisted value unchanged, negative rejected with 400 + persisted value unchanged, overwrite reflects new value.
+- **Files changed**
+  - `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs` (added `MapPatch("")` handler + two records)
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerSlotsApiSpecs.cs` (new, 5 tests)
+- **Learnings for future tasks**
+  - **Decisions made**
+    - Route sits at the group root (`PATCH /api/runner/{runnerId}`) rather than under a sub-path like `/slots` — matches REST convention of PATCH on the resource root for a single attribute change. Added as a Codebase Pattern note so future contributors don't try `MapPatch("/")` or `MapPatch("/{runnerId}")`.
+    - Response uses the standard `ApiResults.Ok(...)` envelope (`{ success: true, data: { runnerId, slots } }`) instead of a raw object — `ApiTestClient.PatchDataAsync<T>` already unwraps envelopes, and the rest of the API surface uses the same shape.
+    - Two layers of validation (route guard + grain `ArgumentOutOfRangeException` catch) are intentional belt-and-suspenders so any future caller (e.g. a grain internal call or a different route) cannot bypass the invariant.
+  - **Gotchas discovered**
+    - Initial implementation used `Results.Ok(new RunnerSlotsPatchResponse(...))` which returns the raw object without an envelope — tests that read `payload.GetProperty("success")` failed with `KeyNotFoundException`. Switched to `ApiResults.Ok(...)` (matches `/poll`, `/report`, every `ProjectRoutes` PATCH).
+    - The `[Collection("WorkflowGrain")]` flake documented in Codebase Patterns still affects `RunnerBindingSpecs.Poll_WhenRegistryEntryMissing_ReRegistersRunnerPresence` and `RunnerDefinitionStateSpecs.UpdateAsync_WriteThrough_PersistsAndNextDispatchHonorsNewCapacity` when run as part of a larger batch — confirmed both pass in isolation. Not introduced or worsened by T-004; the new API tests use a different collection (`MohistIntegration`) and are not affected.
+- **Patterns / API shapes established**
+  - `PATCH /api/runner/{runnerId}` body `{ slots: int }` → 200 `{ success, data: { runnerId, slots } }`; 400 `{ success: false, code: "bad_request", error }` when `slots <= 0`. Persisted `slots` unchanged on 400 (verified by direct DB read in tests).
+  - Tests pattern: integration collection (`MohistIntegration`) + direct sqlite DB read via `IDbContextFactory<MohistDbContext>` to assert the persisted row matches the response. This complements the grain-level spec which already covers the write-through semantics.
+- **Cross-task invariants**
+  - `IRunnerGrain.UpdateAsync(int slots)` remains the single mutation point for persisted slots (no other code paths may call `RunnerDefinitionStore.UpdateSlotsAsync` directly — see T-002 invariants). The PATCH route enforces this.
+  - Spec requirement "PATCH 成功后下一轮派发周期使用新容量" is satisfied by the existing T-002 write-through cache and verified in test `PatchSlots_NextDispatchCycleHonorsNewCapacity` — the grain's `GetSlotsAsync()` reflects the new value immediately after PATCH, so the next `PollAsync` call enforces it. No additional dispatch cycle plumbing is required.
+
+## Task T-003 verification: re-run on already-implemented globalization
+
+- **Context**
+  The workflow rescheduled T-003 (status: `running` on issue #222 build stage) on top of the previous T-003 implementation (commits `55fdd7211`, `74400686a`) plus the post-T-003 follow-up commit `5ae77c994` (AgentRoutes persisted-slots view + `IWorkflowBacklogDirectory.Clear()` + per-test directory reset in `WorkflowGrainSpecs.ClearTestStateAsync` and `WorkflowGrainFixture.ClearBacklogDirectory`). The branch was clean and the implementation already satisfied every acceptance criterion.
+- **What was verified**
+  - `dotnet build Mohist.sln --nologo` → 0 Warning(s), 0 Error(s).
+  - `dotnet test --no-build --filter "FullyQualifiedName~Runner"` → 245 passed, 2 skipped (pre-existing AgentSession skips).
+  - `dotnet test --no-build --filter "FullyQualifiedName~RunnerSlotsApi"` → 5 passed (T-004 PATCH API specs).
+  - `dotnet test --no-build --filter "FullyQualifiedName~RunnerStatusApi|FullyQualifiedName~RuntimeEntry"` → 25 passed (covers T-003 scope-view change + global registry path).
+  - `dotnet test --no-build --filter "FullyQualifiedName~Spec"` (full server suite) → 2148 passed, 8 skipped, **3 failed in batch but all 3 pass in isolation** (`IssueCreationSpecs.Cancel_ActiveIssue_ClearsBacklogLease_AndRunnerAssignment`, `IssueCreationSpecs.StartWorkflow_UsesProjectDefaultTemplate`, `IssueWorkflowProductLoopSpecs.IssueStart_RunnerCompletesWorkflow_IssueBecomesDone`). These match the `[Collection("WorkflowGrain")]` PollAsync slowness flake documented in Codebase Patterns — `PollAsync` walks the in-memory backlog directory and, as more projects accumulate across specs in a single test run, the per-poll grain-call cost grows past the 30s test timeout. The post-T-003 commit `5ae77c994` adds a `Clear()` method on `IWorkflowBacklogDirectory` and resets it from `WorkflowGrainSpecs.ClearTestStateAsync` and `WorkflowGrainFixture.ClearBacklogDirectory`, which *shortens* the window but does not eliminate it (the directory is reset between tests, but the persisted project backlog DB rows + the `WorkflowGrainFixture` cluster's grain activations accumulate within the same batch).
+- **No code changes required for T-003 acceptance criteria**
+  Re-checked every AC line against the current tree:
+  - `RunnerGrain` has no `_projectId` field; all 6 registry call sites (`RegisterAsync`, `UnregisterAsync`, `HeartbeatRepairAsync`, `UpdateBuildGitHashAsync`, `HandleTimeoutAsync`, `TouchPresenceAsync`) use `RunnerRegistryKeys.Global`.
+  - `RunnerStatusService.cs:22/43`, `AgentRoutes.cs:71` (was the project+global double-lookup), `OpencodeRoutes.cs:18`, `RunnerIdentityRoutes.cs:18`, `RunnerWorkspaceClient.cs:115`, `AgentJobGrain.cs:215` — all migrated to `Global`.
+  - `RunnerRegistryGrain.ListEligibleRunnersAsync` returns `_runners.Values.ToList()` directly; no cross-registry merge.
+  - `RunnerGrain.BacklogProjectIdsAsync` + `ClaimFromBacklogAsync` unchanged — cross-project round-robin claim preserved (verified by `RunnerGlobalizationSpecs.Poll_RoundRobinClaimsAcrossProjectBacklogs`, which registers 3 projects, queues one workflow per project, bumps the runner's `UpdateAsync(3)` capacity, and asserts `PollAsync` claims across all three).
+  - `RunnerInfo.ProjectId` and `RunnerRegisterRequest.ProjectId` / `RunnerHeartbeatRequest.ProjectId` fields preserved on the wire (non-authoritative).
+  - Tests updated as required: `RunnerRegistrySpecs` (8 specs covering project-id filtering removal), `RunnerBindingSpecs` (clears global registry + backlog at start of two previously-flaky tests; renamed `Register_ReRegisteringWithDifferentProjectId_KeepsRunnerInGlobalRegistry`), `RunnerGlobalizationSpecs` (new, 3 specs covering the spec's WHEN/THEN scenarios), `RunnerStatusApiSpecs` (3 scope assertions → `"global"`), `RunnerStatusProjectionSpecs` (scope assertions → `"global"`), `RuntimeEntrySpecs` (registry key → `Global`), `RunnerBuildIdentitySpecs` (registry key → `Global`).
+- **Decisions made in this re-run**
+  - No-op for T-003 — committed a verification log entry only. The implementation is stable; touching it would re-open merges with T-002/T-004 for no behavioural gain.
+- **Cross-task invariants reaffirmed**
+  - `[Obsolete(error: false)]` on `RunnerRegistryKeys.ForProject` and `GrainKey.RunnerRegistry` keeps the helpers compilable for any cross-PR code that hasn't migrated yet; both have zero call sites in this repo, so they can be deleted after the rollout settles (matches design Open Questions and T-003's "Patterns / API shapes established" decision from the prior pass).
+  - `AgentStatusResponse.Create` in `AgentRoutes.cs` (added in commit `5ae77c994`) reads `runnerGrain.GetSlotsAsync()` per runner instead of `RunnerCapacity.Normalize(r.MaxWorkflowSlots)`. This extends T-002's "slots single source of truth" invariant into the public API view as well — the `RunnerStatusResponse.Max` field returned by `/api/projects/{projectRef}/agent/status` now reflects persisted slots, which is exactly what the spec scenario "Configuration takes effect without runner restart" requires the next dispatch cycle to honour. The change was made in a separate commit on this branch and is consistent with T-003's globalization stance.
+- **Files changed in this re-run**
+  - `openspec/changes/issue-222/progress.txt` (this entry).
+
+---
+
+## Task T-004 verification: re-run on already-implemented PATCH slots API
+
+- **Context**
+  The workflow rescheduled T-004 (status: `running` on issue #222 build stage) on top of the previous T-004 implementation (commit `2c7c17c5b`). The branch was clean and the implementation already satisfied every acceptance criterion.
+- **What was verified**
+  - `dotnet build Mohist.sln --nologo` → 0 Warning(s), 0 Error(s).
+  - `dotnet test --no-build --filter "FullyQualifiedName~RunnerSlotsApi"` → 5 passed.
+  - `dotnet test --no-build --filter "FullyQualifiedName~Runner"` → 245 passed, 2 skipped (pre-existing AgentSession skips).
+- **No code changes required for T-004 acceptance criteria**
+  Re-checked every AC line against the current tree:
+  - `RunnerRoutes.cs:67-85` `MapPatch("")` handler accepts `RunnerSlotsPatchRequest`, validates `Slots > 0` (400 on failure), calls `IRunnerGrain.UpdateAsync(req.Slots)` (write-through via T-002), and returns `RunnerSlotsPatchResponse` in the `ApiResults.Ok` envelope (`{ success, data: { runnerId, slots } }`).
+  - `RunnerRoutes.cs:69-70` returns 400 on `req.Slots <= 0` *before* touching the grain, so the persisted value cannot change on a rejected PATCH (verified by `PatchSlots_Zero_Returns400AndPersistsValueUnchanged` and `PatchSlots_Negative_Returns400AndPersistsValueUnchanged` which read the row directly after the 400).
+  - The grain's own `ArgumentOutOfRangeException` (from `RunnerGrain.UpdateAsync` when `slots <= 0`) is caught and converted to the same 400 — belt-and-suspenders so any future caller that bypasses the route guard still respects the invariant.
+  - `RunnerSlotsPatchRequest` and `RunnerSlotsPatchResponse` records declared at `RunnerRoutes.cs:281-282` next to the other route DTOs.
+  - The five integration specs in `RunnerSlotsApiSpecs.cs` cover: positive update round-trip (response + DB + grain cache), next-dispatch-cycle capacity honored via grain cache after PATCH (uses `IRunnerGrain.GetSlotsAsync()` directly — same code path `PollAsync` reads), zero rejected with 400 + persisted value unchanged, negative rejected with 400 + persisted value unchanged, overwrite reflects new value.
+- **Decisions made in this re-run**
+  - No-op for T-004 — committed a verification log entry only. The implementation is stable; the only test gap would be a true cross-`PollAsync` integration test (claim one workflow, PATCH `slots=1` from `2`, assert the second claim is rejected). This is already covered by `RunnerDefinitionStateSpecs.UpdateAsync_WriteThrough_PersistsAndNextDispatchHonorsNewCapacity` at the grain level, so the PATCH spec layer focuses on the API contract (envelope shape, 400 contract, persisted-row invariant) and on the write-through cache surfacing the new value to subsequent `GetSlotsAsync()` calls — which is exactly what `PollAsync` reads.
+- **Files changed in this re-run**
+  - `openspec/changes/issue-222/progress.txt` (this entry).

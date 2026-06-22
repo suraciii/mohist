@@ -122,7 +122,7 @@ public class RunnerBuildIdentitySpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, BuildGitHash: hash));
 
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListRunnersAsync();
 
         var info = Assert.Single(runners, r => r.RunnerId == runnerId);

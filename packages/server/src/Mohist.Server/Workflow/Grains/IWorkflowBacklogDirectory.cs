@@ -6,6 +6,7 @@ public interface IWorkflowBacklogDirectory
 {
     void RegisterProject(string projectId);
     IReadOnlyList<string> ListProjects();
+    void Clear();
 }
 
 public sealed class InMemoryWorkflowBacklogDirectory : IWorkflowBacklogDirectory
@@ -19,4 +20,6 @@ public sealed class InMemoryWorkflowBacklogDirectory : IWorkflowBacklogDirectory
     }
 
     public IReadOnlyList<string> ListProjects() => _projects.Keys.Order(StringComparer.Ordinal).ToArray();
+
+    public void Clear() => _projects.Clear();
 }

@@ -1,6 +1,4 @@
-using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Config;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SystemInfo;
 
@@ -15,14 +13,10 @@ public static class OpencodeRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/opencode")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("/models", async (HttpContext context, IGrainFactory grains) =>
+        group.MapGet("/models", async (IGrainFactory grains) =>
         {
-            var project = context.GetResolvedProject();
-
-            var globalRegistry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            var models = (await globalRegistry.ListCoderModelsAsync())
-                .Concat(await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(project.Id)).ListCoderModelsAsync())
-                .ToArray();
+            var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+            var models = (await registry.ListCoderModelsAsync()).ToArray();
 
             var visibleModels = models
                 .Where(model => !string.IsNullOrWhiteSpace(model))
@@ -30,10 +24,7 @@ public static class OpencodeRoutes
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            var globalVariants = await globalRegistry.ListCoderModelVariantsAsync();
-            var projectVariants = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(project.Id)).ListCoderModelVariantsAsync();
-
-            var modelVariants = MergeVariantMaps(globalVariants, projectVariants);
+            var modelVariants = await registry.ListCoderModelVariantsAsync();
 
             return ApiResults.Ok(new { models = visibleModels, modelVariants });
         });
@@ -54,48 +45,5 @@ public static class OpencodeRoutes
         });
 
         return app;
-    }
-
-    private static IReadOnlyDictionary<string, string[]> MergeVariantMaps(
-        IReadOnlyDictionary<string, string[]> global,
-        IReadOnlyDictionary<string, string[]> project)
-    {
-        if ((global is null || global.Count == 0) && (project is null || project.Count == 0))
-            return new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-
-        var merged = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-        foreach (var source in new[] { global, project })
-        {
-            if (source is null) continue;
-            foreach (var entry in source)
-            {
-                if (string.IsNullOrWhiteSpace(entry.Key))
-                    continue;
-
-                var variants = (entry.Value ?? [])
-                    .Where(v => !string.IsNullOrWhiteSpace(v))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToArray();
-
-                if (variants.Length == 0)
-                    continue;
-
-                if (merged.TryGetValue(entry.Key, out var existing))
-                {
-                    merged[entry.Key] = existing
-                        .Concat(variants)
-                        .Distinct(StringComparer.Ordinal)
-                        .ToArray();
-                }
-                else
-                {
-                    merged[entry.Key] = variants;
-                }
-            }
-        }
-
-        return merged
-            .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
     }
 }

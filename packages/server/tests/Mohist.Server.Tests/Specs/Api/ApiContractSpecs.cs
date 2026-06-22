@@ -97,6 +97,14 @@ public class ApiContractSpecs
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
         await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
+        // Capacity.Max is summed across all currently-registered global
+        // runners, so we need a clean registry to assert against this
+        // runner's contribution in isolation. Drain anything left over
+        // from prior tests in this collection.
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+
         var runnerId = $"slot-runner-{Guid.NewGuid():N}";
 
         try
@@ -106,8 +114,15 @@ public class ApiContractSpecs
                 capabilities = Array.Empty<string>(),
                 hostname = "test-host",
                 projectId,
-                maxWorkflowSlots = 4,
             });
+
+            // The runner-reported maxWorkflowSlots field is intentionally
+            // ignored for dispatch capacity (issue-222 T-002). Capacity is
+            // sourced from the persisted definition state and only mutates
+            // through PATCH /api/runner/{runnerId}. This test exercises the
+            // PATCH path: register defaults the runner to 1 slot, then
+            // PATCH bumps it to 4 and the agent status view reflects it.
+            await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 4 });
 
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{projectId}/agent/status");
 

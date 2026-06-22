@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Label;
+using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Project.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
@@ -52,6 +53,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowArtifactPendingUploadRow> WorkflowArtifactPendingUploads { get; set; } = null!;
     public DbSet<LabelDefinitionRow> LabelDefinitions { get; set; } = null!;
     public DbSet<ProjectIssueTemplateRow> ProjectIssueTemplates { get; set; } = null!;
+    public DbSet<RunnerRow> Runners { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -469,6 +471,17 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.Key }).IsUnique();
+        });
+
+        modelBuilder.Entity<RunnerRow>(entity =>
+        {
+            entity.ToTable("Runners");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Slots).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.ToTable(t => t.HasCheckConstraint("CK_Runners_Slots_Positive", "\"Slots\" > 0"));
         });
     }
 

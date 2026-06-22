@@ -22,8 +22,9 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
     Task<IReadOnlyList<RunnerInfo>> ListAllAsync();
 
     /// <summary>
-    /// Returns eligible runners for a project: global runners and runners scoped to the selected project.
-    /// Runners scoped only to other projects are excluded.
+    /// Returns all registered runner info entries. Runners are global resources;
+    /// the projectId parameter is retained for call-site compatibility but no
+    /// longer filters the result set.
     /// </summary>
     Task<IReadOnlyList<RunnerInfo>> ListEligibleRunnersAsync(string projectId);
 }
@@ -32,5 +33,6 @@ public static class RunnerRegistryKeys
 {
     public const string Global = "__global__";
 
+    [Obsolete("Runner registries are global only; use RunnerRegistryKeys.Global.", error: false)]
     public static string ForProject(string projectId) => projectId;
 }
