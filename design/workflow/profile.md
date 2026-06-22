@@ -5,7 +5,8 @@ style: ["极简，只给目标态。"]
 
 # Workflow Profile
 
-> profile = **template**（选哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。prompts 不属 profile → `prompt-management.md`。
+> profile = **template**（选哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。prompts 不属 profile → [`prompt-management.md`](../prompt-management.md)。
+> action input/output 契约见 `actions.md`。内置 workflow 行为见 `builtin-workflows.md`。
 
 ## 架构
 

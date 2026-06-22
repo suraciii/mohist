@@ -141,7 +141,7 @@ POST   /api/projects/{id}/issues/{n}/workflow-profile/prompts/{key}/preview
 
 本文是目标态。当前代码与目标的偏差：
 
-- **概念错位**：现文档/代码把 prompt 当作 "workflow profile 的第三块"。目标：prompt 属于 **Project Space 上下文**（project-scoped），不属于 profile（profile 只有 template + variables，见 [`workflow-profile.md`](workflow-profile.md)）。
+- **概念错位**：现文档/代码把 prompt 当作 "workflow profile 的第三块"。目标：prompt 属于 **Project Space 上下文**（project-scoped），不属于 profile（profile 只有 template + variables，见 [`workflow/profile.md`](workflow/profile.md)）。
 - **issue 级 prompt 无场景，应移除**：现状有 issue 级 prompt 覆盖（`IssueWorkflowProfileRow.Prompts` + `/issues/{n}/workflow-profile/prompts` API）。目标：砍掉——per-issue 的差异走变量（issue body 等）流进标准 prompt，不需要换模板；issue 级**变量**保留（那是数据，不是模板）。
 - **寄生在 Workflow**：prompt 机制（`FilePromptLoader` / `PromptTemplateEngine` / builtins）现躺在 `Workflow/Services/Prompts/`。目标：挪进 **Project Space**（内置 .prompt 作为 loader fallback 留在源码/应用配置），供 runner 和未来独立 Agent 共用，不依赖 Workflow。
 - **解析时机与执行方**：现状是 `WorkflowGrain`（server）在 dispatch 时 `LoadPrompt` 解析、文本塞进 payload。目标：dispatch 只带 key，由 runner/action 在执行那一刻按需解析（见上方「与 Workflow 的关系」）。
