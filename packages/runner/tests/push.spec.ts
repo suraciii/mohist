@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
+import { createDefaultRegistry } from "../src/actions/registry.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
@@ -65,6 +66,12 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
 }
 
 describe("mohist/push", () => {
+  it("DefaultRegistry_RegistersPushAction", () => {
+    const registry = createDefaultRegistry()
+
+    expect(registry.resolve("mohist/push")).toBe(pushAction)
+  })
+
   it("FastForwardPush_AdvancesRemoteTargetViaRefspec", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")

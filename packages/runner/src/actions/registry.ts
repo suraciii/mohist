@@ -9,6 +9,7 @@ import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
 import { git as defaultGit } from "./git.js"
 import { publishViaPrAction } from "./publish-via-pr.js"
+import { pushAction } from "./push.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 type GitRunner = typeof defaultGit
@@ -45,6 +46,7 @@ export function createDefaultRegistry() {
   registry.register("mohist/rebase", rebaseAction)
   registry.register("mohist/rebase-status", rebaseStatusAction)
   registry.register("mohist/merge-ready", mergeReadyAction)
+  registry.register("mohist/push", pushAction)
   registry.register("mohist/publish-via-pr", publishViaPrAction)
   return registry
 }
