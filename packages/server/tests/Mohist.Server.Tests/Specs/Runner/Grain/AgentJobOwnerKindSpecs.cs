@@ -32,7 +32,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: agentJobId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var result = await runner.AssignWorkAsync(dispatch);
+        var result = await runner.AssignAgentJobAsync(dispatch);
 
         Assert.Equal(RunnerWorkAssignmentStatus.Assigned, result.Status);
     }
@@ -51,7 +51,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkId: workId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var result = await runner.AssignWorkAsync(dispatch);
+        var result = await runner.AssignAgentJobAsync(dispatch);
 
         Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
         Assert.Equal("invalid-work", result.Reason);
@@ -71,7 +71,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: "agent-job-missing-work",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var result = await runner.AssignWorkAsync(dispatch);
+        var result = await runner.AssignAgentJobAsync(dispatch);
 
         Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
         Assert.Equal("invalid-work", result.Reason);
@@ -93,7 +93,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: agentJobId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        await runner.AssignWorkAsync(dispatch);
+        await runner.AssignAgentJobAsync(dispatch);
 
         var agentJob = Grains.GetGrain<IAgentJobGrain>(agentJobId);
         await agentJob.AssignRunnerAsync(runnerId, workId);
@@ -124,7 +124,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: agentJobId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        await runner.AssignWorkAsync(dispatch);
+        await runner.AssignAgentJobAsync(dispatch);
 
         var agentJob = Grains.GetGrain<IAgentJobGrain>(agentJobId);
         Assert.Equal(AgentJobStatus.Pending, await agentJob.GetStatusAsync());
@@ -149,12 +149,12 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: agentJobId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        await runner.AssignWorkAsync(dispatch);
+        await runner.AssignAgentJobAsync(dispatch);
 
         var agentJob = Grains.GetGrain<IAgentJobGrain>(agentJobId);
         await agentJob.AssignRunnerAsync(runnerId, workId);
 
-        var report = await runner.ReportResultAsync(dispatch, workId, new WorkResult("completed", "ok"));
+        var report = await runner.ReportAgentJobResultAsync(agentJobId, workId, new WorkResult("completed", "ok"));
 
         Assert.True(report.Tracked);
         Assert.Equal(WorkDispatchOwnerKinds.AgentJob, report.OwnerKind);
@@ -179,7 +179,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkId: "agent-work-missing",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var report = await runner.ReportResultAsync(dispatch, "agent-work-missing", new WorkResult("completed"));
+        var report = await runner.ReportAgentJobResultAsync(string.Empty, "agent-work-missing", new WorkResult("completed"));
 
         Assert.False(report.Tracked);
         Assert.Equal("missing-agent-job", report.Reason);
@@ -201,7 +201,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: agentJobId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        var report = await runner.ReportResultAsync(dispatch, workId, new WorkResult("completed"));
+        var report = await runner.ReportAgentJobResultAsync(agentJobId, workId, new WorkResult("completed"));
 
         Assert.False(report.Tracked);
         Assert.Equal("job-rejected:not-running", report.Reason);
@@ -214,7 +214,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task AssignWork_WorkflowDispatch_StillAccepted()
+    public async Task AssignAgentJobAsync_WorkflowDispatch_IsRejected()
     {
         var runnerId = await RegisterRunnerAsync("workflow-accept-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -224,9 +224,10 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkId: "wf-work-1",
             OwnerKind: WorkDispatchOwnerKinds.Workflow);
 
-        var result = await runner.AssignWorkAsync(dispatch);
+        var result = await runner.AssignAgentJobAsync(dispatch);
 
-        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, result.Status);
+        Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
+        Assert.Equal("invalid-work", result.Reason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -242,7 +243,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             WorkId: "wf-work-1",
             OwnerKind: WorkDispatchOwnerKinds.Workflow);
 
-        var result = await runner.AssignWorkAsync(dispatch);
+        var result = await runner.AssignAgentJobAsync(dispatch);
 
         Assert.Equal(RunnerWorkAssignmentStatus.Rejected, result.Status);
         Assert.Equal("invalid-work", result.Reason);
@@ -251,7 +252,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task IsWorkRunnable_WorkflowArm_AsksWorkflowGrain_ForClaimedRunnerStatusAndWorkId()
+    public async Task IsWorkRunnable_WorkflowArm_AsksWorkflowGrain_ForAssignedRunnerStatusAndWorkId()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
         var runnerId = _runnerId!;
@@ -260,10 +261,10 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         var (work, _) = await PollWorkAnyAsync();
         Assert.NotNull(work);
 
-        var claimed = await workflow.GetClaimedRunnerIdAsync();
+        var assigned = await workflow.GetAssignedRunnerIdAsync();
         var status = await workflow.GetRunStatusAsync();
         var currentWorkId = await workflow.GetCurrentWorkIdAsync();
-        Assert.Equal(runnerId, claimed);
+        Assert.Equal(runnerId, assigned);
         Assert.Equal("Running", status);
         Assert.Equal(work.WorkId, currentWorkId);
     }
@@ -294,16 +295,16 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: "orphan-agent-job-from-workflow-arm",
             OwnerKind: WorkDispatchOwnerKinds.Workflow);
 
-        // Assigning will go on the workflow-arm branch.
-        var assignment = await runner.AssignWorkAsync(dispatch);
-        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assignment.Status);
+        // Workflow dispatches are no longer accepted through the AgentJob
+        // delivery arm.
+        var assignment = await runner.AssignAgentJobAsync(dispatch);
+        Assert.Equal(RunnerWorkAssignmentStatus.Rejected, assignment.Status);
 
         // The agent-job grain must still be in Pending (never transitioned
         // by the workflow arm).
         Assert.Equal(AgentJobStatus.Pending, await orphanAgentJob.GetStatusAsync());
 
-        // Keep the workflow alive through tear-down so it doesn't deallocate.
-        await ReportAsync(runnerId, "wf-arm-neg", "wf-arm-neg-work", new WorkResult("completed", "ok"));
+        Assert.Equal("invalid-work", assignment.Reason);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -316,13 +317,13 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
         var (work, _) = await PollWorkAnyAsync();
-        var report = await runner.ReportResultAsync(work, work.WorkId, new WorkResult("completed"));
+        var report = await runner.ReportWorkflowResultAsync(work.WorkflowRunId, work.WorkId, new WorkResult("completed"));
 
         Assert.True(report.Tracked);
         Assert.Equal(work.WorkflowRunId, report.WorkflowRunId);
         Assert.Equal("reported", report.Reason);
-        Assert.Null(report.OwnerKind);
-        Assert.Null(report.OwnerId);
+        Assert.Equal(WorkDispatchOwnerKinds.Workflow, report.OwnerKind);
+        Assert.Equal(work.WorkflowRunId, report.OwnerId);
         Assert.Equal("Running", report.WorkflowStatus);
 
         var orphanAgentJob = Grains.GetGrain<IAgentJobGrain>("workflow-report-orphan-agent-job");
@@ -346,7 +347,7 @@ public class AgentJobOwnerKindSpecs : WorkflowGrainSpecs
             AgentJobId: agentJobId,
             OwnerKind: WorkDispatchOwnerKinds.AgentJob);
 
-        await runner.AssignWorkAsync(dispatch);
+        await runner.AssignAgentJobAsync(dispatch);
 
         var state = await runner.GetRuntimeStateAsync();
         Assert.Single(state.ActiveWorks);

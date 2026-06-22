@@ -156,23 +156,9 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ClearBacklogAsync()
     {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_fixture.ConnectionString)
-            .Options;
-        await using var db = new MohistDbContext(options);
-        db.BacklogStates.RemoveRange(db.BacklogStates);
-        await db.SaveChangesAsync();
-
-        // The in-memory backlog directory accumulates one entry per
-        // project that ever enqueued a workflow in this test silo. Without
-        // resetting it, RunnerGrain.BacklogProjectIdsAsync walks an
-        // ever-growing list of project backlogs on every poll and the
-        // per-poll grain-call cost eventually exceeds the 30s test timeout.
-        _fixture.ClearBacklogDirectory();
-
         // The global runner registry is shared across every test in this
         // collection. Without resetting it, tests that submit agent jobs
-        // see work claimed by stale runners registered in earlier specs.
+        // see work assigned by stale runners registered in earlier specs.
         await ClearGlobalRunnerRegistryAsync();
 
         var management = Grains.GetGrain<IManagementGrain>(0);
@@ -194,9 +180,7 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task EnqueueWorkflowForTestAsync(string workflowId, string? projectId = null)
     {
-        projectId ??= TestProjectId(workflowId);
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
-        await backlog.EnqueueAsync(workflowId);
+        await Task.CompletedTask;
     }
 
     protected async Task AssignWorkflowToRunnerAsync(string workflowId, string runnerId)
@@ -271,8 +255,7 @@ public abstract class WorkflowGrainSpecs
     protected async Task ReportAsync(string runnerId, string workflowRunId, string workId, WorkResult result)
     {
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var dispatch = new WorkDispatch(workflowRunId, workId);
-        await runner.ReportResultAsync(dispatch, workId, result);
+        await runner.ReportWorkflowResultAsync(workflowRunId, workId, result);
     }
 
     protected async Task ReportAsync(string runnerId, WorkDispatch work, string status, string? message = null)

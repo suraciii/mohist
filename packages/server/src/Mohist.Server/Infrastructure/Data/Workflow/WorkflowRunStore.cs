@@ -121,13 +121,53 @@ public class WorkflowRunStore : IWorkflowRunStore
     {
         try
         {
-            return JSON.Deserialize<WorkflowRun>(json);
+            return JSON.Deserialize<WorkflowRun>(MigrateAssignmentJson(json));
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException(
                 $"Failed to deserialize workflow run state. The persisted JSON is corrupt.", ex);
         }
+    }
+
+    public static string MigrateAssignmentJson(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object
+            || root.TryGetProperty("assignment", out _)
+            || !root.TryGetProperty("claim", out var oldAssignment)
+            || oldAssignment.ValueKind != JsonValueKind.Object)
+            return json;
+
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            foreach (var property in root.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "claim", StringComparison.Ordinal))
+                {
+                    writer.WritePropertyName("assignment");
+                    writer.WriteStartObject();
+                    foreach (var oldProperty in oldAssignment.EnumerateObject())
+                    {
+                        if (string.Equals(oldProperty.Name, "claimedAt", StringComparison.Ordinal))
+                            writer.WritePropertyName("assignedAt");
+                        else
+                            writer.WritePropertyName(oldProperty.Name);
+                        oldProperty.Value.WriteTo(writer);
+                    }
+                    writer.WriteEndObject();
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 
     private static string WorkflowEventSource(string workflowRunId) =>

@@ -30,7 +30,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(rid2, checkWork, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(rid2);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -59,7 +59,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, check2, "build-ok");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -97,6 +97,6 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, c1, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
-        Assert.True(await runner.IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 }

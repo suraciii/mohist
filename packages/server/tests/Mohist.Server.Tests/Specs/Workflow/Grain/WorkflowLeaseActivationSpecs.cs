@@ -26,7 +26,7 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 
         workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
         var snapshot = await GetQuerier().GetStatusAsync(workflowId);
         var runningTask = snapshot!.Stages.Single().Tasks.Single();
         Assert.Equal("running", runningTask.Status);

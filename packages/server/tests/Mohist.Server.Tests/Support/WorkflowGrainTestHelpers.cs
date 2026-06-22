@@ -142,34 +142,13 @@ public static class WorkflowGrainTestHelpers
 
     public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)
     {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connectionString)
-            .Options;
-        await using var db = new MohistDbContext(options);
-        db.BacklogStates.RemoveRange(db.BacklogStates);
-        await db.SaveChangesAsync();
-
-        // The in-memory backlog directory accumulates one entry per
-        // project that ever enqueued a workflow in this test silo. Without
-        // resetting it, RunnerGrain.BacklogProjectIdsAsync walks an
-        // ever-growing list of project backlogs on every poll and the
-        // per-poll grain-call cost eventually exceeds the 30s test timeout.
-        // The directory is registered as a singleton in both the in-process
-        // test silo and the integration web host; resetting through the
-        // IGrainFactory's ServiceProvider works for both.
-        var serviceProvider = (grains as IServiceProvider)?.GetService(typeof(IWorkflowBacklogDirectory))
-            as IWorkflowBacklogDirectory;
-        serviceProvider?.Clear();
-
         var management = grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
     }
 
     public static async Task EnqueueWorkflowForTestAsync(IGrainFactory grains, string workflowId, string? projectId = null)
     {
-        projectId ??= TestProjectId(workflowId);
-        var backlog = grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
-        await backlog.EnqueueAsync(workflowId);
+        await Task.CompletedTask;
     }
 
     public static async Task AssignWorkflowToRunnerAsync(IGrainFactory grains, string workflowId, string runnerId)
@@ -228,8 +207,7 @@ public static class WorkflowGrainTestHelpers
     public static async Task ReportAsync(IGrainFactory grains, string runnerId, string workflowRunId, string workId, WorkResult result)
     {
         var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-        var dispatch = new WorkDispatch(workflowRunId, workId);
-        await runner.ReportResultAsync(dispatch, workId, result);
+        await runner.ReportWorkflowResultAsync(workflowRunId, workId, result);
     }
 
     public static async Task ReportAsync(IGrainFactory grains, string runnerId, WorkDispatch work, WorkResult result)

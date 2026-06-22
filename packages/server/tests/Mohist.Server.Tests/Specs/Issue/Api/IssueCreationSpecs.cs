@@ -1,8 +1,5 @@
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -12,7 +9,6 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.Infrastructure.Data.Workflow;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Issue.Api;
@@ -54,17 +50,6 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         using var scope = _services.CreateScope();
         var issues = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         return await issues.GetInfoAsync(projectId, number);
-    }
-
-    private async Task<WorkflowBacklogState?> LoadBacklogStateAsync(string projectId)
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connectionString)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        var row = await db.BacklogStates.FindAsync(projectId);
-        return row is null ? null : JsonSerializer.Deserialize<WorkflowBacklogState>(row.State);
     }
 
     private async Task<IReadOnlyList<StoredCloudEvent>> GetWorkflowEventsAsync(string workflowRunId)
@@ -110,16 +95,11 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     [Fact]
     public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
-        // The runner is a global resource (issue-222 T-003) that claims
-        // from a shared project backlog. Prior tests in this collection
-        // leave runners registered, the in-memory backlog directory
-        // populated, and stale BacklogStates rows behind — all of which
-        // race with this test's poll. Reset all three.
+        // The runner is a global resource. Prior tests in this collection
+        // leave runners registered, which can race with this test's poll.
         var registry = _grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var staleId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleId);
-        var directory = _services.GetService<IWorkflowBacklogDirectory>();
-        directory?.Clear();
         await WorkflowGrainTestHelpers.ClearBacklogAsync(_grains, _connectionString);
 
         var project = await SetupProjectAsync();
@@ -168,16 +148,11 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     [Fact]
     public async Task StartWorkflow_UsesProjectDefaultTemplate()
     {
-        // The runner is a global resource (issue-222 T-003) that claims
-        // from a shared project backlog. Prior tests in this collection
-        // leave runners registered, the in-memory backlog directory
-        // populated, and stale BacklogStates rows behind — all of which
-        // race with this test's poll. Reset all three.
+        // The runner is a global resource. Prior tests in this collection
+        // leave runners registered, which can race with this test's poll.
         var registry = _grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var staleId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleId);
-        var directory = _services.GetService<IWorkflowBacklogDirectory>();
-        directory?.Clear();
         await WorkflowGrainTestHelpers.ClearBacklogAsync(_grains, _connectionString);
 
         var project = await SetupProjectAsync();
@@ -324,7 +299,7 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task Cancel_ActiveIssue_ClearsBacklogLease_AndRunnerAssignment()
+    public async Task Cancel_ActiveIssue_RemovesWorkflowFromRunnerPoll()
     {
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Cancelable");
@@ -356,8 +331,6 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         Assert.Equal("cancelled", info!.Status);
         Assert.Equal("cancelled", info.Health);
 
-        var backlog = await LoadBacklogStateAsync(project.Id);
-        Assert.True(backlog is null || (!backlog.Waiting.Contains(workflowRunId) && !backlog.All.Contains(workflowRunId)));
         Assert.Null(await runner.PollAsync());
 
         var events = await GetWorkflowEventsAsync(workflowRunId);

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -12,17 +11,14 @@ namespace Mohist.Server.Tests.Specs.Runner.Grain;
 
 /// <summary>
 /// Covers the spec requirement "Runner is a global execution resource":
-/// runner registration is bound to the global registry, and dispatch
-/// round-robins across every known project backlog. Per T-003 AC, the
+/// runner registration is bound to the global registry, and dispatch scans
+/// assignable workflow records across projects. Per T-003 AC, the
 /// project-scoped registry path is removed entirely; every consumer goes
 /// through the global path.
 /// </summary>
 public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
 {
     public RunnerGlobalizationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
-
-    private IWorkflowBacklogDirectory BacklogDirectory =>
-        _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IWorkflowBacklogDirectory>();
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
@@ -67,7 +63,7 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task Poll_RoundRobinClaimsAcrossProjectBacklogs()
+    public async Task Poll_GlobalRunnerAssignsAcrossProjects()
     {
         await ClearGlobalRunnerRegistryAsync();
         await ClearBacklogAsync();
@@ -75,10 +71,6 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
         var projectA = $"globalization-proj-a-{Guid.NewGuid():N}";
         var projectB = $"globalization-proj-b-{Guid.NewGuid():N}";
         var projectC = $"globalization-proj-c-{Guid.NewGuid():N}";
-
-        BacklogDirectory.RegisterProject(projectA);
-        BacklogDirectory.RegisterProject(projectB);
-        BacklogDirectory.RegisterProject(projectC);
 
         var workflowA = $"wf-a-{Guid.NewGuid():N}";
         var workflowB = $"wf-b-{Guid.NewGuid():N}";
@@ -91,7 +83,7 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
                 [new CheckDefinition("check-1", "Check 1", "spec/check")])
         ]);
 
-        async Task<string> EnqueueAsync(string workflowId, string projectId)
+        async Task<string> StartAssignableWorkflowAsync(string workflowId, string projectId)
         {
             var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
             await SeedWorkflowTemplateAsync(workflowId, def, projectId);
@@ -105,9 +97,9 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
             return workflowId;
         }
 
-        await EnqueueAsync(workflowA, projectA);
-        await EnqueueAsync(workflowB, projectB);
-        await EnqueueAsync(workflowC, projectC);
+        await StartAssignableWorkflowAsync(workflowA, projectA);
+        await StartAssignableWorkflowAsync(workflowB, projectB);
+        await StartAssignableWorkflowAsync(workflowC, projectC);
 
         var runnerId = $"globalized-rrobin-runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -116,27 +108,28 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
             ["spec/*"],
             "round-robin-host",
             null));
-        // Bump capacity to 3 so the global runner can hold one workflow per
-        // project backlog and exercise the round-robin claim path across all
-        // of them. The default of 1 would only let the runner pick a single
-        // workflow before its slot was full.
-        await runner.UpdateAsync(3);
+        // Bump capacity above the target count so unrelated assignable workflows
+        // left by other specs cannot fill every slot before this assertion sees
+        // all three projects.
+        await runner.UpdateAsync(20);
 
-        var claimed = new HashSet<string>(StringComparer.Ordinal);
-        var claimedWorkflowIds = new List<string>();
+        var assigned = new HashSet<string>(StringComparer.Ordinal);
+        var assignedWorkflowIds = new List<string>();
+        var expectedWorkflowIds = new HashSet<string>([workflowA, workflowB, workflowC], StringComparer.Ordinal);
 
-        for (var attempt = 0; attempt < 10; attempt++)
+        for (var attempt = 0; attempt < 50 && assigned.Count < expectedWorkflowIds.Count; attempt++)
         {
             var work = await runner.PollAsync();
             if (work is null) break;
-            Assert.Contains(work.WorkflowRunId, new[] { workflowA, workflowB, workflowC });
-            if (claimed.Add(work.WorkflowRunId))
-                claimedWorkflowIds.Add(work.WorkflowRunId);
+            if (!expectedWorkflowIds.Contains(work.WorkflowRunId))
+                continue;
+            if (assigned.Add(work.WorkflowRunId))
+                assignedWorkflowIds.Add(work.WorkflowRunId);
         }
 
-        Assert.Equal(3, claimed.Count);
-        Assert.Contains(workflowA, claimedWorkflowIds);
-        Assert.Contains(workflowB, claimedWorkflowIds);
-        Assert.Contains(workflowC, claimedWorkflowIds);
+        Assert.Equal(3, assigned.Count);
+        Assert.Contains(workflowA, assignedWorkflowIds);
+        Assert.Contains(workflowB, assignedWorkflowIds);
+        Assert.Contains(workflowC, assignedWorkflowIds);
     }
 }

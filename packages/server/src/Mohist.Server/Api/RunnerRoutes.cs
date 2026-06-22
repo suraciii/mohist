@@ -136,12 +136,9 @@ public static class RunnerRoutes
 
             var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.CapturedOutputs);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var dispatch = new WorkDispatch(
-                WorkflowRunId: req.WorkflowRunId ?? string.Empty,
-                WorkId: req.WorkId,
-                OwnerKind: ownerKind,
-                AgentJobId: req.AgentJobId);
-            var report = await runner.ReportResultAsync(dispatch, req.WorkId, result);
+            var report = string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
+                ? await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result)
+                : await runner.ReportWorkflowResultAsync(req.WorkflowRunId ?? string.Empty, req.WorkId, result);
 
             return Results.Ok(new RunnerReportResponse(
                 report.WorkflowRunId,

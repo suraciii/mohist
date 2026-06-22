@@ -56,7 +56,7 @@ public static class MohistDefaultWorkflowProjection
 
         return new MohistDefaultWorkflowState(
             issueStage,
-            RuntimeStatus(issueStage, attention, workflow.Status, workflow.ClaimedBy),
+            RuntimeStatus(issueStage, attention, workflow.Status, workflow.AssignedTo),
             ComputeBlockedReason(attention, workflow),
             approval,
             attention,
@@ -77,7 +77,7 @@ public static class MohistDefaultWorkflowProjection
         attention?.Message
         ?? (workflow?.Status == "failed" ? workflow.Failure?.Message : null);
 
-    private static string RuntimeStatus(string issueStatus, WorkflowAttention? attention, string? workflowStatus = null, string? claimedBy = null)
+    private static string RuntimeStatus(string issueStatus, WorkflowAttention? attention, string? workflowStatus = null, string? assignedBy = null)
     {
         if (issueStatus == "done") return "done";
         if (issueStatus == "cancelled") return "cancelled";
@@ -85,7 +85,7 @@ public static class MohistDefaultWorkflowProjection
         if (attention is not null) return "attention";
         return workflowStatus switch
         {
-            "running" when claimedBy is null => "queued",
+            "running" when assignedBy is null => "queued",
             "paused" => "paused",
             "failed" => "blocked",
             _ => "active",

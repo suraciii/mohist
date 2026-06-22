@@ -707,21 +707,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentSessionTranscriptTurns", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.BacklogStateRow", b =>
-                {
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ProjectId");
-
-                    b.ToTable("BacklogStates");
-                });
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.IssueWorkflowProfile", b =>
                 {
                     b.Property<string>("IssueId")
@@ -1004,6 +989,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AssignedRunnerId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.assignment.runnerId'), json_extract(State, '$.claim.runnerId'))", true);
+
                     b.Property<long>("ETag")
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
@@ -1013,13 +1003,22 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.metadata.annotations.projectId'), json_extract(State, '$.Metadata.Annotations.projectId'), json_extract(State, '$.Metadata.Annotations.ProjectId'))", true);
 
+                    b.Property<DateTime?>("CreatedAt")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(State, '$.metadata.createdAt')", true);
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("WorkflowRunId");
 
+                    b.HasIndex("AssignedRunnerId");
+
                     b.HasIndex("MetadataProjectId");
+
+                    b.HasIndex("MetadataProjectId", "AssignedRunnerId", "CreatedAt");
 
                     b.ToTable("WorkflowRuns");
                 });

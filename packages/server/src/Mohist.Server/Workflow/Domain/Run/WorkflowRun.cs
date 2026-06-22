@@ -33,14 +33,14 @@ public sealed class WorkflowRun
     public required WorkflowRunMetadata Metadata { get; set; }
     public WorkflowRunStatus Status { get; set; }
     /// <summary>
-    /// The single-runner invariant: at most one runner may claim this run
-    /// for its entire lifecycle. Once a <see cref="WorkflowClaimInfo"/> exists,
+    /// The single-runner invariant: at most one runner may be assigned this run
+    /// for its entire lifecycle. Once a <see cref="WorkflowAssignment"/> exists,
     /// its <c>RunnerId</c> is the unique runner identity for this run.
     /// A <c>Running</c> <see cref="TaskRun"/>'s <c>RunnerId</c> equals
-    /// <c>Claim.RunnerId</c> as a consequence of this invariant, not as
+    /// <c>Assignment.RunnerId</c> as a consequence of this invariant, not as
     /// an independently-kept-in-sync fact.
     /// </summary>
-    public WorkflowClaimInfo? Claim { get; set; }
+    public WorkflowAssignment? Assignment { get; set; }
     public string? CurrentStageId { get; set; }
     public required List<StageRun> Stages { get; init; }
     public DateTimeOffset? StartedAt { get; set; }
@@ -48,9 +48,10 @@ public sealed class WorkflowRun
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
     public DateTimeOffset? WorkspaceMaterializedAt { get; set; }
+    public WorkflowWorkDelivery? WorkDelivery { get; set; }
     public Dictionary<string, JsonElement> RuntimeVariables { get; init; } = new(StringComparer.Ordinal);
     public List<ApprovalFeedback> Feedback { get; set; } = new();
 
-    public bool IsClaimed => Claim is not null;
-    public string? ClaimedBy => Claim?.RunnerId;
+    public bool IsAssigned => Assignment is not null;
+    public string? AssignedTo => Assignment?.RunnerId;
 }

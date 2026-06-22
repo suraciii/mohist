@@ -665,18 +665,18 @@ public class AgentSessionQuerier
     /// <remarks>
     /// <see cref="AgentSession"/> is a peer aggregate, never owned by <see cref="WorkflowRun"/>.
     /// The association is established through a <see cref="TaskRun"/> session reference and
-    /// relies on the single-runner claim invariant: if the run is claimed, the session MUST
-    /// belong to the same runner (<see cref="WorkflowClaimInfo.RunnerId"/> == session.RunnerId)
+    /// relies on the single-runner assignment invariant: if the run is assigned, the session MUST
+    /// belong to the same runner (<see cref="WorkflowAssignmentInfo.RunnerId"/> == session.RunnerId)
     /// and the task identified by <see cref="AgentSessionQueryMetadataKeys.WorkId"/> (if running)
     /// MUST match the session's work item (the task whose reference links them).
-    /// When the run has no claim yet (<see cref="WorkflowRun.ClaimedBy"/> is null), any active
+    /// When the run has no assignment yet (<see cref="WorkflowRun.AssignedTo"/> is null), any active
     /// session known by workflow-run-id is provisionally accepted.
     /// </remarks>
     private static bool IsSessionAssociatedWithRun(WorkflowRun run, AgentSessionRecord session)
     {
-        if (run.ClaimedBy is null) return true;
+        if (run.AssignedTo is null) return true;
 
-        if (!string.Equals(run.ClaimedBy, session.Row.RunnerId, StringComparison.Ordinal))
+        if (!string.Equals(run.AssignedTo, session.Row.RunnerId, StringComparison.Ordinal))
             return false;
 
         var runningTask = run.Stages

@@ -66,7 +66,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         Assert.StartsWith("compile.", nextTask.WorkId);
         await ReportAsync(r3, nextTask.WorkId, "completed");
 
-        Assert.True(await Grains.GetGrain<IRunnerGrain>(r3).IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await Grains.GetGrain<IRunnerGrain>(r3).GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -86,7 +86,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         Assert.StartsWith("compile.", nextTask.WorkId);
         await ReportAsync(runnerId, nextTask.WorkId, "completed");
 
-        Assert.True(await Grains.GetGrain<IRunnerGrain>(runnerId).IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync()).Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -111,6 +111,6 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         Assert.StartsWith("compile.", nextTask.WorkId);
         await ReportAsync(r2, nextTask.WorkId, "completed");
 
-        Assert.True(await Grains.GetGrain<IRunnerGrain>(r2).IsAvailableAsync());
+        Assert.Equal(RunnerStatus.Online, (await Grains.GetGrain<IRunnerGrain>(r2).GetRuntimeStateAsync()).Status);
     }
 }

@@ -41,6 +41,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
             .UseSqlite(connectionString));
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
@@ -50,7 +51,6 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<WorkflowDispatchBuilder>();
         siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
-        siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();
         siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
         siloBuilder.Services.AddSingleton(eventBus);

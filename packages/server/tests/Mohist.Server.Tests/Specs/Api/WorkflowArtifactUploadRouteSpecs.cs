@@ -283,7 +283,7 @@ public class WorkflowArtifactUploadRouteSpecs
     }
 
     /// <summary>
-    /// Set up a workflow that has been started, claimed by a runner, and
+    /// Set up a workflow that has been started, assigned by a runner, and
     /// has had its first task polled — that is the only state in which
     /// <c>WorkflowGrain.GetActiveWorkAsync</c> returns a non-null view.
     /// Returns <c>(workflowRunId, workId, runnerId)</c> for the active task.

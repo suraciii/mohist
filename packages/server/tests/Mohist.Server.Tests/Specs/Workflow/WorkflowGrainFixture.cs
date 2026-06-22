@@ -4,7 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Workflow.Grains;
 using Orleans;
 using Orleans.TestingHost;
 using Xunit;
@@ -50,11 +49,4 @@ public class WorkflowGrainFixture : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    public void ClearBacklogDirectory()
-    {
-        if (Cluster is null) return;
-        var directory = Cluster.GetSiloServiceProvider(null)
-            .GetRequiredService<IWorkflowBacklogDirectory>();
-        directory.Clear();
-    }
 }

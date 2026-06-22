@@ -315,7 +315,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
+    public async Task IssueStart_GlobalRunnerAssignsProjectBacklogWork()
     {
         var projectName = $"global-runner-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName });
@@ -354,7 +354,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             return;
         }
 
-        Assert.Fail("Global runner did not claim project backlog work");
+        Assert.Fail("Global runner did not assignment project backlog work");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

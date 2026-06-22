@@ -11,7 +11,7 @@ namespace Mohist.Server.Agent.Grains;
 /// In-memory only (no <c>[PersistentState]</c>); non-reentrant so the backoff timer
 /// and <see cref="ReportResultAsync"/> cannot race on the lifecycle fields. Dispatches
 /// its work directly to an idle Runner via <see cref="IRunnerRegistryGrain"/>, never
-/// touching <c>IWorkflowBacklogGrain</c>.
+/// touching workflow assignment or workflow polling.
 ///
 /// State machine:
 /// <c>Pending</c> → <c>Running</c> (when a Runner accepts the dispatch) → <c>Completed</c>
@@ -259,7 +259,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         try
         {
             var dispatch = BuildDispatch(workId);
-            result = await runner.AssignWorkAsync(dispatch);
+            result = await runner.AssignAgentJobAsync(dispatch);
         }
         catch
         {

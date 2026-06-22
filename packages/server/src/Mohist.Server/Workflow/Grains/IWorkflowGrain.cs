@@ -21,11 +21,12 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
+    Task<WorkDispatch?> PollWorkAsync(string runnerId);
     Task NotifyRunnerLostAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkResult result);
     Task<string?> GetRunStatusAsync();
     Task<bool> IsStoppedOrTerminalAsync();
-    Task<string?> GetClaimedRunnerIdAsync();
+    Task<string?> GetAssignedRunnerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();
     Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId);
     Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId);
@@ -99,7 +100,8 @@ public sealed record WorkflowActiveWorkView(
     [property: Id(3)] string TaskRunId,
     [property: Id(4)] string? Title,
     [property: Id(5)] string? ProjectId = null,
-    [property: Id(6)] string? IssueId = null);
+    [property: Id(6)] string? IssueId = null,
+    [property: Id(7)] int? IssueNumber = null);
 
 /// <summary>
 /// Read-only snapshot of an approval feedback record for API

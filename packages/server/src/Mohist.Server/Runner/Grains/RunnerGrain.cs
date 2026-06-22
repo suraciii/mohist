@@ -1,6 +1,7 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
@@ -16,9 +17,8 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private string? _pendingBuildGitHash;
-    private readonly Dictionary<string, RunnerTrackedWork> _works = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RunnerTrackedWork> _agentJobs = new(StringComparer.Ordinal);
     private DateTime _lastHeartbeat;
-    private int _nextProjectIndex;
     private IDisposable? _heartbeatTimer;
 
     // Authoritative source for dispatch capacity. Loaded from the persisted
@@ -27,8 +27,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     // via register/heartbeat SHALL NOT influence this field.
     private int? _slots;
 
-    private readonly IWorkflowBacklogDirectory _backlogs;
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
     private readonly ILogger<RunnerGrain> _log;
 
@@ -36,13 +35,11 @@ public class RunnerGrain : Grain, IRunnerGrain
     private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
 
     public RunnerGrain(
-        IWorkflowBacklogDirectory backlogs,
-        IDbContextFactory<MohistDbContext> dbFactory,
+        WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
         ILogger<RunnerGrain> log)
     {
-        _backlogs = backlogs;
-        _dbFactory = dbFactory;
+        _workflowRuns = workflowRuns;
         _definitions = definitions;
         _log = log;
     }
@@ -100,7 +97,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         await NotifyTrackedWorkflowRunnersLostAsync();
         _status = RunnerStatus.Offline;
         _info = null;
-        _works.Clear();
+        _agentJobs.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.UnregisterAsync(RunnerId);
     }
@@ -139,82 +136,36 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         await TouchPresenceAsync();
 
-        var pending = await DequeueAssignedWorkAsync();
+        var pending = await DequeueAssignedAgentJobAsync();
         if (pending is not null)
             return pending;
 
-        if (ActiveWorkflowCount >= MaxWorkflowSlots)
+        if (await ActiveWorkflowCountAsync() >= MaxWorkflowSlots)
             return null;
 
-        while (true)
-        {
-            var claimed = await ClaimFromBacklogAsync();
-            if (string.IsNullOrWhiteSpace(claimed))
-                break;
-
-            var claimedWork = await DequeueAssignedWorkAsync();
-            if (claimedWork is not null)
-                return claimedWork;
-        }
-
-        return null;
+        return await PollAssignedOrAssignableWorkflowAsync();
     }
 
     private int MaxWorkflowSlots =>
         _slots ?? RunnerCapacity.DefaultMaxWorkflowSlots;
 
-    private int ActiveWorkflowCount =>
-        _works.Values
-            .Where(w => w.Dispatch.OwnerKind == WorkDispatchOwnerKinds.Workflow)
-            .Select(w => OwnerIdentityFor(w.Dispatch))
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-
-    public Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work)
+    private async Task<int> ActiveWorkflowCountAsync()
     {
-        // Accept work even when the runner is offline. The RunnerGrain
-        // tracks pending work in _works and serves it via PollAsync when
-        // the runner reconnects. The IsWorkRunnableAsync gate ensures
-        // stale entries (e.g. from a grain reactivation that produced a
-        // new WorkId) are silently dropped.
-        switch (work.OwnerKind)
+        var count = 0;
+        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(RunnerId))
         {
-            case WorkDispatchOwnerKinds.Workflow:
-                return AssignWorkValidationForWorkflowAsync(work);
-            case WorkDispatchOwnerKinds.AgentJob:
-                return AssignWorkValidationForAgentJobAsync(work);
-            default:
-                return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work"));
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            var currentWorkId = await workflow.GetCurrentWorkIdAsync();
+            if (!string.IsNullOrWhiteSpace(currentWorkId))
+                count++;
         }
+        return count;
     }
 
-    private Task<RunnerWorkAssignmentResult> AssignWorkValidationForWorkflowAsync(WorkDispatch work)
+    public Task<RunnerWorkAssignmentResult> AssignAgentJobAsync(WorkDispatch work)
     {
-        if (string.IsNullOrWhiteSpace(work.WorkflowRunId) || string.IsNullOrWhiteSpace(work.WorkId))
+        if (work.OwnerKind != WorkDispatchOwnerKinds.AgentJob)
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work"));
-
-        var key = WorkKey(work.OwnerKind, OwnerIdentityFor(work), work.WorkId);
-        if (_works.ContainsKey(key))
-            return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
-
-        var staleKeys = _works.Keys
-            .Where(k => _works[k].Dispatch.WorkflowRunId == work.WorkflowRunId)
-            .ToArray();
-        if (staleKeys.Length > 0)
-        {
-            foreach (var sk in staleKeys)
-                _works.Remove(sk);
-            _log.LogDebug("Runner {Id} replaced {Count} stale work entries for workflow {WorkflowId}",
-                RunnerId, staleKeys.Length, work.WorkflowRunId);
-        }
-
-        _works[key] = new RunnerTrackedWork(work, RunnerWorkState.Assigned, DateTimeOffset.UtcNow);
-        _log.LogInformation("Runner {Id} assigned work {WorkId} for workflow {WorkflowId}", RunnerId, work.WorkId, work.WorkflowRunId);
-        return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
-    }
-
-    private Task<RunnerWorkAssignmentResult> AssignWorkValidationForAgentJobAsync(WorkDispatch work)
-    {
         if (string.IsNullOrWhiteSpace(work.AgentJobId) || string.IsNullOrWhiteSpace(work.WorkId))
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work"));
 
@@ -225,70 +176,49 @@ public class RunnerGrain : Grain, IRunnerGrain
         // keys to remove. If a future contributor adds a multi-shot agent-job
         // model, they should re-introduce the workflow arm's stale-key cleanup.
         var key = WorkKey(work.OwnerKind, OwnerIdentityFor(work), work.WorkId);
-        if (_works.ContainsKey(key))
+        if (_agentJobs.ContainsKey(key))
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
 
-        _works[key] = new RunnerTrackedWork(work, RunnerWorkState.Assigned, DateTimeOffset.UtcNow);
+        _agentJobs[key] = new RunnerTrackedWork(work, RunnerWorkState.Assigned, DateTimeOffset.UtcNow);
         _log.LogInformation("Runner {Id} assigned work {WorkId} for agent-job {AgentJobId}", RunnerId, work.WorkId, work.AgentJobId);
         return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
     }
 
-    public async Task<RunnerWorkReportResult> ReportResultAsync(WorkDispatch work, string workId, WorkResult result)
+    public async Task<RunnerWorkReportResult> ReportWorkflowResultAsync(string workflowRunId, string workId, WorkResult result)
     {
         if (string.IsNullOrWhiteSpace(workId))
-            return new RunnerWorkReportResult(work.WorkflowRunId, null, false, "missing-work", work.OwnerKind, OwnerIdentityFor(work));
-
-        switch (work.OwnerKind)
-        {
-            case WorkDispatchOwnerKinds.Workflow:
-                return await ReportResultForWorkflowAsync(work, workId, result);
-            case WorkDispatchOwnerKinds.AgentJob:
-                return await ReportResultForAgentJobAsync(work, workId, result);
-            default:
-                return new RunnerWorkReportResult(work.WorkflowRunId, null, false, "invalid-work", work.OwnerKind, OwnerIdentityFor(work));
-        }
-    }
-
-    private async Task<RunnerWorkReportResult> ReportResultForWorkflowAsync(WorkDispatch work, string workId, WorkResult result)
-    {
-        var workflowRunId = work.WorkflowRunId;
+            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-work", WorkDispatchOwnerKinds.Workflow, workflowRunId);
         if (string.IsNullOrWhiteSpace(workflowRunId))
-            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow", work.OwnerKind, OwnerIdentityFor(work));
-        if (string.IsNullOrWhiteSpace(workId))
-            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-work", work.OwnerKind, OwnerIdentityFor(work));
-
-        var key = WorkKey(work.OwnerKind, OwnerIdentityFor(work), workId);
-        var tracked = _works.ContainsKey(key);
+            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow", WorkDispatchOwnerKinds.Workflow, workflowRunId);
 
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
         await workflow.ReportResultAsync(RunnerId, workId, result);
         var workflowStatus = await workflow.GetRunStatusAsync();
 
-        if (tracked)
-            _works.Remove(key);
-
         return new RunnerWorkReportResult(
             workflowRunId,
             workflowStatus,
-            tracked,
-            tracked ? "reported" : "untracked");
+            true,
+            "reported",
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId);
     }
 
-    private async Task<RunnerWorkReportResult> ReportResultForAgentJobAsync(WorkDispatch work, string workId, WorkResult result)
+    public async Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result)
     {
-        if (string.IsNullOrWhiteSpace(work.AgentJobId))
-            return new RunnerWorkReportResult(string.Empty, null, false, "missing-agent-job", work.OwnerKind, OwnerIdentityFor(work));
+        if (string.IsNullOrWhiteSpace(agentJobId))
+            return new RunnerWorkReportResult(string.Empty, null, false, "missing-agent-job", WorkDispatchOwnerKinds.AgentJob, agentJobId);
         if (string.IsNullOrWhiteSpace(workId))
-            return new RunnerWorkReportResult(string.Empty, null, false, "missing-work", work.OwnerKind, OwnerIdentityFor(work));
+            return new RunnerWorkReportResult(string.Empty, null, false, "missing-work", WorkDispatchOwnerKinds.AgentJob, agentJobId);
 
-        var key = WorkKey(work.OwnerKind, OwnerIdentityFor(work), workId);
-        var tracked = _works.ContainsKey(key);
+        var key = WorkKey(WorkDispatchOwnerKinds.AgentJob, agentJobId, workId);
+        var tracked = _agentJobs.ContainsKey(key);
 
-        var job = GrainFactory.GetGrain<IAgentJobGrain>(work.AgentJobId);
+        var job = GrainFactory.GetGrain<IAgentJobGrain>(agentJobId);
         var accepted = await job.ReportResultAsync(RunnerId, workId, result);
 
         if (tracked && accepted.Accepted)
-            _works.Remove(key);
+            _agentJobs.Remove(key);
 
         var reason = !accepted.Accepted
             ? $"job-rejected:{accepted.Reason ?? "unknown"}"
@@ -299,23 +229,20 @@ public class RunnerGrain : Grain, IRunnerGrain
             null,
             tracked,
             reason,
-            work.OwnerKind,
-            work.AgentJobId);
+            WorkDispatchOwnerKinds.AgentJob,
+            agentJobId);
     }
 
-    public Task<bool> IsAvailableAsync()
+    public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
-        return Task.FromResult(_status == RunnerStatus.Online);
-    }
+        var activeWorks = new List<RunnerActiveWorkItem>();
+        activeWorks.AddRange(_agentJobs.Values.Select(ProjectActiveWork));
+        activeWorks.AddRange(await ProjectActiveWorkflowWorksAsync());
 
-    public Task<RunnerRuntimeState> GetRuntimeStateAsync()
-    {
-        return Task.FromResult(new RunnerRuntimeState(
+        return new RunnerRuntimeState(
             _status,
             _lastHeartbeat,
-            _works.Values
-                .Select(ProjectActiveWork)
-                .ToArray()));
+            activeWorks);
     }
 
     private static RunnerActiveWorkItem ProjectActiveWork(RunnerTrackedWork work)
@@ -329,6 +256,37 @@ public class RunnerGrain : Grain, IRunnerGrain
             Stage: dispatch.Stage,
             Title: dispatch.Title,
             Issue: dispatch.Issue);
+    }
+
+    private async Task<IReadOnlyList<RunnerActiveWorkItem>> ProjectActiveWorkflowWorksAsync()
+    {
+        var items = new List<RunnerActiveWorkItem>();
+        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(RunnerId))
+        {
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            var currentWorkId = await workflow.GetCurrentWorkIdAsync();
+            if (string.IsNullOrWhiteSpace(currentWorkId))
+                continue;
+
+            var active = await workflow.GetActiveWorkAsync(currentWorkId);
+            if (active is null)
+                continue;
+
+            items.Add(new RunnerActiveWorkItem(
+                WorkId: active.WorkId,
+                OwnerKind: WorkDispatchOwnerKinds.Workflow,
+                OwnerId: workflowRunId,
+                WorkType: active.WorkType,
+                Stage: active.Stage,
+                Title: active.Title,
+                Issue: string.IsNullOrWhiteSpace(active.ProjectId)
+                    || string.IsNullOrWhiteSpace(active.IssueId)
+                    || active.IssueNumber is null
+                    ? null
+                    : new WorkIssueRef(active.ProjectId, active.IssueId, active.IssueNumber.Value)));
+        }
+
+        return items;
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)
@@ -388,9 +346,6 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task HandleTimeoutAsync()
     {
-        // Notify affected workflows so they can fail running tasks,
-        // but keep _works intact — pending check dispatches are still
-        // valid and will be served when the runner reconnects.
         await NotifyTrackedWorkflowRunnersLostAsync();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -398,37 +353,20 @@ public class RunnerGrain : Grain, IRunnerGrain
     }
 
     private async Task NotifyTrackedWorkflowRunnersLostAsync()
-        => await NotifyTrackedWorkflowRunnersLostAsync(
-            _works.Values.Select(w => w.Dispatch),
-            RunnerId,
-            workflowRunId => GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId).NotifyRunnerLostAsync(RunnerId),
-            (ex, workflowRunId) => _log.LogWarning(ex,
-                "Runner {RunnerId} failed to notify workflow {WorkflowRunId} about lost work",
-                RunnerId,
-                workflowRunId));
-
-    internal static async Task NotifyTrackedWorkflowRunnersLostAsync(
-        IEnumerable<WorkDispatch> trackedWork,
-        string runnerId,
-        Func<string, Task> notifyWorkflowAsync,
-        Action<Exception, string> logFailure)
     {
-        var workflowRunIds = trackedWork
-            .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow)
-            .Select(w => w.WorkflowRunId)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
+        var workflowRunIds = await _workflowRuns.FindAssignedToAsync(RunnerId);
         foreach (var workflowRunId in workflowRunIds)
         {
             try
             {
-                await notifyWorkflowAsync(workflowRunId);
+                await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId).NotifyRunnerLostAsync(RunnerId);
             }
             catch (Exception ex)
             {
-                logFailure(ex, workflowRunId);
+                _log.LogWarning(ex,
+                    "Runner {RunnerId} failed to notify workflow {WorkflowRunId} about lost runner",
+                    RunnerId,
+                    workflowRunId);
             }
         }
     }
@@ -442,51 +380,43 @@ public class RunnerGrain : Grain, IRunnerGrain
         await registry.RegisterAsync(_info);
     }
 
-    private Task<IReadOnlyList<string>> BacklogProjectIdsAsync()
+    private async Task<WorkDispatch?> PollAssignedOrAssignableWorkflowAsync()
     {
-        // The in-memory directory is the canonical source of active project
-        // backlogs — it is populated by WorkflowBacklogGrain.OnActivateAsync
-        // which calls _directory.RegisterProject on every grain activation.
-        // Querying db.Projects here would re-introduce stale project IDs
-        // that were already cleared from the directory, and each such ID
-        // triggers a WorkflowBacklogGrain activation that re-registers
-        // the project, defeating the cleanup.
-        var projectIds = _backlogs.ListProjects();
-        return Task.FromResult<IReadOnlyList<string>>(projectIds);
-    }
-
-    private async Task<string?> ClaimFromBacklogAsync()
-    {
-        var projectIds = await BacklogProjectIdsAsync();
-        if (projectIds.Count == 0)
-            return null;
-
-        var start = _nextProjectIndex % projectIds.Count;
-        for (var offset = 0; offset < projectIds.Count; offset++)
+        foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(RunnerId))
         {
-            var index = (start + offset) % projectIds.Count;
-            var projectId = projectIds[index];
-            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
-            var claimed = await backlog.ClaimAsync(RunnerId);
-            if (!string.IsNullOrWhiteSpace(claimed))
-            {
-                _nextProjectIndex = (index + 1) % projectIds.Count;
-                return claimed;
-            }
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            var currentWorkId = await workflow.GetCurrentWorkIdAsync();
+            if (!string.IsNullOrWhiteSpace(currentWorkId))
+                continue;
+
+            var work = await workflow.PollWorkAsync(RunnerId);
+            if (work is not null)
+                return work;
         }
 
-        _nextProjectIndex = (start + 1) % projectIds.Count;
+        foreach (var workflowRunId in await _workflowRuns.FindAssignableAsync(_info?.ProjectId))
+        {
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+            var assigned = await workflow.AssignRunnerAsync(RunnerId);
+            if (assigned.Status != WorkflowAssignmentStatus.Assigned)
+                continue;
+
+            var work = await workflow.PollWorkAsync(RunnerId);
+            if (work is not null)
+                return work;
+        }
+
         return null;
     }
 
-    private async Task<WorkDispatch?> DequeueAssignedWorkAsync()
+    private async Task<WorkDispatch?> DequeueAssignedAgentJobAsync()
     {
         while (true)
         {
             string? selectedKey = null;
             RunnerTrackedWork? selectedWork = null;
 
-            foreach (var (key, work) in _works)
+            foreach (var (key, work) in _agentJobs)
             {
                 if (work.Status != RunnerWorkState.Assigned)
                     continue;
@@ -504,11 +434,11 @@ public class RunnerGrain : Grain, IRunnerGrain
                 _log.LogDebug(
                     "Runner {Id} dropping work {WorkId} for {OwnerKind} {OwnerId}: not runnable",
                     RunnerId, selectedWork.Dispatch.WorkId, selectedWork.Dispatch.OwnerKind, OwnerIdentityFor(selectedWork.Dispatch));
-                _works.Remove(selectedKey);
+                _agentJobs.Remove(selectedKey);
                 continue;
             }
 
-            _works[selectedKey] = selectedWork.MarkRunning(DateTimeOffset.UtcNow);
+            _agentJobs[selectedKey] = selectedWork.MarkRunning(DateTimeOffset.UtcNow);
             return selectedWork.Dispatch;
         }
     }
@@ -517,28 +447,11 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         switch (work.OwnerKind)
         {
-            case WorkDispatchOwnerKinds.Workflow:
-                return await IsWorkRunnableForWorkflowAsync(work);
             case WorkDispatchOwnerKinds.AgentJob:
                 return await IsWorkRunnableForAgentJobAsync(work);
             default:
                 return false;
         }
-    }
-
-    private async Task<bool> IsWorkRunnableForWorkflowAsync(WorkDispatch work)
-    {
-        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-        var owner = await workflow.GetClaimedRunnerIdAsync();
-        if (!string.Equals(owner, RunnerId, StringComparison.Ordinal))
-            return false;
-
-        var status = await workflow.GetRunStatusAsync();
-        if (!string.Equals(status, "Running", StringComparison.Ordinal))
-            return false;
-
-        var currentWorkId = await workflow.GetCurrentWorkIdAsync();
-        return string.Equals(currentWorkId, work.WorkId, StringComparison.Ordinal);
     }
 
     private async Task<bool> IsWorkRunnableForAgentJobAsync(WorkDispatch work)
