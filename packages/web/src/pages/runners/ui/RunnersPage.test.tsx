@@ -295,7 +295,8 @@ describe('RunnersPage', () => {
         }),
       ]
       renderWith()
-      expect(screen.getByText('2/4 slots')).toBeInTheDocument()
+      expect(screen.getByTestId('runner-capacity')).toBeInTheDocument()
+      expect(screen.getByText('2/4')).toBeInTheDocument()
     })
   })
 })

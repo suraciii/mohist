@@ -24,7 +24,7 @@ const STATUS_LABEL: Record<StatusKey, string> = {
 }
 
 const STATUS_DOT: Record<StatusKey, string> = {
-  idle: 'bg-green-500',
+  idle: 'bg-emerald-500',
   busy: 'bg-blue-500',
   stale: 'bg-amber-500',
   offline: 'bg-gray-400',
@@ -59,7 +59,7 @@ function ScopeFilterBar({
       role="group"
       aria-label="Runner scope filter"
       data-testid="runners-scope-filter"
-      className="inline-flex items-center rounded-md border border-gray-200 bg-white p-0.5 shadow-sm"
+      className="inline-flex items-center rounded-lg bg-muted p-0.5"
     >
       {SCOPE_FILTERS.map((option) => {
         const active = option.key === value
@@ -70,10 +70,10 @@ function ScopeFilterBar({
             onClick={() => onChange(option.key)}
             aria-pressed={active}
             data-testid={`runners-scope-${option.key}`}
-            className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
               active
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {option.label}
@@ -86,12 +86,15 @@ function ScopeFilterBar({
 
 function RunnerStatusSummaryBar({ rows }: { rows: RunnerStatusRow[] }) {
   const counts = countByStatus(rows)
+  const total = rows.length
   return (
     <div
       data-testid="runners-summary-bar"
       data-scope-counts={JSON.stringify(counts)}
-      className="flex items-center gap-4 flex-wrap px-3 py-2 rounded-md border border-gray-200 bg-white shadow-sm"
+      className="flex items-center gap-4 flex-wrap"
     >
+      <span className="text-sm font-medium text-foreground tabular-nums">{total} runner{total !== 1 ? 's' : ''}</span>
+      <span className="h-4 w-px bg-border" />
       {STATUS_KEYS.map((status) => (
         <div
           key={status}
@@ -99,10 +102,10 @@ function RunnerStatusSummaryBar({ rows }: { rows: RunnerStatusRow[] }) {
           className="inline-flex items-center gap-1.5"
         >
           <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[status]}`} aria-hidden="true" />
-          <span className="text-xs text-gray-500">{STATUS_LABEL[status]}</span>
+          <span className="text-xs text-muted-foreground">{STATUS_LABEL[status]}</span>
           <span
             data-testid={`runners-summary-${status}-count`}
-            className="text-xs font-semibold tabular-nums text-gray-900"
+            className="text-xs font-semibold tabular-nums text-foreground"
           >
             {counts[status]}
           </span>
@@ -116,12 +119,12 @@ function RunnerEmptyState() {
   return (
     <div
       data-testid="runners-empty-state"
-      className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-10 text-center"
+      className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-16 text-center"
     >
-      <p className="text-sm text-gray-500 mb-2">No runners connected</p>
-      <p className="text-xs text-gray-400">
+      <p className="text-sm font-medium text-foreground mb-2">No runners connected</p>
+      <p className="text-xs text-muted-foreground">
         Start a runner:{' '}
-        <code className="text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded font-mono text-gray-700">
+        <code className="text-xs bg-background border border-border px-1.5 py-0.5 rounded font-mono text-foreground">
           {RUNNER_START_HINT}
         </code>
       </p>
@@ -133,10 +136,10 @@ function NoProjectState() {
   return (
     <div
       data-testid="runners-no-project-state"
-      className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-10 text-center"
+      className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-16 text-center"
     >
-      <p className="text-sm text-gray-500">No project selected</p>
-      <p className="text-xs text-gray-400 mt-1">
+      <p className="text-sm font-medium text-foreground">No project selected</p>
+      <p className="text-xs text-muted-foreground mt-1">
         Select a project to view its eligible runners.
       </p>
     </div>
@@ -156,13 +159,13 @@ export function RunnersPage() {
     <div
       data-testid="runners-page"
       data-scope-filter={scope}
-      className="flex-1 overflow-y-auto bg-gray-50"
+      className="flex-1 overflow-y-auto bg-background"
     >
-      <div className="max-w-3xl mx-auto px-4 py-4 md:px-6 space-y-4">
+      <div className="max-w-4xl mx-auto px-6 py-6 space-y-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Runners</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <h1 className="text-lg font-semibold text-foreground">Runners</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
               Live status of all runners eligible for this project.
             </p>
           </div>
@@ -175,7 +178,7 @@ export function RunnersPage() {
             {filteredRows.length === 0 ? (
               <RunnerEmptyState />
             ) : (
-              <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="rounded-lg border border-border bg-card overflow-hidden">
                 <RunnerList rows={filteredRows} />
               </div>
             )}

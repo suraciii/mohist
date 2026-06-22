@@ -315,8 +315,7 @@ describe('RunnerList UI', () => {
       const heartbeatTime = '2026-01-01T12:00:00Z'
       const rows = [makeRow({ lastHeartbeatAt: heartbeatTime, status: 'idle', connectionState: 'connected' })]
       renderInRouter(<RunnerList rows={rows} />)
-      expect(screen.getByText('heartbeat fresh: 2m ago')).toBeInTheDocument()
-      expect(screen.getByText(/last heartbeat:/)).toBeInTheDocument()
+      expect(screen.getByText('2m ago')).toBeInTheDocument()
       vi.useRealTimers()
     })
 
@@ -336,7 +335,9 @@ describe('RunnerList UI', () => {
         }),
       ]
       renderInRouter(<RunnerList rows={rows} />)
-      expect(screen.getByText('2 models: openai/gpt-4.5, anthropic/claude-3')).toBeInTheDocument()
+      expect(screen.getByText('2 models')).toBeInTheDocument()
+      expect(screen.getByText('openai/gpt-4.5')).toBeInTheDocument()
+      expect(screen.getByText('anthropic/claude-3')).toBeInTheDocument()
     })
 
     it('shows runner capabilities', () => {
@@ -348,7 +349,8 @@ describe('RunnerList UI', () => {
         }),
       ]
       renderInRouter(<RunnerList rows={rows} />)
-      expect(screen.getByText('capabilities: workflow, workspace-query')).toBeInTheDocument()
+      expect(screen.getByText('workflow')).toBeInTheDocument()
+      expect(screen.getByText('workspace-query')).toBeInTheDocument()
     })
   })
 
@@ -413,7 +415,9 @@ describe('RunnerList UI', () => {
         }),
       ]
       renderInRouter(<RunnerList rows={rows} />)
-      expect(screen.getByText('1/2 slots')).toBeInTheDocument()
+      expect(screen.getByTestId('runner-capacity')).toBeInTheDocument()
+      expect(screen.getByText('1/2')).toBeInTheDocument()
+      expect(screen.getByText('slots')).toBeInTheDocument()
     })
 
     it('renders every active work as an independent row (no collapse)', () => {
@@ -537,8 +541,7 @@ describe('RunnerList UI', () => {
       vi.setSystemTime(new Date('2026-01-01T12:10:00Z'))
       const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'stale', connectionState: 'disconnected' })]
       renderInRouter(<RunnerList rows={rows} />)
-      expect(screen.getByText('heartbeat stale: 10m ago')).toBeInTheDocument()
-      expect(screen.getByText(/last heartbeat:/)).toBeInTheDocument()
+      expect(screen.getByText('10m ago')).toBeInTheDocument()
       vi.useRealTimers()
     })
 
@@ -546,8 +549,7 @@ describe('RunnerList UI', () => {
       vi.setSystemTime(new Date('2026-01-01T14:00:00Z'))
       const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'offline', connectionState: 'disconnected' })]
       renderInRouter(<RunnerList rows={rows} />)
-      expect(screen.getByText('heartbeat offline: 2h ago')).toBeInTheDocument()
-      expect(screen.getByText(/last heartbeat:/)).toBeInTheDocument()
+      expect(screen.getByText('2h ago')).toBeInTheDocument()
       vi.useRealTimers()
     })
 
