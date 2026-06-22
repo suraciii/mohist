@@ -85,15 +85,17 @@ function LinkedIssueRow({
   onStart,
   disabled,
   startPending,
+  hasInProgress,
 }: {
   issue: LinkedIssue
   onRemove: (issueId: string) => void
   onStart: (issueNumber: number) => void
   disabled: boolean
   startPending: boolean
+  hasInProgress: boolean
 }) {
   const toProjectPath = useProjectPath()
-  const showStart = canInlineStartRow(issue)
+  const showStart = canInlineStartRow(issue, hasInProgress)
 
   return (
     <Card className="flex items-center justify-between gap-4 p-4">
@@ -207,6 +209,7 @@ function CurrentActivityList({
       </div>
     )
   }
+
   return (
     <ul
       className="mt-2 flex flex-col gap-1"
@@ -397,6 +400,10 @@ export function EpicDetailPage() {
     reason: null,
   })
 
+  const handleGraphRenderabilityChange = useCallback((state: { renderable: boolean; reason: Renderability | null }) => {
+    setGraphRenderable(state)
+  }, [])
+
   const availableIssues = useMemo(() => {
     if (!issues || !epic) return []
     const linkedIds = new Set(epic.linkedIssues.map(issue => issue.id))
@@ -451,9 +458,6 @@ export function EpicDetailPage() {
   const graphAvailable = linkedIssueCount >= 2
   const graphSelected = graphAvailable && linkedIssuesView === 'graph'
   const showList = !graphSelected || graphRenderable.reason === 'cyclic' || graphRenderable.reason === 'empty'
-  const handleGraphRenderabilityChange = useCallback((state: { renderable: boolean; reason: Renderability | null }) => {
-    setGraphRenderable(state)
-  }, [])
 
   function handleConfirmClose() {
     closeEpic.mutate(epicId, {
@@ -488,6 +492,8 @@ export function EpicDetailPage() {
       onSettled: () => setPendingStartIssueNumber(null),
     })
   }
+
+  const hasInProgress = epic.linkedIssues.some(i => i.status === IssueStatus.InProgress)
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -733,6 +739,7 @@ export function EpicDetailPage() {
                   onStart={handleStartIssue}
                   disabled={removeEpicIssue.isPending}
                   startPending={pendingStartIssueNumber === issue.number}
+                  hasInProgress={hasInProgress}
                 />
               ))
             )}

@@ -276,9 +276,62 @@ public class EpicProgressBuildSpecs
         Assert.Equal(1, progress.NextIssue.Number);
         Assert.Null(progress.NextIssueReason);
         Assert.False(progress.ReadyToMarkDone);
-        Assert.Equal(2, progress.ActiveIssues.Count);
-        Assert.Single(progress.BlockedIssues);
-        Assert.Equal("issue_blocked", progress.BlockedIssues[0].Id);
+        Assert.Empty(progress.ActiveIssues);
+        Assert.Empty(progress.BlockedIssues);
+    }
+
+    [Fact]
+    public void NextIssue_IsNullAndReasonShowsInProgress_WhenIssueIsRunning()
+    {
+        var linked = new[]
+        {
+            Issue("issue_running", number: 1, title: "In progress P0", status: "in_progress", priority: "p0", canStart: true),
+            Issue("issue_next", number: 2, title: "Next P1", priority: "p1", canStart: true),
+        };
+
+        var progress = EpicProgress.Build(linked);
+
+        Assert.Null(progress.NextIssue);
+        Assert.NotNull(progress.NextIssueReason);
+        Assert.Contains("Waiting for #1 to complete", progress.NextIssueReason!);
+        Assert.Single(progress.ActiveIssues);
+        Assert.Equal("issue_running", progress.ActiveIssues[0].Id);
+    }
+
+    [Fact]
+    public void CancelledIssues_ExcludedFromPipeline()
+    {
+        var linked = new[]
+        {
+            Issue("issue_1", number: 1, title: "Done", status: "done"),
+            Issue("issue_2", number: 2, title: "Cancelled", status: "cancelled"),
+            Issue("issue_3", number: 3, title: "Active", status: "in_progress", health: "active"),
+        };
+
+        var progress = EpicProgress.Build(linked);
+
+        Assert.Equal(1, progress.DeliveredCount);
+        Assert.Equal(3, progress.TotalIssueCount);
+        Assert.Single(progress.ActiveIssues);
+        Assert.Equal("issue_3", progress.ActiveIssues[0].Id);
+        Assert.Null(progress.NextIssue);
+    }
+
+    [Fact]
+    public void ActiveAndBlocked_OnlyContainInProgressIssues()
+    {
+        var linked = new[]
+        {
+            Issue("issue_1", number: 1, title: "Backlog active", status: "backlog", health: "active", canStart: true),
+            Issue("issue_2", number: 2, title: "In progress", status: "in_progress", health: "active"),
+            Issue("issue_3", number: 3, title: "Backlog blocked-ish", status: "backlog", health: "blocked"),
+        };
+
+        var progress = EpicProgress.Build(linked);
+
+        Assert.Single(progress.ActiveIssues);
+        Assert.Equal("issue_2", progress.ActiveIssues[0].Id);
+        Assert.Empty(progress.BlockedIssues);
     }
 
     [Fact]
