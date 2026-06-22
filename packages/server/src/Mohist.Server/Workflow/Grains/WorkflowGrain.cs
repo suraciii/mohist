@@ -6,7 +6,7 @@ using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services.SignalR;
+
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain;
@@ -46,7 +46,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly WorkflowDispatchBuilder _dispatchBuilder;
     private readonly WorkflowSessionHealthService _sessionHealth;
     private readonly IWorkflowArtifactBindService _artifactBindService;
-    private readonly IRunnerWorkspaceClient _workspaceClient;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
@@ -56,7 +55,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         WorkflowDispatchBuilder dispatchBuilder,
         WorkflowSessionHealthService sessionHealth,
         IWorkflowArtifactBindService artifactBindService,
-        IRunnerWorkspaceClient workspaceClient,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
@@ -65,7 +63,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _dispatchBuilder = dispatchBuilder;
         _sessionHealth = sessionHealth;
         _artifactBindService = artifactBindService;
-        _workspaceClient = workspaceClient;
         _log = log;
     }
 
@@ -290,28 +287,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
     }
 
-    public async Task<WorkflowStartMaterializationDispatch?> PrepareStartMaterializationAsync(string runnerId)
-    {
-        if (_run is null || _run.Status != WorkflowRunStatus.Running) return null;
-        if (_run.Claim is not null && !string.Equals(_run.Claim.RunnerId, runnerId, StringComparison.Ordinal)) return null;
-        var work = _run.NextWork();
-        if (work is null) return null;
-        var dispatch = await PrepareWorkAsync(work, runnerId, markRunning: false);
-        if (dispatch is null) return null;
-        return new WorkflowStartMaterializationDispatch(dispatch);
-    }
-
-    public async Task RecordStartMaterializationFailureAsync(string runnerId, string? message)
-    {
-        if (_run is null || _run.Status != WorkflowRunStatus.Running) return;
-        if (_run.Claim is not null && !string.Equals(_run.Claim.RunnerId, runnerId, StringComparison.Ordinal)) return;
-        if (_run.NextWork() is null) return;
-
-        var failureMessage = FormatWorkspaceMaterializationFailure(message);
-        var events = _run.FailStage(failureMessage);
-        await CommitAsync(events);
-    }
-
     private async Task RunCoreAsync()
     {
         if (_run is null || _run.Status != WorkflowRunStatus.Running)
@@ -335,43 +310,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (!await AcquireStageLocksIfNeededAsync(work.Stage))
             return;
 
-        if (ShouldMaterializeWorkflowWorkspace())
-        {
-            var materialization = await PrepareStartMaterializationAsync(runnerId);
-            if (materialization is null)
-                return;
-
-            var result = await _workspaceClient.MaterializeWorkspaceAsync(GetProjectId(), runnerId, materialization.Dispatch);
-            if (!result.Ok)
-            {
-                await RecordStartMaterializationFailureAsync(runnerId, result.Message);
-                return;
-            }
-
-            _run.WorkspaceMaterializedAt = DateTimeOffset.UtcNow;
-            await SaveRunAsync();
-        }
-
         var dispatch = await PrepareWorkAsync(work, runnerId, markRunning: true);
         if (dispatch is null)
             return;
 
         await SaveRunAsync();
         await AssignRunnerWorkAsync(runnerId, dispatch);
-    }
-
-    private static string FormatWorkspaceMaterializationFailure(string? resultMessage)
-    {
-        var message = string.IsNullOrWhiteSpace(resultMessage)
-            ? "workspace materialization failed"
-            : resultMessage.Trim();
-        return $"workflow workspace materialization failure (workspace-corrupt): {message}";
-    }
-
-    private bool ShouldMaterializeWorkflowWorkspace()
-    {
-        if (_run is null) return false;
-        return _run.WorkspaceMaterializedAt is null;
     }
 
     private async Task EnsureWorkHeartbeatAsync()

@@ -1,15 +1,13 @@
 using Microsoft.AspNetCore.SignalR;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Runner.Services.SignalR;
 
 public interface IRunnerWorkspaceClient
 {
-    Task<WorkspaceMaterializationResult> MaterializeWorkspaceAsync(string projectId, string runnerId, WorkDispatch dispatch, CancellationToken ct = default);
     Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default);
     Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default);
     Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, string hash, CancellationToken ct = default);
@@ -34,16 +32,6 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
         _hub = hub;
         _connections = connections;
         _grains = grains;
-    }
-
-    public async Task<WorkspaceMaterializationResult> MaterializeWorkspaceAsync(string projectId, string runnerId, WorkDispatch dispatch, CancellationToken ct = default)
-    {
-        var connectionId = _connections.GetConnectionId(runnerId);
-        if (string.IsNullOrWhiteSpace(connectionId))
-            return new WorkspaceMaterializationResult(false, null, null, null, "runner_unavailable");
-
-        return await InvokeAsync<WorkspaceMaterializationResult>(connectionId, "MaterializeWorkspace", dispatch, ct)
-            ?? new WorkspaceMaterializationResult(false, null, null, null, "workspace_materialization_failed");
     }
 
     public async Task<RunnerWorkspaceDiffResult?> GetDiffAsync(string projectId, string workflowRunId, WorkspaceIdentity workspace, string baseBranch, CancellationToken ct = default)
@@ -137,13 +125,6 @@ public sealed class RunnerWorkspaceClient : IRunnerWorkspaceClient
         return await _hub.Clients.Client(connectionId).InvokeAsync<T?>(method, query, arg, timeout.Token);
     }
 
-    private async Task<T?> InvokeAsync<T>(string connectionId, string method, WorkDispatch dispatch, CancellationToken ct)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
-        return await _hub.Clients.Client(connectionId).InvokeAsync<T?>(method, dispatch, timeout.Token);
-    }
-
     private static RunnerWorkspaceQuery BuildQuery(string workflowRunId, WorkspaceIdentity workspace, string? baseBranch)
     {
         var branch = string.IsNullOrWhiteSpace(workspace.Branch)
@@ -160,13 +141,6 @@ public sealed record RunnerWorkspaceQuery(
     string? WorkspacePath,
     string? Branch,
     string? BaseBranch);
-
-public sealed record WorkspaceMaterializationResult(
-    bool Ok,
-    string? WorkspacePath,
-    string? Branch,
-    string? ChangeDir,
-    string? Message);
 
 public sealed record RunnerWorkspaceDiffResult(
     string Base,
