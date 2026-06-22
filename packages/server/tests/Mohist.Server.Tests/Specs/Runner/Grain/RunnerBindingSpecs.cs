@@ -163,10 +163,12 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Heartbeat_WhenRegistryEntryMissing_ReRegistersRunnerPresence()
     {
+        await ClearGlobalRunnerRegistryAsync();
+        await ClearBacklogAsync();
         var projectId = $"heartbeat-repair-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, $"heartbeat-repair-runner-{Guid.NewGuid():N}");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
 
         await registry.UnregisterAsync(runnerId);
         Assert.DoesNotContain(runnerId, await registry.ListRunnerIdsAsync());
@@ -181,10 +183,12 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task Poll_WhenRegistryEntryMissing_ReRegistersRunnerPresence()
     {
+        await ClearGlobalRunnerRegistryAsync();
+        await ClearBacklogAsync();
         var projectId = $"poll-repair-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, $"poll-repair-runner-{Guid.NewGuid():N}");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
 
         await registry.UnregisterAsync(runnerId);
         Assert.DoesNotContain(runnerId, await registry.ListRunnerIdsAsync());
@@ -198,19 +202,21 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task Register_WhenRunnerScopeChanges_RemovesStaleRegistryPresence()
+    public async Task Register_ReRegisteringWithDifferentProjectId_KeepsRunnerInGlobalRegistry()
     {
         var projectId = $"scope-change-project-{Guid.NewGuid():N}";
         var runnerId = await RegisterRunnerForProjectAsync(projectId, $"scope-change-runner-{Guid.NewGuid():N}");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var projectRegistry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
-        var globalRegistry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
 
-        Assert.Contains(runnerId, await projectRegistry.ListRunnerIdsAsync());
+        Assert.Contains(runnerId, await registry.ListRunnerIdsAsync());
+        var before = await runner.GetInfoAsync();
+        Assert.Equal(projectId, before!.ProjectId);
 
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null));
 
-        Assert.DoesNotContain(runnerId, await projectRegistry.ListRunnerIdsAsync());
-        Assert.Contains(runnerId, await globalRegistry.ListRunnerIdsAsync());
+        Assert.Contains(runnerId, await registry.ListRunnerIdsAsync());
+        var after = await runner.GetInfoAsync();
+        Assert.Null(after!.ProjectId);
     }
 }

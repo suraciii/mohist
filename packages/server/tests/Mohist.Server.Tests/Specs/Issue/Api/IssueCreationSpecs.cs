@@ -110,6 +110,18 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     [Fact]
     public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
+        // The runner is a global resource (issue-222 T-003) that claims
+        // from a shared project backlog. Prior tests in this collection
+        // leave runners registered, the in-memory backlog directory
+        // populated, and stale BacklogStates rows behind — all of which
+        // race with this test's poll. Reset all three.
+        var registry = _grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+        var directory = _services.GetService<IWorkflowBacklogDirectory>();
+        directory?.Clear();
+        await WorkflowGrainTestHelpers.ClearBacklogAsync(_grains, _connectionString);
+
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Context");
 
@@ -123,9 +135,23 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         var runnerId = $"runner-variable-test-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
-        var work = await runner.PollAsync();
+
+        WorkDispatch? work = null;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            work = await runner.PollAsync();
+            if (work is null)
+            {
+                await Task.Delay(20);
+                continue;
+            }
+            if (string.Equals(work.WorkflowRunId, wrId, StringComparison.Ordinal))
+                break;
+            await Task.Delay(20);
+        }
 
         Assert.NotNull(work);
+        Assert.Equal(wrId, work!.WorkflowRunId);
         Assert.NotNull(work.Variables);
         Assert.Contains("My Project", work.Variables);
         Assert.Contains("repository", work.Variables);
@@ -133,6 +159,8 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         Assert.Contains("workspace", work.Variables);
         Assert.DoesNotContain("project.path", work.Variables);
         Assert.DoesNotContain("project.baseBranch", work.Variables);
+
+        await runner.UnregisterAsync();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -140,6 +168,18 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
     [Fact]
     public async Task StartWorkflow_UsesProjectDefaultTemplate()
     {
+        // The runner is a global resource (issue-222 T-003) that claims
+        // from a shared project backlog. Prior tests in this collection
+        // leave runners registered, the in-memory backlog directory
+        // populated, and stale BacklogStates rows behind — all of which
+        // race with this test's poll. Reset all three.
+        var registry = _grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+        var directory = _services.GetService<IWorkflowBacklogDirectory>();
+        directory?.Clear();
+        await WorkflowGrainTestHelpers.ClearBacklogAsync(_grains, _connectionString);
+
         var project = await SetupProjectAsync();
         using (var scope = _services.CreateScope())
         {
@@ -166,13 +206,28 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         var runnerId = $"runner-template-test-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
-        var work = await runner.PollAsync();
+
+        WorkDispatch? work = null;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            work = await runner.PollAsync();
+            if (work is null)
+            {
+                await Task.Delay(20);
+                continue;
+            }
+            if (string.Equals(work.WorkflowRunId, wrId, StringComparison.Ordinal))
+                break;
+            await Task.Delay(20);
+        }
 
         Assert.NotNull(work);
-        Assert.Equal(wrId, work.WorkflowRunId);
+        Assert.Equal(wrId, work!.WorkflowRunId);
         Assert.Equal("custom-stage", work.Stage);
         Assert.StartsWith("custom-task.", work.WorkId);
         Assert.Contains("Project template prompt", work.With);
+
+        await runner.UnregisterAsync();
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

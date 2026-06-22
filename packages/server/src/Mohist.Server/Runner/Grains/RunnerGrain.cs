@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
@@ -14,14 +15,21 @@ public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
-    private string? _projectId;
     private string? _pendingBuildGitHash;
     private readonly Dictionary<string, RunnerTrackedWork> _works = new(StringComparer.Ordinal);
     private DateTime _lastHeartbeat;
     private int _nextProjectIndex;
     private IDisposable? _heartbeatTimer;
+
+    // Authoritative source for dispatch capacity. Loaded from the persisted
+    // definition state in OnActivateAsync / RegisterAsync and updated via
+    // UpdateAsync (write-through). A value reported by the runner process
+    // via register/heartbeat SHALL NOT influence this field.
+    private int? _slots;
+
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly RunnerDefinitionStore _definitions;
     private readonly ILogger<RunnerGrain> _log;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
@@ -30,18 +38,25 @@ public class RunnerGrain : Grain, IRunnerGrain
     public RunnerGrain(
         IWorkflowBacklogDirectory backlogs,
         IDbContextFactory<MohistDbContext> dbFactory,
+        RunnerDefinitionStore definitions,
         ILogger<RunnerGrain> log)
     {
         _backlogs = backlogs;
         _dbFactory = dbFactory;
+        _definitions = definitions;
         _log = log;
     }
 
     private string RunnerId => this.GetPrimaryKeyString();
 
-    public override Task OnActivateAsync(CancellationToken ct)
+    public override async Task OnActivateAsync(CancellationToken ct)
     {
-        return Task.CompletedTask;
+        // Reload persisted slots on every activation so the in-memory cache
+        // survives grain deactivation followed by reacquisition. This is the
+        // structural fix for the capacity-volatility issue: a runner's slots
+        // are now sourced from the persisted definition, not from in-memory
+        // heartbeat state.
+        _slots = await _definitions.GetOrInitAsync(RunnerId, ct);
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -53,31 +68,29 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task RegisterAsync(RunnerInfo info)
     {
-        var previousRegistryKey = _info is null ? null : RunnerRegistryKey();
         var effectiveHash = info.BuildGitHash ?? _pendingBuildGitHash;
+        // The runner-reported MaxWorkflowSlots field is intentionally NOT
+        // written into the persisted definition state. Persisted slots are
+        // the sole authoritative source; this field is preserved on the
+        // RunnerInfo record for runner-line compatibility only.
         _info = info with
         {
-            MaxWorkflowSlots = RunnerCapacity.Normalize(info.MaxWorkflowSlots),
             BuildGitHash = effectiveHash,
         };
-        _projectId = string.IsNullOrWhiteSpace(info.ProjectId) ? null : info.ProjectId;
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
         _pendingBuildGitHash = null;
-        var registryKey = RunnerRegistryKey();
-        if (previousRegistryKey is not null && previousRegistryKey != registryKey)
-        {
-            var previousRegistry = GrainFactory.GetGrain<IRunnerRegistryGrain>(previousRegistryKey);
-            await previousRegistry.UnregisterAsync(RunnerId);
-        }
-
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(registryKey);
+        // Hydrate the slots cache from the persisted definition state on
+        // every register (covers both first-time register and post-restart
+        // re-register). A runner-reported slots value is ignored.
+        _slots = await _definitions.GetOrInitAsync(RunnerId);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.RegisterAsync(_info);
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
             HeartbeatCheckInterval,
             HeartbeatCheckInterval);
-        _log.LogInformation("Runner {Id} registered from {Host} for {Scope} with {Slots} workflow slots", info.RunnerId, info.Hostname, _projectId ?? "all projects", _info.MaxWorkflowSlots);
+        _log.LogInformation("Runner {Id} registered from {Host} as global resource with {Slots} persisted workflow slots", info.RunnerId, info.Hostname, _slots);
     }
 
     public async Task UnregisterAsync()
@@ -88,7 +101,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _status = RunnerStatus.Offline;
         _info = null;
         _works.Clear();
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.UnregisterAsync(RunnerId);
     }
 
@@ -112,7 +125,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (effectiveHash is not null && _info is not null && _info.BuildGitHash != effectiveHash)
         {
             _info = _info with { BuildGitHash = effectiveHash };
-            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.RegisterAsync(_info);
         }
         _pendingBuildGitHash = null;
@@ -147,10 +160,15 @@ public class RunnerGrain : Grain, IRunnerGrain
         return null;
     }
 
-    private int MaxWorkflowSlots => RunnerCapacity.Normalize(_info?.MaxWorkflowSlots);
+    private int MaxWorkflowSlots =>
+        _slots ?? RunnerCapacity.DefaultMaxWorkflowSlots;
 
     private int ActiveWorkflowCount =>
-        _works.Values.Select(w => OwnerIdentityFor(w.Dispatch)).Distinct(StringComparer.Ordinal).Count();
+        _works.Values
+            .Where(w => w.Dispatch.OwnerKind == WorkDispatchOwnerKinds.Workflow)
+            .Select(w => OwnerIdentityFor(w.Dispatch))
+            .Distinct(StringComparer.Ordinal)
+            .Count();
 
     public Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work)
     {
@@ -326,13 +344,32 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         _info = _info with { BuildGitHash = normalized };
         _log.LogInformation("Runner {Id} reported buildGitHash {Hash}", RunnerId, normalized ?? "<null>");
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.RegisterAsync(_info);
     }
 
     public Task<RunnerInfo?> GetInfoAsync()
     {
         return Task.FromResult(_info);
+    }
+
+    public Task<int> GetSlotsAsync()
+    {
+        return Task.FromResult(MaxWorkflowSlots);
+    }
+
+    public async Task UpdateAsync(int slots)
+    {
+        if (slots <= 0)
+            throw new ArgumentOutOfRangeException(nameof(slots), slots, "slots must be a positive integer");
+
+        // Write-through: persist first so the next dispatch cycle is
+        // guaranteed to observe the new value even if a subsequent caller
+        // hits a freshly reactivated grain before the cache update is
+        // visible. The cache update is best-effort within the same call.
+        await _definitions.UpdateSlotsAsync(RunnerId, slots);
+        _slots = slots;
+        _log.LogInformation("Runner {Id} slots updated to {Slots}", RunnerId, slots);
     }
 
     private async Task CheckHeartbeatAsync()
@@ -352,7 +389,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         await NotifyTrackedWorkflowRunnersLostAsync();
         _works.Clear();
         _status = RunnerStatus.Offline;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.UnregisterAsync(RunnerId);
     }
 
@@ -392,22 +429,17 @@ public class RunnerGrain : Grain, IRunnerGrain
         }
     }
 
-    private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;
-
     private async Task TouchPresenceAsync()
     {
         _lastHeartbeat = DateTime.UtcNow;
         if (_info is null) return;
 
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.RegisterAsync(_info);
     }
 
     private async Task<IReadOnlyList<string>> BacklogProjectIdsAsync()
     {
-        if (!string.IsNullOrWhiteSpace(_projectId))
-            return [_projectId];
-
         var projectIds = new HashSet<string>(_backlogs.ListProjects(), StringComparer.Ordinal);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var persistedProjectIds = await db.Projects

@@ -50,7 +50,13 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 2 });
+            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+
+            // The runner-reported maxWorkflowSlots field is intentionally
+            // ignored for dispatch capacity (issue-222 T-002). Register
+            // defaults the runner to 1 slot; PATCH bumps it to 2 so the
+            // capacity view reflects the new value.
+            await _fixture.Client.PatchOkAsync("/api/runner/runtime-test-runner", new { slots = 2 });
 
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
@@ -104,13 +110,20 @@ public class RuntimeEntrySpecs
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var runnerId = $"runtime-offline-runner-{Guid.NewGuid():N}";
 
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(project.Id));
-        await registry.RegisterAsync(new RunnerInfo(runnerId, [], "test-host", project.Id, MaxWorkflowSlots: 4));
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        try
+        {
+            await registry.RegisterAsync(new RunnerInfo(runnerId, [], "test-host", project.Id, MaxWorkflowSlots: 4));
 
-        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
-        Assert.DoesNotContain(status.Runners, r => r.Id == runnerId);
-        Assert.DoesNotContain(status.Runners, r => r.Max == 4 && r.Id == runnerId);
+            Assert.DoesNotContain(status.Runners, r => r.Id == runnerId);
+            Assert.DoesNotContain(status.Runners, r => r.Max == 4 && r.Id == runnerId);
+        }
+        finally
+        {
+            await registry.UnregisterAsync(runnerId);
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -124,7 +137,13 @@ public class RuntimeEntrySpecs
 
         try
         {
-            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(project.Id));
+            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+
+            // Global runners from earlier integration tests can leak into this test's
+            // registry assertions; clear them so we start from a known empty state.
+            var existingIds = await registry.ListRunnerIdsAsync();
+            foreach (var id in existingIds)
+                await registry.UnregisterAsync(id);
 
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/unregister", null);
@@ -175,7 +194,7 @@ public class RuntimeEntrySpecs
     [Fact]
     public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
-        var status = AgentStatusResponse.Create([], []);
+        var status = AgentStatusResponse.Create([], [], new Dictionary<string, int>(StringComparer.Ordinal));
 
         Assert.False(status.Running);
         Assert.False(status.RunnerAvailable);

@@ -16,10 +16,7 @@ public sealed record RunnerStatusView(
     IReadOnlyList<RunnerActiveWorkView> ActiveWorks,
     string? BuildGitHash = null);
 
-public sealed record RunnerScopeView(
-    string Type,
-    string? ProjectId = null,
-    string? ProjectName = null);
+public sealed record RunnerScopeView(string Type);
 
 public sealed record RunnerCapacityView(
     int UsedSlots,

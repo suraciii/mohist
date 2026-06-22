@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
 
@@ -213,10 +212,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         _dispatchAttempts++;
         var projectId = _input.ProjectId ?? string.Empty;
-        var registryKey = string.IsNullOrWhiteSpace(projectId)
-            ? RunnerRegistryKeys.Global
-            : GrainKey.RunnerRegistry(projectId);
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(registryKey);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
         {
@@ -242,8 +238,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (state.Status != RunnerStatus.Online)
             return false;
 
-        var maxSlots = RunnerCapacity.Normalize(runnerInfo.MaxWorkflowSlots);
-        if (state.ActiveWorks.Count >= maxSlots)
+        // Slots are sourced from the runner grain (which reads from the
+        // persisted definition state). The runner-reported MaxWorkflowSlots
+        // on RunnerInfo is non-authoritative and intentionally ignored here.
+        var maxSlots = await runner.GetSlotsAsync();
+        var activeWorkCount = state.ActiveWorks
+            .Select(w => w.OwnerId)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        if (activeWorkCount >= maxSlots)
             return false;
 
         var workId = $"agent-work-{Guid.NewGuid():N}";

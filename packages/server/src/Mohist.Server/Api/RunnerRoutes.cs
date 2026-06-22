@@ -64,6 +64,26 @@ public static class RunnerRoutes
             return Results.Ok();
         });
 
+        group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
+        {
+            if (req is null || req.Slots <= 0)
+                return ApiResults.BadRequest("slots must be a positive integer");
+
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            try
+            {
+                await runner.UpdateAsync(req.Slots);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // The grain repeats the positive-integer invariant; reject with
+                // the same 400 contract if a future caller bypasses the route guard.
+                return ApiResults.BadRequest("slots must be a positive integer");
+            }
+
+            return ApiResults.Ok(new RunnerSlotsPatchResponse(runnerId, req.Slots));
+        });
+
         group.MapPost("/poll", async (string runnerId, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
@@ -258,6 +278,8 @@ public record RunnerRegisterRequest(
     int? MaxWorkflowSlots = null,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null);
+public record RunnerSlotsPatchRequest(int Slots);
+public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
 public record RunnerHeartbeatRequest(
     string[]? Capabilities = null,
     string? ProjectId = null,

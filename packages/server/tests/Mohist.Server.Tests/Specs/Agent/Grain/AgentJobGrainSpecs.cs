@@ -50,14 +50,25 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
         string? projectId = null,
         int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
+        // Every agent-job spec shares the in-memory backlog directory and
+        // global runner registry with the rest of the [Collection("WorkflowGrain")]
+        // cluster. Without a reset here, a stale runner from a prior spec
+        // claims this job before the new runner can, which makes the
+        // assertions on snapshot.RunnerId non-deterministic. Clear both
+        // before each registration.
+        await ClearBacklogAsync();
+
         var pid = projectId ?? $"agent-job-project-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
             "agent-job-host",
-            pid,
-            MaxWorkflowSlots: maxWorkflowSlots));
+            pid));
+        if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
+        {
+            await runner.UpdateAsync(maxWorkflowSlots);
+        }
         return (runnerId, pid);
     }
 
@@ -210,6 +221,8 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task SubmitAsync_NoEligibleRunner_StaysPendingAndRetriesWithBackoff()
     {
+        await ClearGlobalRunnerRegistryAsync();
+
         var jobKey = $"agent-job-no-slot-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
@@ -227,8 +240,45 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
+    public async Task SubmitAsync_RunnerAtPersistedSlots_LeavesSecondAgentJobPending()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-capacity-runner-{Guid.NewGuid():N}");
+        var firstJobKey = $"agent-job-capacity-first-{Guid.NewGuid():N}";
+        var secondJobKey = $"agent-job-capacity-second-{Guid.NewGuid():N}";
+        var firstJob = JobGrain(firstJobKey);
+        var secondJob = JobGrain(secondJobKey);
+
+        await firstJob.SubmitAsync(MakeInput("occupy slot", projectId, "/tmp/agent-job-capacity-first"));
+        await WaitForStatusAsync(firstJob, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        await secondJob.SubmitAsync(MakeInput("wait for slot", projectId, "/tmp/agent-job-capacity-second"));
+
+        var secondStatus = await WaitForAsync(
+            () => secondJob.GetStatusAsync(),
+            status => status == AgentJobStatus.Pending,
+            TimeSpan.FromMilliseconds(150),
+            TimeSpan.FromMilliseconds(25),
+            "second job remains pending while runner slot is occupied");
+        Assert.Equal(AgentJobStatus.Pending, secondStatus);
+
+        var secondSnapshot = await secondJob.GetRuntimeSnapshotAsync();
+        Assert.Null(secondSnapshot.RunnerId);
+        Assert.Null(secondSnapshot.CurrentWorkId);
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var activeWorks = (await runner.GetRuntimeStateAsync()).ActiveWorks;
+        Assert.Single(activeWorks, w => w.OwnerKind == WorkDispatchOwnerKinds.AgentJob);
+        Assert.Contains(activeWorks, w => w.OwnerId == firstJobKey);
+        Assert.DoesNotContain(activeWorks, w => w.OwnerId == secondJobKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
     public async Task SubmitAsync_BoundExceeded_TransitionsToFailedWithRunnerUnavailable()
     {
+        await ClearGlobalRunnerRegistryAsync();
+
         var jobKey = $"agent-job-bound-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
@@ -321,6 +371,8 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task SubmitAsync_NoEligibleRunner_IncrementsDispatchAttemptsAcrossRetries()
     {
+        await ClearGlobalRunnerRegistryAsync();
+
         var jobKey = $"agent-job-retry-attempts-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 

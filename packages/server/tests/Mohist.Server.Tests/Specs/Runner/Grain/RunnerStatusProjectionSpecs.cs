@@ -59,7 +59,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task GetRunnersAsync_OtherProjectRunner_IsExcluded()
+    public async Task GetRunnersAsync_OtherProjectRunner_IsIncluded()
     {
         var runnerId = $"runner-other-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -68,18 +68,22 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
         var result = await service.GetRunnersAsync("test-project");
 
-        Assert.DoesNotContain(result, r => r.Id == runnerId);
+        Assert.Contains(result, r => r.Id == runnerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task GetRunnersAsync_NoProjectScopedRunners_ReturnsOnlyGlobalRunners()
+    public async Task GetRunnersAsync_GlobalRegistry_ReturnsRunnersRegardlessOfProjectIdField()
     {
-        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
-        var result = await service.GetRunnersAsync("nonexistent-project");
+        var runnerId = $"runner-global-scope-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "scope-host", "some-project"));
 
-        Assert.All(result, r => Assert.Equal("global", r.Scope.Type));
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var result = await service.GetRunnersAsync("different-project");
+
+        Assert.Contains(result, r => r.Id == runnerId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -237,6 +241,24 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
+    public async Task GetRunnersAsync_CapacityUsesPersistedSlots_AndIgnoresReportedMaxWorkflowSlots()
+    {
+        var runnerId = $"runner-cap-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "cap-host", "test-project", MaxWorkflowSlots: 99));
+        await runner.UpdateAsync(4);
+
+        var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
+        var result = await service.GetRunnersAsync("test-project");
+
+        var view = Assert.Single(result, r => r.Id == runnerId);
+        Assert.NotNull(view.Capacity);
+        Assert.Equal(4, view.Capacity.TotalSlots);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
+    [Fact]
     public async Task GetRunnersAsync_ReturnsAllFields()
     {
         var runnerId = $"runner-full-{Guid.NewGuid():N}";
@@ -252,8 +274,9 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal(runnerId, view.Id);
         Assert.Equal("external", view.Kind);
         Assert.Equal("full-host", view.Hostname);
-        Assert.Equal("project", view.Scope.Type);
-        Assert.Equal("test-project", view.Scope.ProjectId);
+        // Runners are global execution resources; RunnerInfo.ProjectId is
+        // preserved on the wire but does not influence the scope view.
+        Assert.Equal("global", view.Scope.Type);
         Assert.Equal("idle", view.Status);
         Assert.NotNull(view.RegisteredAt);
         Assert.NotNull(view.LastHeartbeatAt);
@@ -280,7 +303,6 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var view = Assert.Single(result, r => r.Id == runnerId);
         Assert.Equal("global", view.Scope.Type);
-        Assert.Null(view.Scope.ProjectId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -534,7 +556,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
-    public async Task GetRunnerAsync_RunnerScopedToDifferentProject_ReturnsNull()
+    public async Task GetRunnerAsync_RunnerWithDifferentProjectId_ReturnsRunner()
     {
         var runnerId = $"runner-other-proj-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -542,7 +564,9 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
         var view = await service.GetRunnerAsync("test-project", runnerId);
-        Assert.Null(view);
+
+        Assert.NotNull(view);
+        Assert.Equal(runnerId, view!.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

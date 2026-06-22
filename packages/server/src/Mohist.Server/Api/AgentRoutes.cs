@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Http;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Services;
@@ -18,9 +17,10 @@ public static class AgentRoutes
         {
             var project = context.GetResolvedProject();
             var runners = await ListAvailableRunnersAsync(grains, project.Id);
+            var persistedSlots = await LoadPersistedSlotsByRunnerAsync(grains, runners);
             var activeAgents = await projection.ListActiveAgentsAsync(project.Id);
 
-            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners));
+            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners, persistedSlots));
         });
 
         group.MapGet("/sessions", async (HttpContext context, string? status, int? limit, AgentSessionQuerier sessions) =>
@@ -68,21 +68,32 @@ public static class AgentRoutes
 
     private static async Task<IReadOnlyList<RunnerInfo>> ListAvailableRunnersAsync(IGrainFactory grains, string projectId)
     {
-        var projectRunners = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnersAsync();
         var globalRunners = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnersAsync();
-        var candidates = projectRunners
-            .Concat(globalRunners)
-            .GroupBy(r => r.RunnerId, StringComparer.Ordinal)
-            .Select(g => g.First())
-            .ToArray();
         var available = new List<RunnerInfo>();
-        foreach (var runner in candidates)
+        foreach (var runner in globalRunners)
         {
             var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
             if (await grain.IsAvailableAsync())
                 available.Add(runner);
         }
         return available;
+    }
+
+    private static async Task<IReadOnlyDictionary<string, int>> LoadPersistedSlotsByRunnerAsync(
+        IGrainFactory grains,
+        IReadOnlyList<RunnerInfo> runners)
+    {
+        var slots = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var runner in runners)
+        {
+            var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
+            // Persisted slots are the sole authoritative source for dispatch
+            // capacity (issue-222 Decision 2). The runner-reported
+            // MaxWorkflowSlots field is preserved on RunnerInfo for
+            // runner-line compatibility but MUST NOT influence capacity.
+            slots[runner.RunnerId] = await grain.GetSlotsAsync();
+        }
+        return slots;
     }
 }
 
@@ -97,7 +108,10 @@ public sealed record AgentStatusResponse(
     string? RunnerMessage,
     IReadOnlyList<RunnerStatusResponse> Runners)
 {
-    public static AgentStatusResponse Create(IReadOnlyList<ActiveAgentDto> activeAgents, IReadOnlyList<RunnerInfo> runners)
+    public static AgentStatusResponse Create(
+        IReadOnlyList<ActiveAgentDto> activeAgents,
+        IReadOnlyList<RunnerInfo> runners,
+        IReadOnlyDictionary<string, int> persistedSlotsByRunner)
     {
         var runnerAvailable = runners.Count > 0;
         var activeSlotsByRunner = activeAgents
@@ -106,7 +120,14 @@ public sealed record AgentStatusResponse(
         var runnerResponses = runners
             .Select(r =>
             {
-                var maxSlots = RunnerCapacity.Normalize(r.MaxWorkflowSlots);
+                // Persisted slots are the sole authoritative source for
+                // dispatch capacity (issue-222 Decision 2). The
+                // runner-reported MaxWorkflowSlots field on RunnerInfo is
+                // preserved for runner-line compatibility but MUST NOT
+                // influence capacity.
+                var maxSlots = persistedSlotsByRunner.TryGetValue(r.RunnerId, out var slots)
+                    ? slots
+                    : RunnerCapacity.DefaultMaxWorkflowSlots;
                 activeSlotsByRunner.TryGetValue(r.RunnerId, out var activeSlots);
                 return new RunnerStatusResponse(r.RunnerId, "external", activeSlots, maxSlots);
             })

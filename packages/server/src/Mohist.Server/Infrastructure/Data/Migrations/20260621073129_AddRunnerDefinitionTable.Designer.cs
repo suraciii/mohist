@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,9 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260621073129_AddRunnerDefinitionTable")]
+    partial class AddRunnerDefinitionTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -112,10 +115,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<int?>("Number")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("PauseReason")
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Priority")
                         .IsRequired()
@@ -529,6 +528,28 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionLabelRow", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SessionId", "Key");
+
+                    b.HasIndex("Key", "Value", "SessionId");
+
+                    b.ToTable("AgentSessionLabels", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>
                 {
                     b.Property<string>("Id")
@@ -541,46 +562,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<string>("LabelIssueNumber")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/issue-number\"')", true);
-
-                    b.Property<string>("LabelProjectId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/project-id\"')", true);
-
-                    b.Property<string>("LabelSessionName")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/session-name\"')", true);
-
-                    b.Property<string>("LabelSourceId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/source-id\"')", true);
-
-                    b.Property<string>("LabelSourceKind")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/source-kind\"')", true);
-
-                    b.Property<string>("LabelStage")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/stage\"')", true);
-
-                    b.Property<string>("LabelWorkId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-id\"')", true);
-
-                    b.Property<string>("LabelWorkType")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')", true);
 
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");
@@ -601,15 +582,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AgentSessionId");
-
-                    b.HasIndex("LabelSourceId")
-                        .HasDatabaseName("IX_AgentSessions_LabelSourceId");
-
-                    b.HasIndex("LabelProjectId", "CreatedAt")
-                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
-
-                    b.HasIndex("LabelSourceId", "LabelSessionName")
-                        .HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");
 
                     b.HasIndex("Status", "CreatedAt");
 

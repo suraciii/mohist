@@ -35,6 +35,7 @@ using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Label.Services;
 using Mohist.Server.Otel;
+using Mohist.Server.Infrastructure.Data.Runner;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -156,6 +157,7 @@ public static class MohistServiceRegistration
         {
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
+        services.AddScoped<RunnerDefinitionStore>();
         services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options);
 
         return services;

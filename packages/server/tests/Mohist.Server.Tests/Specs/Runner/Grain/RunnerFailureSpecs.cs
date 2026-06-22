@@ -87,8 +87,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
             runnerId,
             ["spec/*"],
             "test-host",
-            TestProjectId(work.WorkflowRunId),
-            MaxWorkflowSlots: RunnerCapacity.DefaultMaxWorkflowSlots));
+            TestProjectId(work.WorkflowRunId)));
         workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
 
         Assert.Equal("Running", await workflow.GetRunStatusAsync());
