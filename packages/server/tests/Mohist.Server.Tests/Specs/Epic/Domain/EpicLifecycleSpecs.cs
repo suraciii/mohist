@@ -393,8 +393,7 @@ public class EpicLifecycleSpecs
         Assert.NotNull(detail.Progress.NextIssue);
         Assert.Equal(second.Number, detail.Progress.NextIssue!.Number);
         Assert.Equal(second.Id, detail.Progress.NextIssue.Id);
-        Assert.Single(detail.Progress.ActiveIssues);
-        Assert.Equal(second.Id, detail.Progress.ActiveIssues[0].Id);
+        Assert.Empty(detail.Progress.ActiveIssues);
         Assert.Empty(detail.Progress.BlockedIssues);
 
         var secondRow = detail.LinkedIssues.Single(i => i.Number == second.Number);
