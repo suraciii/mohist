@@ -1,18 +1,28 @@
 import { existsSync } from "node:fs"
 import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
+import type { JsonObject, WorkItem } from "../core/types.js"
 import { deleteDirectory, runCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
+
+export interface RunnerSignalRClientOptions {
+  probeTimeoutMs?: number
+  onReconnected?: (connectionId: string) => void
+}
 
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
   private readonly workspaceManager: WorkspaceManager
+  private readonly probeTimeoutMs: number
+  private readonly onReconnected: ((connectionId: string) => void) | undefined
 
-  constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string, buildGitHash: string | null = null) {
+  constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string, buildGitHash: string | null = null, options: RunnerSignalRClientOptions = {}) {
     const baseUrl = serverUrl.replace(/\/$/, "")
     const params = new URLSearchParams()
     params.set("runnerId", runnerId)
     if (buildGitHash) params.set("buildGitHash", buildGitHash)
+    this.probeTimeoutMs = options.probeTimeoutMs ?? 5_000
+    this.onReconnected = options.onReconnected
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(`${baseUrl}/hubs/runner?${params.toString()}`)
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
@@ -20,6 +30,7 @@ export class RunnerSignalRClient {
     this.workspaceManager = new WorkspaceManager(runnerRoot)
 
     this.registerHandlers()
+    this.registerLifecycleCallbacks()
   }
 
   async start(): Promise<void> {
@@ -28,6 +39,69 @@ export class RunnerSignalRClient {
 
   async stop(): Promise<void> {
     await this.connection.stop()
+  }
+
+  getConnectionId(): string | null {
+    return this.connection.connectionId
+  }
+
+  async probeLiveness(signal: AbortSignal): Promise<boolean> {
+    if (this.connection.state !== signalR.HubConnectionState.Connected) {
+      return false
+    }
+    return await new Promise<boolean>((resolve) => {
+      let settled = false
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const finish = (result: boolean) => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        if (signal) signal.removeEventListener("abort", onAbort)
+        resolve(result)
+      }
+      const onAbort = () => finish(false)
+      timer = setTimeout(() => finish(false), this.probeTimeoutMs)
+      if (signal.aborted) {
+        finish(false)
+        return
+      }
+      signal.addEventListener("abort", onAbort, { once: true })
+      this.connection
+        .invoke("Ping")
+        .then(() => finish(true))
+        .catch(() => finish(false))
+    })
+  }
+
+  async forceReconnect(signal: AbortSignal): Promise<void> {
+    if (this.connection.state === signalR.HubConnectionState.Disconnected) {
+      await this.connection.start()
+      this.notifyReconnected()
+      return
+    }
+    try {
+      await this.connection.stop()
+    } catch {
+      // best effort — a half-open socket may throw on stop; the start() below
+      // will surface the real state.
+    }
+    if (signal.aborted) return
+    await this.connection.start()
+    this.notifyReconnected()
+  }
+
+  private registerLifecycleCallbacks(): void {
+    this.connection.onreconnected((connectionId) => {
+      this.notifyReconnected(connectionId)
+    })
+  }
+
+  private notifyReconnected(connectionId?: string): void {
+    if (!this.onReconnected) return
+    const id = typeof connectionId === "string" && connectionId.length > 0
+      ? connectionId
+      : (this.connection.connectionId ?? "")
+    if (id) this.onReconnected(id)
   }
 
   private registerHandlers(): void {
@@ -167,6 +241,11 @@ export class RunnerSignalRClient {
         return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))
       }
     })
+
+    this.connection.on("MaterializeWorkspace", async (payload: unknown) => {
+      const ac = new AbortController()
+      return await this.workspaceManager.materialize(normalizeMaterializePayload(payload), ac.signal)
+    })
   }
 }
 
@@ -191,6 +270,53 @@ export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined):
   const head = query.branch ?? null
   if (!head) return null
   return { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
+}
+
+export function normalizeMaterializePayload(payload: unknown): WorkItem {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("MaterializeWorkspace payload must be an object")
+  const source = payload as Record<string, unknown>
+  const workflowRunId = readString(source, "workflowRunId")
+  const workId = readString(source, "workId")
+  const workType = readString(source, "workType")
+  if (!workflowRunId || !workId || !workType) throw new Error("MaterializeWorkspace payload requires workflowRunId, workId, and workType")
+
+  return {
+    workflowRunId,
+    workId,
+    workType,
+    stage: readNullableString(source, "stage"),
+    title: readNullableString(source, "title"),
+    uses: readNullableString(source, "uses"),
+    with: parseJsonObject(source["with"], "with"),
+    variables: parseJsonObject(source["variables"], "variables"),
+    projectId: readNullableString(source, "projectId"),
+    issueNumber: readNullableNumber(source, "issueNumber") ?? undefined,
+    artifacts: parseJsonObject(source["artifacts"], "artifacts"),
+    ownerKind: readNullableString(source, "ownerKind") ?? undefined,
+    agentJobId: readNullableString(source, "agentJobId") ?? undefined,
+  }
+}
+
+function parseJsonObject(value: unknown, field: string): JsonObject | null {
+  if (value === undefined || value === null || value === "") return null
+  const parsed = typeof value === "string" ? JSON.parse(value) : value
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`MaterializeWorkspace ${field} must be an object`)
+  return parsed as JsonObject
+}
+
+function readString(source: Record<string, unknown>, field: string): string | null {
+  const value = source[field]
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function readNullableString(source: Record<string, unknown>, field: string): string | null | undefined {
+  const value = source[field]
+  return value === undefined || value === null || typeof value === "string" ? value : undefined
+}
+
+function readNullableNumber(source: Record<string, unknown>, field: string): number | null | undefined {
+  const value = source[field]
+  return value === undefined || value === null || (typeof value === "number" && Number.isFinite(value)) ? value : undefined
 }
 
 async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {

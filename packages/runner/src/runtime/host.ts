@@ -34,6 +34,11 @@ export class RunnerHost {
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
 
+  // The active outer-run signal. The onReconnected callback fires from
+  // outside the run loop, so we capture the signal here to bound the
+  // immediate heartbeat it triggers.
+  private activeSignal: AbortSignal | null = null
+
   // Step 10 of design/eventbus.md: AcpSessionManager and
   // SharedAcpConnection are created once per host (not per work item).
   // The previous design recreated them for every executeAndReport call,
@@ -54,25 +59,60 @@ export class RunnerHost {
       options.runnerId,
       options.runnerRoot,
       this.buildGitHash,
+      { onReconnected: () => this.onDispatchReconnected() },
     )
   }
 
   async run(signal: AbortSignal) {
-    while (!signal.aborted) {
-      await this.connectRunner(signal)
-      await this.initializeSharedConnection(signal)
-      const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
-      try {
-        await this.runWorkerPool(signal)
-      } catch (error) {
-        if (signal.aborted) break
-        console.error(`runner connection lost; reconnecting in ${this.options.pollIntervalMs}ms`, error)
-        await delay(this.options.pollIntervalMs, signal)
-      } finally {
-        clearInterval(heartbeat)
-        await this.shutdownSharedConnection()
-        await this.shutdownConnection()
+    this.activeSignal = signal
+    try {
+      while (!signal.aborted) {
+        await this.connectRunner(signal)
+        await this.initializeSharedConnection(signal)
+        const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
+        const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
+        try {
+          await this.runWorkerPool(signal)
+        } catch (error) {
+          if (signal.aborted) break
+          console.error(`runner connection lost; reconnecting in ${this.options.pollIntervalMs}ms`, error)
+          await delay(this.options.pollIntervalMs, signal)
+        } finally {
+          clearInterval(heartbeat)
+          clearInterval(selfCheck)
+          await this.shutdownSharedConnection()
+          await this.shutdownConnection()
+        }
       }
+    } finally {
+      this.activeSignal = null
+    }
+  }
+
+  private async runSelfCheck(signal: AbortSignal) {
+    if (signal.aborted) return
+    const alive = await this.signalR.probeLiveness(signal).catch(() => false)
+    if (signal.aborted) return
+    if (alive) return
+    console.warn("dispatch liveness probe failed; forcing reconnect")
+    try {
+      await this.signalR.forceReconnect(signal)
+    } catch (error) {
+      console.error("forceReconnect failed:", error)
+    }
+  }
+
+  private onDispatchReconnected() {
+    void this.sendImmediateHeartbeat()
+  }
+
+  private async sendImmediateHeartbeat() {
+    const signal = this.activeSignal
+    if (!signal || signal.aborted) return
+    try {
+      await this.connection.heartbeat(this.registrationState(), signal)
+    } catch (error) {
+      console.error("immediate post-reconnect heartbeat failed:", error)
     }
   }
 
@@ -237,6 +277,7 @@ export class RunnerHost {
       coderModels: this.coderModels,
       coderModelVariants: this.coderModelVariants,
       maxWorkflowSlots: this.maxConcurrentWorkflows,
+      connectionId: this.signalR.getConnectionId(),
     }
   }
 

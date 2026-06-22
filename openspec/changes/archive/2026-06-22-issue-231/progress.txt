@@ -1,0 +1,103 @@
+## Codebase Patterns
+
+### Server: SignalR `HubCallerContext` is not fully overridable
+
+In the .NET 10 SignalR version used by this repo (`Microsoft.AspNetCore.SignalR.Common` 10.0.0-preview.3.25172.1), `HubCallerContext.Query` is **not** `virtual` or `abstract` — you cannot `override` it in a test stub. Hub subclasses that need to fake a request query must either skip the override entirely (and avoid using `Context.GetHttpContext()?.Request.Query` in the code under test) or take a different testing surface. The unit test pattern that works is direct hub instantiation with a minimal `TestHubCallerContext` overriding only the abstract/virtual members (`ConnectionId`, `UserIdentifier`, `User`, `Items`, `Features`, `ConnectionAborted`, `Abort`).
+
+### Server: minimal-argument test helpers for `IGrainFactory`
+
+When a test only needs to assert behavior of one or two Hub methods that don't touch grains, a "throwing" stub `IGrainFactory` is preferable to a scripted one: every accidental grain call fails the test loudly instead of silently doing nothing. This is the same shape used in `MohistHubSpecs` (see its `ScriptedConnectionSubscriptionGrainFactory` when grains ARE needed). Choose based on whether the code under test resolves grains — for `Ping()` and other pure-context methods, use `ThrowingGrainFactory`.
+
+### Server: in-process DI exposes singletons via `MohistIntegrationFixture.Services`
+
+`MohistIntegrationFixture.Services` (an `IServiceProvider`) resolves the same singletons registered in `MohistServiceRegistration.cs`. This is how tests assert on `RunnerConnectionTracker` state without going through a public API — `Services.GetRequiredService<RunnerConnectionTracker>().GetConnectionId(runnerId)`. Useful for verifying in-memory map writes from HTTP handlers and hub lifecycle methods.
+
+### Server: minimal-API handler DI by parameter name
+
+ASP.NET Core minimal-API handlers in `RunnerRoutes.cs` bind DI services by parameter type from the request container. Adding `RunnerConnectionTracker connections` to the lambda signature is enough — no `[FromServices]` attribute needed. The handler can then call `connections.Register(...)` directly. The route does NOT need to be registered as a service itself; the method body resolves the singleton from the request scope.
+
+## Task T-001: Server: heartbeat-driven map convergence + Ping probe target
+
+### What was implemented
+- `RunnerHeartbeatRequest` (`packages/server/src/Mohist.Server/Api/RunnerRoutes.cs:283`) gains an optional trailing field `string? ConnectionId = null`. JSON deserialization treats missing and null identically (null in C#), so old runner clients that don't send the field continue to work unchanged.
+- `/api/runner/{runnerId}/heartbeat` handler (RunnerRoutes.cs:40) now takes a `RunnerConnectionTracker connections` parameter and, **only when** the request body is non-null AND `req.ConnectionId` is non-empty (`!string.IsNullOrWhiteSpace`), calls `connections.Register(runnerId, req.ConnectionId)`. The handler never calls `Unregister`. The empty-body / absent-field / null / whitespace / empty-string cases all skip the write path entirely, preserving any pre-existing tracker entry.
+- `RunnerHub.Ping()` added as `public Task<string> Ping() => Task.FromResult(Context.ConnectionId ?? string.Empty);`. It returns the caller's connection id with no I/O, no grain call, no side effects — making it safe to invoke as a self-check probe on a hot path.
+
+### Files changed
+- `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs` — added `using Mohist.Server.Runner.Services.SignalR;`, `ConnectionId` field on `RunnerHeartbeatRequest`, and `RunnerConnectionTracker` parameter + conditional `Register` call in `/heartbeat` handler.
+- `packages/server/src/Mohist.Server/Runner/Services/SignalR/RunnerHub.cs` — added `Ping()` method after `OnConnectedAsync`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Runner/SignalR/RunnerHubSpecs.cs` — new file. 2 unit tests: `Ping_ReturnsCallerConnectionId`, `Ping_DistinctConnections_DistinctResults`. Uses a minimal `TestHubCallerContext` stub and a `ThrowingGrainFactory`.
+- `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerHeartbeatConnectionApiSpecs.cs` — new file. 8 integration tests covering: heartbeat with connection id → tracker writes; empty body → entry unchanged; body without `connectionId` field → entry unchanged; explicit empty string → entry unchanged; explicit null → entry unchanged; whitespace → entry unchanged; repopulates after simulated disconnect-erasure; subsequent ids overwrite. Resolves `RunnerConnectionTracker` from `MohistIntegrationFixture.Services` for assertions.
+
+### Learnings for future tasks
+- **Decisions made**
+  - `Ping()` returns `Context.ConnectionId ?? string.Empty` rather than throwing or returning null. SignalR guarantees a non-null connection id during invocation; the `??` is a defensive guard but in practice never fires. Avoids nullable return-type confusion for clients.
+  - `Register` is invoked inside the `if (req is not null)` branch only — the no-body path skips the connection-map write entirely. This is intentional: a heartbeat with no body means "the runner client is alive enough to send an empty POST", which is not a fresh signalR connection event, so we don't synthesize a fake one.
+  - The handler intentionally does not echo `connectionId` in any response body. Future debugging can rely on the singleton tracker's state. Keeps the response shape stable for legacy callers.
+
+- **Gotchas discovered**
+  - `HubCallerContext.Query` is **not overridable** in `Microsoft.AspNetCore.SignalR.Common` 10.0.0-preview.3.25172.1 — see Codebase Patterns above. The runner hub's `OnConnectedAsync` reads query via `Context.GetHttpContext()?.Request.Query`, which silently returns null in a unit test (no HttpContext), causing the `if (string.IsNullOrEmpty(runnerId)) return;` early-exit. Don't try to unit-test `OnConnectedAsync` via direct hub instantiation — use the integration fixture instead, or skip those tests for this hub.
+  - `RunnerDefinitionStateSpecs.OfflineRunner_DoesNotClaimOrAcceptNewWork` is **pre-existing failure** (unrelated to T-001): it expects `RunnerWorkAssignmentStatus.Rejected` after `UnregisterAsync`, but commit `e4ffd6f02` ("accept work while offline") changed `AssignWorkAsync` to return `Assigned` even on offline runners. The test was committed in #222 (3255685e3) after that fix and was never updated. Do not treat this as a T-001 regression; it should be fixed in a follow-up.
+
+- **Patterns / API shapes established**
+  - **"Two sources of truth, one write API"**: the `runnerId → connectionId` map is now written through `Register` from both SignalR `OnConnectedAsync` (connect-time) and the heartbeat handler (every cycle). `Unregister` remains SignalR-only. This makes the heartbeat a convergence channel without introducing new tracker methods or guarded APIs.
+  - **Probe target = pure-context hub method**: `Ping()` is the lightest possible round-trip — no grain call, no I/O. Future probes should follow this shape; adding side-effecting probe methods would couple liveness checks to system state.
+  - **Integration test for HTTP-handler convergence**: resolve the singleton from `MohistIntegrationFixture.Services`, register a runner, exercise the endpoint, and assert on the tracker. This is a clean way to verify handler-driven writes without exposing the tracker via HTTP.
+
+- **Cross-task invariants**
+  - **Heartbeat must never erase**: any future change to the heartbeat path MUST NOT call `Unregister`. The acceptance criterion is enforceable by grepping `Unregister` in `RunnerRoutes.cs` — only `RunnerHub.OnDisconnectedAsync` should match. T-002 (runner client) does not touch this.
+  - **Heartbeat field is optional**: any future change to `RunnerHeartbeatRequest` MUST preserve the `string? ConnectionId = null` default so legacy runners continue to work. The no-body / null / empty / whitespace handling is locked in by `RunnerHeartbeatConnectionApiSpecs`; changing those semantics requires updating the spec acceptance criteria.
+  - **The grain does not learn about the connection id**: `IRunnerGrain` still owns only the liveness timestamp. T-002 sends the connection id via the existing heartbeat body spread; it does not push the id through the grain.
+  - **Hub lifecycle is unchanged**: `OnConnectedAsync` still writes on connect and `OnDisconnectedAsync` still erases. T-001 does not reorder or remove any of these calls.
+
+## Task T-002: Runner client: carry connectionId in heartbeat, self-check dispatch liveness, proactive reconnect with immediate heartbeat
+
+### What was implemented
+- `RunnerRegistration` (core/types.ts:98) gains `connectionId?: string | null`. `RunnerHost.registrationState()` (host.ts:280) populates it from `this.signalR.getConnectionId()`. Because `ServerConnection.heartbeat(state, signal)` already spreads `...state` into the POST body (commit `4b784e443`), the connection id flows through the heartbeat automatically — zero signature change to `heartbeat()`.
+- `RunnerSignalRClient` (runner-signalr.ts) gains:
+  - `getConnectionId(): string | null` returning the underlying `HubConnection.connectionId` (null before start).
+  - `probeLiveness(signal: AbortSignal): Promise<boolean>` — short-circuits to `false` if the connection is not `Connected`; otherwise invokes `"Ping"` with a bounded timeout (default 5s, configurable via `probeTimeoutMs` option) and respects `AbortSignal`. Resolves to `true` on success, `false` on rejection, timeout, or abort.
+  - `forceReconnect(signal: AbortSignal): Promise<void>` — if already `Disconnected`, starts directly; otherwise calls `stop()` (errors swallowed — half-open sockets can throw) then `start()`. Surfaces the real state in either direction.
+  - `RunnerSignalRClientOptions` with optional `probeTimeoutMs` (default 5000) and `onReconnected(connectionId: string) => void` callback.
+  - Registers `HubConnection.onreconnected` so that both SignalR's automatic-reconnect path and any future manual restart funnel through a single host callback.
+- `RunnerHost` (host.ts) gains:
+  - `onReconnected: () => this.onDispatchReconnected()` passed to the `RunnerSignalRClient` constructor.
+  - A second `setInterval` self-check timer on `dispatchLivenessProbeIntervalMs` (host.ts:73). On each tick `runSelfCheck` calls `signalR.probeLiveness(signal)`; on failure it logs and calls `signalR.forceReconnect(signal)` (errors swallowed).
+  - `onDispatchReconnected()` calls `sendImmediateHeartbeat()`, which fetches the current `activeSignal` (captured at the start of `run`) and fires `connection.heartbeat(registrationState(), signal)` once.
+  - The self-check timer is cleared in the same `finally` block as the heartbeat timer (host.ts:81-82), so neither leaks across the reconnect loop in `connectRunner`/`runWorkerPool`/`shutdownConnection`.
+- `RunnerOptions` (types.ts:87) gains `dispatchLivenessProbeIntervalMs: number`.
+- `cli.ts` reads `DISPATCH_LIVENESS_PROBE_INTERVAL_MS` (default 10000) into `RunnerOptions.dispatchLivenessProbeIntervalMs`.
+
+### Files changed
+- `packages/runner/src/core/types.ts` — added `connectionId?: string | null` to `RunnerRegistration` and `dispatchLivenessProbeIntervalMs: number` to `RunnerOptions`.
+- `packages/runner/src/server/runner-signalr.ts` — added `RunnerSignalRClientOptions`, `getConnectionId`, `probeLiveness`, `forceReconnect`, `registerLifecycleCallbacks` (onreconnected wiring), and a call to it in the constructor.
+- `packages/runner/src/runtime/host.ts` — added `activeSignal` field, `runSelfCheck`, `onDispatchReconnected`, `sendImmediateHeartbeat`; wired self-check timer in `run()`; populated `connectionId` in `registrationState()`.
+- `packages/runner/src/cli.ts` — read `DISPATCH_LIVENESS_PROBE_INTERVAL_MS` (default 10_000) into `RunnerOptions.dispatchLivenessProbeIntervalMs`.
+- `packages/runner/tests/runner-signalr.spec.ts` — added 8 tests covering `getConnectionId` (before/after start), `probeLiveness` (disconnected, success, rejection, timeout, abort), `forceReconnect` (connected, disconnected, swallows stop error), and `onreconnected` callback (with explicit id, falls back to `connection.connectionId` when arg missing).
+- `packages/runner/tests/runner-host.spec.ts` — added 4 tests covering `HeartbeatCarriesCurrentConnectionId`, `SelfCheckTimer_ProbesAndForceReconnects_OnProbeFailure`, `SelfCheckTimer_DoesNotReconnect_OnProbeSuccess`, `OnReconnected_InvokesImmediateHeartbeatOnce`, and `SelfCheckTimer_ClearedOnShutdown_NoLeakAcrossReconnectLoops`. Updated existing tests to pass the new `dispatchLivenessProbeIntervalMs` option.
+
+### Learnings for future tasks
+- **Decisions made**
+  - **Constructor option bag for `RunnerSignalRClient`**: introduced `RunnerSignalRClientOptions` rather than expanding the positional signature. Keeps the existing call sites unchanged and makes future options (e.g. a custom probe method name) additive.
+  - **`activeSignal` field on the host**: needed because `onreconnected` fires from SignalR's internal transport, outside the `run` call stack. Capturing the abort signal in a field is the simplest way to bound the immediate heartbeat that the reconnect callback triggers.
+  - **Single callback funnel for both reconnect paths**: registering `HubConnection.onreconnected` in the client (not the host) and exposing it via a constructor option means the host doesn't need to subscribe to the connection directly. SignalR's auto-reconnect and our manual `forceReconnect()` (which internally calls `start()`, which itself fires `onreconnected` after negotiating the new connection) both flow through the same `onReconnected` callback → `sendImmediateHeartbeat` chain.
+  - **No probe when state != Connected**: `probeLiveness` short-circuits to `false` for non-`Connected` states. This avoids invoking on a half-built connection; the self-check will then call `forceReconnect`, which handles `Disconnected` by starting directly.
+  - **`stop()` errors swallowed in `forceReconnect`**: a half-open socket can throw on `stop()`. We swallow and let the subsequent `start()` reflect the actual state. Failing the whole `forceReconnect` would leave the host stuck in the suspect state.
+
+- **Gotchas discovered**
+  - **`signal.addEventListener` guard in `probeLiveness`**: `signal` is required in the API, but a test or future caller may pass an already-aborted signal. The implementation must check `signal.aborted` before subscribing and must remove the listener in the `finish` callback to avoid leaks when the promise resolves on its own.
+  - **Test fake must mirror reconnect callback firing**: The real `RunnerSignalRClient.forceReconnect` does NOT directly invoke `onReconnected` — it calls `start()`, and SignalR's `HubConnection` fires `onreconnected` on the new connection. In tests we model this by triggering the captured `onReconnected` callback from the fake `forceReconnect` implementation. This keeps the host's wiring (the actual test target) honest.
+  - **`setInterval` timer cleanup across `run`'s while-loop**: The heartbeat and self-check timers must be cleared on EVERY iteration of the outer `while (!signal.aborted)` loop, not just on shutdown. If `runWorkerPool` throws, the `finally` block runs and the timers are cleared; if the loop exits cleanly via `signal.aborted`, the `finally` block also runs. No need for a global cleanup hook.
+  - **`HubConnection.onreconnected` argument shape**: the official `HubConnection.onreconnected(callback)` may pass a `string | undefined` to the callback (the new connection id). We defensively fall back to `this.connection.connectionId` if the argument is missing or empty — covers libraries that haven't updated to pass the new id.
+
+- **Patterns / API shapes established**
+  - **Constructor option bag for SignalR client**: `RunnerSignalRClientOptions` pattern. Future SignalR client options should follow this same shape.
+  - **Probe target = `Ping` hub method (server) + `probeLiveness` client wrapper**: kept symmetric with the server's `Ping()` from T-001. Bounded timeout + abort support is the canonical shape for any future probe-style calls.
+  - **Self-check + force-reconnect pair**: `runSelfCheck` + `signalR.forceReconnect` is the template for any future dead-socket detection. The two are decoupled so the self-check can be replaced (e.g. with a more sophisticated liveness signal) without touching `forceReconnect`.
+  - **`activeSignal` field pattern**: when a callback can fire from outside the `run` call stack, capture the `AbortSignal` in a field and re-check `aborted` in the callback. This is more robust than passing a `() => AbortSignal` thunk.
+
+- **Cross-task invariants**
+  - **Both reconnect paths funnel through `onReconnected`**: any future change that adds another reconnect mechanism (e.g. an explicit `reconnectNow()` admin command) must go through `HubConnection.start()` to fire `onreconnected`, or it must call `onReconnected` directly. The contract: every successful (re)connect MUST trigger exactly one immediate heartbeat.
+  - **Self-check timer interval is decoupled from heartbeat**: do not collapse the two timers, even if their values happen to match in production. The two are tuned for different concerns (liveness detection vs. map convergence), and operators may want to tune one without the other.
+  - **Probe never invents state**: `probeLiveness` only reports liveness of the current connection; it does not trigger reconnects. The host's `runSelfCheck` is the single owner of the probe → reconnect decision. Any future self-check logic (e.g. a longer-running health check) belongs in the host, not the client.
+  - **`RunnerRegistration.connectionId` is a snapshot**: the value is captured at the moment `registrationState()` is called, not lazily evaluated. The host's `sendImmediateHeartbeat` calls `registrationState()` *inside* the callback to pick up the new id, which is the correct contract — the heartbeat body reflects the connection id at send time, not at registration time.
