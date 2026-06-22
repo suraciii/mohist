@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { RunnerActiveWork, RunnerStatusRow } from '../../../entities/runner'
 import { useRunners } from '../../../entities/runner'
@@ -6,6 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components
 import { Badge } from '@/shared/ui/components/badge'
 
 const RUNNER_START_HINT = 'npx mohist runner'
+
+const STATUS_CONFIG: Record<RunnerStatusRow['status'], { dot: string; badge: string; label: string }> = {
+  idle: { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20', label: 'idle' },
+  busy: { dot: 'bg-blue-500', badge: 'bg-blue-50 text-blue-700 ring-blue-600/20', label: 'busy' },
+  stale: { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700 ring-amber-600/20', label: 'stale' },
+  offline: { dot: 'bg-gray-400', badge: 'bg-gray-50 text-gray-500 ring-gray-600/20', label: 'offline' },
+}
 
 function RunnerScopeLabel({ scope }: { scope: RunnerStatusRow['scope'] }) {
   if (scope.type === 'global') {
@@ -19,15 +27,13 @@ function RunnerScopeLabel({ scope }: { scope: RunnerStatusRow['scope'] }) {
 }
 
 function RunnerStatusBadge({ status }: { status: RunnerStatusRow['status'] }) {
-  const variants: Record<RunnerStatusRow['status'], string> = {
-    idle: 'bg-green-100 text-green-700',
-    busy: 'bg-blue-100 text-blue-700',
-    stale: 'bg-amber-100 text-amber-700',
-    offline: 'bg-gray-100 text-gray-500',
-  }
+  const config = STATUS_CONFIG[status]
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${variants[status]}`}>
-      {status}
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset ${config.badge}`}
+    >
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${config.dot}`} aria-hidden="true" />
+      {config.label}
     </span>
   )
 }
@@ -54,12 +60,6 @@ function formatHeartbeatTimestamp(lastHeartbeatAt: string) {
   return new Date(heartbeatMs).toLocaleTimeString()
 }
 
-function heartbeatFreshnessLabel(row: RunnerStatusRow) {
-  if (!row.lastHeartbeatAt) return 'heartbeat unknown'
-  const kind = row.status === 'stale' || row.status === 'offline' ? row.status : 'fresh'
-  return `heartbeat ${kind}: ${formatHeartbeatAge(row.lastHeartbeatAt)}`
-}
-
 function ActiveWorkSummary({
   work,
   toProjectPath,
@@ -70,27 +70,85 @@ function ActiveWorkSummary({
   const label = work.title ?? work.workType ?? work.ownerKind
   if (work.issue) {
     return (
-      <div className="mt-1 text-xs text-blue-600" data-testid="active-work-row">
-        <span>{label}</span>
-        <span className="mx-1 text-gray-300">·</span>
+      <div className="flex items-center gap-1.5 text-xs" data-testid="active-work-row">
+        <span className="text-foreground truncate">{label}</span>
+        <span className="text-gray-300 shrink-0">·</span>
         <Link
           to={toProjectPath(`/issues/${work.issue.issueNumber}`)}
           onClick={(event) => event.stopPropagation()}
-          className="text-blue-600 hover:text-blue-700 hover:underline"
+          className="text-blue-600 hover:text-blue-700 hover:underline shrink-0"
           data-testid="active-work-issue-link"
           data-work-id={work.workId}
         >
           #{work.issue.issueNumber}
         </Link>
-        {work.stage && <span className="ml-1 text-gray-400">({work.stage})</span>}
+        {work.stage && <span className="text-muted-foreground shrink-0">({work.stage})</span>}
       </div>
     )
   }
   return (
-    <div className="mt-1 text-xs text-blue-600" data-testid="active-work-row">
-      <span>{label}</span>
-      {work.stage && <span className="ml-1 text-gray-400">({work.stage})</span>}
-      <span className="ml-1 text-gray-400 font-mono">{work.ownerId}</span>
+    <div className="flex items-center gap-1.5 text-xs" data-testid="active-work-row">
+      <span className="text-foreground truncate">{label}</span>
+      {work.stage && <span className="text-muted-foreground shrink-0">({work.stage})</span>}
+      <span className="text-muted-foreground font-mono shrink-0">{work.ownerId}</span>
+    </div>
+  )
+}
+
+function CapacityIndicator({ used, total }: { used: number; total: number }) {
+  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
+  const color = used >= total ? 'bg-amber-500' : used > 0 ? 'bg-blue-500' : 'bg-emerald-500'
+  return (
+    <div className="flex items-center gap-2" data-testid="runner-capacity">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {used}/{total}
+        </span>
+        <span className="text-xs text-muted-foreground">slots</span>
+      </div>
+      <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function ModelList({ models, count }: { models: string[]; count: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const display = expanded ? models : models.slice(0, 5)
+  const hidden = count - display.length
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {display.map((model) => (
+        <span
+          key={model}
+          className="inline-block rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground"
+        >
+          {model}
+        </span>
+      ))}
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setExpanded((v) => !v)
+          }}
+          className="inline-block rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted-foreground/20 transition-colors"
+        >
+          {expanded ? 'show less' : `+${hidden} more`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 min-w-0">
+      <span className="text-xs text-muted-foreground/70 shrink-0">{label}</span>
+      <span className="text-xs text-muted-foreground truncate">{children}</span>
     </div>
   )
 }
@@ -112,63 +170,88 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
           navigate(detailHref)
         }
       }}
-      className="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+      className="block px-4 py-3 border-b border-border last:border-0 hover:bg-muted/40 cursor-pointer transition-colors"
       data-testid="runner-row"
       data-runner-id={row.id}
       data-href={detailHref}
     >
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-xs font-medium text-foreground">{row.id}</span>
-          <span className="text-xs text-gray-400">{row.kind}</span>
-          <RunnerStatusBadge status={row.status} />
-          <RunnerScopeLabel scope={row.scope} />
-        </div>
-        <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
-          {row.hostname && <span>{row.hostname}</span>}
-          <span>{heartbeatFreshnessLabel(row)}</span>
-          <span>
-            last heartbeat: {row.lastHeartbeatAt ? formatHeartbeatTimestamp(row.lastHeartbeatAt) : 'unknown'}
-          </span>
-          {row.connectionState && (
-            <span className={row.connectionState === 'connected' ? 'text-green-600' : 'text-gray-400'}>
-              {row.connectionState}
-            </span>
-          )}
-        </div>
-        {activeWorks.length > 0 && (
-          <div className="mt-1 space-y-0.5" data-testid="runner-active-works" data-count={activeWorks.length}>
-            {activeWorks.map((work) => (
-              <ActiveWorkSummary key={work.workId} work={work} toProjectPath={toProjectPath} />
-            ))}
-          </div>
-        )}
+      {/* Identity row */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-mono text-sm font-medium text-foreground">{row.id}</span>
+        <RunnerStatusBadge status={row.status} />
+        <RunnerScopeLabel scope={row.scope} />
         {row.capacity && (
-          <div className="mt-1 text-xs text-gray-400">
-            {row.capacity.usedSlots}/{row.capacity.totalSlots} slots
-          </div>
-        )}
-        {row.capabilities.length > 0 && (
-          <div className="mt-1 text-xs text-gray-400">
-            capabilities: {row.capabilities.join(', ')}
-          </div>
-        )}
-        {row.coderModels.length > 0 && (
-          <div className="mt-1 text-xs text-gray-400">
-            {row.coderModelCount} model{row.coderModelCount !== 1 ? 's' : ''}: {row.coderModels.join(', ')}
+          <div className="ml-auto">
+            <CapacityIndicator used={row.capacity.usedSlots} total={row.capacity.totalSlots} />
           </div>
         )}
       </div>
+
+      {/* Metadata row */}
+      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+        {row.hostname && <MetaItem label="host">{row.hostname}</MetaItem>}
+        <MetaItem label="heartbeat">
+          {row.lastHeartbeatAt ? formatHeartbeatAge(row.lastHeartbeatAt) : 'unknown'}
+        </MetaItem>
+        {row.lastHeartbeatAt && (
+          <MetaItem label="at">{formatHeartbeatTimestamp(row.lastHeartbeatAt)}</MetaItem>
+        )}
+        {row.connectionState && (
+          <span
+            className={`text-xs ${row.connectionState === 'connected' ? 'text-emerald-600' : 'text-muted-foreground'}`}
+          >
+            {row.connectionState}
+          </span>
+        )}
+        {row.kind && <MetaItem label="type">{row.kind}</MetaItem>}
+      </div>
+
+      {/* Active work */}
+      {activeWorks.length > 0 && (
+        <div
+          className="mt-2 space-y-1 rounded-md bg-blue-50/50 px-2.5 py-1.5"
+          data-testid="runner-active-works"
+          data-count={activeWorks.length}
+        >
+          {activeWorks.map((work) => (
+            <ActiveWorkSummary key={work.workId} work={work} toProjectPath={toProjectPath} />
+          ))}
+        </div>
+      )}
+
+      {/* Capabilities */}
+      {row.capabilities.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {row.capabilities.map((cap) => (
+            <span
+              key={cap}
+              className="inline-block rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+            >
+              {cap}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Models */}
+      {row.coderModels.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[11px] text-muted-foreground/70 mb-1">
+            {row.coderModelCount} model{row.coderModelCount !== 1 ? 's' : ''}
+          </div>
+          <ModelList models={row.coderModels} count={row.coderModelCount} />
+        </div>
+      )}
     </div>
   )
 }
 
 function RunnerEmptyState() {
   return (
-    <div className="py-8 text-center">
-      <p className="text-sm text-gray-400 mb-2">No runners connected</p>
-      <p className="text-xs text-gray-400">
-        Start a runner: <code className="text-xs bg-gray-100 px-1 rounded">{RUNNER_START_HINT}</code>
+    <div className="py-12 text-center">
+      <p className="text-sm font-medium text-foreground mb-2">No runners connected</p>
+      <p className="text-xs text-muted-foreground">
+        Start a runner: <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{RUNNER_START_HINT}</code>
       </p>
     </div>
   )
@@ -184,7 +267,7 @@ export function RunnerList({ rows }: RunnerListProps) {
   }
 
   return (
-    <div className="divide-y divide-gray-100">
+    <div>
       {rows.map((row) => (
         <RunnerRow key={row.id} row={row} />
       ))}
@@ -202,7 +285,7 @@ export function RunnerListCard() {
       </CardHeader>
       <CardContent className="pt-3">
         {isLoading ? (
-          <div className="py-4 text-xs text-gray-400">Loading...</div>
+          <div className="py-4 text-xs text-muted-foreground">Loading...</div>
         ) : (
           <RunnerList rows={rows} />
         )}
