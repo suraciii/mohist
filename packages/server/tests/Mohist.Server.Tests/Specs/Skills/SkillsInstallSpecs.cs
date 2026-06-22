@@ -38,9 +38,9 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_PathTarget_WritesOnlyToSelectedRepository()
     {
-        var targetRoot = Path.Combine("/tmp", $"skills-install-path-{Guid.NewGuid():N}");
+        var targetRoot = Path.Combine(Path.GetTempPath(), $"skills-install-path-{Guid.NewGuid():N}");
         _files.AddDirectory(targetRoot);
-        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-cwd-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-cwd-{Guid.NewGuid():N}"));
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
@@ -57,7 +57,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_ClaudeTarget_WritesClaudeSkillsOnly()
     {
-        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-claude-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-claude-{Guid.NewGuid():N}"));
 
         var assets = BuildDefaultAssetService();
         var exitCode = await BuildRootCommand()
@@ -78,7 +78,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_OverwritesExistingBuiltInStubContent()
     {
-        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-overwrite-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-overwrite-{Guid.NewGuid():N}"));
         var skillDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist");
         _files.AddDirectory(skillDir);
         _files.AddFile(Path.Combine(skillDir, "SKILL.md"), "old content");
@@ -98,7 +98,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_DoesNotTouchUnrelatedUserAuthoredSkillDirectories()
     {
-        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-untouched-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-untouched-{Guid.NewGuid():N}"));
         var userSkillDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist-po");
         _files.AddDirectory(userSkillDir);
         var sentinelPath = Path.Combine(userSkillDir, "SKILL.md");
@@ -119,7 +119,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_HermesTarget_WritesEntryDiscoveryStub()
     {
-        var hermesHome = Path.Combine("/tmp", $"hermes-home-{Guid.NewGuid():N}");
+        var hermesHome = Path.Combine(Path.GetTempPath(), $"hermes-home-{Guid.NewGuid():N}");
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -155,7 +155,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_HermesTarget_UsesConfiguredHermesHomeAndReportsUpdatedOnRepeatInstall()
     {
-        var hermesHome = Path.Combine("/tmp", $"custom-hermes-home-{Guid.NewGuid():N}");
+        var hermesHome = Path.Combine(Path.GetTempPath(), $"custom-hermes-home-{Guid.NewGuid():N}");
         var defaultHermesRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hermes", "skills");
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
 
@@ -180,7 +180,7 @@ public sealed class SkillsInstallSpecs
             Assert.DoesNotContain("mohist-explore:", secondOutput);
             Assert.DoesNotContain("mohist-create-epic:", secondOutput);
             Assert.DoesNotContain("mohist-create-issue:", secondOutput);
-            Assert.NotEqual(Path.GetFullPath(defaultHermesRoot), Path.GetFullPath(Path.Combine(hermesHome, "skills")));
+            Assert.NotEqual(defaultHermesRoot, Path.Combine(hermesHome, "skills"));
         }
         finally
         {
@@ -195,8 +195,8 @@ public sealed class SkillsInstallSpecs
     [InlineData("--hermes", "--path", "repo")]
     public async Task Install_HermesTarget_RejectsIncompatibleOptionsBeforeWriting(params string[] args)
     {
-        var hermesHome = Path.Combine("/tmp", $"hermes-home-{Guid.NewGuid():N}");
-        var repoPath = Path.Combine("/tmp", $"hermes-repo-{Guid.NewGuid():N}");
+        var hermesHome = Path.Combine(Path.GetTempPath(), $"hermes-home-{Guid.NewGuid():N}");
+        var repoPath = Path.Combine(Path.GetTempPath(), $"hermes-repo-{Guid.NewGuid():N}");
         _files.AddDirectory(repoPath);
         _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
         using var stdout = new StringWriter();
@@ -227,7 +227,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_HermesTarget_DoesNotTouchHermesConfigFiles()
     {
-        var hermesHome = Path.Combine("/tmp", $"hermes-config-{Guid.NewGuid():N}");
+        var hermesHome = Path.Combine(Path.GetTempPath(), $"hermes-config-{Guid.NewGuid():N}");
         var configPath = Path.Combine(hermesHome, "config.yaml");
         _files.AddDirectory(hermesHome);
         _files.AddFile(configPath, "skills:\n  external_dirs:\n    - /existing\n");
@@ -254,7 +254,7 @@ public sealed class SkillsInstallSpecs
     [Fact]
     public async Task Install_DoesNotTouchDotMohistSkills()
     {
-        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-runtime-{Guid.NewGuid():N}"));
+        _files.SetCurrentDirectory(Path.Combine(Path.GetTempPath(), $"skills-install-runtime-{Guid.NewGuid():N}"));
         var mohistSkillsDir = Path.Combine(_files.Cwd, ".mohist", "skills");
         _files.AddDirectory(mohistSkillsDir);
         var sentinelPath = Path.Combine(mohistSkillsDir, "sentinel.txt");
@@ -272,23 +272,14 @@ public sealed class SkillsInstallSpecs
 
     private SkillAssetService BuildDefaultAssetService()
     {
-        var sourceRoot = Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "cli", "Mohist.Cli", "skill-data");
-        sourceRoot = Path.GetFullPath(sourceRoot);
-        var targetRoot = Path.Combine("/tmp", $"skills-install-assets-{Guid.NewGuid():N}");
+        var targetRoot = Path.Combine(Path.GetTempPath(), $"skills-install-assets-{Guid.NewGuid():N}");
         _files.AddDirectory(targetRoot);
         _assetRoot = targetRoot;
 
-        if (Directory.Exists(sourceRoot))
-        {
-            foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(sourceRoot, file);
-                _files.AddFile(Path.Combine(targetRoot, relative), File.ReadAllText(file));
-            }
-        }
+        WriteSkill(targetRoot, "mohist", "test mohist body");
+        WriteSkill(targetRoot, "mohist-explore", "test explore body");
+        WriteSkill(targetRoot, "mohist-create-epic", "test create-epic body");
+        WriteSkill(targetRoot, "mohist-create-issue", "test create-issue body");
 
         var resolver = new SkillAssetRootResolver(
             _files,
@@ -297,6 +288,15 @@ public sealed class SkillsInstallSpecs
             getManagedAssetRoot: null,
             getUserHome: () => targetRoot);
         return new SkillAssetService(_files, _environment, resolver);
+    }
+
+    private void WriteSkill(string root, string name, string heading)
+    {
+        var skillDir = Path.Combine(root, name);
+        _files.AddDirectory(skillDir);
+        _files.AddFile(
+            Path.Combine(skillDir, "SKILL.md"),
+            $"---\nname: {name}\ndescription: test\n---\n\n# {heading}\n");
     }
 
     private global::System.CommandLine.RootCommand BuildRootCommand(

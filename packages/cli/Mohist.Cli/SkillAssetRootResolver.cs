@@ -104,7 +104,8 @@ internal sealed class SkillAssetRootResolver
         return _getManagedAssetRoot();
     }
 
-    private static string NormalizeRoot(string path) => Path.GetFullPath(path);
+    private static string NormalizeRoot(string path) =>
+        path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
 
     private static string BuildOverrideMissingDiagnostic(string candidate) =>
         $"MOHIST_SKILLS_DIR points to '{candidate}' which does not exist. " +

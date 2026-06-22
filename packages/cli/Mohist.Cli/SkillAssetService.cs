@@ -66,8 +66,8 @@ internal sealed class SkillAssetService
     private static SkillAssetRootResolution BuildResolution(IFileSystem fileSystem, string? overrideAssetRoot)
     {
         var resolvedRoot = string.IsNullOrWhiteSpace(overrideAssetRoot)
-            ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "skill-data"))
-            : Path.GetFullPath(overrideAssetRoot);
+            ? Path.Combine(AppContext.BaseDirectory, "skill-data")
+            : NormalizePath(overrideAssetRoot);
 
         if (!fileSystem.DirectoryExists(resolvedRoot))
         {
@@ -79,6 +79,9 @@ internal sealed class SkillAssetService
 
         return SkillAssetRootResolution.Selected(resolvedRoot, SkillAssetRootSource.Override);
     }
+
+    private static string NormalizePath(string path) =>
+        path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
 
     public string? AssetRoot => _assetRoot;
 
@@ -129,7 +132,7 @@ internal sealed class SkillAssetService
         if (string.IsNullOrWhiteSpace(_assetRoot) || !_fileSystem.DirectoryExists(_assetRoot))
             return skills;
 
-        var rootFull = Path.GetFullPath(_assetRoot);
+        var rootFull = NormalizePath(_assetRoot);
 
         IEnumerable<string> skillFiles;
         try
@@ -149,8 +152,8 @@ internal sealed class SkillAssetService
 
             // Only accept SKILL.md that is a direct child of a skill directory under root:
             //   <root>/<skillName>/SKILL.md
-            var grandparent = Path.GetDirectoryName(parentDir);
-            if (!string.Equals(grandparent, rootFull, StringComparison.Ordinal))
+            var grandparent = NormalizePath(Path.GetDirectoryName(parentDir)!);
+            if (!string.Equals(grandparent, rootFull, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var content = _fileSystem.ReadAllText(file);

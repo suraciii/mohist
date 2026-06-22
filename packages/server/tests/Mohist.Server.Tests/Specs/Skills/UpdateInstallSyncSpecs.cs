@@ -176,8 +176,8 @@ public sealed class UpdateInstallSyncSpecs
         Assert.Equal(SkillAssetRootSource.ManagedCache, service.AssetRootSource);
         var expectedManagedRoot = Path.Combine(tempRoot, ".mohist", "cli", "skill-data");
         Assert.Equal(
-            Path.GetFullPath(expectedManagedRoot),
-            Path.GetFullPath(service.AssetRoot!));
+            expectedManagedRoot,
+            service.AssetRoot!);
 
         var mohistResult = service.GetSkill("mohist", includeSupplementaryFiles: false);
         Assert.True(mohistResult.Found, mohistResult.Error);
@@ -192,7 +192,7 @@ public sealed class UpdateInstallSyncSpecs
             exploreResult.Skill!.DirectoryPath);
     }
 
-    private string NewIsolatedRoot(string label) => Path.Combine("/tmp", $"mohist-update-sync-{label}-{Guid.NewGuid():N}");
+    private string NewIsolatedRoot(string label) => Path.Combine(Path.GetTempPath(), $"mohist-update-sync-{label}-{Guid.NewGuid():N}");
 
     private void WritePackagedSkillAssets(string tempRoot)
     {

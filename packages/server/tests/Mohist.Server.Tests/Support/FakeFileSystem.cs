@@ -228,7 +228,8 @@ public class FakeFileSystem : IFileSystem
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
 
-    private static string Normalize(string path) => Path.GetFullPath(path);
+    private static string Normalize(string path) =>
+        path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
 
     private static bool StartsWithDirectory(string filePath, string directoryPath)
     {
