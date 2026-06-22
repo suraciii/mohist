@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Otel;
+using Mohist.Server.Otel.OtlpProtobuf;
 
 namespace Mohist.Server.Api;
 
@@ -49,7 +50,11 @@ public static class OtlpRoutes
             var request = context.Request;
             var contentType = ResolveContentType(request.ContentType);
 
-            if (!string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
+            var isJson = string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase);
+            var isProtobuf = string.Equals(contentType, "application/x-protobuf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(contentType, "application/protobuf", StringComparison.OrdinalIgnoreCase);
+
+            if (!isJson && !isProtobuf)
             {
                 logger.LogDebug(
                     "Rejecting OTLP request with unsupported Content-Type: {ContentType}.",
@@ -60,27 +65,37 @@ public static class OtlpRoutes
                     contentType: "application/json");
             }
 
-            string body;
-            using (var reader = new StreamReader(request.Body))
+            string? body = null;
+            byte[]? protobufBody = null;
+            try
             {
-                try
+                if (isProtobuf)
                 {
+                    using var memory = new MemoryStream();
+                    await request.Body.CopyToAsync(memory, ct);
+                    protobufBody = memory.ToArray();
+                }
+                else
+                {
+                    using var reader = new StreamReader(request.Body);
                     body = await reader.ReadToEndAsync(ct);
                 }
-                catch (IOException ex)
-                {
-                    logger.LogDebug(ex, "Failed to read OTLP request body.");
-                    return Results.Json(
-                        OtlpError.BadBody("Failed to read request body."),
-                        statusCode: StatusCodes.Status400BadRequest,
-                        contentType: "application/json");
-                }
+            }
+            catch (IOException ex)
+            {
+                logger.LogDebug(ex, "Failed to read OTLP request body.");
+                return Results.Json(
+                    OtlpError.BadBody("Failed to read request body."),
+                    statusCode: StatusCodes.Status400BadRequest,
+                    contentType: "application/json");
             }
 
             int spansWritten;
             try
             {
-                spansWritten = ingester.IngestJson(body, ct);
+                spansWritten = isProtobuf
+                    ? ingester.Ingest(OtlpProtobufTraceParser.Parse(protobufBody!), ct)
+                    : ingester.IngestJson(body!, ct);
             }
             catch (JsonException ex)
             {

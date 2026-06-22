@@ -30,8 +30,8 @@ var mainUri = new Uri(mainHost);
 //   2. 在 app.StartAsync() 周围用 try/catch 兜住 bind 失败；
 //   3. 失败时记录日志、保持 OtelCollectorStatus = 离线，main API
 //      继续运行。
-var otelOptions = new OtelOptions();
-builder.Configuration.GetSection(OtelOptions.SectionName).Bind(otelOptions);
+var otelOptions = new Mohist.Server.Otel.OtelOptions();
+builder.Configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName).Bind(otelOptions);
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {

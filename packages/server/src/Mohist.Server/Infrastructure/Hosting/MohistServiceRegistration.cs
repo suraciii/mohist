@@ -62,6 +62,8 @@ public static class MohistServiceRegistration
     {
         var connectionString = ResolveSqliteConnectionString(configuration);
 
+        services.AddMohistOpenTelemetry(configuration);
+
         services.AddDbContextFactory<MohistDbContext>(options =>
             options.UseSqlite(connectionString));
 
@@ -134,8 +136,8 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
-        services.Configure<OtelOptions>(configuration.GetSection(OtelOptions.SectionName));
-        services.PostConfigure<OtelOptions>(options =>
+        services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));
+        services.PostConfigure<Mohist.Server.Otel.OtelOptions>(options =>
         {
             if (!string.IsNullOrWhiteSpace(options.DbPath))
                 return;
