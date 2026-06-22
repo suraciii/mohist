@@ -8,22 +8,22 @@ public static class EpicProgress
     public static readonly IReadOnlyList<string> TerminalStatuses = new[] { "done", "closed" };
 
     private const string HealthBlocked = "blocked";
-    private const string HealthActive = "active";
 
     public static EpicProgressDto Build(IReadOnlyList<LinkedIssueDto> linked)
     {
         var completed = linked.Where(IsCompleted).ToList();
-        var undelivered = linked.Where(i => !IsCompleted(i)).ToList();
+        var undelivered = linked.Where(i => !IsCompleted(i) && i.Status != "cancelled").ToList();
 
         var next = SelectStartableNext(undelivered);
         var nextIssueReason = next is null ? BuildNextIssueReason(undelivered) : null;
 
-        var blocked = undelivered
+        var inProgress = undelivered.Where(i => i.Status == "in_progress").ToList();
+        var blocked = inProgress
             .Where(i => string.Equals(i.Health, HealthBlocked, StringComparison.Ordinal))
             .Select(ToProgressIssue)
             .ToArray();
-        var active = undelivered
-            .Where(i => string.Equals(i.Health, HealthActive, StringComparison.Ordinal))
+        var active = inProgress
+            .Where(i => !string.Equals(i.Health, HealthBlocked, StringComparison.Ordinal))
             .Select(ToProgressIssue)
             .ToArray();
 
@@ -45,8 +45,11 @@ public static class EpicProgress
 
     private static LinkedIssueDto? SelectStartableNext(IReadOnlyList<LinkedIssueDto> undelivered)
     {
+        if (undelivered.Any(i => i.Status == "in_progress"))
+            return null;
+
         return undelivered
-            .Where(i => i.CanStart && i.StartBlocker is null)
+            .Where(i => i.Status != "in_progress" && i.CanStart && i.StartBlocker is null)
             .OrderBy(i => PriorityRank(i.Priority))
             .ThenBy(i => i.Number)
             .Cast<LinkedIssueDto?>()
@@ -56,6 +59,13 @@ public static class EpicProgress
     private static string? BuildNextIssueReason(IReadOnlyList<LinkedIssueDto> undelivered)
     {
         if (undelivered.Count == 0) return null;
+
+        var running = undelivered
+            .OrderBy(i => i.Number)
+            .FirstOrDefault(i => i.Status == "in_progress");
+        if (running is not null)
+            return $"Waiting for #{running.Number} to complete";
+
         var blocker = undelivered
             .OrderBy(i => PriorityRank(i.Priority))
             .ThenBy(i => i.Number)

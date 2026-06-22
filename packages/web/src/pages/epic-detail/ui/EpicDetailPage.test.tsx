@@ -1665,6 +1665,23 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
     expect(startButton).toBeDisabled()
     expect(startButton.textContent).toBe('Starting...')
   })
+
+  it('hides the Start button on all backlog issues when any sibling is in_progress', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Running', status: 'in_progress' as LinkedIssue['status'], stage: 'build' as LinkedIssue['stage'], health: 'active' as LinkedIssue['health'] }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Next candidate' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryAllByTestId('linked-issue-start')).toHaveLength(0)
+    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2)
+  })
 })
 
 describe('EpicDetailPage linked issues view toggle', () => {
