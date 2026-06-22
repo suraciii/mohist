@@ -367,6 +367,16 @@ describe("WorkExecutor branch-stability boundary checks", () => {
       async planResolution(_work: WorkItem, _signal: AbortSignal) {
         return { action: "verify" as const, workspacePath: workDir }
       },
+      async ensure(work: WorkItem, signal: AbortSignal) {
+        // T-002 contract: the executor's start-boundary precheck
+        // routes through `ensure`, which mirrors the real
+        // `WorkspaceManager.ensure` by planning first and then
+        // dispatching to `materialize` or `verify` accordingly.
+        const plan = await this.planResolution(work, signal)
+        return plan.action === "materialize"
+          ? await this.materialize(work, signal)
+          : await this.verify(work, signal)
+      },
     }
     const executor = new WorkExecutor(
       makeRegistry(async (ctx) => {
@@ -428,6 +438,13 @@ describe("WorkExecutor branch-stability boundary checks", () => {
       },
       async planResolution() {
         return { action: "verify" as const, workspacePath: workDir }
+      },
+      async ensure() {
+        // T-002 contract: the executor's start-boundary precheck
+        // routes through `ensure`, which calls `planResolution` and
+        // dispatches to `verify` here because the workspace is
+        // already bound.
+        return await this.verify()
       },
     }
     const executor = new WorkExecutor(

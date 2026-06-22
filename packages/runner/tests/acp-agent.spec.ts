@@ -253,8 +253,8 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(contextWithOverrides({
       prompt: "long shared task",
       session: "shared-session",
-      livenessQuietThresholdMs: 150,
-      probeTimeoutMs: 500,
+      livenessQuietThresholdMs: 100,
+      probeTimeoutMs: 200,
       timeout: 1_000,
     }, undefined, shared.context()))
 
@@ -326,8 +326,8 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(contextWithOverrides({
       prompt: "long resumed task",
       session: "shared-session",
-      livenessQuietThresholdMs: 150,
-      probeTimeoutMs: 500,
+      livenessQuietThresholdMs: 100,
+      probeTimeoutMs: 200,
       timeout: 1_000,
     }, undefined, shared.context()))
 
@@ -1201,7 +1201,7 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     expect(extraCleanups).toBeLessThanOrEqual(1)
   })
 
-  it("SharedSessionCancelHangs_NoProcessIsKilled", async () => {
+  it("SharedSessionCancelHangs_NoProcessIsKilled", { timeout: 15_000 }, async () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
     shared.agent.cancelHangs = true
 

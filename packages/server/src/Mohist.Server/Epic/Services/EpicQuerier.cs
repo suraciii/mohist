@@ -86,6 +86,10 @@ public class EpicQuerier
 
         var allIssues = await _issuesQuery.ListAsync(epic.ProjectId, all: true);
         var byId = allIssues.ToDictionary(i => i.Id);
+        var byNumber = allIssues.ToDictionary(i => i.Number);
+        var memberNumbers = new HashSet<int>(
+            links.Select(link => byId.TryGetValue(link.IssueId, out var member) ? member.Number : 0)
+                .Where(n => n != 0));
         return links
             .Select(link => byId.TryGetValue(link.IssueId, out var issue)
                 ? new LinkedIssueDto(
@@ -97,11 +101,32 @@ public class EpicQuerier
                     Health: issue.Health,
                     Priority: issue.Priority,
                     CanStart: issue.CanStart,
-                    StartBlocker: issue.Blocker)
+                    StartBlocker: issue.Blocker,
+                    PrerequisiteNumbers: issue.PrerequisiteNumbers,
+                    ExternalPrerequisites: BuildExternalPrerequisites(issue, memberNumbers, byNumber))
                 : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
             .ToList();
+    }
+
+    internal static IReadOnlyList<IssuePrerequisiteRefDto> BuildExternalPrerequisites(
+        IssueReadModel issue,
+        HashSet<int> memberNumbers,
+        Dictionary<int, IssueReadModel> byNumber)
+    {
+        if (issue.PrerequisiteNumbers.Length == 0) return [];
+        var result = new List<IssuePrerequisiteRefDto>(issue.PrerequisiteNumbers.Length);
+        var seen = new HashSet<int>();
+        foreach (var prereqNumber in issue.PrerequisiteNumbers)
+        {
+            if (!seen.Add(prereqNumber)) continue;
+            if (memberNumbers.Contains(prereqNumber)) continue;
+            result.Add(byNumber.TryGetValue(prereqNumber, out var prereq)
+                ? IssuePrerequisiteRefDto.FromSummary(IssuePrerequisiteSummary.FromReadModel(prereq))
+                : new IssuePrerequisiteRefDto { Number = prereqNumber });
+        }
+        return result;
     }
 
     private static EpicProgressDto BuildProgress(IReadOnlyList<LinkedIssueDto> linked) =>

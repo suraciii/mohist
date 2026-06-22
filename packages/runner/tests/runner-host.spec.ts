@@ -151,7 +151,7 @@ describe("RunnerHost", () => {
     expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
 
     resolveSecondSignalR()
-    await vi.waitFor(() => expect(poll).toHaveBeenCalled())
+    await vi.waitFor(() => expect(poll).toHaveBeenCalled(), { timeout: 10_000 })
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })

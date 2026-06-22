@@ -299,6 +299,109 @@ public class EpicLifecycleSpecs
         Assert.Equal(1, detail.Progress.TotalIssueCount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicDetail_LinkedIssue_ExposesPrerequisiteNumbers()
+    {
+        var project = await CreateProjectAsync();
+        var upstream = await CreateIssueAsync(project.Id, "Upstream");
+        var dependent = await CreateIssueAsync(project.Id, "Dependent");
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        await dependentGrain.AddPrerequisiteAsync(upstream.Number);
+
+        var epic = await CreateEpicAsync(project.Id, "Prereq numbers");
+        await LinkIssueAsync(project.Id, epic.Id, upstream.Number);
+        await LinkIssueAsync(project.Id, epic.Id, dependent.Number);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+
+        var dependentRow = detail.LinkedIssues.Single(i => i.Number == dependent.Number);
+        Assert.Equal(new[] { upstream.Number }, dependentRow.PrerequisiteNumbers);
+
+        var upstreamRow = detail.LinkedIssues.Single(i => i.Number == upstream.Number);
+        Assert.Empty(upstreamRow.PrerequisiteNumbers);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicDetail_LinkedIssue_ExposesExternalPrerequisitesSummary()
+    {
+        var project = await CreateProjectAsync();
+        var externalUpstream = await CreateIssueAsync(project.Id, "External upstream");
+        var memberDependent = await CreateIssueAsync(project.Id, "Member dependent");
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(memberDependent.Id);
+        await dependentGrain.AddPrerequisiteAsync(externalUpstream.Number);
+
+        var epic = await CreateEpicAsync(project.Id, "External prereq summary");
+        await LinkIssueAsync(project.Id, epic.Id, memberDependent.Number);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+
+        var dependentRow = detail.LinkedIssues.Single(i => i.Number == memberDependent.Number);
+        var ghost = Assert.Single(dependentRow.ExternalPrerequisites);
+        Assert.Equal(externalUpstream.Number, ghost.Number);
+        Assert.Equal("External upstream", ghost.Title);
+        Assert.False(string.IsNullOrEmpty(ghost.Stage));
+        Assert.False(string.IsNullOrEmpty(ghost.Status));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicDetail_LinkedIssue_InternalPrerequisiteIsNotExposedAsExternal()
+    {
+        var project = await CreateProjectAsync();
+        var upstream = await CreateIssueAsync(project.Id, "Internal upstream");
+        var dependent = await CreateIssueAsync(project.Id, "Internal dependent");
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
+        await dependentGrain.AddPrerequisiteAsync(upstream.Number);
+
+        var epic = await CreateEpicAsync(project.Id, "Internal prereq");
+        await LinkIssueAsync(project.Id, epic.Id, upstream.Number);
+        await LinkIssueAsync(project.Id, epic.Id, dependent.Number);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+
+        var dependentRow = detail.LinkedIssues.Single(i => i.Number == dependent.Number);
+        Assert.Equal(new[] { upstream.Number }, dependentRow.PrerequisiteNumbers);
+        Assert.Empty(dependentRow.ExternalPrerequisites);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task EpicDetail_ProgressOutputsAreUnchangedByPrerequisiteData()
+    {
+        var project = await CreateProjectAsync();
+        var first = await CreateIssueAsync(project.Id, "First");
+        await CompleteIssueAsync(project.Id, first);
+        var second = await CreateIssueAsync(project.Id, "Second");
+        var secondGrain = _grains.GetGrain<IIssueGrain>(second.Id);
+        await secondGrain.AddPrerequisiteAsync(first.Number);
+
+        var epic = await CreateEpicAsync(project.Id, "Progress additivity");
+        await LinkIssueAsync(project.Id, epic.Id, first.Number);
+        await LinkIssueAsync(project.Id, epic.Id, second.Number);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+
+        Assert.Equal(1, detail.Progress.DeliveredCount);
+        Assert.Equal(2, detail.Progress.TotalIssueCount);
+        Assert.False(detail.Progress.ReadyToMarkDone);
+        Assert.NotNull(detail.Progress.NextIssue);
+        Assert.Equal(second.Number, detail.Progress.NextIssue!.Number);
+        Assert.Equal(second.Id, detail.Progress.NextIssue.Id);
+        Assert.Single(detail.Progress.ActiveIssues);
+        Assert.Equal(second.Id, detail.Progress.ActiveIssues[0].Id);
+        Assert.Empty(detail.Progress.BlockedIssues);
+
+        var secondRow = detail.LinkedIssues.Single(i => i.Number == second.Number);
+        Assert.Equal(new[] { first.Number }, secondRow.PrerequisiteNumbers);
+        Assert.Empty(secondRow.ExternalPrerequisites);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
@@ -348,7 +451,8 @@ public class EpicLifecycleSpecs
     private sealed record IssueDto(int Number, string Id, int[] PrerequisiteNumbers, string Status, string Health, string? WorkflowRunId);
     private sealed record EpicDto(string Id, int? Number, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
     private sealed record EpicDetailDto(string Id, string Status, LinkedIssueDto[] LinkedIssues, EpicProgressDto Progress);
-    private sealed record LinkedIssueDto(string Id, int Number, string Title, string Status, string Stage, string Health, string? Priority, bool CanStart = false, StartBlockerDto? StartBlocker = null);
+    private sealed record LinkedIssueDto(string Id, int Number, string Title, string Status, string Stage, string Health, string? Priority, bool CanStart = false, StartBlockerDto? StartBlocker = null, int[] PrerequisiteNumbers = null!, ExternalPrerequisiteDto[] ExternalPrerequisites = null!);
+    private sealed record ExternalPrerequisiteDto(int Number, string Title = "", string Stage = "", string Status = "");
     private sealed record StartBlockerDto(string Kind);
     private sealed record EpicProgressDto(int DeliveredCount, int TotalIssueCount, EpicProgressIssueDto[] BlockedIssues, EpicProgressIssueDto[] ActiveIssues, EpicNextIssueDto? NextIssue, string? NextIssueReason, bool ReadyToMarkDone);
     private sealed record EpicProgressIssueDto(string Id, int Number, string Title, string Health);
