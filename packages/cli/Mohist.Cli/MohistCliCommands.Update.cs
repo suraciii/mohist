@@ -1568,11 +1568,11 @@ internal sealed class SourceCodeUpdater
     private async Task<string?> ResolveCliPathAsync(string? explicitPath)
     {
         if (!string.IsNullOrWhiteSpace(explicitPath))
-            return Path.GetFullPath(explicitPath);
+            return explicitPath;
 
         var envPath = _environment.GetEnvironmentVariable(CliPathEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(envPath))
-            return Path.GetFullPath(envPath);
+            return envPath;
 
         var home = _getUserHome();
         var wrapper = ResolveCliWrapperPath(home);

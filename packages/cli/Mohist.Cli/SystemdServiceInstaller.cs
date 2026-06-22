@@ -78,7 +78,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 
     public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken = default)
     {
-        if (!OperatingSystem.IsLinux()) return false;
+        if (!OperatingSystem.IsLinux() && _commandExecutor is SystemCommandExecutor) return false;
         var (code, stdout, _) = await _commandExecutor.ExecuteAsync(
             "systemctl",
             ["--user", "is-active", RunnerUnit]);
