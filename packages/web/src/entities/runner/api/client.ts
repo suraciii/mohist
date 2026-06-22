@@ -10,3 +10,13 @@ export function getRunner(projectId: string | null, runnerId: string) {
     projectApiPath(projectId, `/runners/${encodeURIComponent(runnerId)}`),
   )
 }
+
+export function updateRunnerSlots(
+  runnerId: string,
+  slots: number,
+): Promise<{ runnerId: string; slots: number }> {
+  return request(`/runner/${encodeURIComponent(runnerId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ slots }),
+  })
+}
