@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
+using EnvironmentAbstractions.TestHelpers;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services;
@@ -142,6 +143,12 @@ public class IssueModelVariantRoundTripSpecs
     public async Task ReadModel_SuppressesVariantWhenModelIsAbsent()
     {
         using var scope = _fixture.Services.CreateScope();
+        var env = scope.ServiceProvider.GetRequiredService<IEnvironmentVariableProvider>();
+        var mockEnv = (MockEnvironmentVariableProvider)env;
+        var previousModel = mockEnv["MOHIST__CONFIG__MODEL"];
+        mockEnv["MOHIST__CONFIG__MODEL"] = "anthropic/claude-sonnet-4-20250514";
+        try
+        {
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var project = new ProjectInfo { Id = $"proj-variant-no-model-{Guid.NewGuid():N}", Name = "No Model" };
 
@@ -190,6 +197,11 @@ public class IssueModelVariantRoundTripSpecs
         // preserved alongside that model.
         Assert.NotNull(loaded!.Model);
         Assert.Equal("high", loaded.ModelVariant);
+        }
+        finally
+        {
+            mockEnv["MOHIST__CONFIG__MODEL"] = previousModel;
+        }
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
