@@ -79,7 +79,7 @@ public sealed class SkillsContentSpecs
     [Fact]
     public async Task Get_PrintsPackagedFullGuidance_NotInstalledStub()
     {
-        var agentsStubDir = Path.Combine("/tmp", $"agents-stubs-{Guid.NewGuid():N}", ".agents", "skills", "mohist");
+        var agentsStubDir = Path.Combine(Path.GetTempPath(), $"agents-stubs-{Guid.NewGuid():N}", ".agents", "skills", "mohist");
         _files.AddDirectory(agentsStubDir);
         _files.AddFile(Path.Combine(agentsStubDir, "SKILL.md"), "stub");
 
@@ -171,7 +171,7 @@ public sealed class SkillsContentSpecs
     [Fact]
     public async Task Path_PrintsManagedCachePath_WhenManagedCacheIsSelected()
     {
-        var userHome = Path.Combine("/tmp", $"mohist-content-home-{Guid.NewGuid():N}");
+        var userHome = Path.Combine(Path.GetTempPath(), $"mohist-content-home-{Guid.NewGuid():N}");
         var managedRoot = Path.Combine(userHome, ".mohist", "cli", "skill-data");
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
@@ -203,7 +203,7 @@ public sealed class SkillsContentSpecs
     [Fact]
     public async Task Get_ReturnsFullPackagedGuidance_FromManagedCache_WhenSelected()
     {
-        var userHome = Path.Combine("/tmp", $"mohist-content-home-{Guid.NewGuid():N}");
+        var userHome = Path.Combine(Path.GetTempPath(), $"mohist-content-home-{Guid.NewGuid():N}");
         var managedRoot = Path.Combine(userHome, ".mohist", "cli", "skill-data");
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
@@ -234,18 +234,8 @@ public sealed class SkillsContentSpecs
     {
         var siblingRoot = Path.Combine(AppContext.BaseDirectory, "skill-data");
         _files.AddDirectory(siblingRoot);
-        var sourceRoot = Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "cli", "Mohist.Cli", "skill-data");
-        if (Directory.Exists(sourceRoot))
-        {
-            foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(sourceRoot, file);
-                _files.AddFile(Path.Combine(siblingRoot, relative), File.ReadAllText(file));
-            }
-        }
+        WriteSkill(siblingRoot, "mohist", "sibling mohist body");
+        WriteSkill(siblingRoot, "mohist-explore", "sibling explore body");
 
         using var stdout = new StringWriter();
         var resolver = new SkillAssetRootResolver(
@@ -253,7 +243,7 @@ public sealed class SkillsContentSpecs
             _environment,
             getOverrideAssetRoot: () => null,
             getManagedAssetRoot: null,
-            getUserHome: () => Path.Combine("/tmp", $"empty-home-{Guid.NewGuid():N}"));
+            getUserHome: () => Path.Combine(Path.GetTempPath(), $"empty-home-{Guid.NewGuid():N}"));
         var assets = new SkillAssetService(_files, _environment, resolver);
 
         var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
@@ -268,7 +258,7 @@ public sealed class SkillsContentSpecs
     [Fact]
     public async Task Get_FailsWithRepairGuidance_WhenNoAssetRootIsResolvable()
     {
-        var userHome = Path.Combine("/tmp", $"user-home-{Guid.NewGuid():N}");
+        var userHome = Path.Combine(Path.GetTempPath(), $"user-home-{Guid.NewGuid():N}");
 
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -295,7 +285,7 @@ public sealed class SkillsContentSpecs
     [Fact]
     public async Task Commands_UseMohistSkillsDirOverride_ForListGetAndPath()
     {
-        var overrideRoot = Path.Combine("/tmp", $"override-assets-{Guid.NewGuid():N}");
+        var overrideRoot = Path.Combine(Path.GetTempPath(), $"override-assets-{Guid.NewGuid():N}");
         _files.AddDirectory(overrideRoot);
         WriteSkill(overrideRoot, "mohist", "override mohist");
         WriteSkill(overrideRoot, "mohist-explore", "override explore");
@@ -343,7 +333,7 @@ public sealed class SkillsContentSpecs
     [Fact]
     public async Task ContentCommands_DoNotTouchDotMohistSkills()
     {
-        var mohistSkillsDir = Path.Combine("/tmp", $"mohist-skills-content-runtime-{Guid.NewGuid():N}", ".mohist", "skills");
+        var mohistSkillsDir = Path.Combine(Path.GetTempPath(), $"mohist-skills-content-runtime-{Guid.NewGuid():N}", ".mohist", "skills");
         _files.AddDirectory(mohistSkillsDir);
         var sentinel = Path.Combine(mohistSkillsDir, "sentinel.txt");
         _files.AddFile(sentinel, "keep");
@@ -397,30 +387,23 @@ public sealed class SkillsContentSpecs
 
     private string PopulateDefaultAssets()
     {
-        var sourceRoot = Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", "..",
-            "cli", "Mohist.Cli", "skill-data");
-        sourceRoot = Path.GetFullPath(sourceRoot);
-        var targetRoot = Path.Combine("/tmp", $"mohist-content-defaults-{Guid.NewGuid():N}", "skill-data");
+        var targetRoot = Path.Combine(Path.GetTempPath(), $"mohist-content-defaults-{Guid.NewGuid():N}", "skill-data");
         _files.AddDirectory(targetRoot);
 
-        if (Directory.Exists(sourceRoot))
-        {
-            foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(sourceRoot, file);
-                var target = Path.Combine(targetRoot, relative);
-                _files.AddFile(target, File.ReadAllText(file));
-            }
-        }
+        WriteSkill(targetRoot, "mohist", "managed mohist body");
+        WriteSkill(targetRoot, "mohist-explore", "managed explore body");
+        WriteSkill(targetRoot, "mohist-create-epic", "managed create-epic body");
+        WriteSkill(targetRoot, "mohist-create-issue", "managed create-issue body");
+        WriteSupplementaryFile(targetRoot, "mohist-create-issue", "references", "issue-templates.md", "# Issue Templates");
+        WriteSupplementaryFile(targetRoot, "mohist-create-epic", "references", "epic-templates.md", "# Epic Templates");
+        WriteSupplementaryFile(targetRoot, "mohist-explore", "references", "issue-body-template.md", "# Issue Body Template");
 
         return targetRoot;
     }
 
     private string SetUpManagedCache()
     {
-        var managedRoot = Path.Combine("/tmp", $"mohist-skills-content-managed-{Guid.NewGuid():N}", ".mohist", "cli", "skill-data");
+        var managedRoot = Path.Combine(Path.GetTempPath(), $"mohist-skills-content-managed-{Guid.NewGuid():N}", ".mohist", "cli", "skill-data");
         _files.AddDirectory(managedRoot);
         WriteSkill(managedRoot, "mohist", "managed mohist body");
         WriteSkill(managedRoot, "mohist-explore", "managed explore body");
@@ -437,10 +420,19 @@ public sealed class SkillsContentSpecs
             $"---\nname: {name}\ndescription: {DescriptionFor(name)}\n---\n\n# {heading}\n");
     }
 
+    private void WriteSupplementaryFile(string root, string skillName, string subDir, string fileName, string content)
+    {
+        var dir = Path.Combine(root, skillName, subDir);
+        _files.AddDirectory(dir);
+        _files.AddFile(Path.Combine(dir, fileName), content);
+    }
+
     private static string DescriptionFor(string name) => name switch
     {
-        "mohist" => "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。",
-        "mohist-explore" => "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。当用户带着一句话、一个模糊念头或未沉淀的改进意图，需要探索当前产品形态和技术实现，最终产出一份用户视角、产品视角、领域视角三段协作的 PRD 时使用。触发词包括 \"提炼需求\"、\"写 PRD\"、\"沉淀 issue\"、\"需求文档\"、\"探索\"、\"完善 issue\"。",
+        "mohist" => "执行 Mohist 当前 .NET 后端/API/Web 相关操作。",
+        "mohist-explore" => "把模糊的产品想法提炼成清晰的、有边界的 Mohist issue 需求文档。",
+        "mohist-create-epic" => "驱动 Mohist epic 的核心流程执行。",
+        "mohist-create-issue" => "驱动 Mohist issue 的核心流程执行。",
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
     };
 

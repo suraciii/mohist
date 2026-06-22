@@ -473,10 +473,10 @@ public class InfoCollectorSpecs
         Assert.Equal("/workdir", InfoCollector.ResolveSourcePath(new SystemdUnitFields("/workdir", "dotnet run --project /proj")));
 
         var fromProject = InfoCollector.ResolveSourcePath(new SystemdUnitFields(null, "dotnet run --project /proj/Mohist.Server.csproj"));
-        Assert.Equal("/proj", fromProject);
+        Assert.Equal(Path.GetDirectoryName("/proj/Mohist.Server.csproj"), fromProject);
 
         var fromBinary = InfoCollector.ResolveSourcePath(new SystemdUnitFields(null, "node /binary/script.js"));
-        Assert.Equal("/binary", fromBinary);
+        Assert.Equal(Path.GetDirectoryName("/binary/script.js"), fromBinary);
 
         var noPath = InfoCollector.ResolveSourcePath(new SystemdUnitFields(null, "dotnet run"));
         Assert.Null(noPath);

@@ -1519,15 +1519,14 @@ internal sealed class InfoCollector
                 var path = StripQuotes(tokens[i + 1]);
                 if (IsLikelyPath(path))
                 {
-                    var fullPath = Path.GetFullPath(path).Replace('\\', '/');
-                    if (fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-                        || fullPath.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase))
+                    if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                        || path.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase))
                     {
-                        var dir = Path.GetDirectoryName(fullPath);
+                        var dir = Path.GetDirectoryName(path);
                         if (!string.IsNullOrWhiteSpace(dir))
-                            return dir.Replace('\\', '/');
+                            return dir;
                     }
-                    return fullPath;
+                    return path;
                 }
             }
         }
@@ -1586,16 +1585,15 @@ internal sealed class InfoCollector
                 || path.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase)
                 || path.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
             {
-                var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+                var dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrWhiteSpace(dir))
-                    return dir.Replace('\\', '/');
+                    return dir;
             }
-            var full = Path.GetFullPath(path);
-            if (Directory.Exists(full))
-                return full.Replace('\\', '/');
-            var dir2 = Path.GetDirectoryName(full);
+            if (Directory.Exists(path))
+                return path;
+            var dir2 = Path.GetDirectoryName(path);
             if (!string.IsNullOrWhiteSpace(dir2))
-                return dir2.Replace('\\', '/');
+                return dir2;
         }
         catch
         {
