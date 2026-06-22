@@ -30,6 +30,8 @@ public class RunnerHub : Hub
         await runner.UpdateBuildGitHashAsync(buildGitHash);
     }
 
+    public Task<string> Ping() => Task.FromResult(Context.ConnectionId ?? string.Empty);
+
     public override Task OnDisconnectedAsync(Exception? exception)
     {
         var runnerId = Context.GetHttpContext()?.Request.Query["runnerId"].ToString();

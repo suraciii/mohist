@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -37,7 +38,7 @@ public static class RunnerRoutes
             return Results.Ok();
         });
 
-        group.MapPost("/heartbeat", async (string runnerId, HttpRequest request, IGrainFactory grains) =>
+        group.MapPost("/heartbeat", async (string runnerId, HttpRequest request, IGrainFactory grains, RunnerConnectionTracker connections) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var req = request.ContentLength.GetValueOrDefault() > 0
@@ -56,6 +57,11 @@ public static class RunnerRoutes
                     BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                     CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants));
                 await runner.HeartbeatRepairAsync(info);
+
+                if (!string.IsNullOrWhiteSpace(req.ConnectionId))
+                {
+                    connections.Register(runnerId, req.ConnectionId);
+                }
             }
             else
             {
@@ -287,7 +293,8 @@ public record RunnerHeartbeatRequest(
     string[]? CoderModels = null,
     int? MaxWorkflowSlots = null,
     string? BuildGitHash = null,
-    Dictionary<string, string[]>? CoderModelVariants = null);
+    Dictionary<string, string[]>? CoderModelVariants = null,
+    string? ConnectionId = null);
 public record RunnerReportRequest(
     string WorkId,
     string Status,

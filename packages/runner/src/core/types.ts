@@ -84,6 +84,7 @@ export interface RunnerOptions {
   maxConcurrentWorkflows: number
   pollIntervalMs: number
   heartbeatIntervalMs: number
+  dispatchLivenessProbeIntervalMs: number
 }
 
 export interface RunnerRegistration {
@@ -94,4 +95,5 @@ export interface RunnerRegistration {
   coderModelVariants?: Record<string, string[]>
   maxWorkflowSlots?: number
   buildGitHash?: string | null
+  connectionId?: string | null
 }
