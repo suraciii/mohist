@@ -1,8 +1,8 @@
 # 边界：Workflow ↔ Issue（Profile 归属与依赖方向）
 
-本文是 [`context-map.md`](../context-map.md) 关系 #1（Workflow↔Issue）的具体展开，聚焦：**依赖怎么走、哪些东西真的放错了**。profile 的内容/合并/加载见 [`workflow-profile.md`](../workflow-profile.md)。
+本文是 [`context-map.md`](../../context-map.md) 关系 #1（Workflow↔Issue）的具体展开，聚焦：**依赖怎么走、哪些东西真的放错了**。profile 的内容/合并/加载见 [`profile.md`](../profile.md)。
 
-> 相关但不重叠：调度见 `workflow-scheduling.md`、任务派发见 `workflow-task-dispatch.md`、协调见 `issue-workflow-coordination.md`。
+> 相关但不重叠：调度见 [`scheduling.md`](../scheduling.md)、任务派发见 [`task-dispatch.md`](../task-dispatch.md)、协调见 [`issue-coordination.md`](../issue-coordination.md)。
 
 ## 目标
 
@@ -21,7 +21,7 @@
 |---|---|---|---|
 | `WorkflowDefinition` | 结构类型（stages/tasks/checks）+ 引擎 | **Workflow** | ✓ 已在 `Workflow/Domain/Definition/` |
 | workflow profile | template 选择 + variables（per project/issue 配置） | **Issue / Project 自己** | ✓ 留原处（本就是它们的配置） |
-| prompts | project 级 prompt 库（内置 .prompt 兜底） | **Project Space**（project-scoped） | 见 `prompt-management.md`，不属 profile |
+| prompts | project 级 prompt 库（内置 .prompt 兜底） | **Project Space**（project-scoped） | 见 [`prompt-management.md`](../../prompt-management.md)，不属 profile |
 | 默认 `WorkflowDefinition` 内容 | 出厂默认工作流（yaml） | **应用配置层**（composition root） | ❌ 错放在 Issue，要搬 |
 | 投影 | Issue 解读 workflow 运行状态（attention 等） | **Issue**（只读消费） | ✓ 留 Issue |
 

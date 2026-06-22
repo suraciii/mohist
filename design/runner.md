@@ -6,8 +6,8 @@ include:
   - "Behavior signatures and which group each one writes."
   - "Why work-level in-flight tracking is not on this aggregate."
 exclude:
-  - "Grain-interface call sequences; see workflow-scheduling.md."
-  - "Task dispatch protocol; see workflow-task-dispatch.md."
+  - "Grain-interface call sequences; see workflow/scheduling.md."
+  - "Task dispatch protocol; see workflow/task-dispatch.md."
   - "Slot configuration authority and persistence; see issue #222."
   - "HTTP API payloads and Web UI surfaces; #214 covers the read-side projections."
 style:
@@ -20,7 +20,7 @@ style:
 
 Runner 聚合的信息结构与自报 status 机制。
 
-> 相关不重叠：调度/claim/bind/report 链路见 [`workflow-scheduling.md`](workflow-scheduling.md)；task 派发见 [`workflow-task-dispatch.md`](workflow-task-dispatch.md)；slots 配置权上收与持久化见 issue #222；#214 的详情页只读消费见其 issue。
+> 相关不重叠：调度/claim/bind/report 链路见 [`workflow/scheduling.md`](workflow/scheduling.md)；task 派发见 [`workflow/task-dispatch.md`](workflow/task-dispatch.md)；slots 配置权上收与持久化见 issue #222；#214 的详情页只读消费见其 issue。
 
 ## 问题
 
@@ -155,7 +155,7 @@ Update(slots)                    # slots := new
 
 ## 范围外
 
-- 不改派发/claim/bind/report 链路（见 `workflow-scheduling.md`）
+- 不改派发/claim/bind/report 链路（见 `workflow/scheduling.md`）
 - 不改 slots 配置权归属（见 #222）
 - 不替换 #214 的派发台账视图——它在 UI 旁作为"desired/assigned 列"保留，本期新增的 status 是并排的"observed 列"
 - 不加 runner 控制动作（drain / pause / enable-disable）

@@ -1,0 +1,32 @@
+---
+purpose: "Design 文档索引：按全局原则、Workflow 核心域、支撑主题组织。"
+style: ["短索引，只说明入口。"]
+---
+
+# Design
+
+`design/` 面向开发者和 agent，记录架构边界、领域划分、workflow 机制和跨模块设计约定。面向使用者的文档在 [`../docs/`](../docs/)。
+
+## 全局基础
+
+- [architecture.md](architecture.md) — 运行时边界、控制平面/执行平面职责、放置规则。
+- [domain-analysis.md](domain-analysis.md) — 问题空间和子域划分。
+- [context-map.md](context-map.md) — 限界上下文和模型依赖方向。
+- [conventions.md](conventions.md) — 命名、分层、变量等约定。
+- [eventbus.md](eventbus.md) — 事件总线边界和 CloudEvent 约定。
+
+## Workflow 核心域
+
+- [workflow/actions.md](workflow/actions.md) — action input/output 接口、errorCode、失败恢复编排。
+- [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — `mohist/default` 与 `mohist/pr` 两条内置 workflow。
+- [workflow/profile.md](workflow/profile.md) — profile = template + variables 的加载与合并。
+- [workflow/task-dispatch.md](workflow/task-dispatch.md) — task.with 模板展开和 dispatch 输入。
+- [workflow/scheduling.md](workflow/scheduling.md) — runner claim、pull、report、supervision。
+- [workflow/issue-coordination.md](workflow/issue-coordination.md) — Issue、WorkflowRun、Runner、Session 的跨聚合交互。
+- [workflow/boundaries/issue.md](workflow/boundaries/issue.md) — Workflow 与 Issue 的依赖方向和 profile 归属。
+
+## 支撑主题
+
+- [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
+- [runner.md](runner.md) — Runner 聚合信息结构与自报 status。
+- [web-ui.md](web-ui.md) — Web UI 设计边界。
