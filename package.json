@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "dotnet build Mohist.sln",
-    "test": "dotnet test Mohist.sln",
+    "test": "dotnet test Mohist.sln -p:SkipWebBuild=true",
     "build:web": "npm run build -w packages/web",
     "build:runner": "npm run build -w packages/runner",
     "dev:runner": "npm run dev -w packages/runner",
