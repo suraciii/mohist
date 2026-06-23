@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { IssueStatus, type Issue, type IssueHealth } from '../model/types'
 
@@ -221,6 +221,14 @@ describe('deriveCompletionSnapshot', () => {
 })
 
 describe('useCompletionSnapshot', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date(NOW) })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('returns the {completed, failed, new} shape derived from useIssues()', () => {
     useIssuesMock.mockReturnValue({
       data: [

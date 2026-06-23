@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
+import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { ProductivityZone } from '../productivity/ProductivityZone'
 import { DashboardZone } from './DashboardZone'
 import type { DashboardZoneId } from './DashboardZone'
 
@@ -64,21 +64,15 @@ export function DashboardPage() {
         data-testid="dashboard-zones"
         className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
       >
-        {DASHBOARD_ZONES.map((zone) => (
-          zone.id === 'productivity' ? (
-            <section
-              key={zone.id}
-              data-testid={`dashboard-zone-${zone.id}`}
-              data-zone={zone.id}
-              aria-label={zone.name}
-              className="rounded-lg border border-border bg-card/50 p-4"
-            >
-              <ProductivityZone />
-            </section>
+        {DASHBOARD_ZONES.map((zone) =>
+          zone.id === 'digest' ? (
+            <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
+              <DashboardDigestWidget />
+            </DashboardZone>
           ) : (
             <DashboardZone key={zone.id} id={zone.id} name={zone.name} />
-          )
-        ))}
+          ),
+        )}
       </div>
     </div>
   )

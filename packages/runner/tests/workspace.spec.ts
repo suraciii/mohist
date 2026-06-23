@@ -810,7 +810,21 @@ describe("WorkspaceManager hardened cache", () => {
     // back on, so the failure must be fatal — the runner cannot
     // continue. Calling materialize() directly exercises the
     // first-materialization clone path explicitly.
-    const badUrl = "https://127.0.0.1:1/this-host-has-no-git-server.git"
+    //
+    // Point at a `file://` URL under a path that does not exist.
+    // Git treats `file://` transports as local I/O (no HTTP/HTTPS,
+    // no proxy, no DNS), so the clone fails immediately with
+    // `fatal: '<path>' does not appear to be a git repository` —
+    // a few milliseconds, well inside the 10s test timeout.
+    //
+    // We previously tried `https://127.0.0.1:1/...` (TCP connect
+    // timeout exceeded the 10s test budget) and
+    // `https://no-such-host.invalid/...` (DNS does not resolve,
+    // but environments with a configured HTTP proxy — e.g.
+    // `http.proxy` set in git config — forward the request to the
+    // proxy, which then waits for the upstream it can never reach).
+    // `file://` avoids both failure modes.
+    const badUrl = "file:///this-path-does-not-exist/this-host-has-no-git-server.git"
 
     // The thrown error must NOT be `CacheReplacementBlockedError`; the
     // first-materialization failure is a plain clone failure surfaced as
