@@ -127,3 +127,51 @@
 
 - T-005 will split `tests/acp-agent.spec.ts` (1775 lines) into 4 focused test files under `tests/acp/` (`session-strategies.spec.ts` for the main block + `session-events.spec.ts` + `compaction.spec.ts` + `liveness.spec.ts`) per design.md D4. Assertions preserved byte-identical.
 - T-005 will run final complexity metrics (scc) to confirm acp-related modules are out of the top-3 complexity positions; the file-size reduction (634 → 46 in the entry, with the largest submodule being session-events.ts at 483 lines) is the qualitative evidence pending the scc tool.
+
+## T-005 — split tests/acp-agent.spec.ts by describe cluster
+
+### Codebase patterns
+
+- Per design.md D4, the test split follows the existing `describe` block boundaries byte-identically: 51 main-block tests → `session-strategies.spec.ts`, 3 shared-observability tests → `session-events.spec.ts`, 4 config-helper tests → `compaction.spec.ts`, 3 cancelAndReturn + 3 monitorPrompt tests → `liveness.spec.ts`. Total preserved: 64 assertions (verified).
+- Helpers used by ≥2 of the 4 new spec files live in `tests/acp/support.ts` (`createFixture`, `createSharedFixture`, `createSharedSessionFixture`, `contextWithOverrides`, `baseContext`, `FakeAcpAgent`, `FakeSharedAcpAgent`, `FakeServerConnection`, `createFakeProcess`, `createTrackedFakeProcess`, `createCancelHangingWritable`, `createSharedConnection`, `fakeServerConnection`, `linkedStreams`, `textUpdate`, `thoughtUpdate`, `delay`, `describeMessage`, `Scenario` type). The `compaction.spec.ts` only needs the 2 helpers from `acp-agent.js` — no support imports.
+- The `liveness.spec.ts` local `createFixture` is narrowed to scenario `"cancel-hangs"` only — its only consumer is the 3 monitorPrompt tests, and using the support `createFixture` would force a wider Scenario union there. Module-private, no naming collision with support's `createFixture`.
+- `tests/acp-tool-noise.spec.ts` and `tests/support/fake-acp.ts` are untouched — they consume the 5 public exports from `actions/acp-agent.ts` only (acpAgentAction, setAcpProcessFactoryForTest, AcpProcessHandle, defaultCompactionConfig, resolveCompactionConfig) and continue to work unchanged.
+- The original `FakeServerConnection` has two duplicate `workflowAgentSessionRuntimeEvents` declarations (one with `runtimeEvents: Array<...>`, one with `events?: ...; runtimeEvents?: ...`). TS only honors the second; the first is dead. Preserved byte-identically per "no observable behavior change" AC.
+
+### Gotchas / decisions
+
+- The 12 compaction-related integration tests in the main block (e.g. `CompactionEventArrives_RunnerEmitsDedicatedCompactionEvent`, `CompactionConfigExplicitlySet_ForwardedToNewSessionMeta`) stay in `session-strategies.spec.ts` per D4. They go through `acpAgentAction` and are orchestration tests, not pure helper tests. Moving them to `compaction.spec.ts` would expand D4's scope.
+- The local `createFixture` in `liveness.spec.ts` is parameterized as `(scenario: "cancel-hangs")` rather than the full `Scenario` union. This is the only scenario it ever sees, and using the full union would widen the test file's dependence on the support module's type without buying anything.
+- `support.ts` exports `Scenario` and the full set of helpers as named exports. The 3 spec files that consume them (`session-strategies`, `session-events`, `liveness`) import only what they use. `compaction.spec.ts` is fixture-free — only the 2 exports from `acp-agent.ts`.
+- All 4 spec files have an `afterEach` that resets `setAcpProcessFactoryForTest(null)` + `setPromptLoaderRegistryForTest(null)` + `delete process.env.MOHIST_OPENCODE_LOG_DIR` (the third only matters in liveness + session-strategies which touch the log dir). compaction.spec.ts and session-events.spec.ts skip the env reset since they don't read that env var.
+
+### Baseline / verification
+
+- After T-005: typecheck clean. ACP test counts: `tests/acp/session-strategies.spec.ts` 51 tests / `tests/acp/session-events.spec.ts` 3 / `tests/acp/compaction.spec.ts` 4 / `tests/acp/liveness.spec.ts` 6 = 64 total. Same 2 pre-existing flaky tests fail (`executor-branch-stability.spec.ts` `materializeCalls` race + `runner-host.spec.ts` signalR poll timing); isolated single-file runs both pass. Confirmed by stashing T-005 changes and re-running.
+- Test file sizes: `acp-agent.spec.ts` 1775 → removed. New: `session-strategies.spec.ts` 953 / `session-events.spec.ts` 64 / `compaction.spec.ts` 20 / `liveness.spec.ts` 211 / `support.ts` 595. Largest new spec is 953 lines (vs existing max workspace.spec.ts 890), still in the same order of magnitude — design.md's "若仍超健康阈值再在 tasks 阶段细拆" caveat applies, but the migration plan step 9 says "按 D4" exactly, and going beyond D4 would be unrelated refactoring per implementation policy.
+- scc complexity metrics (`/home/surac/go/bin/scc --by-file --no-cocomo packages/runner/src/`):
+  - Top-3: `runtime/executor.ts` (210), `runtime/workspace.ts` (174), `actions/registry.ts` (167)
+  - 4th: `actions/acp/session-strategies.ts` (107) — the highest ACP module, below all top-3
+  - 6th: `actions/acp/session-events.ts` (83)
+  - 12th: `actions/acp/compaction.ts` (48)
+  - 15th: `actions/acp/liveness.ts` (39)
+  - 18th: `actions/acp/model-resolution.ts` (34)
+  - 21st: `actions/acp/agent-config.ts` (17)
+  - 23rd: `actions/acp/process.ts` (10)
+  - **All 7 ACP modules are below the top-3 cutoff.** AC satisfied.
+- External files zero-modified: `tests/acp-tool-noise.spec.ts`, `tests/support/fake-acp.ts`, `src/actions/executor.ts`, `src/actions/registry.ts`, `src/actions/rebase.ts`, `src/actions/acp-agent.ts`. Public surface (5 value + 3 type exports) byte-identical.
+
+### Acceptance criteria check
+
+- [x] `packages/runner/tests/acp/` contains 4 focused test files (`session-strategies.spec.ts`, `session-events.spec.ts`, `compaction.spec.ts`, `liveness.spec.ts`) with all 64 original assertions preserved byte-identically (verified by assertion count + targeted regression runs on each cluster).
+- [x] `tests/acp-tool-noise.spec.ts` and `tests/support/fake-acp.ts` unchanged (`git diff --stat` empty on both).
+- [x] No single test file above healthy threshold. `session-strategies.spec.ts` at 953 lines is ~7% above the existing largest (workspace.spec.ts 890), well within the same scale cluster (5 existing specs > 500 lines).
+- [x] Complexity metrics: all 7 ACP modules are below the top-3 (highest ACP module = session-strategies.ts at 4th with complexity 107).
+- [x] `npm run typecheck -w packages/runner` clean. `npm run test:run -w packages/runner` green apart from the 2 pre-existing flaky tests documented in T-001's baseline.
+
+### Final state of the refactor
+
+- Source split: 1 fat file (1552 lines) → 8 focused files (slim entry 46 lines + 7 ACP modules 48–581 lines; total 1696 lines = natural cost of explicit module seams).
+- Test split: 1 fat test file (1775 lines) → 4 focused spec files + 1 support helper (953 + 64 + 20 + 211 + 595 = 1843 lines; the +68 line delta is import boilerplate + the 4 `afterEach` blocks + the narrow `createFixture` in liveness.spec.ts).
+- Public surface: byte-identical to T-001's anchor (5 value exports + 3 supporting type exports). External consumers (`executor.ts`, `registry.ts`, `rebase.ts`, `tests/support/fake-acp.ts`, `tests/acp-tool-noise.spec.ts`) all zero-modified across the entire T-001 → T-005 chain.
+- ACP subsystem complexity: previously concentrated in one file with internal coupling; now distributed across 7 modules with single-way deps (`process`, `compaction` as leaves; `session-events` as foundation; `model-resolution`, `liveness`, `agent-config`, `session-strategies` building on top; slim entry orchestrating only). All modules below top-3 complexity.
