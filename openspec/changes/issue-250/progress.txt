@@ -67,3 +67,33 @@
 
 - T-003 must move `hasPostProbeActivity`, `createSessionLivenessState`, `recordSessionLivenessActivity`, `beginLivenessProbe`, `clearLivenessProbe`, `probeWasSatisfied`, `SessionLivenessState`, `LivenessProbeState`, `LivenessFailureReason`, plus `monitorPrompt`, `ensurePromptAcceptedOrPending`, `waitForData`, and the concurrent primitives (`timeout` / `aborted` / `cancelAndReturn` / `toError`) from `acp-agent.ts` to `liveness.ts`.
 - T-004 will move `acpAgentAction`, `restoreAgentToolNoise`, the 4 run-* functions, `createSharedPromptRunner`, `satisfyExpectations`, `appendAgentText`, `truncateAgentText`, and the `MAX_AGENT_TEXT_LENGTH` constant from `acp-agent.ts` to `session-strategies.ts`. After T-004 the slim entry will be the only remaining file in `src/actions/` outside `acp/`.
+
+## T-003 — extract acp/liveness.ts
+
+### Codebase patterns
+
+- The new `liveness.ts` module follows the **one-way leaf / single dependency** rule: depends on `core/types` (leaf), `runtime/opencode-log-diagnostics` (leaf), `acp/process` (leaf per D2), and `acp/session-events` (the only acp submodule dep). No reverse edges.
+- All four concurrency primitives folded into liveness per design.md D1: `timeout` (exported, shared with `session-strategies` to-be), `aborted` (module-private, only `monitorPrompt` uses it), `cancelAndReturn` (exported, `monitorPrompt` calls it), `toError` (module-private, only `monitorPrompt` uses it).
+- The two compile-time constants `CANCEL_TIMEOUT_MS = 5_000` and `PROBE_PROMPT` (string) are module-private to `liveness.ts`. They were previously module-private in `acp-agent.ts`.
+- `LivenessProbeState` (interface) stays **module-private** in `liveness.ts` — it's only used as a transient shape inside `monitorPrompt` (the `probeState` literal passed into the diagnostic message and event payload). T-001's note predicted it might be needed externally; it isn't. `SessionLivenessState`, `LivenessFailureReason` are `export` because they're part of the public signature of `monitorPrompt` (its options object) and the `AcpSessionResult` / `AcpPromptRunResult` types in `acp-agent.ts`.
+- `monitorPrompt`'s parameter `livenessState: SessionLivenessState` is structurally the same shape as the liveness state object passed to `emitLivenessStatusEvent` (which already accepts a structural type). No coupling change — `emitLivenessStatusEvent` was already designed for structural acceptance per T-001 (the `failureReason` extras field is typed `string`, not `LivenessFailureReason`, to keep the dependency graph clean).
+- `acp-agent.ts` keeps the `AcpSessionResult` / `AcpPromptRunResult` interfaces (they reference `LivenessFailureReason` via type-only import) and the `failureCategory` plumbing. These move to `session-strategies.ts` in T-004.
+
+### Gotchas / decisions
+
+- `OpencodeProviderErrorDiagnostic` stays as a **type-only** import in `acp-agent.ts` because `AcpSessionResult.failureCategory` and `AcpPromptRunResult.failureCategory` both still reference it. The runtime functions (`appendOpencodeDiagnostic`, `findOpencodeProviderErrorDiagnostic`) are no longer imported in `acp-agent.ts` — they moved with `monitorPrompt`.
+- `buildUsageUpdatePayload`, `emitSessionEvent`, `hasUsageUpdateContent` from `session-events.ts` are imported by `liveness.ts` (used inside `emitPromptUsageIfAppropriate`). `emitLivenessStatusEvent` is also imported from `session-events.ts` (was added in T-001 — perfect home for the payload builder + constant).
+- `acp-agent.ts` now imports `timeout` from `./acp/liveness.js` for the 3 `Promise.race` calls in `runResumedWorkflowAgentSession` / `runNewWorkflowAgentSession` / `runEphemeralWorkflowAgentSession` (against `connection.resumeSession` / `newSession` / `initialize` / `newSession`). This is the D1 wiring — T-004 will move these 3 run-* functions into `session-strategies.ts` and re-import `timeout` from `liveness` there. For now `acp-agent.ts` re-exports nothing new (the public surface stays frozen at 5 exports).
+- The `cancelled` flag in `cancelAndReturn` is set via `.then(() => { cancelled = true })` rather than awaiting — same logic, byte-identical to original.
+
+### Baseline / verification
+
+- After T-003: typecheck clean. All 64 ACP tests pass, including both required regression blocks (`cancelAndReturn bounded cleanup`: 3/3, `monitorPrompt prompt_timeout diagnostics`: 3/3). The same 1 pre-existing flaky test (`executor-branch-stability.spec.ts` `materializeCalls` race) still fails — unrelated to ACP.
+- File sizes: `acp-agent.ts` 860 → 634 lines (226 lines extracted, ~26% reduction). New: `liveness.ts` 243 lines (largest single module so far but single-responsibility: liveness state + monitoring loop + concurrency primitives).
+- External test files (`tests/support/fake-acp.ts`, `tests/acp-tool-noise.spec.ts`) zero-modified. Public surface unchanged.
+- Dependency graph: `liveness.ts → session-events.ts, process.ts, runtime/opencode-log-diagnostics.ts, core/types.ts, sdk`. No reverse edges. `session-strategies.ts` (next) will import `timeout` from `liveness.ts` per design.md D1.
+
+### Open items for downstream tasks
+
+- T-004 must move `acpAgentAction`, `restoreAgentToolNoise`, the 4 run-* functions, `createSharedPromptRunner`, `satisfyExpectations`, `appendAgentText`, `truncateAgentText`, the `MAX_AGENT_TEXT_LENGTH` constant, and the `AcpSessionResult` / `AcpPromptRunResult` interfaces from `acp-agent.ts` to `session-strategies.ts`. After T-004 the slim entry will be the only remaining file in `src/actions/` outside `acp/`.
+- T-004 will re-import `timeout` from `./acp/liveness.js` in `session-strategies.ts` (the 3 `Promise.race` callers move there). Currently `acp-agent.ts` does this import temporarily; once T-004 is done `acp-agent.ts` no longer needs `timeout`.
