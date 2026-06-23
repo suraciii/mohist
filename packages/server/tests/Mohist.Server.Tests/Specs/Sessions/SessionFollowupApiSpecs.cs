@@ -224,6 +224,9 @@ public class SessionFollowupApiSpecs
 
     private async Task<string> ResolveSessionIdAsync(string workflowRunId, string sessionName)
     {
+        // AgentSessionLabels index table was replaced by STORED computed
+        // columns on AgentSessions (LabelSourceId / LabelSessionName, ...),
+        // matching the production query in AgentSessionQuery.
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         return await db.AgentSessions
             .Where(s => s.LabelSourceId == workflowRunId && s.LabelSessionName == sessionName)
