@@ -5,7 +5,8 @@ style: ["极简，只给目标态。"]
 
 # Workflow Profile
 
-> profile = **template**（选哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。prompts 不属 profile → [`prompt-management.md`](../prompt-management.md)。
+> profile = **template**（选哪个 `WorkflowDefinition`）+ **variables**（`VariableBundle`）。
+> prompts 不属 profile → [`prompt-management.md`](../prompt-management.md)。
 > action input/output 契约见 `actions.md`。内置 workflow 行为见 `builtin-workflows.md`。
 
 ## 架构
@@ -17,21 +18,67 @@ WorkflowGrain ──▶ IWorkflowProfileProvider              端口，Workflow 
                 WorkflowProfileProvider                  adapter
                        │ live 读 config
                        ▼
-        global config · project profile · issue profile · project templates
+        global config · project profile · issue profile · run profile · project templates
 ```
 
 - Workflow 零 Issue 依赖；解析在 adapter，live 不快照。
-- 身份：grain 直传 in-memory `WorkflowRun.Metadata`，不反查 `db.Issues` / `Issue.State`。
+- `WorkflowRun` 只保存执行状态和 profile 身份，不内嵌 profile variables。
+- profile 的读取、更新、合并都走 `WorkflowProfileProvider` / profile service。
 
 ## VariableBundle
 
 `{ vars, stages: { "plan": { vars } } }`。Set 整替，Patch deep merge。
 
+## Profile Layers
+
+### Project Profile
+
+项目级默认配置。
+
+```text
+project_workflow_profile
+  ProjectId
+  DefaultTemplateId
+  Variables
+```
+
+### Issue Profile
+
+issue 级模板选择和变量覆盖。
+
+```text
+issue_workflow_profile
+  IssueId
+  SourceTemplateId
+  Template
+  Variables
+```
+
+### Run Profile
+
+workflow run 级运行态 profile。它是最后一层变量来源，优先级最高。
+
+```text
+workflow_run_profile
+  WorkflowRunId
+  Variables
+```
+
+run profile 用于保存 workflow run 过程中产生、且后续 task 需要引用的运行态事实，例如：
+
+```yaml
+vars.github.pr.number
+vars.github.pr.url
+vars.github.pr.headSha
+```
+
+run profile 不属于 `WorkflowRun` aggregate state。`WorkflowRun` 通过 `WorkflowRunId` 关联它，profile service 负责读写。
+
 ## 合并
 
 ```
 低 ──────────────────────────────────────────────────────▶ 高
-template embedded (YAML variables:) + project vars + issue vars + dispatch 注入(runId/stage/work，仅 dispatch)
+template embedded (YAML variables:) + global vars + project vars + issue vars + run vars + dispatch context
 ```
 
 deepMerge：对象递归，后者覆盖同名 key。
@@ -39,19 +86,22 @@ deepMerge：对象递归，后者覆盖同名 key。
 ## 加载
 
 ```
-LoadTemplate(metadata):                       adapter, live
+LoadTemplate(runId):                          adapter, live
   issue.Template?           → parsed (自定义)
   issue.SourceTemplateId    → project_templates
   project.DefaultTemplateId → project_templates
   else                      → mohist/default (应用配置层)
 
-LoadVariables(metadata):                      adapter, live, 3 层 deepMerge
-  global config > project vars > issue vars
+LoadVariables(runId):                         adapter, live, layered deepMerge
+  global config > project vars > issue vars > run vars
 
 grain dispatch (纯计算):
-  resolved = deepMerge(template.embedded, LoadVariables) + dispatch 注入
+  resolved = deepMerge(template.embedded, LoadVariables)
+  payload  = resolved + dispatch context(workflow/stage/work/issue/workspace/tasks)
   with     = Workflow.Domain.ExpandTaskWith(resolved, task.With)
 ```
+
+`dispatch context` 不是 profile variables。它只在 dispatch payload 中存在，例如 `workflow.runId`、`stage.name`、`work.id`、`issue.number`、`workspace.branch`、`tasks.*.outputs.*`。
 
 ## ExpandTaskWith
 
@@ -68,9 +118,33 @@ for (k,v) in taskWith:
 project_workflow_profile  projectId → DefaultTemplateId, Variables
 project_templates         (ProjectId, TemplateId) → Template
 issue_workflow_profile    issueId → SourceTemplateId, Template, Variables
+workflow_run_profile      workflowRunId → Variables
 ```
 
-`WorkflowRun.Metadata` 存 projectId/issueId 作解析身份。
+`WorkflowRun.Metadata` 存 projectId/issueId/profile identity 作解析身份，但不存 profile body。
+
+## Runtime Writes
+
+task 成功后，action output 可以通过 `setVars` 写入 run profile：
+
+```yaml
+setVars:
+  github.pr.number: output.prNumber
+  github.pr.url: output.prUrl
+```
+
+写入语义：
+
+- 左侧路径相对 `vars`。
+- 只 patch `workflow_run_profile.Variables`。
+- 不写回 project profile 或 issue profile。
+- 不修改 `WorkflowRun` 执行状态。
+- 读取后续 task variables 时通过 `LoadVariables(runId)` 统一合并生效。
+
+task output context 和 run profile 分离：
+
+- `tasks.<taskId>.outputs.*`：来自 task action output，属于 dispatch context。
+- `vars.*`：来自 profile variables，包含 project/issue/run 三层变量。
 
 ## Write API
 
@@ -79,5 +153,6 @@ issue_workflow_profile    issueId → SourceTemplateId, Template, Variables
 项目模板      /projects/:p/workflow-templates          (GET, POST; /:t GET,PUT,DELETE)
 项目 profile  /projects/:p/workflow-profile            (GET; /default-template PUT,DELETE; /variables GET,PUT,PATCH)
 issue profile /projects/:p/issues/:n/workflow-profile  (GET; /template PUT,DELETE; /variables GET,PUT,PATCH)
-run           /workflow-runs/:id                        (/yaml, /variables/effective)
+run profile   /workflow-runs/:id/workflow-profile       (GET; /variables GET,PUT,PATCH)
+effective     /workflow-runs/:id                        (/yaml, /variables/effective)
 ```
