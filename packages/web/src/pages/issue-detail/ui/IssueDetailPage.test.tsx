@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -24,6 +24,7 @@ const mockUseWorkflowTimeline = vi.fn()
 const mockUseWorkflowYaml = vi.fn()
 const mockUseAgentStatus = vi.fn()
 const mockUseIssue = vi.fn()
+const mockUseWorkspaceStatus = vi.fn()
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()
@@ -34,6 +35,7 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
     useWorkflowTimeline: (...args: unknown[]) => mockUseWorkflowTimeline(...args),
     useWorkflowYaml: (...args: unknown[]) => mockUseWorkflowYaml(...args),
+    useWorkspaceStatus: (...args: unknown[]) => mockUseWorkspaceStatus(...args),
     useIssueEvents: () => ({ data: undefined, isLoading: false }),
   }
 })
@@ -108,6 +110,7 @@ describe('IssueDetailPage primaryEpic numbered display', () => {
     mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
     mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
     mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
   })
 
   afterEach(() => {
@@ -216,6 +219,7 @@ describe('IssueDetailPage runtime decision surface', () => {
     mockUseWorkflowTimeline.mockReturnValue({ data: undefined })
     mockUseWorkflowYaml.mockReturnValue({ data: undefined, isLoading: false })
     mockUseAgentStatus.mockReturnValue({ data: { activeAgents: [], capacity: { max: 1 }, runnerAvailable: true } })
+    mockUseWorkspaceStatus.mockReturnValue({ data: undefined, isLoading: false })
   })
 
   afterEach(() => {
@@ -871,6 +875,76 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
 
     expect(container.querySelector('[data-testid="issue-detail-header"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="diff-summary-banner"]')).toBeFalsy()
+  })
+
+  it('places the branch rebase status above the workflow profile editor instead of burying it in the description column', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        body: 'Issue body content.',
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkspaceStatus.mockReturnValue({
+      data: {
+        exists: true,
+        branch: 'mohist/run-test',
+        baseBranch: 'master',
+        ahead: 1,
+        behind: 2,
+        rebaseInProgress: false,
+        conflictingFiles: [],
+      },
+      isLoading: false,
+    })
+
+    const { container } = renderPage()
+
+    const branchFrame = await waitFor(() => screen.getByTestId('branch-bar-frame'))
+    expect(within(branchFrame).getByTestId('branch-bar')).toBeTruthy()
+    expect(within(branchFrame).getByText('Rebase onto master')).toBeTruthy()
+
+    const profileFrame = screen.getByTestId('workflow-profile-editor-frame')
+    const contentGrid = screen.getByTestId('issue-detail-content-grid')
+    expect(
+      (branchFrame.compareDocumentPosition(profileFrame) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true)
+    expect(
+      (branchFrame.compareDocumentPosition(contentGrid) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true)
+    expect(container.querySelector('[data-testid="issue-detail-content-grid"] [data-testid="branch-bar"]')).toBeNull()
+  })
+
+  it('does not render an empty PR delivery summary frame when the workflow has no PR delivery metadata', async () => {
+    mockUseIssue.mockReturnValue({
+      data: makeIssue({
+        id: 'issue-14',
+        number: 14,
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+      }),
+      isLoading: false,
+      isError: false,
+    })
+    mockUseWorkflowTimeline.mockReturnValue({
+      data: {
+        stages: [{ id: 'build', tasks: [], checks: [] }],
+        availableActions: [],
+      },
+    })
+
+    const { container } = renderPage()
+
+    await waitFor(() => expect(screen.getByTestId('workflow-view-frame')).toBeTruthy())
+    expect(container.querySelector('[data-testid="pr-delivery-summary-frame"]')).toBeNull()
   })
 
   it('removes decorative borders from plain section cards (Description, Comments, Commits) in favor of whitespace grouping', async () => {

@@ -96,10 +96,10 @@ describe('WorkspacePanel', () => {
     expect(screen.getByText('Rebase onto master')).toBeInTheDocument()
   })
 
-  it('shows "Rebase after completion" when agent is running', () => {
+  it('still allows queuing rebase when agent is running', () => {
     mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 2, behind: 1, canFastForward: false, isRebaseInProgress: false }, false)
     render(<WorkspacePanel issueNumber={1} isAgentRunning={true} />)
-    expect(screen.getByText('Rebase after completion')).toBeInTheDocument()
+    expect(screen.getByText('Rebase onto master')).toBeInTheDocument()
   })
 
   it('returns null while loading', () => {

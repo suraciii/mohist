@@ -10,7 +10,7 @@ import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
@@ -396,6 +396,7 @@ export function IssueDetailPage() {
   const runnerUnavailable = agentStatus?.runnerAvailable === false
   const isBacklog = issue.status === IssueStatus.Backlog
   const workflowStage = issue.workflowStage ?? null
+  const prDeliveryMetadata = findPublishViaPrMetadata(workflowTimeline)
   const workflowAllowedActions = workflowTimeline?.availableActions.map((action) => action.name) ?? []
   const allowedActions = Array.from(new Set([...recoveryAllowedActions, ...workflowAllowedActions]))
   const canRetryWorkflow = allowedActions.includes('retry')
@@ -529,7 +530,11 @@ export function IssueDetailPage() {
             <WorkflowView issue={issue} />
           </div>
 
-          {workflowTimeline && (
+          <div className="mb-8" data-testid="branch-bar-frame">
+            <BranchBar issueNumber={issueNumber} stage={workflowStage} isAgentRunning={isAgentRunningOnThis} />
+          </div>
+
+          {prDeliveryMetadata && (
             <div className="mb-8" data-testid="pr-delivery-summary-frame">
               <PrDeliverySummary timeline={workflowTimeline} />
             </div>
@@ -577,7 +582,6 @@ export function IssueDetailPage() {
 
           <div className="grid min-w-0 grid-cols-1 lg:grid-cols-3 gap-8" data-testid="issue-detail-content-grid">
             <div className="min-w-0 lg:col-span-2 space-y-8">
-              <BranchBar issueNumber={issueNumber} stage={workflowStage} isAgentRunning={isAgentRunningOnThis} />
               {issue.body && (
                   <div className="rounded-lg bg-white p-4" data-testid="description-section">
                     <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
