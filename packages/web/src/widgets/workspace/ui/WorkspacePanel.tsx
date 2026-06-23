@@ -248,8 +248,6 @@ export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: Workspac
               </svg>
               Rebasing...
             </>
-          ) : isAgentRunning ? (
-            'Rebase after completion'
           ) : (
             'Rebase onto master'
           )}

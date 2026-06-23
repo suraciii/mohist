@@ -14,7 +14,7 @@ interface BranchBarProps {
   isAgentRunning: boolean
 }
 
-export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps) {
+export function BranchBar({ issueNumber, stage }: BranchBarProps) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const { rebaseConflict } = useLiveTask()
@@ -55,7 +55,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
 
   if (isRebasing) {
     return (
-      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
+      <div data-testid="branch-bar" className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
         <div className="flex items-center gap-3">
           <svg className="h-4 w-4 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -80,7 +80,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
 
   if (isUpstreamUnknown) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+      <div data-testid="branch-bar" className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
@@ -95,7 +95,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
 
   if (isBehind) {
     return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+      <div data-testid="branch-bar" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
@@ -110,17 +110,14 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
             <Button
               variant="outline"
               onClick={() => rebaseMutation.mutate()}
-              disabled={isAgentRunning || isConflictResolving}
-              title={isAgentRunning ? 'Cannot rebase while agent is running' : isConflictResolving ? 'Conflict resolution in progress' : undefined}
+              disabled={rebaseMutation.isPending || isConflictResolving}
+              title={isConflictResolving ? 'Conflict resolution in progress' : undefined}
               className="rounded-md border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5 h-auto"
             >
               Rebase onto {baseBranch}
             </Button>
           </div>
         </div>
-        {isAgentRunning && (
-          <p className="text-xs text-amber-500">Cannot rebase while agent is running</p>
-        )}
         {isDone && (
           <p className="text-xs text-amber-600">
             This Done workflow workspace is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained workspace.
@@ -153,7 +150,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   }
 
   return (
-    <div className="rounded-lg border bg-background px-4 py-3">
+    <div data-testid="branch-bar" className="rounded-lg border bg-background px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
