@@ -3,11 +3,13 @@ import { render, screen } from './test-utils'
 
 type WorkspaceStatus = {
   exists: boolean
+  reason?: string
   branch: string
   ahead: number
   behind: number
   canFastForward: boolean
-  isRebaseInProgress: boolean
+  isRebaseInProgress?: boolean
+  rebaseInProgress?: boolean
 }
 
 vi.mock('../src/entities/issue/api/queries', async () => {
@@ -110,6 +112,21 @@ describe('WorkspacePanel', () => {
     mockWorkspaceStatus({ exists: true, branch: 'mo/issue-1', ahead: 0, behind: 3, canFastForward: false, isRebaseInProgress: false }, false)
     render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
     expect(screen.getByText(/3 commits behind master/)).toBeInTheDocument()
+  })
+
+  it('shows unknown upstream state without stale up-to-date or rebase controls when fetch fails', () => {
+    mockWorkspaceStatus({ exists: true, reason: 'fetch_failed', branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: false, isRebaseInProgress: false }, false)
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    expect(screen.getByText('未能检查上游')).toBeInTheDocument()
+    expect(screen.queryByText('Up to date')).not.toBeInTheDocument()
+    expect(screen.queryByText('Rebase onto master')).not.toBeInTheDocument()
+  })
+
+  it('keeps rebasing control visible above unknown upstream state when fetch fails during rebase', () => {
+    mockWorkspaceStatus({ exists: true, reason: 'fetch_failed', branch: 'mo/issue-1', ahead: 0, behind: 0, canFastForward: false, rebaseInProgress: true }, false)
+    render(<WorkspacePanel issueNumber={1} isAgentRunning={false} />)
+    expect(screen.getByText('Rebasing...')).toBeInTheDocument()
+    expect(screen.queryByText('未能检查上游')).not.toBeInTheDocument()
   })
 
   it('uses workspace wording for the Done cleanup button and removal copy', () => {

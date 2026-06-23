@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { isUnderRunnerRoot, normalizeMaterializePayload, resolveWorkspaceQuery, RunnerSignalRClient } from "../src/server/runner-signalr.js"
+import { isUnderRunnerRoot, normalizeMaterializePayload, resolveWorkspaceQuery, RunnerSignalRClient, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import type { CommandResult } from "../src/system/process.js"
 
 interface CapturedBuilder {
   url?: string
@@ -9,6 +10,26 @@ interface CapturedBuilder {
 }
 
 const builders: CapturedBuilder[] = []
+
+afterEach(async () => {
+  setRunnerSignalRGitRunnerForTest(null)
+  setRunnerSignalRExistsCheckerForTest(null)
+})
+
+function findHandler(name: string): (arg: unknown) => Promise<unknown> {
+  const conn = builders.at(-1)!.connection
+  const call = conn.on.mock.calls.find(([event]) => event === name)
+  if (!call) throw new Error(`handler not registered: ${name}`)
+  return call[1] as (arg: unknown) => Promise<unknown>
+}
+
+function runOk(stdout = ""): CommandResult {
+  return { exitCode: 0, stdout, stderr: "" }
+}
+
+function runFail(stderr = ""): CommandResult {
+  return { exitCode: 1, stdout: "", stderr }
+}
 
 interface FakeConnection {
   state: signalR.HubConnectionState
@@ -113,6 +134,102 @@ describe("RunnerSignalRClient workspace queries", () => {
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects/app/workspaces/issue-1")).toBe(true)
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/projects")).toBe(true)
     expect(isUnderRunnerRoot("/tmp/mohist/projects", "/tmp/mohist/other/issue-1")).toBe(false)
+  })
+
+  it("GetWorkspaceStatus_WhenFetchFails_ReturnsExistingWorkspaceWithRebaseState", async () => {
+    builders.length = 0
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runOk("headSha\n")
+        case "rebase --show-current-patch":
+          return runOk("patch\n")
+        case "diff --name-only --diff-filter=U":
+          return runOk("packages/runner/src/server/runner-signalr.ts\n")
+        case "fetch origin master":
+          return runFail("fatal: unable to access origin")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/runner-root", null)
+    const handler = findHandler("GetWorkspaceStatus")
+    const status = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(status).toEqual({
+      exists: true,
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+      rebaseInProgress: true,
+      conflictingFiles: ["packages/runner/src/server/runner-signalr.ts"],
+      reason: "fetch_failed",
+    })
+    expect(calls).toEqual([
+      "rev-parse --is-inside-work-tree",
+      "rev-parse --verify refs/heads/mohist/run-wr-1",
+      "rebase --show-current-patch",
+      "diff --name-only --diff-filter=U",
+      "fetch origin master",
+    ])
+    expect(calls).not.toContain("rev-list --left-right --count origin/master...mohist/run-wr-1")
+  })
+
+  it("GetWorkspaceStatus_WhenFetchSucceeds_ReportsAheadBehindFromOriginBase", async () => {
+    builders.length = 0
+    const calls: string[] = []
+    setRunnerSignalRExistsCheckerForTest(() => true)
+    setRunnerSignalRGitRunnerForTest(async (_cmd, args, _cwd) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --is-inside-work-tree":
+          return runOk("true\n")
+        case "rev-parse --verify refs/heads/mohist/run-wr-1":
+          return runOk("headSha\n")
+        case "rebase --show-current-patch":
+          return runFail("fatal: no rebase in progress")
+        case "fetch origin master":
+          return runOk("")
+        case "rev-list --left-right --count origin/master...mohist/run-wr-1":
+          return runOk("3\t2\n")
+        default:
+          return runFail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/runner-root", null)
+    const handler = findHandler("GetWorkspaceStatus")
+    const status = await handler({
+      workspacePath: "/runner-root/workspace",
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+    })
+
+    expect(status).toMatchObject({
+      exists: true,
+      branch: "mohist/run-wr-1",
+      baseBranch: "master",
+      ahead: 2,
+      behind: 3,
+      rebaseInProgress: false,
+      conflictingFiles: [],
+    })
+    expect(calls).toEqual([
+      "rev-parse --is-inside-work-tree",
+      "rev-parse --verify refs/heads/mohist/run-wr-1",
+      "rebase --show-current-patch",
+      "fetch origin master",
+      "rev-list --left-right --count origin/master...mohist/run-wr-1",
+    ])
   })
 })
 

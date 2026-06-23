@@ -259,6 +259,7 @@ export function stopIssue(number: number, projectId?: string | null) {
 export function getWorkspaceStatus(number: number, projectId?: string | null) {
   return request<{
     exists: boolean
+    reason?: string
     branch?: string
     baseBranch?: string
     ahead?: number

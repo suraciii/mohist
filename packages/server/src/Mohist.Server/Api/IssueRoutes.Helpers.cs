@@ -95,6 +95,7 @@ public static partial class IssueRoutes
         var with = new Dictionary<string, object?>
         {
             ["baseBranch"] = baseBranch,
+            ["remote"] = "origin",
             ["repository"] = new Dictionary<string, object?>
             {
                 ["name"] = repository.Name,

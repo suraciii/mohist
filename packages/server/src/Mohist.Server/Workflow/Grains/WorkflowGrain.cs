@@ -405,7 +405,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With)));
         }
 
-        var events = _run.InsertRuntimeTasksAfter(tasksToInsert);
+        var events = _run.AddRuntimeTasks(tasksToInsert);
 
         _log.LogInformation("Workflow {Id} added {Count} tasks in stage {Stage}",
             GrainKey, tasksToInsert.Count, current.Id);

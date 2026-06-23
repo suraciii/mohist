@@ -56,6 +56,13 @@ public static partial class WorkflowRunExtensions
             string? stage = null,
             bool invalidateChecks = false,
             string? causedByFeedbackId = null)
+            => run.AddRuntimeTasks([task], stage, invalidateChecks, causedByFeedbackId);
+
+        public IReadOnlyList<WorkflowEvent> AddRuntimeTasks(
+            IReadOnlyList<TaskDefinition> tasks,
+            string? stage = null,
+            bool invalidateChecks = false,
+            string? causedByFeedbackId = null)
         {
             var current = run.CurrentStage();
             if (!current.Initialized)
@@ -63,8 +70,20 @@ public static partial class WorkflowRunExtensions
             if (!string.IsNullOrWhiteSpace(stage) && stage != current.Id)
                 throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
-            var newTask = TaskRun.MakeTask(current.Tasks, task, causedByFeedbackId);
-            current.Tasks.Add(newTask);
+            var runningIndex = current.Tasks.FindIndex(t => t.Status == TaskRunStatus.Running);
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
+            var insertIndex = runningIndex >= 0
+                ? runningIndex + 1
+                : firstIncompleteIndex >= 0
+                    ? firstIncompleteIndex
+                    : current.Tasks.Count;
+
+            foreach (var task in tasks)
+            {
+                var newTask = TaskRun.MakeTask(current.Tasks, task, causedByFeedbackId);
+                current.Tasks.Insert(insertIndex, newTask);
+                insertIndex++;
+            }
 
             if (invalidateChecks)
             {
@@ -83,35 +102,6 @@ public static partial class WorkflowRunExtensions
                 current.Status = StageRunStatus.Running;
 
             run.Status = WorkflowRunStatus.Running;
-            return [new WorkflowRunResumed()];
-        }
-
-        public IReadOnlyList<WorkflowEvent> InsertRuntimeTasksAfter(
-            IReadOnlyList<TaskDefinition> tasks,
-            bool invalidateChecks = false)
-        {
-            var current = run.CurrentStage();
-            var afterTask = current.CurrentTask();
-            var insertIndex = afterTask is not null
-                ? current.Tasks.IndexOf(afterTask) + 1
-                : current.Tasks.Count;
-
-            foreach (var task in tasks)
-            {
-                var newTask = TaskRun.MakeTask(current.Tasks, task);
-                current.Tasks.Insert(insertIndex, newTask);
-                insertIndex++;
-            }
-
-            if (invalidateChecks)
-            {
-                foreach (var c in current.Checks)
-                {
-                    c.Status = StageCheckStatus.Pending;
-                    c.Message = null;
-                    c.Output = null;
-                }
-            }
             return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
 

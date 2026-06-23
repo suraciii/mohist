@@ -243,6 +243,10 @@ public class IssueRepositoryResolutionRegressionSpecs
         var rebaseTask = currentStage.Tasks.Single(t => t.Uses == "mohist/rebase");
         Assert.NotNull(rebaseTask.WithInput);
         Assert.Equal("release-new", rebaseTask.WithInput!["baseBranch"]!.Value.GetString());
+        Assert.Equal("origin", rebaseTask.WithInput["remote"]!.Value.GetString());
+        var rebaseIndex = currentStage.Tasks.IndexOf(rebaseTask);
+        var runningTaskIndex = currentStage.Tasks.FindIndex(t => t.Status == Mohist.Server.Workflow.Domain.Run.TaskRunStatus.Running);
+        Assert.Equal(runningTaskIndex + 1, rebaseIndex);
         var repository = rebaseTask.WithInput["repository"]!.Value;
         Assert.Equal("secondary", repository.GetProperty("name").GetString());
         Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("gitUrl").GetString());
