@@ -1863,10 +1863,7 @@ internal sealed class SourceCodeUpdater
 
     private sealed class SystemInfoSnapshot
     {
-        public static readonly JsonSerializerOptions JsonOptions = new()
-        {
-            PropertyNameCaseInsensitive = true,
-        };
+        public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
         [System.Text.Json.Serialization.JsonPropertyName("running")]
         public SystemInfoRunningSnapshot? Running { get; set; }

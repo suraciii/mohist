@@ -11,6 +11,8 @@ namespace Mohist.Server.Tests.Specs.Skills;
 [Collection("SkillsCli")]
 public sealed class SkillsContentSpecs
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly FakeFileSystem _files = new();
     private readonly MockEnvironmentVariableProvider _environment = new();
     private readonly string _defaultAssetRoot;
@@ -48,7 +50,7 @@ public sealed class SkillsContentSpecs
         var exitCode = await BuildRootCommand(stdout).Parse(["skills", "list", "--json"]).InvokeAsync();
 
         Assert.Equal(0, exitCode);
-        var items = JsonSerializer.Deserialize<List<SkillListItem>>(stdout.ToString());
+        var items = JsonSerializer.Deserialize<List<SkillListItem>>(stdout.ToString(), JsonOptions);
         Assert.NotNull(items);
         Assert.Collection(
             items!,

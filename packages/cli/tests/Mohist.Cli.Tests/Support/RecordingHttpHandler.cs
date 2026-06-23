@@ -13,6 +13,8 @@ public sealed class RecordingHttpHandler : HttpMessageHandler
         _responder = responder;
     }
 
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public List<CapturedRequest> Requests { get; } = [];
 
     public void SetResponder(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
@@ -37,7 +39,7 @@ public sealed class RecordingHttpHandler : HttpMessageHandler
     {
         var response = new HttpResponseMessage(statusCode)
         {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+            Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json"),
         };
         return response;
     }
