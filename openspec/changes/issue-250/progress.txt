@@ -1,0 +1,39 @@
+# Issue #250 progress
+
+## T-001 — extract acp/process.ts + acp/session-events.ts
+
+### Codebase patterns
+
+- All runtime/agent protocol code lives under `packages/runner/src/actions/`. The single fat file `acp-agent.ts` (1552 lines) is being decomposed into a focused module group at `acp/` plus a slim entry.
+- Tests live under `packages/runner/tests/`. ACP support helpers (e.g. `support/fake-acp.ts`) are imported by both `acp-agent.spec.ts` and `acp-tool-noise.spec.ts`. The `fake-acp.ts` `AcpProcessHandle` type is imported from `acp-agent.ts`.
+- Public surface imported by external consumers (`executor.ts`, `registry.ts`, `rebase.ts`, `tests/support/fake-acp.ts`, `tests/acp-tool-noise.spec.ts`, `tests/acp-agent.spec.ts`):
+  - `acpAgentAction`
+  - `setAcpProcessFactoryForTest`
+  - `AcpProcessHandle` (type)
+  - `defaultCompactionConfig`
+  - `resolveCompactionConfig`
+  - `AcpProcessFactory` (type, supporting)
+  - `CompactionConfig` (type, supporting)
+  - `CompactionStrategy` (type, supporting)
+- Import paths must stay byte-identical at the entry; module re-exports handle the rest.
+
+### Gotchas / decisions
+
+- `extractCompactionEventFromUpdate` is listed in the design under `compaction.ts` (T-002) and not under `session-events.ts` (T-001). However, it is the only consumer of `createObservabilityAwareEmitter` (in `session-events.ts`). To make the observability emitter work as a self-contained module, the function is kept as a **private (non-exported) helper** in `session-events.ts` for T-001. T-002 can lift it to `compaction.ts` and have `session-events` import it back, or restructure the observability emitter.
+- `buildLivenessEventPayload` accepts the liveness state structurally; the consumer `emitLivenessStatusEvent` (newly added) and the liveness state machine in `acp-agent.ts` pass the same shape. `LivenessFailureReason` is still defined in `acp-agent.ts` for T-001 (moves to `liveness.ts` in T-003) — `buildLivenessEventPayload` types `failureReason` as `string` to avoid pulling the type from a module that will move.
+- `hasPostProbeActivity` belongs to the liveness state machine and stays in `acp-agent.ts` for T-001 (moves to `liveness.ts` in T-003). It is **not** re-exported.
+- The slim entry uses `export type` for the two type-only re-exports (`AcpProcessFactory`, `CompactionStrategy`). `AcpProcessHandle` and `setAcpProcessFactoryForTest` keep value-style `export` — but `AcpProcessHandle` is in fact only used as a type by tests; the value-style re-export is harmless and keeps the shape of the original module identical. `CompactionConfig` (an interface) stays defined inline in `acp-agent.ts` for T-001; T-002 will move it to `compaction.ts` and the entry re-export will switch to `export type`.
+- `emitLivenessStatusEvent` is a thin wrapper around `buildLivenessEventPayload` + `emitSessionEvent` + the `SESSION_LIVENESS_EVENT` constant. It logically lives next to the payload builder and the constant, so it was added to `session-events.ts` (not in the T-001 D1 list, but its natural home and the only way to keep `acp-agent.ts` from holding the constant or the payload builder).
+
+### Baseline / verification
+
+- Baseline: `npm run typecheck -w packages/runner` clean. `npm test -w packages/runner` has 2 pre-existing flaky failures (unrelated to ACP): `tests/executor-branch-stability.spec.ts` (workspace branch invariant retry) and `tests/runner-host.spec.ts` (signalR poll timing). Confirmed by stashing my changes and re-running.
+- After T-001: typecheck clean. All 65 ACP tests pass (64 in `acp-agent.spec.ts` including the 3 in `shared session observability` describe + 1 in `acp-tool-noise.spec.ts`). External test files (`tests/support/fake-acp.ts`, `tests/acp-tool-noise.spec.ts`) zero-modified.
+- File sizes: `acp-agent.ts` 1552 → 1014 lines (35% reduction). New: `acp/process.ts` 89 lines, `acp/session-events.ts` 489 lines.
+
+### Open items for downstream tasks
+
+- T-002 must decide whether to (a) re-export `CompactionStrategy` and `CompactionConfig` from `session-events.ts`/`acp-agent.ts` or (b) move the types and update consumers. Either is fine; current state has them living in `acp-agent.ts` and `session-events.ts` respectively, and `CompactionConfig` defined inline in `acp-agent.ts`.
+- T-002 must move `extractCompactionEventFromUpdate` out of `session-events.ts` and rewire the observability emitter. The function is currently private to `session-events.ts` so the move is internal.
+- T-003 must move `hasPostProbeActivity`, `createSessionLivenessState`, `recordSessionLivenessActivity`, `beginLivenessProbe`, `clearLivenessProbe`, `probeWasSatisfied`, `SessionLivenessState`, `LivenessProbeState`, `LivenessFailureReason` from `acp-agent.ts` to `liveness.ts`.
+- T-004 will move `acpAgentAction`, `restoreAgentToolNoise`, the 4 run-* functions, `createSharedPromptRunner`, `satisfyExpectations`, the agent config resolver, and the model resolver into `session-strategies.ts` / `agent-config.ts` / `model-resolution.ts`.

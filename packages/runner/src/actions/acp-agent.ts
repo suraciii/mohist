@@ -1,37 +1,37 @@
-import { spawn, type ChildProcess } from "node:child_process"
-import { Readable, Writable } from "node:stream"
-import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
-import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
+import { ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
+import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { numberInput, objectInput, stringInput } from "../core/json.js"
 import { resolvePrompt, type PromptLoaderContext } from "../core/prompt.js"
-import { killProcess, runCommand, sanitizedEnvironment } from "../system/process.js"
+import { runCommand } from "../system/process.js"
 import { verifyExpectations, type TaskArtifactExpectation } from "./expectations.js"
-import type { AcpSessionManager, SharedAcpConnection } from "../runtime/acp-connection.js"
-import { acpArgs, acpCommand } from "../runtime/acp-command.js"
 import { appendOpencodeDiagnostic, findOpencodeProviderErrorDiagnostic, type OpencodeProviderErrorDiagnostic } from "../runtime/opencode-log-diagnostics.js"
+import {
+  AcpProcessHandle,
+  getAcpProcessFactory,
+  setAcpProcessFactoryForTest,
+} from "./acp/process.js"
+import {
+  attachSessionToServer,
+  buildPromptEvent,
+  buildUsageUpdatePayload,
+  classifyAcpLivenessActivity,
+  CompactionStrategy,
+  createAcpSessionUpdateHandler,
+  createObservabilityAwareEmitter,
+  emitLivenessStatusEvent,
+  emitResolvedModelEvent,
+  emitSessionEvent,
+  emitSessionStarted,
+  hasUsageUpdateContent,
+  recordLivenessActivity,
+  sessionNameFromContext,
+  ToolCallIdGenerator,
+} from "./acp/session-events.js"
 
-export interface AcpProcessHandle {
-  readonly stream: Stream
-  readonly processPid: number | null
-  readonly spawnFailure: Promise<never>
-  readonly exitFailure: Promise<never>
-  markInitialized(): void
-  exitCode(): number | null
-  cleanup(): Promise<void>
-}
-
-export type AcpProcessFactory = (context: ActionContext) => AcpProcessHandle
-
-let acpProcessFactory: AcpProcessFactory = createSpawnedAcpProcess
-
-export function setAcpProcessFactoryForTest(factory: AcpProcessFactory | null) {
-  acpProcessFactory = factory ?? createSpawnedAcpProcess
-}
-
-function getAcpProcessFactory() {
-  return acpProcessFactory
-}
+export { AcpProcessHandle, setAcpProcessFactoryForTest }
+export type { AcpProcessFactory } from "./acp/process.js"
+export type { CompactionStrategy } from "./acp/session-events.js"
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
 const DEFAULT_SESSION_START_TIMEOUT_MS = 30 * 1000
@@ -39,315 +39,20 @@ const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
 const CANCEL_TIMEOUT_MS = 5_000
-const WIND_DOWN_TIMEOUT_MS = 5_000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
-const WIND_DOWN_PROMPT = "The session is about to time out. Record your current progress in progress.txt, commit any safe changes, then output <promise>unfinished</promise>. Do not start new work."
 
 const DEFAULT_COMPACTION_THRESHOLD = 0.8
 const DEFAULT_COMPACTION_STRATEGY = "summary"
 const COMPACTION_META_KEY = "opencode.compaction"
 
-const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
-  "agent_message_chunk",
-  "agent_thought_chunk",
-  "tool_call",
-  "tool_call_update",
-  "tool_result",
-  "tool_result_update",
-  "usage_update",
-  "compaction",
-])
-
-const SESSION_INPUT_EVENT = "session.input"
-const SESSION_CLOSED_EVENT = "session.closed"
-const SESSION_LIVENESS_EVENT = "session.liveness"
-const MODEL_RESOLVED_EVENT = "model.resolved"
-const USAGE_UPDATED_EVENT = "usage.updated"
-const COMPACTION_EVENT = "compaction"
-
-export type CompactionStrategy = "summary"
-
-export interface CompactionConfig {
+export type CompactionConfig = {
   threshold: number
   strategy: CompactionStrategy
 }
 
-interface CompactionEventPayload {
-  contextWindowUsedBefore?: number
-  contextWindowUsedAfter?: number
-  contextWindowSize?: number
-  strategy?: CompactionStrategy
-}
-
-type AcpLivenessActivity =
-  | { isActivity: false }
-  | { isActivity: true; activityType: string }
-
-function classifyAcpLivenessActivity(source:
-  | { kind: "session_update"; update: SessionNotification["update"] }
-  | { kind: "protocol_response"; response: "initialize" | "new_session" | "resume_session" | "set_session_config" | "set_session_model" }
-): AcpLivenessActivity {
-  if (source.kind === "protocol_response") {
-    return { isActivity: true, activityType: source.response }
-  }
-
-  const update = source.update
-  const type = update.sessionUpdate
-  if (!type) return { isActivity: false }
-  if (QUALIFYING_LIVENESS_NOTIFICATION_TYPES.has(type)) {
-    return { isActivity: true, activityType: type }
-  }
-
-  if (type === "session_info_update" && hasMessageGrowth(update)) {
-    return { isActivity: true, activityType: "message_growth" }
-  }
-
-  if (type.includes("tool") && (type.includes("result") || type.includes("output") || type.includes("update"))) {
-    return { isActivity: true, activityType: type }
-  }
-
-  return { isActivity: false }
-}
-
-function assistantMessageChunkText(update: SessionNotification["update"]): string | undefined {
-  if (update.sessionUpdate !== "agent_message_chunk") return undefined
-  if (!("content" in update) || !update.content || typeof update.content !== "object") return undefined
-  return "text" in update.content ? String(update.content.text) : undefined
-}
-
-function hasMessageGrowth(update: SessionNotification["update"]): boolean {
-  const candidate = update as Record<string, unknown>
-  for (const key of ["messages", "message", "messageCount", "messageDelta"]) {
-    const value = candidate[key]
-    if (Array.isArray(value) && value.length > 0) return true
-    if (typeof value === "string" && value.trim().length > 0) return true
-    if (typeof value === "number" && value > 0) return true
-  }
-  return false
-}
-
-function recordLivenessActivity(notify: (activityType?: string) => void, activity: AcpLivenessActivity) {
-  if (activity.isActivity) notify(activity.activityType)
-}
-
-function extractResolvedModelId(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null) return undefined
-  const models = (value as Record<string, unknown>).models
-  if (typeof models !== "object" || models === null) return undefined
-  const current = (models as Record<string, unknown>).currentModelId
-  return typeof current === "string" && current.trim().length > 0 ? current : undefined
-}
-
-function extractResolvedModelFromConfigUpdate(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null) return undefined
-  const configOptions = (value as Record<string, unknown>).configOptions
-  if (!Array.isArray(configOptions)) return undefined
-  for (const entry of configOptions) {
-    if (typeof entry !== "object" || entry === null) continue
-    const option = entry as Record<string, unknown>
-    const category = option.category
-    if (category !== "model") continue
-    const current = option.currentValue
-    if (typeof current === "string" && current.trim().length > 0) return current
-  }
-  return undefined
-}
-
-function buildResolvedModelEventPayload(context: ActionContext, acpSessionId: string, resolvedModel: string, source: "newSession" | "resumeSession" | "config_option_update"): JsonObject {
-  return cleanJson({
-    sessionName: sessionNameFromContext(context),
-    acpSessionId,
-    workId: context.workId,
-    workType: context.workType,
-    stage: context.stage ?? null,
-    resolvedModel,
-    source,
-  })
-}
-
-function buildUsageUpdatePayload(context: ActionContext, acpSessionId: string, source: "prompt_response" | "usage_update" | "compaction", usage?: unknown, update?: { cost?: unknown, size?: unknown, used?: unknown, compaction?: CompactionEventPayload }): JsonObject {
-  const payload: JsonObject = cleanJson({
-    sessionName: sessionNameFromContext(context),
-    acpSessionId,
-    workId: context.workId,
-    workType: context.workType,
-    stage: context.stage ?? null,
-    source,
-  })
-
-  if (usage && typeof usage === "object") {
-    const u = usage as Record<string, unknown>
-    if (typeof u.inputTokens === "number") payload.inputTokens = u.inputTokens
-    if (typeof u.outputTokens === "number") payload.outputTokens = u.outputTokens
-    if (typeof u.totalTokens === "number") payload.totalTokens = u.totalTokens
-    if (typeof u.cachedReadTokens === "number") payload.cachedReadTokens = u.cachedReadTokens
-    if (typeof u.thoughtTokens === "number") payload.thoughtTokens = u.thoughtTokens
-  }
-
-  if (update) {
-    if (update.cost && typeof update.cost === "object") {
-      const c = update.cost as Record<string, unknown>
-      if (typeof c.amount === "number") payload.costAmount = c.amount
-      if (typeof c.currency === "string") payload.costCurrency = c.currency
-    }
-    if (typeof update.size === "number") payload.contextWindowSize = update.size
-    if (typeof update.used === "number") payload.contextWindowUsed = update.used
-    if (update.compaction) {
-      const compaction = update.compaction
-      if (typeof compaction.contextWindowUsedBefore === "number") payload.contextWindowUsedBefore = compaction.contextWindowUsedBefore
-      if (typeof compaction.contextWindowUsedAfter === "number") payload.contextWindowUsedAfter = compaction.contextWindowUsedAfter
-      if (typeof compaction.contextWindowSize === "number") payload.contextWindowSize = compaction.contextWindowSize
-      if (typeof compaction.strategy === "string") payload.compactionStrategy = compaction.strategy
-    }
-  }
-
-  return payload
-}
-
-function hasUsageUpdateContent(payload: JsonObject): boolean {
-  return payload.contextWindowSize !== undefined
-    || payload.contextWindowUsed !== undefined
-    || payload.costAmount !== undefined
-    || payload.costCurrency !== undefined
-    || payload.inputTokens !== undefined
-    || payload.outputTokens !== undefined
-    || payload.totalTokens !== undefined
-    || payload.cachedReadTokens !== undefined
-    || payload.thoughtTokens !== undefined
-    || payload.contextWindowUsedBefore !== undefined
-    || payload.contextWindowUsedAfter !== undefined
-    || payload.compactionStrategy !== undefined
-}
-
-function extractCompactionEventFromUpdate(update: unknown): CompactionEventPayload | undefined {
-  if (!update || typeof update !== "object") return undefined
-  const record = update as Record<string, unknown>
-  const candidates: Array<Record<string, unknown>> = []
-  if (record.compaction && typeof record.compaction === "object") {
-    candidates.push(record.compaction as Record<string, unknown>)
-  }
-  const meta = record._meta
-  if (meta && typeof meta === "object") {
-    const metaRecord = meta as Record<string, unknown>
-    if (metaRecord.compaction && typeof metaRecord.compaction === "object") {
-      candidates.push(metaRecord.compaction as Record<string, unknown>)
-    }
-    if (metaRecord["opencode.compaction"] && typeof metaRecord["opencode.compaction"] === "object") {
-      candidates.push(metaRecord["opencode.compaction"] as Record<string, unknown>)
-    }
-  }
-  let before: number | undefined
-  let after: number | undefined
-  let size: number | undefined
-  let strategyValue: unknown
-  for (const source of candidates) {
-    before ??= numberField(source, "contextWindowUsedBefore")
-    after ??= numberField(source, "contextWindowUsedAfter")
-    size ??= numberField(source, "contextWindowSize")
-    if (strategyValue === undefined) strategyValue = source.strategy
-  }
-  const strategy: CompactionStrategy | undefined = strategyValue === "summary" ? "summary" : undefined
-  if (before === undefined && after === undefined && size === undefined && strategy === undefined) {
-    return undefined
-  }
-  return {
-    contextWindowUsedBefore: before,
-    contextWindowUsedAfter: after,
-    contextWindowSize: size,
-    strategy,
-  }
-}
-
-function numberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key]
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function createObservabilityAwareEmitter(
-  context: ActionContext,
-  getAcpSessionId: () => string,
-  toolIds: ToolCallIdGenerator,
-): (type: string, update: SessionNotification["update"]) => Promise<void> {
-  return async (type, update) => {
-    const acpSessionId = getAcpSessionId()
-    const normalized = normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds)
-    await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized)
-
-    if (type === "config_option_update") {
-      const resolvedModel = extractResolvedModelFromConfigUpdate(update as unknown)
-      if (resolvedModel) {
-        await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, acpSessionId, resolvedModel, "config_option_update"))
-      }
-    }
-
-    if (type === "usage_update") {
-      const u = update as unknown as Record<string, unknown>
-      const compaction = extractCompactionEventFromUpdate(update)
-      if (compaction && compaction.contextWindowSize === undefined && typeof u.size === "number") {
-        compaction.contextWindowSize = u.size
-      }
-      const payload = buildUsageUpdatePayload(context, acpSessionId, compaction ? "compaction" : "usage_update", undefined, {
-        cost: u.cost,
-        size: u.size,
-        used: u.used,
-        compaction,
-      })
-      if (hasUsageUpdateContent(payload)) {
-        await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
-        if (compaction) {
-          await emitSessionEvent(context, COMPACTION_EVENT, buildCompactionEventPayload(context, acpSessionId, compaction))
-        }
-      }
-    }
-  }
-}
-
-function buildCompactionEventPayload(context: ActionContext, acpSessionId: string, compaction: CompactionEventPayload): JsonObject {
-  return cleanJson({
-    sessionName: sessionNameFromContext(context),
-    acpSessionId,
-    workId: context.workId,
-    workType: context.workType,
-    stage: context.stage ?? null,
-    contextWindowUsedBefore: compaction.contextWindowUsedBefore,
-    contextWindowUsedAfter: compaction.contextWindowUsedAfter,
-    contextWindowSize: compaction.contextWindowSize,
-    strategy: compaction.strategy,
-  })
-}
-
-function createAcpSessionUpdateHandler(options: {
-  notifyData(activityType?: string): void
-  recordActivity?(): void
-  recordWorkActivity?(): void
-  appendAssistantText(text: string): void
-  emitUpdate(type: string, update: SessionNotification["update"]): Promise<void>
-}) {
-  return async (notification: SessionNotification) => {
-    const update = notification.update
-    const type = update.sessionUpdate
-    const activity = classifyAcpLivenessActivity({ kind: "session_update", update })
-    if (activity.isActivity) {
-      options.recordActivity?.()
-      if (isPromptWorkActivity(activity.activityType)) options.recordWorkActivity?.()
-      options.notifyData(activity.activityType)
-    }
-
-    const chunkText = assistantMessageChunkText(update)
-    if (chunkText !== undefined) options.appendAssistantText(chunkText)
-
-    await options.emitUpdate(type, update)
-  }
-}
-
-function isPromptWorkActivity(activityType: string): boolean {
-  return activityType !== "usage_update"
-}
-
 interface AgentConfig {
   model?: string
-  variant?: string
   timeoutMs?: number
   sessionStartTimeoutMs?: number
   livenessQuietThresholdMs?: number
@@ -357,7 +62,6 @@ interface AgentConfig {
 
 interface RequestedModel {
   model?: string
-  variant?: string
   source: "agent.model" | "with.model" | "none"
 }
 
@@ -419,46 +123,6 @@ function probeWasSatisfied(state: SessionLivenessState) {
   return hasPostProbeActivity(state) && state.lastDataAt <= Date.parse(state.probeDeadlineAt)
 }
 
-function buildLivenessEventPayload(context: ActionContext, state: SessionLivenessState, status: "probing" | "running" | "failed", extras?: {
-  acpSessionId?: string
-  activeProbeVersion?: number
-  satisfiedProbeVersion?: number
-  failureReason?: LivenessFailureReason
-  providerError?: OpencodeProviderErrorDiagnostic
-  postProbeActivity?: boolean
-}): JsonObject {
-  return cleanJson({
-    sessionName: sessionNameFromContext(context),
-    acpSessionId: extras?.acpSessionId ?? null,
-    workId: context.workId,
-    workType: context.workType,
-    stage: context.stage ?? null,
-    status,
-    lastDataAt: new Date(state.lastDataAt).toISOString(),
-    lastActivityType: state.lastActivityType,
-    probeSentAt: state.probeSentAt,
-    probeDeadlineAt: state.probeDeadlineAt,
-    probeVersion: state.probeVersion,
-    dataVersion: state.dataVersion,
-    postProbeActivity: extras?.postProbeActivity,
-    activeProbeVersion: extras?.activeProbeVersion,
-    satisfiedProbeVersion: extras?.satisfiedProbeVersion,
-    failureReason: extras?.failureReason,
-    providerError: extras?.providerError as JsonObject | undefined,
-  })
-}
-
-async function emitLivenessStatusEvent(context: ActionContext, state: SessionLivenessState, status: "probing" | "running" | "failed", extras?: {
-  acpSessionId?: string
-  activeProbeVersion?: number
-  satisfiedProbeVersion?: number
-  failureReason?: LivenessFailureReason
-  providerError?: OpencodeProviderErrorDiagnostic
-  postProbeActivity?: boolean
-}) {
-  await emitSessionEvent(context, SESSION_LIVENESS_EVENT, buildLivenessEventPayload(context, state, status, extras))
-}
-
 interface AcpSessionResult {
   text: string
   success: boolean
@@ -494,11 +158,11 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
 
   const result = await runAcpWorkflowAgentSession(context, prompt)
   await restoreAgentToolNoise(context)
-  const verification = result.expectation ?? await verifyExpectations(context, result.text)
-  const ok = result.success && verification.satisfied && (verification.matched === undefined || verification.matched === "<promise>done</promise>")
+  const verification = result.expectation ?? await verifyExpectations(context)
+  const ok = result.success && verification.satisfied
   const agentConfig = resolveAgentConfig(context.with)
   const failureCategory = ok ? null : result.failureCategory ?? null
-  await emitSessionEvent(context, SESSION_CLOSED_EVENT, { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
+  await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
@@ -508,7 +172,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
 }
 
 async function satisfyExpectations(context: ActionContext, result: AcpSessionResult, runPrompt: AcpPromptRunner): Promise<TaskArtifactExpectation> {
-  let verification = await verifyExpectations(context, result.text)
+  let verification = await verifyExpectations(context)
   if (verification.satisfied) return verification
 
   const repairLimit = expectationRepairLimit(context)
@@ -530,7 +194,7 @@ async function satisfyExpectations(context: ActionContext, result: AcpSessionRes
       result.exitCode = result.exitCode ?? 1
       return verification
     }
-    verification = await verifyExpectations(context, result.text)
+    verification = await verifyExpectations(context)
   }
 
   return verification
@@ -579,7 +243,6 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
   if (agent && typeof agent === "object") {
     return {
       model: stringInput(agent as JsonObject, "model") ?? undefined,
-      variant: stringInput(agent as JsonObject, "variant") ?? undefined,
       timeoutMs: numberInput(agent as JsonObject, "timeout") ?? undefined,
       sessionStartTimeoutMs: numberInput(agent as JsonObject, "sessionStartTimeout") ?? undefined,
       livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
@@ -589,7 +252,6 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
   }
   return {
     model: stringInput(with_, "model") ?? undefined,
-    variant: stringInput(with_, "variant") ?? undefined,
     timeoutMs: numberInput(with_, "timeout") ?? undefined,
     sessionStartTimeoutMs: numberInput(with_, "sessionStartTimeout") ?? undefined,
     livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
@@ -639,49 +301,44 @@ function buildSessionMeta(compaction: CompactionConfig): { [key: string]: unknow
 
 function resolveRequestedModel(context: ActionContext, agentConfig?: AgentConfig): RequestedModel {
   const agentModel = agentConfig?.model
-  if (agentModel?.trim()) return composeRequestedModel(agentModel, agentConfig?.variant, "agent.model")
+  if (agentModel?.trim()) return { model: agentModel, source: "agent.model" }
   const withModel = stringInput(context.with, "model")
-  if (withModel?.trim()) return composeRequestedModel(withModel, stringInput(context.with, "variant"), "with.model")
+  if (withModel?.trim()) return { model: withModel, source: "with.model" }
   return { source: "none" }
-}
-
-function composeRequestedModel(model: string, variant: string | undefined, source: "agent.model" | "with.model"): RequestedModel {
-  const trimmedModel = model.trim()
-  const trimmedVariant = variant?.trim()
-  if (!trimmedVariant) return { model: trimmedModel, source }
-  return { model: `${trimmedModel}/${trimmedVariant}`, variant, source }
 }
 
 async function applyRequestedModel(connection: ClientSideConnection, context: ActionContext, sessionId: string, requested: RequestedModel, notify: (activityType?: string) => void) {
   if (!requested.model?.trim()) {
-    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested, null))
+    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested))
     return
   }
 
-  console.info("mohist acp setting requested model", modelDiagnosticContext(context, requested, null))
-  let variantDelivered = false
+  console.info("mohist acp setting requested model", modelDiagnosticContext(context, requested))
   try {
-    await connection.unstable_setSessionModel({ sessionId, modelId: requested.model })
-    variantDelivered = true
-    recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
-    console.info("mohist acp set model via set_session_model", modelDiagnosticContext(context, requested, variantDelivered))
-  } catch (modelError) {
-    console.warn("mohist acp set requested model failed; provider default may be used", { ...modelDiagnosticContext(context, requested, false), error: errorMessage(modelError) })
+    await connection.setSessionConfigOption({ sessionId, configId: "model", value: requested.model })
+    recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
+    console.info("mohist acp set model via config option", modelDiagnosticContext(context, requested))
+  } catch (configError) {
+    console.warn("mohist acp set model via config option failed; trying set_session_model", { ...modelDiagnosticContext(context, requested), error: errorMessage(configError) })
+    try {
+      await connection.unstable_setSessionModel({ sessionId, modelId: requested.model })
+      recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
+      console.info("mohist acp set model via set_session_model", modelDiagnosticContext(context, requested))
+    } catch (modelError) {
+      console.warn("mohist acp set requested model failed; provider default may be used", { ...modelDiagnosticContext(context, requested), error: errorMessage(modelError) })
+    }
   }
 }
 
-function modelDiagnosticContext(context: ActionContext, requested: RequestedModel, variantDelivered: boolean | null) {
-  return cleanJson({
+function modelDiagnosticContext(context: ActionContext, requested: RequestedModel) {
+  return {
     workflowRunId: context.workflowRunId,
     workId: context.workId,
     stage: context.stage,
     sessionName: sessionNameFromContext(context),
     requestedModel: requested.model ?? null,
-    requestedVariant: requested.variant ?? null,
     requestedModelSource: requested.source,
-    ...(requested.variant !== undefined ? { requestedVariant: requested.variant } : {}),
-    ...(variantDelivered === null ? {} : { variantDelivered }),
-  })
+  }
 }
 
 function errorMessage(error: unknown) {
@@ -856,7 +513,7 @@ function createSharedPromptRunner(options: {
     const beforeText = options.getAgentText()
     const beforeActivity = options.getActivityCount()
     const beforeWorkActivity = options.getWorkActivityCount()
-    await emitSessionEvent(options.context, SESSION_INPUT_EVENT, buildPromptEvent(options.context, prompt, options.sessionId))
+    await emitSessionEvent(options.context, "session.input", buildPromptEvent(options.context, prompt, options.sessionId))
     const promptResult = await monitorPrompt(options.context, options.connection, options.sessionId, prompt, {
       timeoutMs: options.timeoutMs,
       livenessQuietThresholdMs: options.livenessQuietThresholdMs,
@@ -1173,7 +830,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     if (!promptUsage || typeof promptUsage !== "object") return
     const payload = buildUsageUpdatePayload(context, sessionId, "prompt_response", promptUsage)
     if (!hasUsageUpdateContent(payload)) return
-    await emitSessionEvent(context, USAGE_UPDATED_EVENT, payload)
+    await emitSessionEvent(context, "usage.updated", payload)
   }
 
   while (true) {
@@ -1187,24 +844,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
         providerError: diagnostic,
         postProbeActivity: hasPostProbeActivity(options.livenessState),
       })
-      let cancelled = false
-      try {
-        await Promise.race([
-          connection.cancel({ sessionId }).then(() => { cancelled = true }),
-          timeout(CANCEL_TIMEOUT_MS),
-        ])
-      } catch {}
-      if (cancelled) {
-        try {
-          await Promise.race([
-            connection.prompt({ sessionId, prompt: [{ type: "text", text: WIND_DOWN_PROMPT }] }),
-            timeout(WIND_DOWN_TIMEOUT_MS),
-          ])
-        } catch {}
-      }
-      if (options.acpProcess) {
-        await options.acpProcess.cleanup()
-      }
+      await cancelAndReturn(options.acpProcess, connection, sessionId, `Timed out after ${options.timeoutMs / 1000}s`)
       return {
         error: appendOpencodeDiagnostic(`Timed out after ${options.timeoutMs / 1000}s`, diagnostic),
         providerError: diagnostic,
@@ -1331,228 +971,12 @@ function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"da
   return new Promise((resolve) => waiters.add(() => resolve("data")))
 }
 
-async function emitSessionStarted(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined, resolvedModel?: string, resolvedModelSource: "newSession" | "resumeSession" = "newSession") {
-  await attachSessionToServer(context, agentSessionId, processPid, agentConfig, resolvedModel)
-  await emitResolvedModelEvent(context, agentSessionId, resolvedModel, resolvedModelSource)
-}
-
-async function attachSessionToServer(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined, resolvedModel?: string) {
-  const target = sessionTargetFromContext(context)
-  if (!target || !context.serverConnection) return
-
-  const requestedModel = resolveRequestedModel(context, agentConfig).model
-  await context.serverConnection.attachWorkflowAgentSession(
-    target.projectId,
-    target.workflowRunId,
-    target.sessionName,
-    { agentSessionId, workDir: context.workDir, processPid, model: requestedModel, ...(resolvedModel ? { resolvedModel } : {}) },
-    context.signal)
-}
-
-async function emitResolvedModelEvent(context: ActionContext, agentSessionId: string, resolvedModel: string | undefined, resolvedModelSource: "newSession" | "resumeSession" | "config_option_update") {
-  const sessionName = sessionNameFromContext(context)
-  if (resolvedModel && sessionName) {
-    await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, agentSessionId, resolvedModel, resolvedModelSource))
-  }
-}
-
-async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
-  const target = sessionTargetFromContext(context)
-  if (!target || !context.serverConnection) return
-
-  await context.serverConnection.workflowAgentSessionRuntimeEvents(
-    target.projectId,
-    target.workflowRunId,
-    target.sessionName,
-    { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] },
-    context.signal)
-}
-
-function sessionTargetFromContext(context: ActionContext): { projectId: string; workflowRunId: string; sessionName: string } | null {
-  const sessionName = sessionNameFromContext(context)
-  const projectId = context.projectId
-  if (!sessionName || !projectId) return null
-  return { projectId, workflowRunId: context.workflowRunId, sessionName }
-}
-
-function sessionNameFromContext(context: ActionContext) {
-  return stringInput(context.with, "session") ?? context.workId
-}
-
-function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {
-  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueId: context.issueNumber != null ? String(context.issueNumber) : null, acpSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
-}
-
-function extractOutputPath(prompt: string) {
-  const match = prompt.match(/<contract>([\s\S]*?)<\/contract>/i)
-  return match ? match[1].trim().split("\n")[0]?.trim() : undefined
-}
-
-function extractContextFiles(prompt: string) {
-  const match = prompt.match(/<context[-_]files>([\s\S]*?)<\/context[-_]files>/i)
-  if (!match) return undefined
-  const files = match[1].trim().split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("<!--")).map((line) => line.match(/^@(\S+)/)?.[1] ?? line.match(/<file\s+path="([^"]+)"/i)?.[1] ?? line)
-  return files.length > 0 ? files.slice(0, 5) : undefined
-}
-
-class ToolCallIdGenerator {
-  private counter = 0
-  private started = new Map<string, string[]>()
-  next(sessionId: string, toolName: string, state: "started" | "completed") {
-    if (state === "started") {
-      const id = `${sessionId}-${toolName}-${this.counter++}`
-      this.remember(sessionId, toolName, id)
-      return id
-    }
-    const key = `${sessionId}-${toolName}`
-    const ids = this.started.get(key) ?? []
-    const id = ids.shift() ?? `${sessionId}-${toolName}-${this.counter++}`
-    ids.length > 0 ? this.started.set(key, ids) : this.started.delete(key)
-    return id
-  }
-  remember(sessionId: string, toolName: string, id: string) {
-    const key = `${sessionId}-${toolName}`
-    const ids = this.started.get(key) ?? []
-    if (!ids.includes(id)) ids.push(id)
-    this.started.set(key, ids)
-  }
-}
-
-function normalizeSessionUpdate(update: JsonObject, sessionId: string, ids: ToolCallIdGenerator): JsonObject {
-  const type = stringField(update, "sessionUpdate")
-  if (type !== "tool_call" && type !== "tool_call_update") return update
-  const nested = objectField(update, "toolCall") ?? {}
-  const providerId = stringField(nested, "toolCallId") ?? stringField(update, "toolCallId") ?? stringField(update, "id") ?? stringField(update, "callId")
-  const toolName = stringField(nested, "toolName") ?? stringField(nested, "name") ?? stringField(update, "toolName") ?? stringField(update, "name") ?? inferToolName(update) ?? "unknown"
-  const status = stringField(nested, "status") ?? stringField(update, "status") ?? (type === "tool_call_update" ? "completed" : "in_progress")
-  const state = status === "completed" ? "completed" : "started"
-  const toolCallId = providerId ?? ids.next(sessionId, toolName, state)
-  if (providerId && state === "started") ids.remember(sessionId, toolName, providerId)
-  return {
-    ...update,
-    toolCall: cleanJson({
-      ...nested,
-      toolCallId,
-      toolName,
-      status,
-      title: stringField(nested, "title") ?? stringField(update, "title") ?? toolName,
-      input: nested.input ?? update.input ?? update.rawInput,
-      output: nested.output ?? update.output ?? update.rawOutput,
-      metadata: nested.metadata ?? update.metadata ?? null,
-    }),
-  }
-}
-
-function genericSessionEventType(type: string, payload: JsonObject): string {
-  switch (type) {
-    case "agent_message_chunk":
-    case "agent_output_chunk":
-      return "message.delta"
-    case "agent_thought_chunk":
-      return "reasoning.delta"
-    case "tool_call":
-      return "tool_call.started"
-    case "tool_call_update": {
-      const nested = objectField(payload, "toolCall") ?? {}
-      const status = stringField(nested, "status") ?? stringField(payload, "status")
-      return status && ["completed", "failed", "cancelled", "timeout"].includes(status)
-        ? "tool_call.completed"
-        : "tool_call.updated"
-    }
-    default:
-      return type
-  }
-}
-
-function inferToolName(payload: unknown): string | undefined {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return undefined
-  const record = payload as Record<string, unknown>
-  const title = typeof record.title === "string" ? record.title.toLowerCase() : ""
-  if (title.includes("bash") || title.includes("command")) return "bash"
-  if (title.includes("patch")) return "apply_patch"
-  for (const value of [record.rawInput, record.input, record.rawOutput, record.output]) {
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      const nested = value as Record<string, unknown>
-      if (typeof nested.command === "string" || typeof nested.script === "string") return "bash"
-      if (typeof nested.patchText === "string" || typeof nested.patch === "string") return "apply_patch"
-      if (typeof nested.pattern === "string") return "grep"
-      if (typeof nested.filePath === "string" || typeof nested.file_path === "string" || typeof nested.path === "string") return "read"
-    }
-  }
-  return undefined
-}
-
-function cleanJson(value: Record<string, unknown>): JsonObject {
-  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as JsonObject
-}
-
-function stringField(value: JsonObject, key: string) {
-  return typeof value[key] === "string" ? value[key] : undefined
-}
-
-function objectField(value: JsonObject, key: string): JsonObject | undefined {
-  const found = value[key]
-  return typeof found === "object" && found !== null && !Array.isArray(found) ? found as JsonObject : undefined
-}
-
-function createSpawnedAcpProcess(context: ActionContext): AcpProcessHandle {
-  const command = acpCommand()
-  const args = acpArgs()
-  const proc = spawn(command, args, {
-    cwd: context.workDir,
-    stdio: ["pipe", "pipe", "inherit"],
-    env: sanitizedEnvironment(),
-  })
-  return new SpawnedAcpProcess(proc)
-}
-
-class SpawnedAcpProcess implements AcpProcessHandle {
-  private initialized = false
-  private exited = false
-  private code: number | null = null
-  private rejectOnSpawn: ((error: Error) => void) | undefined
-  private rejectOnExit: ((error: Error) => void) | undefined
-  readonly spawnFailure: Promise<never>
-  readonly exitFailure: Promise<never>
-  readonly stream: Stream
-
-  constructor(private readonly proc: ChildProcess) {
-    this.spawnFailure = new Promise<never>((_, reject) => { this.rejectOnSpawn = reject })
-    this.exitFailure = new Promise<never>((_, reject) => { this.rejectOnExit = reject })
-    proc.on("error", (error) => {
-      if (!this.initialized) this.rejectOnSpawn?.(new Error(`[SPAWN_FAILED] ${error.message}`))
-    })
-    proc.on("exit", (exitCode) => {
-      this.exited = true
-      this.code = exitCode
-      try { proc.stdin?.destroy() } catch {}
-      try { proc.stdout?.destroy() } catch {}
-      if (!this.initialized && exitCode !== 0) this.rejectOnSpawn?.(new Error(`[SPAWN_FAILED] opencode acp exited before initialize (exit code: ${exitCode ?? "signal"})`))
-      if (this.initialized && exitCode !== 0) this.rejectOnExit?.(new Error(`[PROCESS_EXIT] opencode acp exited unexpectedly (exit code: ${exitCode ?? "signal"})`))
-    })
-    proc.stdin?.on("error", () => {})
-    proc.stdout?.on("error", () => {})
-    this.stream = ndJsonStream(
-      Writable.toWeb(proc.stdin!) as WritableStream<Uint8Array>,
-      Readable.toWeb(proc.stdout!) as ReadableStream<Uint8Array>,
-    )
-  }
-
-  get processPid() { return this.proc.pid ?? null }
-  markInitialized() { this.initialized = true; this.rejectOnSpawn = undefined }
-  exitCode() { return this.code }
-  async cleanup() {
-    await Promise.allSettled([
-      this.stream.readable.cancel().catch(() => {}),
-      this.stream.writable.abort().catch(() => {}),
-    ])
-    if (!this.exited) {
-      killProcess(this.proc)
-      setTimeout(() => {
-        try { this.proc.kill("SIGKILL") } catch {}
-      }, 5_000).unref?.()
-    }
-  }
+function extractResolvedModelId(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const models = (value as Record<string, unknown>).models
+  if (typeof models !== "object" || models === null) return undefined
+  const current = (models as Record<string, unknown>).currentModelId
+  return typeof current === "string" && current.trim().length > 0 ? current : undefined
 }
 
 function timeout(ms: number): Promise<"timeout"> {
