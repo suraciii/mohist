@@ -642,7 +642,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                     : new Dictionary<string, JsonElement?> { ["title"] = JSON.SerializeToElement(t.Title) };
                 return await MakeDispatchAsync(new WorkDispatchRequest(
                     work.Stage, t.Id, "task", t.Title, t.Uses, taskWith,
-                    t.Artifacts, t.Outputs, t.SetVars), runnerId, markRunning);
+                    t.Artifacts, t.SetVars), runnerId, markRunning);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -726,7 +726,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 runningTask.Uses,
                 runningTask.WithInput,
                 runningTask.Artifacts,
-                runningTask.Outputs), runnerId, markRunning: false);
+                runningTask.SetVars), runnerId, markRunning: false);
         }
 
         var deliveryWorkId = run.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
@@ -990,10 +990,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<JsonElement?> ResolveBindVariablesAsync()
     {
-        var template = await _profileManager.LoadTemplateAsync(GrainKey);
-        var independent = await _profileManager.LoadVariablesAsync(GrainKey);
-        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
-        var resolved = VariableBundle.Patch(embedded, independent);
+        var resolved = await _profileManager.ResolveEffectiveVariablesAsync(GrainKey);
 
         return WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, _run?.CurrentStageId);
     }

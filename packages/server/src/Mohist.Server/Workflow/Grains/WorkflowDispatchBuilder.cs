@@ -18,7 +18,6 @@ internal sealed record WorkDispatchRequest(
     string? Uses,
     Dictionary<string, JsonElement?>? With,
     TaskArtifactCapture? Artifacts = null,
-    List<TaskOutputDefinition>? Outputs = null,
     Dictionary<string, string>? SetVars = null,
     string? WorkIdOverride = null);
 
@@ -59,7 +58,6 @@ public sealed class WorkflowDispatchBuilder(
             Title: req.Title,
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
             Artifacts: req.Artifacts is not null && !req.Artifacts.IsEmpty ? JSON.Serialize(req.Artifacts) : null,
-            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JSON.Serialize(req.Outputs) : null,
             SetVars: req.SetVars is not null && req.SetVars.Count > 0 ? JSON.Serialize(req.SetVars) : null);
     }
 
@@ -86,10 +84,7 @@ public sealed class WorkflowDispatchBuilder(
     private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
         BuildPayloadAsync(WorkDispatchRequest req, string workId, int attempt, string workflowRunId, WorkflowRun run)
     {
-        var template = await profileManager.LoadTemplateAsync(workflowRunId);
-        var independent = await profileManager.LoadVariablesAsync(workflowRunId);
-        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
-        var resolved = VariableBundle.Patch(embedded, independent);
+        var resolved = await profileManager.ResolveEffectiveVariablesAsync(workflowRunId);
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, req.Stage)

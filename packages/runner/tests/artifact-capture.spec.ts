@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile, readFile } from "node:fs/promises"
-import { join, sep } from "node:path"
+import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
@@ -146,7 +146,7 @@ describe("captureOne", () => {
     const manifest = JSON.parse(new TextDecoder().decode(capture.content))
     expect(manifest.kind).toBe("directory")
     const paths = manifest.files.map((f: { path: string }) => f.path).sort()
-    expect(paths).toEqual(["a.md", `sub${sep}b.md`])
+    expect(paths).toEqual(["a.md", "sub/b.md"])
   })
 
   it("refusesPathsEscapingWorkspace", async () => {

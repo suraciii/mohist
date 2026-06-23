@@ -123,7 +123,7 @@ public static class WorkflowGrainTestHelpers
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
         return new WorkflowQuerier(
             factory,
-            new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), CreateEmptyConfigService()),
+            new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), CreateEmptyConfigService(), new WorkflowRunProfileManager(factory)),
             new WorkflowArtifactQuerier(factory));
     }
 

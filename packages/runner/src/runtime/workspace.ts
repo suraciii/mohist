@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, WorkItem } from "../core/types.js"
+import { getSegments, stringAt } from "../core/json-path.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 
 // Marker for a refused cache replacement. Replacement was justified
@@ -625,20 +626,7 @@ function slug(value: string): string {
 
 export { slug as slugify }
 
-function stringAt(value: JsonObject | undefined, path: string[]) {
-  const found = at(value, path)
-  return typeof found === "string" ? found : undefined
-}
-
-function numberAt(value: JsonObject | undefined, path: string[]) {
-  const found = at(value, path)
+function numberAt(value: JsonObject | undefined, path: string[]): number | undefined {
+  const found = getSegments(value, path)
   return typeof found === "number" ? found : undefined
-}
-
-function at(value: JsonObject | undefined, path: string[]) {
-  if (!value) return undefined
-  return path.reduce<unknown>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return (current as JsonObject)[part]
-  }, value)
 }

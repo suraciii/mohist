@@ -1,6 +1,7 @@
 import { hostname } from "node:os"
 import type { JsonObject, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
+import { getSegments } from "../core/json-path.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -235,32 +236,23 @@ export interface ArtifactUploadResponse {
 }
 
 function readObject(value: unknown, path: string[]): Record<string, unknown> | null {
-  const found = readValueAt(value, path)
+    const found = getSegments(value, path)
   return found && typeof found === "object" && !Array.isArray(found) ? (found as Record<string, unknown>) : null
 }
 
 function readString(value: unknown, path: string[]): string | null {
-  const found = readValueAt(value, path)
+    const found = getSegments(value, path)
   return typeof found === "string" ? found : null
 }
 
 function readNumber(value: unknown, path: string[]): number | null {
-  const found = readValueAt(value, path)
+    const found = getSegments(value, path)
   return typeof found === "number" && Number.isFinite(found) ? found : null
 }
 
 function readBoolean(value: unknown, path: string[]): boolean | null {
-  const found = readValueAt(value, path)
+    const found = getSegments(value, path)
   return typeof found === "boolean" ? found : null
-}
-
-function readValueAt(value: unknown, path: string[]): unknown {
-  let current: unknown = value
-  for (const part of path) {
-    if (current === null || typeof current !== "object" || Array.isArray(current)) return undefined
-    current = (current as Record<string, unknown>)[part]
-  }
-  return current
 }
 
 function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {

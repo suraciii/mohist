@@ -94,44 +94,9 @@ public static class WorkflowYamlSerializer
             ValidateTaskExpectations(id, withMap);
 
         var artifacts = ParseTaskArtifacts(map);
-        var outputs = ParseTaskOutputs(map, id);
         var setVars = ParseTaskSetVars(map, id);
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, outputs, setVars);
-    }
-
-    private static List<TaskOutputDefinition>? ParseTaskOutputs(Dictionary<string, object?> taskMap, string taskId)
-    {
-        if (!taskMap.TryGetValue("outputs", out var outputsValue) || outputsValue is null)
-            return null;
-
-        var outputsList = Normalize(outputsValue) as List<object?>;
-        if (outputsList is null)
-            throw new InvalidOperationException($"Workflow task '{taskId}' 'outputs' must be an array");
-
-        var definitions = new List<TaskOutputDefinition>(outputsList.Count);
-        var seenNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var item in outputsList)
-        {
-            var entry = Normalize(item) as Dictionary<string, object?>;
-            if (entry is null)
-                throw new InvalidOperationException($"Workflow task '{taskId}' 'outputs' entries must be objects");
-
-            var name = String(entry, "name");
-            if (string.IsNullOrWhiteSpace(name))
-                throw new InvalidOperationException($"Workflow task '{taskId}' 'outputs' entry requires 'name'");
-
-            var from = String(entry, "from");
-            if (string.IsNullOrWhiteSpace(from))
-                throw new InvalidOperationException($"Workflow task '{taskId}' outputs entry '{name}' requires 'from'");
-
-            if (!seenNames.Add(name))
-                throw new InvalidOperationException($"Workflow task '{taskId}' has duplicate output name '{name}'");
-
-            definitions.Add(new TaskOutputDefinition(name, from));
-        }
-
-        return definitions.Count == 0 ? null : definitions;
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars);
     }
 
     private static Dictionary<string, string>? ParseTaskSetVars(Dictionary<string, object?> taskMap, string taskId)
@@ -314,15 +279,8 @@ public static class WorkflowYamlSerializer
         if (task.Uses is not null) map["uses"] = task.Uses;
         AddWith(map, task.With);
         AddArtifacts(map, task.Artifacts);
-        AddOutputs(map, task.Outputs);
         AddSetVars(map, task.SetVars);
         return map;
-    }
-
-    private static void AddOutputs(Dictionary<string, object?> map, List<TaskOutputDefinition>? outputs)
-    {
-        if (outputs is null || outputs.Count == 0) return;
-        map["outputs"] = outputs.Select(o => (object?)new Dictionary<string, object?> { ["name"] = o.Name, ["from"] = o.From }).ToList();
     }
 
     private static void AddSetVars(Dictionary<string, object?> map, Dictionary<string, string>? setVars)

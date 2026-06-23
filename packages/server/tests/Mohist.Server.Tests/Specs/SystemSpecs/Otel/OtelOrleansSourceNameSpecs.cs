@@ -101,9 +101,9 @@ public class OtelOrleansSourceNameSpecs : IClassFixture<BacklogFixture>
         ActivitySource.AddActivityListener(listener);
 
         var grain = _fixture.Grains.GetGrain<IRunnerGrain>($"runner-{Guid.NewGuid():N}");
-        var available = await grain.IsAvailableAsync();
+        var info = await grain.GetInfoAsync();
 
-        Assert.False(available);
+        Assert.Null(info);
         // The empirical set MUST contain at least one of the four
         // Orleans ActivitySource names (so the grain call observably
         // goes through Orleans-instrumented code) AND the

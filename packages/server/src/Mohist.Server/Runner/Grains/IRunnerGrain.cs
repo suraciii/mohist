@@ -74,7 +74,6 @@ public record WorkDispatch(
     [property: Id(7)] string? Title = null,
     [property: Id(8)] WorkIssueRef? Issue = null,
     [property: Id(9)] string? Artifacts = null,
-    [property: Id(10)] string? Outputs = null,
     [property: Id(11)] string OwnerKind = WorkDispatchOwnerKinds.Workflow,
     [property: Id(12)] string? AgentJobId = null,
     [property: Id(13)] string? SetVars = null)
@@ -100,8 +99,7 @@ public record WorkResult(
     string? Message = null,
     string? Output = null,
     int? ExitCode = null,
-    string[]? ArtifactUploadIds = null,
-    Dictionary<string, JsonElement>? CapturedOutputs = null);
+    string[]? ArtifactUploadIds = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

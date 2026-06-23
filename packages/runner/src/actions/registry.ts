@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { arrayInput, numberInput, stringInput } from "../core/json.js"
+import { stringAt } from "../core/json-path.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
@@ -182,12 +183,4 @@ function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
     parent.addEventListener("abort", onAbort, { once: true })
   }
   return controller.signal
-}
-
-function stringAt(value: unknown, path: string[]) {
-  const found = path.reduce<unknown>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return (current as Record<string, unknown>)[part]
-  }, value)
-  return typeof found === "string" ? found : undefined
 }

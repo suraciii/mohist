@@ -109,7 +109,6 @@ public static class RunnerRoutes
                 work.Issue?.IssueId,
                 work.Issue?.IssueNumber,
                 work.Artifacts,
-                work.Outputs,
                 work.SetVars,
                 work.OwnerKind,
                 work.AgentJobId));
@@ -135,7 +134,7 @@ public static class RunnerRoutes
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.CapturedOutputs);
+            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var report = string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
                 ? await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result)
@@ -302,7 +301,6 @@ public record RunnerReportRequest(
     string? Output = null,
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
-    Dictionary<string, JsonElement>? CapturedOutputs = null,
     string? OwnerKind = null,
     string? AgentJobId = null);
 public record RunnerReportResponse(
@@ -331,7 +329,6 @@ public record WorkDispatchResponse(
     string? IssueId = null,
     int? IssueNumber = null,
     string? Artifacts = null,
-    string? Outputs = null,
     string? SetVars = null,
     string? OwnerKind = null,
     string? AgentJobId = null);
