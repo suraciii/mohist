@@ -66,3 +66,22 @@ export function resetSession(
     { method: 'POST' },
   )
 }
+
+export interface SessionFollowupResult {
+  status: string
+}
+
+export function postFollowup(
+  number: number,
+  name: string,
+  text: string,
+  projectId?: string | null,
+): Promise<SessionFollowupResult> {
+  return request<SessionFollowupResult>(
+    projectApiPath(projectId, `/issues/${number}/sessions/${encodeURIComponent(name)}/followup`),
+    {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    },
+  )
+}

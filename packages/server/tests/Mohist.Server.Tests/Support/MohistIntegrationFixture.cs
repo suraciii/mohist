@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -118,6 +119,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRunnerWorkspaceClient>();
             services.AddSingleton<FakeRunnerWorkspaceClient>();
             services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
+            services.RemoveAll<IHubContext<RunnerHub>>();
+            services.AddSingleton<RecordingRunnerHubContext>();
+            services.AddSingleton<IHubContext<RunnerHub>>(provider => provider.GetRequiredService<RecordingRunnerHubContext>());
             services.RemoveAll<ConfigService>();
             services.RemoveAll<IEnvironmentVariableProvider>();
             services.AddSingleton<IEnvironmentVariableProvider>(_ =>
@@ -182,3 +186,65 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         return root;
     }
 }
+
+public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
+{
+    private readonly RecordingHubClients _clients;
+
+    public RecordingRunnerHubContext()
+    {
+        _clients = new RecordingHubClients(this);
+    }
+
+    public List<RecordedRunnerHubMessage> SentMessages { get; } = [];
+    public IHubClients Clients => _clients;
+    public IGroupManager Groups { get; } = new NoopGroupManager();
+
+    public void Clear() => SentMessages.Clear();
+
+    private sealed class RecordingHubClients : IHubClients
+    {
+        private readonly RecordingRunnerHubContext _context;
+
+        public RecordingHubClients(RecordingRunnerHubContext context)
+        {
+            _context = context;
+        }
+
+        public IClientProxy All => new RecordingClientProxy(_context, "all");
+        public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => new RecordingClientProxy(_context, "all-except");
+        public IClientProxy Client(string connectionId) => new RecordingClientProxy(_context, connectionId);
+        public IClientProxy Clients(IReadOnlyList<string> connectionIds) => new RecordingClientProxy(_context, string.Join(",", connectionIds));
+        public IClientProxy Group(string groupName) => new RecordingClientProxy(_context, groupName);
+        public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => new RecordingClientProxy(_context, groupName);
+        public IClientProxy Groups(IReadOnlyList<string> groupNames) => new RecordingClientProxy(_context, string.Join(",", groupNames));
+        public IClientProxy User(string userId) => new RecordingClientProxy(_context, userId);
+        public IClientProxy Users(IReadOnlyList<string> userIds) => new RecordingClientProxy(_context, string.Join(",", userIds));
+    }
+
+    private sealed class RecordingClientProxy : IClientProxy
+    {
+        private readonly RecordingRunnerHubContext _context;
+        private readonly string _connectionId;
+
+        public RecordingClientProxy(RecordingRunnerHubContext context, string connectionId)
+        {
+            _context = context;
+            _connectionId = connectionId;
+        }
+
+        public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
+        {
+            _context.SentMessages.Add(new RecordedRunnerHubMessage(_connectionId, method, args));
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class NoopGroupManager : IGroupManager
+    {
+        public Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+}
+
+public sealed record RecordedRunnerHubMessage(string ConnectionId, string Method, IReadOnlyList<object?> Arguments);

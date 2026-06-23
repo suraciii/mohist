@@ -31,6 +31,7 @@ export interface WorkItem {
   projectId?: string | null
   issueNumber?: number | null
   artifacts?: JsonObject | null
+  outputs?: Array<{ name: string; from: string }> | null
   setVars?: Record<string, string> | null
   ownerKind?: string | null
   agentJobId?: string | null
@@ -42,6 +43,7 @@ export interface WorkItemResult {
   output?: string | null
   exitCode?: number | null
   artifactUploadIds?: string[] | null
+  capturedOutputs?: JsonObject | null
   cleanupAttempts?: number | null
 }
 
