@@ -26,17 +26,20 @@ public class WorkflowProfileManager
     private readonly IPromptLoader _promptLoader;
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
+    private readonly WorkflowRunProfileManager _runProfileManager;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
         PromptTemplateEngine engine,
-        ConfigService configService)
+        ConfigService configService,
+        WorkflowRunProfileManager runProfileManager)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
         _configService = configService;
+        _runProfileManager = runProfileManager;
     }
 
     public async Task<ResolvedTemplate> LoadTemplateAsync(
@@ -87,21 +90,18 @@ public class WorkflowProfileManager
 
     public async Task<VariableBundle> LoadVariablesAsync(string runId)
     {
-        // Resolution merges three live layers, lowest priority first, so that
-        // edits to project/global Variables propagate to already-created issues:
+        // Resolution merges four live layers, lowest priority first:
         //   1. global config.jsonc bundle (ConfigService.GetVariables)
         //   2. project Variables (ProjectWorkflowProfile.Variables)
-        //   3. issue Variables (IssueWorkflowProfile.Variables — built-in
-        //      calling context + explicit issue overrides)
-        // The issue layer no longer bakes in project/global values (see
-        // IssueGrain.StartWorkflowAsync), so the project layer is the source of
-        // truth for model/agent defaults unless the issue has an explicit override.
+        //   3. issue Variables (IssueWorkflowProfile.Variables)
+        //   4. run Variables (WorkflowRunProfile.Variables — written by setVars)
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var global = await _configService.GetVariables();
         var project = await LoadProjectLayerAsync(db, context);
         var issue = await LoadIssueLayerAsync(db, context);
-        return VariableBundle.MergeAll(global, project, issue);
+        var run = await _runProfileManager.GetVariablesAsync(runId);
+        return VariableBundle.MergeAll(global, project, issue, run);
     }
 
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)

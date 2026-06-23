@@ -33,7 +33,6 @@ public static partial class WorkflowRunExtensions
                 Status = WorkflowRunStatus.Pending,
                 CurrentStageId = stages[0].Id,
                 Stages = stages,
-                RuntimeVariables = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
             };
         }
     }

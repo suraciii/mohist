@@ -142,7 +142,7 @@ setVars:
 - 不修改 `WorkflowRun` 执行状态。
 - 读取后续 task variables 时通过 `LoadVariables(runId)` 统一合并生效。
 
-`setVars` 由 server 侧执行（编排层），runner 只负责执行 action 和上报 output。server 在 `ProcessTaskResultAsync` 中接收 `result.output`，解析为 `JsonElement` 写入 `task.Output`，然后根据 task 定义中的 `setVars` 映射，从 `task.Output` 按源路径取值并写入 `workflow_run_profile.Variables`。
+`setVars` 是 task 执行的一部分，由 runner 执行。server 通过 dispatch payload 将 `setVars` 映射下发给 runner。runner 在 action 成功后，从 output 按源路径提取变量，通过 `PATCH /api/workflow-runs/{id}/workflow-profile/variables` 写入 run profile，然后才 report task 完成。setVars 失败（路径缺失或 API 错误）导致 task failed。server 不参与 setVars 的路径遍历或提取。
 
 task output context 和 run profile 分离：
 

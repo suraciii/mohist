@@ -85,48 +85,6 @@ internal static class WorkflowDispatchHelpers
         _ => element.GetRawText(),
     };
 
-    internal static JsonElement BuildRuntimeVariablesElement(IReadOnlyDictionary<string, JsonElement> runtimeVariables)
-    {
-        var root = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var (key, value) in runtimeVariables)
-        {
-            var segments = key.Split('.');
-            var current = root;
-            for (var i = 0; i < segments.Length - 1; i++)
-            {
-                if (!current.TryGetValue(segments[i], out var existing) || existing is not Dictionary<string, object?> dict)
-                {
-                    dict = new Dictionary<string, object?>(StringComparer.Ordinal);
-                    current[segments[i]] = dict;
-                }
-                current = dict;
-            }
-            current[segments[^1]] = JsonElementToObject(value.Clone());
-        }
-        return JSON.SerializeToElement(root);
-    }
-
-    internal static Dictionary<string, JsonElement?> JsonElementToDictionary(JsonElement element)
-    {
-        var result = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (element.ValueKind != JsonValueKind.Object)
-            return result;
-
-        foreach (var property in element.EnumerateObject())
-            result[property.Name] = property.Value.Clone();
-        return result;
-    }
-
-    internal static Dictionary<string, JsonElement?> MergeRuntimeVariablesIntoPayload(
-        Dictionary<string, JsonElement?> payload,
-        IReadOnlyDictionary<string, JsonElement> runtimeVariables)
-    {
-        var runtimeElement = BuildRuntimeVariablesElement(runtimeVariables);
-        var payloadElement = JSON.SerializeToElement(payload);
-        var merged = DeepMergeSkippingNulls(payloadElement, runtimeElement) ?? payloadElement;
-        return JsonElementToDictionary(merged);
-    }
-
     internal static string? TryReadNestedString(Dictionary<string, JsonElement?>? values, string key, string nestedKey)
     {
         if (values is null || !values.TryGetValue(key, out var value) || !value.HasValue)
@@ -192,22 +150,6 @@ internal static class WorkflowDispatchHelpers
         return lastDot >= 0 && int.TryParse(taskRunId[(lastDot + 1)..], out var attempt)
             ? attempt
             : 1;
-    }
-
-    internal static void CaptureTaskOutputs(WorkflowRun run, TaskRun? task, Dictionary<string, JsonElement>? capturedOutputs)
-    {
-        if (task is null || capturedOutputs is null || capturedOutputs.Count == 0)
-            return;
-
-        var declaredNames = task.Outputs?.Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
-        if (declaredNames is null || declaredNames.Count == 0)
-            return;
-
-        var validated = capturedOutputs
-            .Where(kv => declaredNames.Contains(kv.Key))
-            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-
-        run.CaptureTaskOutputs(task.DefinitionId, validated);
     }
 
     internal static List<CheckResult> ParseCheckResults(string? output)

@@ -95,8 +95,9 @@ public static class WorkflowYamlSerializer
 
         var artifacts = ParseTaskArtifacts(map);
         var outputs = ParseTaskOutputs(map, id);
+        var setVars = ParseTaskSetVars(map, id);
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, outputs);
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, outputs, setVars);
     }
 
     private static List<TaskOutputDefinition>? ParseTaskOutputs(Dictionary<string, object?> taskMap, string taskId)
@@ -131,6 +132,27 @@ public static class WorkflowYamlSerializer
         }
 
         return definitions.Count == 0 ? null : definitions;
+    }
+
+    private static Dictionary<string, string>? ParseTaskSetVars(Dictionary<string, object?> taskMap, string taskId)
+    {
+        if (!taskMap.TryGetValue("setVars", out var setVarsValue) || setVarsValue is null)
+            return null;
+
+        var setVarsMap = Normalize(setVarsValue) as Dictionary<string, object?>;
+        if (setVarsMap is null)
+            throw new InvalidOperationException($"Workflow task '{taskId}' 'setVars' must be an object");
+
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in setVarsMap)
+        {
+            var strValue = value?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(strValue))
+                throw new InvalidOperationException($"Workflow task '{taskId}' setVars entry '{key}' requires a non-empty value");
+            result[key] = strValue;
+        }
+
+        return result.Count == 0 ? null : result;
     }
 
     private static TaskArtifactCapture? ParseTaskArtifacts(Dictionary<string, object?> taskMap)
@@ -293,6 +315,7 @@ public static class WorkflowYamlSerializer
         AddWith(map, task.With);
         AddArtifacts(map, task.Artifacts);
         AddOutputs(map, task.Outputs);
+        AddSetVars(map, task.SetVars);
         return map;
     }
 
@@ -300,6 +323,12 @@ public static class WorkflowYamlSerializer
     {
         if (outputs is null || outputs.Count == 0) return;
         map["outputs"] = outputs.Select(o => (object?)new Dictionary<string, object?> { ["name"] = o.Name, ["from"] = o.From }).ToList();
+    }
+
+    private static void AddSetVars(Dictionary<string, object?> map, Dictionary<string, string>? setVars)
+    {
+        if (setVars is null || setVars.Count == 0) return;
+        map["setVars"] = setVars.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
     }
 
     private static void AddArtifacts(Dictionary<string, object?> map, TaskArtifactCapture? artifacts)

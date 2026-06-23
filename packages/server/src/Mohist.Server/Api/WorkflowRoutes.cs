@@ -76,6 +76,15 @@ public static class WorkflowRoutes
             return ApiResults.Ok(new { result.WorkflowRunId, result.Stage, result.AddedCount });
         });
 
+        app.MapPatch("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
+            string workflowRunId,
+            VariableBundle patch,
+            WorkflowRunProfileManager runProfileManager) =>
+        {
+            var merged = await runProfileManager.PatchVariablesAsync(workflowRunId, patch);
+            return ApiResults.Ok(new { workflowRunId, variables = merged });
+        });
+
         return app;
     }
 

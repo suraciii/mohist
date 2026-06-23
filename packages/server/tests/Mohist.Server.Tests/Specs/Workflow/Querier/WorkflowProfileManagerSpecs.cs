@@ -27,7 +27,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             .Options;
 
         var factory = new TestDbContextFactory(_options);
-        _manager = new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), WorkflowGrainTestHelpers.CreateEmptyConfigService());
+        var runProfileManager = new WorkflowRunProfileManager(factory);
+        _manager = new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager);
 
         using var initDb = new MohistDbContext(_options);
         initDb.Database.EnsureCreated();

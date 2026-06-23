@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Workflow.Grain;
@@ -9,103 +8,64 @@ namespace Mohist.Server.Tests.Specs.Workflow.Grain;
 public class TaskOutputCaptureSpecs
 {
     [Fact]
-    public void CaptureTaskOutputs_StoresDeclaredOutputsWithTasksIdOutputsNameKey()
+    public void TaskRun_Output_StoresActionOutputAsJsonElement()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStageWithOutputs());
-        var task = MakeTaskRun("proposal.1", "proposal", outputs:
-        [
-            new TaskOutputDefinition("openspecName", "output.openspecName"),
-            new TaskOutputDefinition("changeDir", "output.changeDir")
-        ]);
-        var captured = new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.SerializeToElement("issue-97"),
-            ["changeDir"] = JsonSerializer.SerializeToElement("openspec/changes/issue-97")
-        };
+        var task = MakeTaskRun("proposal.1", "proposal");
 
-        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, captured);
+        task.Output = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42,\"prUrl\":\"https://github.com/test\"}");
 
-        Assert.Equal(2, run.RuntimeVariables.Count);
-        Assert.Equal("issue-97", run.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
-        Assert.Equal("openspec/changes/issue-97", run.RuntimeVariables["tasks.proposal.outputs.changeDir"].GetString());
+        Assert.True(task.Output.HasValue);
+        var output = task.Output.Value;
+        Assert.Equal(42, output.GetProperty("prNumber").GetInt32());
+        Assert.Equal("https://github.com/test", output.GetProperty("prUrl").GetString());
     }
 
     [Fact]
-    public void CaptureTaskOutputs_IgnoresUndeclaredCapturedOutputs()
+    public void TaskRun_Output_NullWhenNoOutput()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStageWithOutputs());
-        var task = MakeTaskRun("proposal.1", "proposal", outputs:
-        [
-            new TaskOutputDefinition("openspecName", "output.openspecName")
-        ]);
-        var captured = new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.SerializeToElement("issue-97"),
-            ["undeclared"] = JsonSerializer.SerializeToElement("ignored")
-        };
+        var task = MakeTaskRun("proposal.1", "proposal");
 
-        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, captured);
-
-        Assert.Single(run.RuntimeVariables);
-        Assert.Equal("issue-97", run.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
-        Assert.False(run.RuntimeVariables.ContainsKey("tasks.proposal.outputs.undeclared"));
+        Assert.False(task.Output.HasValue);
+        Assert.Equal(default, task.Output);
     }
 
     [Fact]
-    public void CaptureTaskOutputs_NullTask_DoesNotModifyStore()
+    public void TaskRun_Output_HandlesNonObjectOutput()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStageWithOutputs());
-        var captured = new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.SerializeToElement("issue-97")
-        };
+        var task = MakeTaskRun("proposal.1", "proposal");
 
-        WorkflowDispatchHelpers.CaptureTaskOutputs(run, null, captured);
+        task.Output = JsonSerializer.Deserialize<JsonElement>("\"plain text output\"");
 
-        Assert.Empty(run.RuntimeVariables);
+        Assert.True(task.Output.HasValue);
+        Assert.Equal(JsonValueKind.String, task.Output.Value.ValueKind);
+        Assert.Equal("plain text output", task.Output.Value.GetString());
     }
 
     [Fact]
-    public void CaptureTaskOutputs_TaskWithoutOutputs_DoesNotModifyStore()
+    public void TaskRun_Output_OverwritesOnRetry()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStageWithOutputs());
-        var task = MakeTaskRun("proposal.1", "proposal", outputs: null);
-        var captured = new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.SerializeToElement("issue-97")
-        };
+        var task = MakeTaskRun("proposal.1", "proposal");
 
-        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, captured);
+        task.Output = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"first\"}");
+        Assert.Equal("first", task.Output!.Value.GetProperty("name").GetString());
 
-        Assert.Empty(run.RuntimeVariables);
+        task.Output = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"second\"}");
+        Assert.Equal("second", task.Output!.Value.GetProperty("name").GetString());
     }
 
     [Fact]
-    public void CaptureTaskOutputs_NullOrEmptyCapturedOutputs_DoesNotModifyStore()
+    public void TaskRun_Output_ArrayOutput()
     {
-        var run = WorkflowRun.Create("wr_1", SingleStageWithOutputs());
-        var task = MakeTaskRun("proposal.1", "proposal", outputs:
-        [
-            new TaskOutputDefinition("openspecName", "output.openspecName")
-        ]);
+        var task = MakeTaskRun("proposal.1", "proposal");
 
-        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, null);
-        WorkflowDispatchHelpers.CaptureTaskOutputs(run, task, []);
+        task.Output = JsonSerializer.Deserialize<JsonElement>("[{\"name\":\"item1\"},{\"name\":\"item2\"}]");
 
-        Assert.Empty(run.RuntimeVariables);
+        Assert.True(task.Output.HasValue);
+        Assert.Equal(JsonValueKind.Array, task.Output.Value.ValueKind);
+        Assert.Equal(2, task.Output.Value.GetArrayLength());
     }
 
-    private static WorkflowDefinition SingleStageWithOutputs()
-    {
-        return new WorkflowDefinition("spec/workflow",
-        [
-            new StageDefinition("build",
-                [new("proposal", "Generate proposal", "spec/task")],
-                [new("check-1", "Check 1", "spec/check")])
-        ]);
-    }
-
-    private static TaskRun MakeTaskRun(string id, string definitionId, List<TaskOutputDefinition>? outputs)
+    private static TaskRun MakeTaskRun(string id, string definitionId)
     {
         return new TaskRun
         {
@@ -113,7 +73,6 @@ public class TaskOutputCaptureSpecs
             DefinitionId = definitionId,
             Attempt = 1,
             Title = "Task",
-            Outputs = outputs,
             Status = TaskRunStatus.Running
         };
     }

@@ -642,7 +642,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                     : new Dictionary<string, JsonElement?> { ["title"] = JSON.SerializeToElement(t.Title) };
                 return await MakeDispatchAsync(new WorkDispatchRequest(
                     work.Stage, t.Id, "task", t.Title, t.Uses, taskWith,
-                    t.Artifacts, t.Outputs), runnerId, markRunning);
+                    t.Artifacts, t.Outputs, t.SetVars), runnerId, markRunning);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -929,8 +929,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         if (result.Status == "completed")
         {
-            WorkflowDispatchHelpers.CaptureTaskOutputs(run, currentTask, result.CapturedOutputs);
-            if (currentTask is not null) currentTask.Output = result.Output;
+            if (currentTask is not null)
+                currentTask.Output = ParseOutputToJsonElement(result.Output);
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
                 var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, result.Output);
@@ -945,7 +945,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
         else
         {
-            if (currentTask is not null) currentTask.Output = result.Output;
+            if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(result.Output);
             events.AddRange(run.FailTask(new TaskResult("failed", result.Message)));
         }
 
@@ -1142,6 +1142,21 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         if (input is null) return null;
         return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, input.Annotations);
+    }
+
+    private static JsonElement? ParseOutputToJsonElement(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            return doc.RootElement.Clone();
+        }
+        catch
+        {
+            var wrapped = JsonSerializer.SerializeToElement(output);
+            return wrapped;
+        }
     }
 
     private async Task SaveRunAsync()

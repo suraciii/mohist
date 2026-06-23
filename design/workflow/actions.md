@@ -114,7 +114,7 @@ vars.github.pr.headSha
 
 规则：
 
-- `setVars` 只在 task 成功后执行。
+- `setVars` 由 runner 在 report task 完成前执行，是 task 完成的一部分。
 - `setVars` 只 patch workflow runtime profile 的 `vars.*`。
 - `setVars` 不能覆盖 `workflow`、`stage`、`work`、`issue`、`workspace` 等 dispatch context。
 - 恢复 task 可以重新写同一组 `vars.*`，覆盖旧运行态事实。

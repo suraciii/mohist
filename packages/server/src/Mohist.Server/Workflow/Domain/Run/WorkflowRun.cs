@@ -49,7 +49,6 @@ public sealed class WorkflowRun
     public WorkspaceIdentity? Workspace { get; set; }
     public DateTimeOffset? WorkspaceMaterializedAt { get; set; }
     public WorkflowWorkDelivery? WorkDelivery { get; set; }
-    public Dictionary<string, JsonElement> RuntimeVariables { get; init; } = new(StringComparer.Ordinal);
     public List<ApprovalFeedback> Feedback { get; set; } = new();
 
     public bool IsAssigned => Assignment is not null;
