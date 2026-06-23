@@ -32,26 +32,110 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.map((call) => call.event).filter((event) => ["initialize", "newSession", "prompt"].includes(event))).toEqual(["initialize", "newSession", "prompt"])
   })
 
-  it("ModelConfigured_AcpSessionStarts_SetsSessionConfigModelBeforePrompt", async () => {
+  it("ModelConfigured_AcpSessionStarts_DeliversRequestedModelViaUnstableSetSessionModelBeforePrompt", async () => {
     const fixture = createFixture("basic")
 
-    await acpAgentAction(fixture.context({ prompt: "do the work", model: "openai/gpt-4.1" }))
-
-    expect(fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model" && entry.value === "openai/gpt-4.1")).toBeTruthy()
-    expect(fixture.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption")).toBeLessThan(fixture.agent.calls.findIndex((entry) => entry.event === "prompt"))
-  })
-
-  it("SessionConfigModelFails_ModelConfigured_FallsBackToUnstableSetSessionModel", async () => {
-    const fixture = createFixture("model-fallback")
-
-    const result = await acpAgentAction(fixture.context({ prompt: "do the work", model: "anthropic/claude" }))
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work", model: "openai/gpt-4.1" }))
 
     expect(result.status).toBe("success")
-    expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude")).toBeTruthy()
+    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-4.1")
+    expect(setModelCall).toBeTruthy()
+    const setModelIndex = fixture.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel")
+    const promptIndex = fixture.agent.calls.findIndex((entry) => entry.event === "prompt")
+    expect(setModelIndex).toBeGreaterThanOrEqual(0)
+    expect(setModelIndex).toBeLessThan(promptIndex)
+    expect(fixture.agent.calls.some((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")).toBe(false)
+  })
+
+  it("ModelWithVariant_AcpSessionStarts_DeliversComposedSlashSeparatedModelId", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      agent: { model: "zhipuai-coding-plan/glm-5.2", variant: "max" },
+    }))
+
+    expect(result.status).toBe("success")
+    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "zhipuai-coding-plan/glm-5.2/max")
+    expect(setModelCall).toBeTruthy()
+    expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "zhipuai-coding-plan/glm-5.2")).toBe(false)
+    expect(fixture.agent.calls.some((entry) => entry.event === "setSessionConfigOption")).toBe(false)
+  })
+
+  it("ModelWithWhitespaceAndVariant_AcpSessionStarts_TrimsModelBeforeComposition", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      agent: { model: " zhipuai-coding-plan/glm-5.2 ", variant: "max" },
+    }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "zhipuai-coding-plan/glm-5.2/max")).toBeTruthy()
+    expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && typeof entry.modelId === "string" && entry.modelId.includes(" "))).toBe(false)
+  })
+
+  it("ModelWithoutVariant_AcpSessionStarts_DeliversBareModelIdWithoutTrailingSlash", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      agent: { model: "minimax-coding-plan/MiniMax-M3" },
+    }))
+
+    expect(result.status).toBe("success")
+    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "minimax-coding-plan/MiniMax-M3")
+    expect(setModelCall).toBeTruthy()
+    expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "minimax-coding-plan/MiniMax-M3/")).toBe(false)
+    expect(fixture.agent.calls.some((entry) => entry.event === "setSessionConfigOption")).toBe(false)
+  })
+
+  it("EmptyVariant_AcpSessionStarts_DeliversBareModelId", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      agent: { model: "openai/gpt-4.1", variant: "   " },
+    }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-4.1")).toBeTruthy()
+    expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-4.1/")).toBe(false)
+  })
+
+  it("NoModelConfigured_DoesNotIssueUnstableSetSessionModel_AndRunsOnProviderDefault", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel")).toBe(false)
+    expect(fixture.agent.calls.some((entry) => entry.event === "setSessionConfigOption")).toBe(false)
+    expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
+  })
+
+  it("UnstableSetSessionModelRejects_VariantNotDelivered_RunStillSucceeds", async () => {
+    const fixture = createFixture("model-config-fails")
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "do the work",
+      agent: { model: "anthropic/claude", variant: "max" },
+    }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude/max")).toBe(true)
+    expect(fixture.agent.calls.some((entry) => entry.event === "setSessionConfigOption")).toBe(false)
+    const rejectionWarn = warnSpy.mock.calls.find((call) => {
+      const payload = call[1] as { requestedVariant?: unknown; variantDelivered?: unknown } | undefined
+      return payload !== undefined && payload.requestedVariant === "max" && payload.variantDelivered === false
+    })
+    expect(rejectionWarn).toBeTruthy()
+    warnSpy.mockRestore()
   })
 
   it("NewSessionCreatedBeforeModelConfiguration_RunnerReportsPhysicalSessionIdToServer", async () => {
-    const fixture = createFixture("model-config-fails")
+    const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({
       prompt: "do the work",
@@ -65,8 +149,14 @@ describe("mohist/acp-agent", () => {
       sessionName: "build",
       body: expect.objectContaining({ agentSessionId: "fake-session-1" }),
     }))
-    expect(fixture.timeline.findIndex((entry) => entry.event === "newSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession"))
-    expect(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "setSessionConfigOption"))
+    const newSessionTimelineIndex = fixture.timeline.findIndex((entry) => entry.event === "newSession")
+    const attachTimelineIndex = fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession")
+    expect(newSessionTimelineIndex).toBeGreaterThanOrEqual(0)
+    expect(attachTimelineIndex).toBeGreaterThan(newSessionTimelineIndex)
+    const setModelIndex = fixture.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude")
+    const promptIndex = fixture.agent.calls.findIndex((entry) => entry.event === "prompt")
+    expect(setModelIndex).toBeGreaterThanOrEqual(0)
+    expect(setModelIndex).toBeLessThan(promptIndex)
   })
 
   it("PermissionRequestHasAllowOption_AgentRequestsPermission_SelectsAllowOption", async () => {
@@ -269,7 +359,7 @@ describe("mohist/acp-agent", () => {
     expect(JSON.parse(result.output ?? "{}").text).toBe("")
   })
 
-  it("ExistingSharedSessionWithRequestedModel_SetsModelBeforePromptWithoutResume", async () => {
+  it("ExistingSharedSessionWithRequestedModel_DeliversModelViaUnstableSetSessionModelBeforePromptWithoutResume", async () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1", model: "openai/gpt-5.5" } })
 
     const result = await acpAgentAction(contextWithOverrides({
@@ -282,10 +372,13 @@ describe("mohist/acp-agent", () => {
     }, undefined, shared.context()))
 
     expect(result.status).toBe("success")
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model" && entry.value === "openai/gpt-5.5")
+    const setModelCall = shared.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "shared-session-1" && entry.modelId === "openai/gpt-5.5")
+    expect(setModelCall).toBeTruthy()
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
+    expect(shared.agent.calls.some((entry) => entry.event === "setSessionConfigOption")).toBe(false)
     expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
     expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
   })
@@ -314,10 +407,33 @@ describe("mohist/acp-agent", () => {
       sessionName: "shared-session",
       body: expect.objectContaining({ agentSessionId: "replacement-session-1", model: "openai/gpt-5.5" }),
     }))
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.sessionId === "replacement-session-1" && entry.value === "openai/gpt-5.5")
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "replacement-session-1" && entry.modelId === "openai/gpt-5.5")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "replacement-session-1")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
+    expect(shared.agent.calls.some((entry) => entry.event === "setSessionConfigOption")).toBe(false)
+  })
+
+  it("ExistingSharedSessionWithSameModelButDifferentVariant_StartsNewSessionInsteadOfReusingCached", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", {
+      cachedModel: "zhipuai-coding-plan/glm-5.2/max",
+      newSessionId: "variant-switch-session-1",
+      sessionRecord: { acpSessionId: "shared-session-1", model: "zhipuai-coding-plan/glm-5.2/max" },
+    })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "switch shared session variant",
+      session: "shared-session",
+      agent: { model: "zhipuai-coding-plan/glm-5.2", variant: "high" },
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
+    expect(shared.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "variant-switch-session-1" && entry.modelId === "zhipuai-coding-plan/glm-5.2/high")).toBeTruthy()
   })
 
   it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
@@ -1033,128 +1149,6 @@ describe("mohist/acp-agent compaction config helpers", () => {
   })
 })
 
-describe("mohist/acp-agent reasoning variant delivery", () => {
-  it("VariantInAgentBlock_AcpSessionStarts_SetsBareModelIdBeforePrompt", async () => {
-    const fixture = createFixture("basic")
-
-    const result = await acpAgentAction(fixture.context({
-      prompt: "do the work",
-      agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" },
-    }))
-
-    expect(result.status).toBe("success")
-    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
-    expect(typeof setModelCall?.value === "string" && setModelCall.value.includes(":")).toBe(false)
-    const setModelIndex = fixture.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    const promptIndex = fixture.agent.calls.findIndex((entry) => entry.event === "prompt")
-    expect(setModelIndex).toBeGreaterThanOrEqual(0)
-    expect(setModelIndex).toBeLessThan(promptIndex)
-  })
-
-  it("VariantInTopLevelWith_AcpSessionStarts_SetsBareModelIdBeforePrompt", async () => {
-    const fixture = createFixture("basic")
-
-    const result = await acpAgentAction(fixture.context({
-      prompt: "do the work",
-      model: "anthropic/claude-sonnet-4-5",
-      variant: "max",
-    }))
-
-    expect(result.status).toBe("success")
-    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
-    expect(typeof setModelCall?.value === "string" && setModelCall.value.includes(":")).toBe(false)
-    const setModelIndex = fixture.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    const promptIndex = fixture.agent.calls.findIndex((entry) => entry.event === "prompt")
-    expect(setModelIndex).toBeLessThan(promptIndex)
-  })
-
-  it("AgentModelWithoutVariant_AcpSessionStarts_SetsBareModelIdWithoutVariantSuffix", async () => {
-    const fixture = createFixture("basic")
-
-    const result = await acpAgentAction(fixture.context({
-      prompt: "do the work",
-      agent: { model: "openai/gpt-4.1" },
-    }))
-
-    expect(result.status).toBe("success")
-    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("openai/gpt-4.1")
-    expect(setModelCall?.value?.includes(":")).toBe(false)
-  })
-
-  it("VariantSet_AgentReceivesBareModelId_RunSucceedsWithoutVariantInModelId", async () => {
-    const fixture = createFixture("basic")
-
-    const result = await acpAgentAction(fixture.context({
-      prompt: "do the work",
-      agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" },
-    }))
-
-    expect(result.status).toBe("success")
-    expect(result.message ?? "").not.toContain("variant")
-    expect(result.message ?? "").not.toContain("reject")
-    const setModelCall = fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    expect(setModelCall).toBeTruthy()
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
-    expect(fixture.agent.calls.some((entry) => entry.event === "prompt")).toBe(true)
-
-    const terminal = fixture.serverConnection.calls
-      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "session.closed")
-      .map((entry) => entry.payload as Record<string, unknown>)
-      .at(-1)
-    expect(terminal?.status).toBe("completed")
-    expect(terminal?.failureCategory).toBeNull()
-    expect(String(terminal?.failureReason ?? "")).not.toMatch(/variant/i)
-  })
-
-  it("ExistingSharedSessionWithSameBaseModel_ReusesCachedSessionRegardlessOfVariant", async () => {
-    const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "anthropic/claude-sonnet-4-5",
-      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5" },
-    })
-
-    const result = await acpAgentAction(contextWithOverrides({
-      prompt: "reuse shared session",
-      session: "shared-session",
-      agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" },
-      livenessQuietThresholdMs: 5_000,
-      probeTimeoutMs: 5_000,
-      timeout: 5_000,
-    }, undefined, shared.context()))
-
-    expect(result.status).toBe("success")
-    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    const setModelCall = shared.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model")
-    expect(setModelCall?.value).toBe("anthropic/claude-sonnet-4-5")
-  })
-
-  it("ExistingSharedSessionSameBaseModelDifferentVariant_ReusesSession_VariantNotInModelIdentity", async () => {
-    const shared = createSharedSessionFixture("thought-liveness", {
-      cachedModel: "anthropic/claude-sonnet-4-5",
-      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5" },
-    })
-
-    const result = await acpAgentAction(contextWithOverrides({
-      prompt: "switch shared session variant",
-      session: "shared-session",
-      agent: { model: "anthropic/claude-sonnet-4-5", variant: "max" },
-      livenessQuietThresholdMs: 5_000,
-      probeTimeoutMs: 5_000,
-      timeout: 5_000,
-    }, undefined, shared.context()))
-
-    expect(result.status).toBe("success")
-    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
-    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(false)
-  })
-})
-
 describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
   it("EphemeralSessionCancelHangs_CleanupForcesProcessKill_AndReturnsWithinBound", async () => {
     const agent = new FakeAcpAgent("cancel-hangs")
@@ -1723,6 +1717,10 @@ class FakeSharedAcpAgent {
       async setSessionConfigOption(params) {
         self.calls.push({ event: "setSessionConfigOption", ...params })
         return { configOptions: [] }
+      },
+      async unstable_setSessionModel(params) {
+        self.calls.push({ event: "unstable_setSessionModel", ...params })
+        return {}
       },
       async prompt(params) {
         self.calls.push({ event: "prompt", sessionId: params.sessionId, text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })

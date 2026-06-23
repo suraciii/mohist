@@ -316,6 +316,7 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 
   it("ProbeLiveness_ReturnsFalse_OnTimeout", async () => {
+    vi.useFakeTimers()
     builders.length = 0
     const client = new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
     const conn = builders.at(-1)!.connection
@@ -334,15 +335,15 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
     tightConn.invoke.mockReturnValue(new Promise((resolve) => {
       resolveTight = resolve
     }))
-    const start = Date.now()
-    const result = await tight.probeLiveness(new AbortController().signal)
-    const elapsed = Date.now() - start
+    const probe = tight.probeLiveness(new AbortController().signal)
+    await vi.advanceTimersByTimeAsync(5)
+    const result = await probe
     expect(result).toBe(false)
-    expect(elapsed).toBeGreaterThanOrEqual(5)
     // Drain the pending invokes so vitest doesn't keep the promises alive.
     resolveInvoke("late")
     resolveTight("late")
     void client
+    vi.useRealTimers()
   })
 
   it("ProbeLiveness_ReturnsFalse_OnAbortSignal", async () => {

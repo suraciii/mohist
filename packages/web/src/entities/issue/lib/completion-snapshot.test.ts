@@ -234,7 +234,7 @@ describe('useCompletionSnapshot', () => {
     useIssuesMock.mockReturnValue({
       data: [
         makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1) }),
-        makeIssue({ status: 'cancelled', createdAt: daysAgo(3), updatedAt: daysAgo(2) }),
+        makeIssue({ status: 'cancelled', createdAt: daysAgo(2), updatedAt: daysAgo(2) }),
         makeIssue({ status: 'in_progress', createdAt: daysAgo(1), updatedAt: daysAgo(1) }),
       ],
     })
