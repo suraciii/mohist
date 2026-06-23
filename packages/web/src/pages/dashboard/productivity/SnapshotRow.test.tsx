@@ -79,7 +79,7 @@ describe('SnapshotRow', () => {
         ),
         makeIssue({ status: 'cancelled', createdAt: daysAgo(30), updatedAt: daysAgo(2) }),
         ...Array.from({ length: 8 }, () =>
-          makeIssue({ status: 'backlog', createdAt: daysAgo(3), updatedAt: daysAgo(10) }),
+          makeIssue({ status: 'backlog', createdAt: daysAgo(1), updatedAt: daysAgo(10) }),
         ),
       ],
     })
