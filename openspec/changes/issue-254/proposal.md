@@ -13,11 +13,11 @@ CLI 中三个高复杂度大文件（更新命令聚合 1717 行、环境信息�
 
 ### New Capabilities
 
-无。本次改造是纯内部结构重构，不引入任何新的对外能力。
+- `cli-module-structure`: CLI 高复杂度命令模块的结构组织契约——更新编排 facade 只持有公共入口与 stage 编排，运行时一致性校验与服务就绪探测各自为窄依赖协作类；表格渲染按实体域 partial 拆分，核心只保留分发与共享基础设施；信息采集、输出渲染、systemd 解析分离为三个职责单一的类型。所有不变式可由文件/类结构与构造器依赖面检验。该契约约束未来对这三个模块的改动，避免再次堆出 god class。
 
 ### Modified Capabilities
 
-无。`cli-interface`（覆盖 `mo update` 等命令）与 `cli-info-command`（覆盖 `mo info`）的 spec 级需求均不变——输出契约、参数、退出码、交互行为保持逐字节一致，仅文件组织与内部协作关系改变，属实现细节而非 spec 级行为变化。
+<!-- 无。这是纯内部结构重构：`cli-interface`（覆盖 `mo update` 等命令）与 `cli-info-command`（覆盖 `mo info`）的 spec 级需求不变——输出契约、参数、退出码、交互行为保持逐字节一致，仅文件组织与内部协作关系改变，属实现细节而非 spec 级行为变化。 -->
 
 ## Impact
 
