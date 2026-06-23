@@ -16,16 +16,13 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task Dispatch_AfterTaskOutputs_IncludesRuntimeVariablesInResolvedVars()
+    public async Task Dispatch_AfterTaskOutputs_IncludesTaskOutputsInVariables()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition("build",
             [
-                new("proposal", "Generate proposal", "spec/task", Outputs:
-                [
-                    new TaskOutputDefinition("openspecName", "output.openspecName")
-                ]),
+                new("proposal", "Generate proposal", "spec/task"),
                 new("specs", "Write specs", "spec/task")
             ],
             [])
@@ -36,10 +33,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, proposal.WorkId, new WorkResult(
             "completed",
-            CapturedOutputs: new Dictionary<string, JsonElement>
-            {
-                ["openspecName"] = JsonSerializer.SerializeToElement("issue-97")
-            }));
+            Output: "{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}"));
 
         var (specs, _) = await PollWorkAnyAsync();
         Assert.StartsWith("specs.", specs.WorkId);
@@ -51,6 +45,8 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         Assert.True(proposalEl.TryGetProperty("outputs", out var outputs));
         Assert.True(outputs.TryGetProperty("openspecName", out var openspecName));
         Assert.Equal("issue-97", openspecName.GetString());
+        Assert.True(outputs.TryGetProperty("changeDir", out var changeDir));
+        Assert.Equal("openspec/changes/issue-97", changeDir.GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -62,10 +58,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         [
             new StageDefinition("build",
             [
-                new("proposal", "Generate proposal", "spec/task", Outputs:
-                [
-                    new TaskOutputDefinition("openspecName", "output.openspecName")
-                ]),
+                new("proposal", "Generate proposal", "spec/task"),
                 new("specs", "Write specs", "spec/task")
             ],
             [],
@@ -87,10 +80,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
         var (proposal, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, proposal.WorkId, new WorkResult(
             "completed",
-            CapturedOutputs: new Dictionary<string, JsonElement>
-            {
-                ["openspecName"] = JsonSerializer.SerializeToElement("runtime-value")
-            }));
+            Output: "{\"openspecName\":\"runtime-value\"}"));
 
         var (specs, _) = await PollWorkAnyAsync();
         Assert.NotNull(specs.Variables);
@@ -102,7 +92,7 @@ public class RuntimeVariableDispatchSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task Dispatch_EmptyRuntimeStore_DoesNotAlterVariables()
+    public async Task Dispatch_EmptyTaskOutput_DoesNotAlterVariables()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [

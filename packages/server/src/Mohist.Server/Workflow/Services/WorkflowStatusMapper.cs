@@ -1,3 +1,4 @@
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
@@ -107,7 +108,7 @@ public static class WorkflowStatusMapper
                     DurationMs: t.StartedAt is not null && t.FinishedAt is not null
                         ? (long)(t.FinishedAt.Value - t.StartedAt.Value).TotalMilliseconds
                         : null,
-                    Output: t.Output))
+                    Output: t.Output.HasValue ? JSON.Serialize(t.Output.Value) : null))
                 .ToList();
 
         var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);

@@ -76,7 +76,8 @@ public record WorkDispatch(
     [property: Id(9)] string? Artifacts = null,
     [property: Id(10)] string? Outputs = null,
     [property: Id(11)] string OwnerKind = WorkDispatchOwnerKinds.Workflow,
-    [property: Id(12)] string? AgentJobId = null)
+    [property: Id(12)] string? AgentJobId = null,
+    [property: Id(13)] string? SetVars = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

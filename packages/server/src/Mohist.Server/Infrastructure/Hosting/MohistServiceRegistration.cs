@@ -98,6 +98,7 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowDispatchBuilder>();
         services.AddScoped<ProjectWorkflowProfileManager>();
         services.AddScoped<IssueWorkflowProfileManager>();
+        services.AddScoped<WorkflowRunProfileManager>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<ConnectionSubscriptionRegistry>();

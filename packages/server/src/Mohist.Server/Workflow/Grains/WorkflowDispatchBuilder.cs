@@ -19,6 +19,7 @@ internal sealed record WorkDispatchRequest(
     Dictionary<string, JsonElement?>? With,
     TaskArtifactCapture? Artifacts = null,
     List<TaskOutputDefinition>? Outputs = null,
+    Dictionary<string, string>? SetVars = null,
     string? WorkIdOverride = null);
 
 public sealed class WorkflowDispatchBuilder(
@@ -58,7 +59,8 @@ public sealed class WorkflowDispatchBuilder(
             Title: req.Title,
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
             Artifacts: req.Artifacts is not null && !req.Artifacts.IsEmpty ? JSON.Serialize(req.Artifacts) : null,
-            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JSON.Serialize(req.Outputs) : null);
+            Outputs: req.Outputs is not null && req.Outputs.Count > 0 ? JSON.Serialize(req.Outputs) : null,
+            SetVars: req.SetVars is not null && req.SetVars.Count > 0 ? JSON.Serialize(req.SetVars) : null);
     }
 
     internal static WorkDispatchRequest BuildChecksRequest(
@@ -104,8 +106,7 @@ public sealed class WorkflowDispatchBuilder(
         payload["stage"] = JSON.SerializeToElement(new { name = req.Stage });
         payload["work"] = JSON.SerializeToElement(new { id = workId, type = req.WorkType, title = req.Title, attempt });
 
-        if (run.RuntimeVariables is { Count: > 0 })
-            payload = WorkflowDispatchHelpers.MergeRuntimeVariablesIntoPayload(payload, run.RuntimeVariables);
+        MergeTaskOutputsIntoPayload(payload, run);
 
         if (req.WorkType == "task")
         {
@@ -195,6 +196,37 @@ public sealed class WorkflowDispatchBuilder(
                 ? stageModel.Value ?? "(null override)"
                 : "(missing)",
             source);
+    }
+
+    internal static void MergeTaskOutputsIntoPayload(Dictionary<string, JsonElement?> payload, WorkflowRun run)
+    {
+        var tasksMap = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        foreach (var stage in run.Stages)
+        {
+            foreach (var task in stage.Tasks)
+            {
+                if (task.Status != TaskRunStatus.Completed || !task.Output.HasValue)
+                    continue;
+
+                if (task.Output.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var outputs = WorkflowDispatchHelpers.JsonElementToObject(task.Output.Value);
+                if (outputs is Dictionary<string, object?> dict)
+                {
+                    tasksMap[task.DefinitionId] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["outputs"] = dict
+                    };
+                }
+            }
+        }
+
+        if (tasksMap.Count > 0)
+        {
+            payload["tasks"] = JSON.SerializeToElement(tasksMap);
+        }
     }
 
     private static bool TryGetAnnotation(WorkflowRun run, string key, out string value)

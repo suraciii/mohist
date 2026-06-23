@@ -44,6 +44,7 @@ public class MohistDbContext : DbContext
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
+    public DbSet<WorkflowRunProfileRow> WorkflowRunProfiles { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
     public DbSet<ProjectPromptTemplateRow> ProjectPromptTemplates { get; set; } = null!;
@@ -380,6 +381,14 @@ public class MohistDbContext : DbContext
                 .IsRequired()
                 .HasDefaultValue(new Dictionary<string, string>());
             entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
+        });
+
+        modelBuilder.Entity<WorkflowRunProfileRow>(entity =>
+        {
+            entity.ToTable("WorkflowRunProfiles");
+            entity.HasKey(e => e.WorkflowRunId);
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
+            entity.Property(e => e.Variables).IsRequired();
         });
 
         modelBuilder.Entity<ProjectPromptTemplateRow>(entity =>

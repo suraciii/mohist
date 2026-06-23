@@ -110,6 +110,7 @@ public static class RunnerRoutes
                 work.Issue?.IssueNumber,
                 work.Artifacts,
                 work.Outputs,
+                work.SetVars,
                 work.OwnerKind,
                 work.AgentJobId));
         });
@@ -331,5 +332,6 @@ public record WorkDispatchResponse(
     int? IssueNumber = null,
     string? Artifacts = null,
     string? Outputs = null,
+    string? SetVars = null,
     string? OwnerKind = null,
     string? AgentJobId = null);

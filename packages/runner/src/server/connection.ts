@@ -1,6 +1,6 @@
 import { hostname } from "node:os"
-import type { RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
-import { parseObject, parseTaskOutputs } from "../core/json.js"
+import type { JsonObject, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
+import { parseObject } from "../core/json.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -38,7 +38,6 @@ export class ServerConnection {
       output: result.output,
       exitCode: result.exitCode,
       artifactUploadIds: result.artifactUploadIds ?? null,
-      capturedOutputs: result.capturedOutputs ?? null,
       cleanupAttempts: result.cleanupAttempts ?? null,
     }
     if (ownerKind) {
@@ -158,6 +157,16 @@ export class ServerConnection {
     if (!response.ok) throw new Error(`addTasks failed: ${response.status} ${await response.text()}`)
   }
 
+  async patchRunVars(workflowRunId: string, vars: JsonObject, signal: AbortSignal) {
+    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/workflow-profile/variables`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ vars }),
+      signal,
+    })
+    if (!response.ok) throw new Error(`patchRunVars failed: ${response.status} ${await response.text()}`)
+  }
+
   async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
   }
@@ -196,7 +205,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
     projectId: dispatch.projectId,
     issueNumber: dispatch.issueNumber ?? undefined,
     artifacts: parseObject(dispatch.artifacts),
-    outputs: parseTaskOutputs(dispatch.outputs),
+    setVars: dispatch.setVars ? (parseObject(dispatch.setVars) as Record<string, string> | null) : null,
     ownerKind: dispatch.ownerKind ?? undefined,
     agentJobId: dispatch.agentJobId ?? undefined,
   }

@@ -10,7 +10,6 @@ import { acpAgentAction } from "../actions/acp-agent.js"
 import { git as defaultGit } from "../actions/git.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
-import { captureOutputs } from "./output-capture.js"
 import {
   actionProducedArtifacts,
   captureArtifacts,
@@ -18,6 +17,7 @@ import {
   summarizeCaptureFailures,
   uploadCapturedArtifacts,
 } from "./artifact-capture.js"
+import { extractSetVars } from "./set-vars.js"
 import {
   buildCleanupWith,
   isAgentBackedTask,
@@ -150,13 +150,7 @@ export class WorkExecutor {
       }
       const withEvidence = attachBranchStabilityEvidence(worktreeResult, evidenceStack)
       const finalResult = await this.captureAndUploadArtifacts(work, workspaceRoot, workDir, withEvidence, result, variables, signal)
-      if (finalResult.status === "completed") {
-        const capturedOutputs = captureOutputs(work.outputs, result)
-        if (capturedOutputs) {
-          return { ...finalResult, capturedOutputs }
-        }
-      }
-      return finalResult
+      return await this.applySetVars(work, finalResult, signal)
     } catch (error) {
       if (error instanceof WorktreeProbeError) {
         return worktreeProbeFailure(work, error)
@@ -535,6 +529,28 @@ export class WorkExecutor {
       message: message ?? result.message,
       artifactUploadIds: uploads.uploads.map((upload) => upload.uploadId),
     }
+  }
+
+  private async applySetVars(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<WorkItemResult> {
+    if (result.status !== "completed") return result
+    if (!work.setVars || Object.keys(work.setVars).length === 0) return result
+
+    const extraction = extractSetVars(work.setVars, result.output)
+    if (extraction.error) {
+      return { ...result, status: "failed", message: `setVars: ${extraction.error}` }
+    }
+    if (extraction.vars) {
+      try {
+        await this.connection.patchRunVars(work.workflowRunId, extraction.vars, signal)
+      } catch (error) {
+        return {
+          ...result,
+          status: "failed",
+          message: `setVars patch failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
+        }
+      }
+    }
+    return result
   }
 }
 

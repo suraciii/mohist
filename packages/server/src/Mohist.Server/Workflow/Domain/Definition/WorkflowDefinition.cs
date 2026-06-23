@@ -17,7 +17,8 @@ public sealed record TaskDefinition(
     string? Uses = null,
     Dictionary<string, JsonElement?>? With = null,
     TaskArtifactCapture? Artifacts = null,
-    List<TaskOutputDefinition>? Outputs = null);
+    List<TaskOutputDefinition>? Outputs = null,
+    Dictionary<string, string>? SetVars = null);
 
 public sealed record CheckFailureRepair(int Limit, TaskDefinition Task, TaskDefinition? VerifyTask = null);
 

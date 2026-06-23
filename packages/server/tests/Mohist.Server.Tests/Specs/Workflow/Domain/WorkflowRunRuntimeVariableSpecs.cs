@@ -12,82 +12,85 @@ public class WorkflowRunRuntimeVariableSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Create_InitializesEmptyRuntimeVariableStore()
+    public void TaskRun_Output_StoresAsJsonElement()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage());
+        run.Start();
+        var events = run.InitializeStage(
+            [new("task-1", "Task 1", "spec/task")],
+            [new("check-1", "Check 1", "spec/check")]);
+        var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
+        var outputJson = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42,\"prUrl\":\"https://github.com/test/pr/42\"}");
 
-        Assert.NotNull(run.RuntimeVariables);
-        Assert.Empty(run.RuntimeVariables);
+        task.Output = outputJson;
+
+        Assert.True(task.Output.HasValue);
+        var outVal = task.Output.Value;
+        Assert.Equal(JsonValueKind.Object, outVal.ValueKind);
+        Assert.Equal(42, outVal.GetProperty("prNumber").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void CaptureTaskOutputs_AppendsUnderTasksIdOutputsName()
+    public void TaskRun_Output_NullByDefault()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage());
-        var outputs = new Dictionary<string, JsonElement>
+
+        var task = new TaskRun
         {
-            ["openspecName"] = JsonSerializer.Deserialize<JsonElement>("\"issue-97\""),
-            ["changeDir"] = JsonSerializer.Deserialize<JsonElement>("\"openspec/changes/issue-97\"")
+            Id = "task-1.1",
+            DefinitionId = "task-1",
+            Attempt = 1,
+            Title = "Task 1",
         };
 
-        run.CaptureTaskOutputs("proposal", outputs);
-
-        Assert.Equal(2, run.RuntimeVariables.Count);
-        Assert.Equal("issue-97", run.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
-        Assert.Equal("openspec/changes/issue-97", run.RuntimeVariables["tasks.proposal.outputs.changeDir"].GetString());
+        Assert.False(task.Output.HasValue);
+        Assert.Equal(default, task.Output);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void CaptureTaskOutputs_NullOrEmpty_DoesNotModifyStore()
+    public void TaskRun_Output_RetryOverwrites()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage());
+        run.Start();
+        var events = run.InitializeStage(
+            [new("task-1", "Task 1", "spec/task")],
+            [new("check-1", "Check 1", "spec/check")]);
+        var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
 
-        run.CaptureTaskOutputs("proposal", null);
-        run.CaptureTaskOutputs("proposal", new Dictionary<string, JsonElement>());
+        var first = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"first\"}");
+        var second = JsonSerializer.Deserialize<JsonElement>("{\"name\":\"second\"}");
 
-        Assert.Empty(run.RuntimeVariables);
+        task.Output = first;
+        Assert.Equal("first", task.Output!.Value.GetProperty("name").GetString());
+
+        task.Output = second;
+        Assert.Equal("second", task.Output!.Value.GetProperty("name").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void CaptureTaskOutputs_RetryOverwritesSameOutput()
+    public void Serialization_RoundTripsTaskOutput()
     {
         var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.CaptureTaskOutputs("proposal", new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.Deserialize<JsonElement>("\"first\"")
-        });
-
-        run.CaptureTaskOutputs("proposal", new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.Deserialize<JsonElement>("\"second\"")
-        });
-
-        Assert.Single(run.RuntimeVariables);
-        Assert.Equal("second", run.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
-    public void Serialization_RoundTripsRuntimeVariables()
-    {
-        var run = WorkflowRun.Create("wr_1", SingleStage());
-        run.CaptureTaskOutputs("proposal", new Dictionary<string, JsonElement>
-        {
-            ["openspecName"] = JsonSerializer.Deserialize<JsonElement>("\"issue-97\"")
-        });
+        run.Start();
+        var events = run.InitializeStage(
+            [new("task-1", "Task 1", "spec/task")],
+            [new("check-1", "Check 1", "spec/check")]);
+        var events2 = run.StartTask("work-1", "runner-1");
+        var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "task-1");
+        task.Output = JsonSerializer.Deserialize<JsonElement>("{\"prNumber\":42}");
 
         var json = JSON.Serialize(run);
         var roundTripped = JSON.Deserialize<WorkflowRun>(json)!;
 
-        Assert.Single(roundTripped.RuntimeVariables);
-        Assert.Equal("issue-97", roundTripped.RuntimeVariables["tasks.proposal.outputs.openspecName"].GetString());
+        var roundTask = roundTripped.Stages[0].Tasks.First(t => t.DefinitionId == "task-1");
+        Assert.True(roundTask.Output.HasValue);
+        Assert.Equal(42, roundTask.Output!.Value.GetProperty("prNumber").GetInt32());
     }
 
     private static WorkflowDefinition SingleStage()
