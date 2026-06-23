@@ -523,6 +523,71 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Theory]
+    [InlineData("not-valid-json")]
+    [InlineData("{\"kind\":\"directory\",\"files\":[]}")]
+    [InlineData("{\"kind\":\"file\",\"files\":[{\"path\":\"a.md\",\"data\":\"YQ==\"}]}")]
+    [InlineData("{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"data\":\"!!!\"}]}")]
+    public async Task UploadAsync_DirectoryContent_MalformedEnvelopeReturnsInvalid(string envelopeJson)
+    {
+        // Directory envelope validation failures (bad JSON, wrong kind,
+        // empty file list, invalid base64) must surface as an Invalid
+        // result rather than throwing, so the upload endpoint returns a
+        // diagnosable 400 instead of an opaque 500.
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var taskRunId = "task-1.1";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, taskRunId);
+        var service = BuildService(resolver);
+
+        var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:bad",
+            Size = envelopeBytes.LongLength,
+            OpenContent = () => new MemoryStream(envelopeBytes, writable: false),
+        });
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task UploadAsync_DirectoryContent_EnvelopeSizeMismatchReturnsInvalid()
+    {
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
+        var workId = $"task-1.1_{Guid.NewGuid():N}";
+        var taskRunId = "task-1.1";
+        var resolver = new StubWorkContextResolver();
+        resolver.Register(workflowRunId, workId, taskRunId);
+        var service = BuildService(resolver);
+
+        var envelopeJson = "{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"size\":1,\"data\":\"YQ==\"}]}";
+        var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
+        var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+        {
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            Path = "specs",
+            ContentType = "application/x-mohist-artifact-directory",
+            ContentHash = "sha256:mismatch",
+            Size = envelopeBytes.LongLength + 100,
+            OpenContent = () => new MemoryStream(envelopeBytes, writable: false),
+        });
+
+        Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        Assert.Contains("mismatch", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task BindAsync_DirectoryPendingUpload_BindsAsDirectoryKind()
     {

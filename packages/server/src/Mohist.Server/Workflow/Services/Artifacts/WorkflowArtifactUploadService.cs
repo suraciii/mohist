@@ -268,6 +268,21 @@ public sealed class WorkflowArtifactUploadService
                     IncomingContentHash: request.ContentHash));
             }
         }
+        catch (InvalidDataException ex)
+        {
+            // Malformed directory envelope (bad JSON, size mismatch,
+            // invalid base64, ...). Surface as a client-visible 400 so
+            // the runner gets a diagnosable error instead of a 500.
+            SafeRemoveStorageDirectory(storagePath);
+            return WorkflowArtifactUploadResult.Invalid(ex.Message);
+        }
+        catch (WorkflowArtifactStorageException ex)
+        {
+            // Storage rejected the content (limit breach, path
+            // traversal, duplicate entry, ...). Same: surface as 400.
+            SafeRemoveStorageDirectory(storagePath);
+            return WorkflowArtifactUploadResult.Invalid(ex.Message);
+        }
         catch
         {
             SafeRemoveStorageDirectory(storagePath);

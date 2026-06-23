@@ -248,6 +248,37 @@ public class WorkflowArtifactUploadRouteSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
+    public async Task UploadEndpoint_MalformedDirectoryEnvelopeReturnsBadRequest()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            // A directory upload whose envelope is not valid JSON must
+            // surface as a diagnosable 400 (with an error message) and
+            // never an opaque 500.
+            var envelope = Encoding.UTF8.GetBytes("not-valid-json");
+            using var form = BuildMultipart(
+                "specs", envelope,
+                "application/x-mohist-artifact-directory",
+                "sha256:bad", envelope.LongLength);
+
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(string.IsNullOrEmpty(body.GetProperty("error").GetString()));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
     public async Task AgentJobUploadEndpoint_AcceptsMultipartForRunningJob()
     {
         var jobId = $"agent-job-upload-{Guid.NewGuid():N}";
