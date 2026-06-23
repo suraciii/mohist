@@ -1,5 +1,0 @@
-Section: agent
-Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens.
-After: page title is rendered by SettingsSection as h3 "Coder Agent Runtime".
-After: detected 1 CardSection-style rounded-lg border containers in the rendered snapshot.
-Diff verdict: expected visual contract migration observed in deterministic rendered artifact.

@@ -1,7 +1,0 @@
-# Ralph Progress Log
-Started: 2026-04-10T05:22:30.501Z
-
----
-
-
-[2026-04-10] T-001: Replaced runAcpOneshot with runAcpSession in executeCoderTask (spawn-coder.ts:78). npm run build passes. No issues encountered.

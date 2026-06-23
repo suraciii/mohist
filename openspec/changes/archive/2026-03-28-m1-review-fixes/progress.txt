@@ -1,8 +1,0 @@
-[2026-03-28T08:10:00Z] T-001: Fixed type safety - replaced 'blocked' as any with IssueStatus.Blocked in api/issues.ts:354, added IssueStatus to import.
-[2026-03-28T08:10:00Z] T-002: Fixed brand residual - replaced 'crawlph' with 'mo' in api/status.ts:41.
-[2026-03-28T08:10:00Z] T-003: Added M1_ALLOWED_TRANSITIONS whitelist map in tools/advance-stage.ts. Tool description updated to only list M1 transitions. Added edge case handling for issues in unsupported stages (e.g. waiting-design-review).
-[2026-03-28T08:10:00Z] T-004: Built buildLlmConfig() in server/index.ts that dynamically extracts providerID from model string to read correct baseURL key. Threaded llmConfig through createIssueRoutes → start endpoint → runMainAgent → resolveModel. MainAgentContext already had llmConfig field so no agent-runtime changes needed.
-[2026-03-28T08:10:00Z] T-005: Replaced pause endpoint body with 501 response explaining M1 limitation. Removed activeAgentPromise/activeAgentIssueId clearing.
-[2026-03-28T08:10:00Z] T-006: Added maybeTruncate() in tools/spawn-agent.ts with 8000 char threshold (3000 head + 5000 tail). Applied only on success path.
-[2026-03-28T08:10:00Z] Design review corrections applied: (1) Fixed T-004 prd notes to use dynamic providerID instead of hardcoded 'anthropic'. (2) Updated design.md D3 accordingly. (3) Created missing specs/http-api/spec.md with 3 requirements for T-001, T-002, T-005.
-[2026-03-28T08:10:00Z] Build: npm run build passes cleanly. 4 pre-existing test failures (2 pause tests expecting 200, 2 start tests expecting taskId) are expected - they test old 6-stage task-based workflow, not the new M1 agent architecture. These tests need rewriting in T-010/T-011.

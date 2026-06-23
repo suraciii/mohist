@@ -1,1 +1,0 @@
-Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens.

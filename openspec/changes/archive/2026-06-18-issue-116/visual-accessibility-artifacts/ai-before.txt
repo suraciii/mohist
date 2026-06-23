@@ -1,1 +1,0 @@
-Before: External Coder Agent used a hand-rolled rounded-md border bg-muted card and local h3 page title.

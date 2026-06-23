@@ -1,6 +1,0 @@
-{
-  "private": true,
-  "scripts": {
-    "health:check": "npm --prefix ../../../packages/cli run health:check"
-  }
-}

@@ -1,5 +1,0 @@
-Section: repositories
-Before: Repository rows used rounded-lg border bg-card/50 and included hardcoded text-gray-500.
-After: page title is rendered by SettingsSection as h3 "Repositories".
-After: detected 3 CardSection-style rounded-lg border containers in the rendered snapshot.
-Diff verdict: expected visual contract migration observed in deterministic rendered artifact.

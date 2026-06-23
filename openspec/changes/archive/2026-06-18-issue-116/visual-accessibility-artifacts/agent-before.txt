@@ -1,1 +1,0 @@
-Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens.
