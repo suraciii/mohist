@@ -36,6 +36,15 @@ public sealed partial class Issue
         ReplaceLabels(labels, recordEvent: true, now: now);
     }
 
+    public void ClearLabels(DateTime? now = null)
+    {
+        if (_labels.Count == 0) return;
+        var snapshot = SnapshotLabels();
+        _labels = new Dictionary<string, string>(StringComparer.Ordinal);
+        Touch(now);
+        RecordLabelsChangeIfDifferent(snapshot);
+    }
+
     public bool LabelsMatch(IReadOnlyDictionary<string, string>? labels)
     {
         var next = new Dictionary<string, string>(StringComparer.Ordinal);

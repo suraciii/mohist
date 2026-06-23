@@ -116,6 +116,89 @@ public sealed class AttachmentService
         CancellationToken cancellationToken = default) =>
         await BindAsync(projectId, OwnerKindIssue, issueId, attachmentIds, cancellationToken).ConfigureAwait(false);
 
+    /// <summary>
+    /// Unbinds every attachment currently owned by the given issue. Used by
+    /// the PATCH path when <c>attachmentIds</c> is present-and-null, which is
+    /// the "clear all" three-state case (<c>absent</c> means keep; <c>null</c>
+    /// means clear; <c>value</c> means replace).
+    /// </summary>
+    public async Task UnbindAllIssueAsync(
+        string projectId,
+        string issueId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Attachments.Where(a =>
+                a.ProjectId == projectId
+                && a.OwnerKind == OwnerKindIssue
+                && a.OwnerId == issueId)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        if (rows.Count == 0) return;
+
+        foreach (var row in rows)
+        {
+            row.OwnerKind = null;
+            row.OwnerId = null;
+            row.ExpiresAt = _time.GetUtcNow().Add(PendingTtl);
+        }
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Replaces every attachment currently owned by the issue with the given
+    /// list. The PATCH path uses this when <c>attachmentIds</c> is present
+    /// with a value (replace semantics). The combined limit is checked
+    /// against the new list size (not the prior size), so this path requires
+    /// the caller to have already validated the new list length.
+    /// </summary>
+    public async Task ReplaceIssueAsync(
+        string projectId,
+        string issueId,
+        IReadOnlyCollection<string> attachmentIds,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = await ValidateBindAsync(projectId, OwnerKindIssue, issueId, attachmentIds, cancellationToken).ConfigureAwait(false);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        if (ids.Length > 0)
+        {
+            var rows = await db.Attachments.Where(a =>
+                    a.ProjectId == projectId
+                    && ids.Contains(a.Id))
+                .ToListAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                row.OwnerKind = OwnerKindIssue;
+                row.OwnerId = issueId;
+                row.ExpiresAt = null;
+            }
+        }
+
+        // Unbind anything previously bound to the issue that is no longer in
+        // the new list, so that present-with-value behaves as a full replace.
+        var keepSet = ids.Length == 0
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : new HashSet<string>(ids, StringComparer.Ordinal);
+        var stale = await db.Attachments
+            .Where(a => a.ProjectId == projectId
+                && a.OwnerKind == OwnerKindIssue
+                && a.OwnerId == issueId
+                && !keepSet.Contains(a.Id))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        if (stale.Count > 0)
+        {
+            var pendingExpiry = _time.GetUtcNow().Add(PendingTtl);
+            foreach (var row in stale)
+            {
+                row.OwnerKind = null;
+                row.OwnerId = null;
+                row.ExpiresAt = pendingExpiry;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task ValidateIssueBindAsync(
         string projectId,
         string issueId,
@@ -176,7 +259,17 @@ public sealed class AttachmentService
         if (row is null) return AttachmentRemovalResult.NotFound;
 
         var updatedBody = StripReferences(issue.Body, attachmentId);
-        await grain.UpdateFullAsync(new UpdateIssueData(issue.Title, updatedBody, issue.Labels, issue.Priority, AttachmentIds: []));
+        await grain.UpdateFullAsync(new UpdateIssueData(
+            Title: issue.Title,
+            Body: updatedBody,
+            Labels: issue.Labels,
+            Priority: issue.Priority,
+            AttachmentIds: [],
+            PresentFields: new HashSet<string>(StringComparer.Ordinal)
+            {
+                nameof(UpdateIssueData.Body),
+                nameof(UpdateIssueData.AttachmentIds),
+            }));
         DeleteStoredContent(row.StoragePath);
         db.Attachments.Remove(row);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

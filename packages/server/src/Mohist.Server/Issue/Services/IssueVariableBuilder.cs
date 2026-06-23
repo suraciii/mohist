@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -91,6 +92,131 @@ public static class IssueVariableBuilder
             Path: Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.IssueWorkspacePath(runnerRoot, project.Name, issue.Number),
             Branch: WorkflowRunBranch.For(workflowRunId),
             ChangeDir: changeDir);
+    }
+
+    /// <summary>
+    /// Builds a <see cref="VariableBundle"/> patch that writes the user-supplied
+    /// model metadata into the issue profile's Variables JSON. Used by PATCH
+    /// (and create) to persist <c>model</c>, <c>agentConfig</c>,
+    /// <c>stageModels</c>, and <c>stageModelVariants</c> on the workflow profile
+    /// path. The resulting bundle is fed to
+    /// <see cref="Workflow.Services.IssueWorkflowProfileManager.PatchVariablesAsync"/>,
+    /// so each provided key overlays the existing variables via deep merge —
+    /// absent keys stay untouched.
+    /// </summary>
+    /// <remarks>
+    /// <para>Storage layout (matches <c>ApplyIssueWorkflowVariables</c> read path):</para>
+    /// <list type="bullet">
+    ///   <item><c>model</c>                -> <c>vars.agent.model</c></item>
+    ///   <item><c>agentConfig</c>          -> <c>vars.agent</c> (deep merge)</item>
+    ///   <item><c>stageModels</c>          -> <c>stages.&lt;stage&gt;.vars.agent.model</c></item>
+    ///   <item><c>stageModelVariants</c>   -> <c>stages.&lt;stage&gt;.vars.agent.variant</c></item>
+    /// </list>
+    /// </remarks>
+    public static VariableBundle BuildModelMetadataPatch(
+        string? model,
+        Dictionary<string, object?>? agentConfig,
+        Dictionary<string, string>? stageModels,
+        Dictionary<string, string>? stageModelVariants)
+    {
+        var hasRoot = model is not null || agentConfig is not null;
+        var hasStages = stageModels is not null || stageModelVariants is not null;
+        if (!hasRoot && !hasStages) return VariableBundle.Empty;
+
+        var rootVars = hasRoot ? new Dictionary<string, JsonElement?>(StringComparer.Ordinal) : null;
+        if (rootVars is not null)
+        {
+            // Read-back path expects vars.agent.model, not vars.model — so the
+            // "model" key is merged into the same agent object as agentConfig.
+            var rootAgent = new Dictionary<string, object?>(StringComparer.Ordinal);
+            if (agentConfig is not null)
+            {
+                foreach (var (k, v) in agentConfig)
+                    rootAgent[k] = v;
+            }
+            if (model is not null)
+                rootAgent["model"] = model;
+
+            if (rootAgent.Count > 0)
+                rootVars["agent"] = JsonSerializer.SerializeToElement(rootAgent, WorkflowVariableJson.Options);
+        }
+
+        Dictionary<string, StageVariables>? stages = null;
+        if (hasStages)
+        {
+            stages = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
+            if (stageModels is not null)
+            {
+                foreach (var (stage, stageModel) in stageModels)
+                {
+                    if (string.IsNullOrWhiteSpace(stage)) continue;
+                    var stageDict = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["agent"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                        {
+                            ["model"] = stageModel,
+                        },
+                    };
+                    stages[stage] = new StageVariables(JsonSerializer.SerializeToElement(stageDict, WorkflowVariableJson.Options));
+                }
+            }
+            if (stageModelVariants is not null)
+            {
+                foreach (var (stage, variant) in stageModelVariants)
+                {
+                    if (string.IsNullOrWhiteSpace(stage)) continue;
+                    var stageAgent = new Dictionary<string, object?>(StringComparer.Ordinal);
+                    var existing = stages.TryGetValue(stage, out var existingStage) && existingStage.Vars.HasValue
+                        ? TryReadAgentFromStage(existingStage.Vars.Value)
+                        : null;
+                    if (existing is not null)
+                    {
+                        foreach (var (k, v) in existing) stageAgent[k] = v;
+                    }
+                    stageAgent["variant"] = variant;
+
+                    var stageDict = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["agent"] = stageAgent,
+                    };
+                    stages[stage] = new StageVariables(JsonSerializer.SerializeToElement(stageDict, WorkflowVariableJson.Options));
+                }
+            }
+        }
+
+        var rootElement = rootVars is null
+            ? (JsonElement?)null
+            : JsonSerializer.SerializeToElement(rootVars, WorkflowVariableJson.Options);
+        return new VariableBundle(rootElement, stages);
+    }
+
+    private static StageVariables GetOrCreateStageVars(Dictionary<string, StageVariables> stages, string stage)
+    {
+        if (stages.TryGetValue(stage, out var existing)) return existing;
+        return new StageVariables(null);
+    }
+
+    private static Dictionary<string, object?> ReadStageVarsDict(StageVariables stageVars)
+    {
+        if (!stageVars.Vars.HasValue || stageVars.Vars.Value.ValueKind != JsonValueKind.Object)
+            return new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            stageVars.Vars.Value.GetRawText(),
+            WorkflowVariableJson.Options);
+        return dict is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(dict, StringComparer.Ordinal);
+    }
+
+    private static Dictionary<string, object?>? TryReadAgentFromStage(JsonElement stageVarsElement)
+    {
+        if (stageVarsElement.ValueKind != JsonValueKind.Object) return null;
+        if (!stageVarsElement.TryGetProperty("agent", out var agentElement) || agentElement.ValueKind != JsonValueKind.Object)
+            return null;
+        return JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            agentElement.GetRawText(),
+            WorkflowVariableJson.Options);
     }
 
     private static VariableBundle BuildBuiltInContext(

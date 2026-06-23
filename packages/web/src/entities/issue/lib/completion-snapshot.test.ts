@@ -222,7 +222,8 @@ describe('deriveCompletionSnapshot', () => {
 
 describe('useCompletionSnapshot', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ now: new Date(NOW) })
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW))
   })
 
   afterEach(() => {

@@ -114,18 +114,28 @@ public static partial class IssueRoutes
         {
             var project = GetRequiredProject(ctx);
 
-            if (TryValidateLabels(req.Labels, out var labelError) is false)
+            if (req.Contains(nameof(UpdateIssueRequest.Labels))
+                && TryValidateLabels(req.Labels, out var labelError) is false)
                 return ApiResults.BadRequest(labelError!, "invalid_label");
 
             if (TryValidateModelMetadata(req, out var modelError) is false)
                 return ApiResults.BadRequest(modelError!, "invalid_model_metadata");
+
+            if (TryValidateModelMetadataRawTypes(req.Raw, out var rawTypeError) is false)
+                return ApiResults.BadRequest(rawTypeError!, "invalid_model_metadata");
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
-                    req.Title, req.Body, req.Labels, req.Priority, req.IsDraft, req.AttachmentIds));
+                    Title: req.Title,
+                    Body: req.Body,
+                    Labels: req.Labels,
+                    Priority: req.Priority,
+                    IsDraft: req.IsDraft,
+                    AttachmentIds: req.AttachmentIds,
+                    PresentFields: req.Fields));
             }
             catch (InvalidOperationException ex)
             {
@@ -209,6 +219,53 @@ public static partial class IssueRoutes
         return error is null;
     }
 
+    private static bool TryValidateModelMetadataRawTypes(JsonElement rawPatch, out string? error)
+    {
+        if (TryValidateStringFieldType(rawPatch, "model", out error) is false)
+            return false;
+        if (TryValidateStringFieldType(rawPatch, "modelVariant", out error) is false)
+            return false;
+        if (TryValidateStringMapFieldType(rawPatch, "stageModels", out error) is false)
+            return false;
+        if (TryValidateStringMapFieldType(rawPatch, "stageModelVariants", out error) is false)
+            return false;
+        error = null;
+        return true;
+    }
+
+    private static bool TryValidateStringFieldType(JsonElement raw, string name, out string? error)
+    {
+        error = null;
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty(name, out var el))
+            return true;
+        if (el.ValueKind is JsonValueKind.Null or JsonValueKind.String)
+            return true;
+        error = $"{name} must be a string or null";
+        return false;
+    }
+
+    private static bool TryValidateStringMapFieldType(JsonElement raw, string name, out string? error)
+    {
+        error = null;
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty(name, out var el))
+            return true;
+        if (el.ValueKind == JsonValueKind.Null)
+            return true;
+        if (el.ValueKind != JsonValueKind.Object)
+        {
+            error = $"{name} must be an object or null";
+            return false;
+        }
+        foreach (var prop in el.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.String)
+                continue;
+            error = $"{name}.{prop.Name} must be a string";
+            return false;
+        }
+        return true;
+    }
+
     private static async Task<string?> ResolveIssueIdAsync(
         IssueIdentityResolver resolver,
         string projectId,
@@ -283,7 +340,7 @@ public static partial class IssueRoutes
             JsonValueKind.String when string.IsNullOrWhiteSpace(el.GetString())
                 => IssueModelMetadata.FieldPatch<string>.Clear,
             JsonValueKind.String => IssueModelMetadata.FieldPatch<string>.Set(el.GetString()!),
-            _ => IssueModelMetadata.FieldPatch<string>.Clear, // unexpected type → treat as clear
+            _ => IssueModelMetadata.FieldPatch<string>.Absent,
         };
     }
 
@@ -299,7 +356,7 @@ public static partial class IssueRoutes
             return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Clear;
 
         if (el.ValueKind != JsonValueKind.Object)
-            return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Clear;
+            return IssueModelMetadata.FieldPatch<IReadOnlyDictionary<string, string>>.Absent;
 
         // Preserve raw JSON order — the helper reads keys via TryGetValue and
         // does not depend on order, but tests expect the order the caller sent.

@@ -219,6 +219,33 @@ public class IssueModelVariantApiSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData("{\"model\":123}")]
+    [InlineData("{\"modelVariant\":false}")]
+    [InlineData("{\"stageModels\":[]}")]
+    [InlineData("{\"stageModels\":{\"plan\":123}}")]
+    [InlineData("{\"stageModelVariants\":[]}")]
+    [InlineData("{\"stageModelVariants\":{\"plan\":true}}")]
+    public async Task PatchIssue_WithWrongTypeModelMetadata_ReturnsBadRequest(string patchJson)
+    {
+        var projectId = await CreateProjectAsync("variant-type-invalid");
+        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
+            $"/api/projects/{projectId}/issues",
+            new { title = "Wrong type patch" });
+
+        var number = issue.GetProperty("number").GetInt32();
+
+        using var response = await _fixture.Client.PatchAsync(
+            $"/api/projects/{projectId}/issues/{number}",
+            new StringContent(patchJson, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_model_metadata", payload.GetProperty("code").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task CreateIssue_WithInvalidStageModelFormat_ReturnsBadRequest()
     {
