@@ -1,5 +1,6 @@
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
+import { stringAt } from "../core/json-path.js"
 import { runCommand } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 
@@ -560,14 +561,6 @@ export function extractIssueNumberFromMessage(message: string): string | null {
 
 function combinedGhOutput(result: { stdout: string; stderr: string }): string {
   return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
-}
-
-function stringAt(value: unknown, path: string[]): string | undefined {
-  const found = path.reduce<unknown>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return (current as Record<string, unknown>)[part]
-  }, value)
-  return typeof found === "string" ? found : undefined
 }
 
 function resolveIssueNumber(context: ActionContext): number | null {

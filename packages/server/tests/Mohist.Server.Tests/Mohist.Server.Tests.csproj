@@ -18,6 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="System.Net.Http.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
   </ItemGroup>

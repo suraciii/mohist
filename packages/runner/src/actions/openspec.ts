@@ -352,5 +352,5 @@ async function hasFiles(directory: string): Promise<boolean> {
 function relativePath(workDir: string, path: string) {
   const relativeToWorkDir = relative(workDir, path)
   if (!relativeToWorkDir || relativeToWorkDir.startsWith("..") || isAbsolute(relativeToWorkDir)) return path
-  return relativeToWorkDir
+  return relativeToWorkDir.replace(/\\/g, "/")
 }

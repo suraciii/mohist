@@ -104,6 +104,14 @@ public class WorkflowProfileManager
         return VariableBundle.MergeAll(global, project, issue, run);
     }
 
+    public async Task<VariableBundle> ResolveEffectiveVariablesAsync(string runId)
+    {
+        var template = await LoadTemplateAsync(runId);
+        var independent = await LoadVariablesAsync(runId);
+        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
+        return VariableBundle.Patch(embedded, independent);
+    }
+
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)
     {
         var workflowRun = await db.WorkflowRuns.AsNoTracking()

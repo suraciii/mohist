@@ -5,5 +5,6 @@ export default defineConfig({
     testTimeout: 10_000,
     hookTimeout: 10_000,
     forceExit: true,
+    pool: "forks",
   },
 })

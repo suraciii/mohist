@@ -2,6 +2,7 @@ import { rm, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import type { ActionContext, ActionResult, JsonObject, JsonValue, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
+import { stringAt } from "../core/json-path.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir, runCommand } from "../system/process.js"
 import { runnerVariables, WorkspaceBranchMismatchError, WorkspaceCorruptError, WorkspaceIdentityMismatchError, WorkspaceManager, WorkspaceMissingError } from "./workspace.js"
@@ -652,14 +653,6 @@ function toCheckStatus(status: string) {
 
 function isCheck(value: unknown): value is { name?: string; title?: string; uses: string; with?: JsonObject | null } {
   return typeof value === "object" && value !== null && "uses" in value && typeof (value as { uses?: unknown }).uses === "string"
-}
-
-function stringAt(value: JsonObject, path: string[]) {
-  const found = path.reduce<unknown>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return (current as JsonObject)[part]
-  }, value)
-  return typeof found === "string" ? found : undefined
 }
 
 function resolveWorkspacePath(workspaceRoot: string, requested: string) {

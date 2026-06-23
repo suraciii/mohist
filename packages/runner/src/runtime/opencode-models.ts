@@ -9,6 +9,14 @@ const CACHE_TTL_MS = 30 * 60 * 1000
 
 let cached: { result: DiscoveredOpencodeModels; fetchedAt: number } | null = null
 
+type ModelsCommandRunner = (command: string, args: string[], signal: AbortSignal) => Promise<string>
+
+let runModelsCommand: ModelsCommandRunner = execFileText
+
+export function setModelsCommandRunnerForTest(runner: ModelsCommandRunner | null): void {
+  runModelsCommand = runner ?? execFileText
+}
+
 export async function discoverOpencodeModels(signal: AbortSignal): Promise<DiscoveredOpencodeModels> {
   const now = Date.now()
   if (cached !== null && now - cached.fetchedAt < CACHE_TTL_MS) {
@@ -19,7 +27,7 @@ export async function discoverOpencodeModels(signal: AbortSignal): Promise<Disco
 
   let result: DiscoveredOpencodeModels
   try {
-    const stdout = await execFileText(command, ["models", "--verbose"], signal)
+    const stdout = await runModelsCommand(command, ["models", "--verbose"], signal)
     result = parseOpencodeModelsVerbose(stdout)
   } catch (error) {
     console.error("failed to discover opencode models", error)

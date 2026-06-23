@@ -1,5 +1,6 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { stringInput } from "../core/json.js"
+import { stringAt } from "../core/json-path.js"
 import { git as defaultGit } from "./git.js"
 
 type GitRunner = typeof defaultGit
@@ -95,12 +96,4 @@ function looksLikeNonFastForward(text: string) {
   // explicit "non-fast-forward" / "fetch first" hint.
   return /non[-\s]?fast-forward|fetch first/i.test(text)
     || /!\s*\[rejected\][^\n]*\((stale info|stale|fetch first|non[-\s]?fast-forward|behind[^\)]*)\)/i.test(text)
-}
-
-function stringAt(value: unknown, path: string[]): string | undefined {
-  const found = path.reduce<unknown>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return (current as Record<string, unknown>)[part]
-  }, value)
-  return typeof found === "string" ? found : undefined
 }
