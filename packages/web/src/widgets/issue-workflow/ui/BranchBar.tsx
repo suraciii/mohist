@@ -51,10 +51,11 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const branch = data.branch ?? 'workspace'
   const baseBranch = data.baseBranch ?? 'master'
   const isDone = stage === WorkflowStage.Done
+  const isUpstreamUnknown = data.reason === 'fetch_failed'
 
   if (isRebasing) {
     return (
-      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
         <div className="flex items-center gap-3">
           <svg className="h-4 w-4 animate-spin text-blue-600" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -62,6 +63,31 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
           </svg>
           <span className="text-sm font-medium text-blue-800">{isConflictResolving ? 'Resolving conflicts...' : 'Rebasing...'}</span>
           <span className="text-xs text-blue-600 font-mono">{branch}</span>
+        </div>
+        {hasConflicts && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            <span>Conflicting files:</span>
+            <ul className="mt-1 ml-3 list-disc">
+              {hasConflicts.map((f) => (
+                <li key={f} className="font-mono">{f}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (isUpstreamUnknown) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
+            <span className="text-xs text-muted-foreground shrink-0">onto</span>
+            <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
+          </div>
+          <span className="text-xs font-medium text-muted-foreground shrink-0">未能检查上游</span>
         </div>
       </div>
     )

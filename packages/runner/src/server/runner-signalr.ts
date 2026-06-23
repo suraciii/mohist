@@ -1,13 +1,24 @@
-import { existsSync } from "node:fs"
+import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import type { JsonObject, WorkItem } from "../core/types.js"
-import { deleteDirectory, runCommand } from "../system/process.js"
+import { deleteDirectory, runCommand as defaultRunCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
 
 export interface RunnerSignalRClientOptions {
   probeTimeoutMs?: number
   onReconnected?: (connectionId: string) => void
+}
+
+let runGitCommand: typeof defaultRunCommand = defaultRunCommand
+let pathExists: typeof defaultExistsSync = defaultExistsSync
+
+export function setRunnerSignalRGitRunnerForTest(runner: typeof defaultRunCommand | null) {
+  runGitCommand = runner ?? defaultRunCommand
+}
+
+export function setRunnerSignalRExistsCheckerForTest(checker: typeof defaultExistsSync | null) {
+  pathExists = checker ?? defaultExistsSync
 }
 
 export class RunnerSignalRClient {
@@ -192,11 +203,6 @@ export class RunnerSignalRClient {
       const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
       if (branchExists.exitCode !== 0) return { exists: false }
 
-      const fetchResult = await git(workspace.workDir, ["fetch", "origin", workspace.baseBranch], ac.signal)
-      if (fetchResult.exitCode !== 0) return { exists: false, reason: "fetch_failed" }
-      const remoteRef = `origin/${workspace.baseBranch}`
-      const aheadBehindResult = await git(workspace.workDir, ["rev-list", "--left-right", "--count", `${remoteRef}...${workspace.head}`], ac.signal)
-      const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
       const rebaseResult = await git(workspace.workDir, ["rebase", "--show-current-patch"], ac.signal)
       const rebaseInProgress = rebaseResult.exitCode === 0
 
@@ -206,7 +212,14 @@ export class RunnerSignalRClient {
         conflictingFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
       }
 
-      return { exists: true, branch: workspace.head, baseBranch: workspace.baseBranch, ahead, behind, rebaseInProgress, conflictingFiles }
+      const baseStatus = { exists: true, branch: workspace.head, baseBranch: workspace.baseBranch, rebaseInProgress, conflictingFiles }
+      const fetchResult = await git(workspace.workDir, ["fetch", "origin", workspace.baseBranch], ac.signal)
+      if (fetchResult.exitCode !== 0) return { ...baseStatus, reason: "fetch_failed" }
+      const remoteRef = `origin/${workspace.baseBranch}`
+      const aheadBehindResult = await git(workspace.workDir, ["rev-list", "--left-right", "--count", `${remoteRef}...${workspace.head}`], ac.signal)
+      const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
+
+      return { ...baseStatus, ahead, behind }
     })
 
     this.connection.on("GetFileContent", async (query: WorkspaceQuery, path: string) => {
@@ -230,7 +243,7 @@ export class RunnerSignalRClient {
     this.connection.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
       if (!query?.workspacePath) return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
       const workspacePath = resolve(query.workspacePath)
-      if (!existsSync(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+      if (!pathExists(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
       if (!isUnderRunnerRoot(this.runnerRoot, workspacePath)) {
         return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
       }
@@ -250,7 +263,7 @@ export class RunnerSignalRClient {
 }
 
 async function git(workDir: string, args: string[], signal: AbortSignal) {
-  return runCommand("git", args, workDir, signal)
+  return runGitCommand("git", args, workDir, signal)
 }
 
 export interface WorkspaceQuery {
@@ -320,7 +333,7 @@ function readNullableNumber(source: Record<string, unknown>, field: string): num
 }
 
 async function isGitWorkTree(workDir: string, signal: AbortSignal): Promise<boolean> {
-  if (!existsSync(workDir)) return false
+  if (!pathExists(workDir)) return false
   const result = await git(workDir, ["rev-parse", "--is-inside-work-tree"], signal)
   return result.exitCode === 0 && result.stdout.trim() === "true"
 }

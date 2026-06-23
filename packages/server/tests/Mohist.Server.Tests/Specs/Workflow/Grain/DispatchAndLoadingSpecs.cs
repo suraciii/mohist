@@ -408,6 +408,61 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task AddTaskAsync_InsertsAsNextTaskBeforeExistingPendingTask()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [
+                new("task-1", "Task 1", "spec/task"),
+                new("task-2", "Task 2", "spec/task")
+            ],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var (task1, runnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-1.", task1.WorkId);
+        await ReportAsync(runnerId, task1.WorkId, "completed");
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
+
+        var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("rebase.", rebase.WorkId);
+        await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
+
+        var (task2, task2RunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-2.", task2.WorkId);
+        await ReportAsync(task2RunnerId, task2.WorkId, "completed");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task AddTaskAsync_WhenTaskIsRunning_InsertsAfterRunningTaskBeforeOtherPendingTasks()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [
+                new("task-1", "Task 1", "spec/task"),
+                new("task-2", "Task 2", "spec/task")
+            ],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var (task1, runnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-1.", task1.WorkId);
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
+
+        await ReportAsync(runnerId, task1.WorkId, "completed");
+
+        var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("rebase.", rebase.WorkId);
+        await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
+
+        var (task2, task2RunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-2.", task2.WorkId);
+        await ReportAsync(task2RunnerId, task2.WorkId, "completed");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task RuntimeTaskWithInvalidateChecks_ReopensStageChecks()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
