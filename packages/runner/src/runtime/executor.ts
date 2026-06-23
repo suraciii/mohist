@@ -19,6 +19,7 @@ import {
   uploadCapturedArtifacts,
 } from "./artifact-capture.js"
 import { extractSetVars } from "./set-vars.js"
+import { captureOutputs } from "./output-capture.js"
 import {
   buildCleanupWith,
   isAgentBackedTask,
@@ -151,7 +152,8 @@ export class WorkExecutor {
       }
       const withEvidence = attachBranchStabilityEvidence(worktreeResult, evidenceStack)
       const finalResult = await this.captureAndUploadArtifacts(work, workspaceRoot, workDir, withEvidence, result, variables, signal)
-      return await this.applySetVars(work, finalResult, signal)
+      const withCapturedOutputs = this.captureDeclaredOutputs(work, finalResult, result)
+      return await this.applySetVars(work, withCapturedOutputs, signal)
     } catch (error) {
       if (error instanceof WorktreeProbeError) {
         return worktreeProbeFailure(work, error)
@@ -552,6 +554,12 @@ export class WorkExecutor {
       }
     }
     return result
+  }
+
+  private captureDeclaredOutputs(work: WorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
+    if (result.status !== "completed") return result
+    const capturedOutputs = captureOutputs(work.outputs, actionResult)
+    return capturedOutputs ? { ...result, capturedOutputs } : result
   }
 }
 

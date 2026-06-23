@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { isUnderRunnerRoot, normalizeMaterializePayload, resolveWorkspaceQuery, RunnerSignalRClient, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { isUnderRunnerRoot, normalizeMaterializePayload, resolveWorkspaceQuery, RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { CommandResult } from "../src/system/process.js"
 
 interface CapturedBuilder {
   url?: string
-  handlers: Array<() => void>
+  handlers: Map<string, (...args: unknown[]) => unknown>
   connection: FakeConnection
 }
 
@@ -70,7 +70,7 @@ vi.mock("@microsoft/signalr", () => {
   return {
     HubConnectionBuilder: class {
       private _url?: string
-      private _handlers: Array<() => void> = []
+      private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
       private _connection: FakeConnection = makeFakeConnection()
       withUrl(url: string) {
         this._url = url
@@ -81,6 +81,10 @@ vi.mock("@microsoft/signalr", () => {
         return this
       }
       build() {
+        this._connection.on.mockImplementation((evt: string, h: (...args: unknown[]) => unknown) => {
+          this._handlers.set(evt, h)
+          return this._connection
+        })
         return this._connection as unknown as signalR.HubConnection
       }
     },
@@ -93,6 +97,12 @@ vi.mock("@microsoft/signalr", () => {
     },
   }
 })
+
+function lastBuilder(): CapturedBuilder {
+  const builder = builders.at(-1)
+  if (!builder) throw new Error("no captured builder; construct a RunnerSignalRClient first")
+  return builder
+}
 
 describe("RunnerSignalRClient workspace queries", () => {
   it("WorkspaceQuery_UsesExplicitWorkspaceAndBaseBranch", () => {
@@ -494,5 +504,303 @@ describe("normalizeMaterializePayload", () => {
     expect(() => normalizeMaterializePayload(null)).toThrow()
     expect(() => normalizeMaterializePayload("not-an-object")).toThrow()
     expect(() => normalizeMaterializePayload([])).toThrow()
+  })
+})
+
+type AnyFn = (...args: any[]) => any
+
+interface MockServerConnection {
+  workflowAgentSessionRuntimeEvents: AnyFn
+}
+
+interface MockConnection {
+  prompt: AnyFn
+}
+
+function buildClient(opts: {
+  resolver?: AnyFn | null
+  serverConnection?: MockServerConnection | null
+}) {
+  builders.length = 0
+  const defaultServerConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: vi.fn(async () => undefined) }
+  const serverConnection = opts.serverConnection === undefined ? defaultServerConnection : opts.serverConnection
+  const resolver = opts.resolver === undefined ? null : opts.resolver
+  const client = new RunnerSignalRClient(
+    "http://localhost:3456",
+    "runner-1",
+    "/tmp/mohist/projects",
+    null,
+    {
+      serverConnection: serverConnection as never,
+      followupTargetResolver: resolver as never,
+    },
+  )
+  return client
+}
+
+function emitFollowup(builder: CapturedBuilder, payload: ReceiveFollowupPayload | null | undefined) {
+  const handler = builder.handlers.get("ReceiveFollowup")
+  if (!handler) throw new Error("ReceiveFollowup handler was not registered")
+  handler(payload)
+}
+
+async function flush() {
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+describe("RunnerSignalRClient ReceiveFollowup handler", () => {
+  it("Followup_FireAndForgetPromptCallsConnectionPromptWithoutAwait", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "add a logout button" })
+    await flush()
+
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledWith({
+      sessionId: "acp-1",
+      prompt: [{ type: "text", text: "add a logout button" }],
+    })
+  })
+
+  it("Followup_ReturnsImmediatelyWithoutAwaitingPromptResolution", async () => {
+    let resolvePrompt!: (value: unknown) => void
+    const prompt = vi.fn(() => new Promise((resolve) => { resolvePrompt = resolve }))
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship it" })
+    await flush()
+    expect(prompt).toHaveBeenCalledTimes(1)
+    resolvePrompt(undefined)
+    await flush()
+  })
+
+  it("Followup_PromptsEvenWhenRuntimeEventsEmitIsStillPending", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(() => new Promise(() => undefined))
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ship while event is pending" })
+    await flush()
+
+    expect(runtimeEvents).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledWith({
+      sessionId: "acp-1",
+      prompt: [{ type: "text", text: "ship while event is pending" }],
+    })
+  })
+
+  it("Followup_EmitsSessionInputEventBeforeCallingPrompt", async () => {
+    const callOrder: string[] = []
+    const prompt = vi.fn(async () => {
+      callOrder.push("prompt")
+    })
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => {
+      callOrder.push("session.input")
+    })
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "fix the typo" })
+    await flush()
+    await flush()
+
+    expect(runtimeEvents).toHaveBeenCalledTimes(1)
+    expect(callOrder).toEqual(["session.input", "prompt"])
+  })
+
+  it("Followup_TagsEventWithPromptKindFollowup", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "tag me" })
+    await flush()
+
+    expect(runtimeEvents).toHaveBeenCalledWith(
+      "proj-1",
+      "wr-1",
+      "work-1",
+      expect.objectContaining({
+        runtimeEvents: [
+          expect.objectContaining({
+            type: "session.input",
+            payload: expect.objectContaining({
+              kind: "followup",
+              text: "tag me",
+              role: "user",
+              acpSessionId: "acp-1",
+              source: "followup",
+            }),
+          }),
+        ],
+      }),
+      expect.any(AbortSignal),
+    )
+  })
+
+  it("Followup_DropsWhenResolverReturnsNullAndDoesNotThrow", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const runtimeEvents = vi.fn(async () => undefined)
+    const resolver = vi.fn(() => null)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ignored" })).not.toThrow()
+    await flush()
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(runtimeEvents).not.toHaveBeenCalled()
+  })
+
+  it("Followup_DropsWhenResolverThrows", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const runtimeEvents = vi.fn(async () => undefined)
+    const resolver = vi.fn(() => { throw new Error("resolver boom") })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "ignored" })).not.toThrow()
+    await flush()
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(runtimeEvents).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it("Followup_CatchesPromptRejectionAndLogsWithoutThrowing", async () => {
+    const prompt = vi.fn(async () => { throw new Error("opencode crashed") })
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    expect(() => emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "boom" })).not.toThrow()
+    await flush()
+    await flush()
+
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenCalledWith("followup connection.prompt rejected:", expect.stringContaining("opencode crashed"))
+    errorSpy.mockRestore()
+  })
+
+  it("Followup_ContinuesToPromptEvenIfRuntimeEventsEmitFails", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => { throw new Error("server unreachable") })
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "keep going" })
+    await flush()
+    await flush()
+
+    expect(runtimeEvents).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenCalledWith("failed to emit followup session.input event:", expect.any(Error))
+    errorSpy.mockRestore()
+  })
+
+  it("Followup_DropsPayloadWhenTextIsMissing", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "" })
+    await flush()
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(runtimeEvents).not.toHaveBeenCalled()
+  })
+
+  it("Followup_DropsPayloadWhenResolverIsNull", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver: null, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
+    await flush()
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(runtimeEvents).not.toHaveBeenCalled()
+  })
+
+  it("Followup_DropsPayloadWhenServerConnectionIsNull", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const resolver = vi.fn(() => ({ connection: { prompt } as never, sessionId: "acp-1", projectId: "proj-1" }))
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, { workflowRunId: "wr-1", sessionName: "work-1", text: "noop" })
+    await flush()
+
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
+  it("Followup_DropsNullOrUndefinedPayload", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const resolver = vi.fn(() => ({ connection: { prompt } as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const runtimeEvents = vi.fn(async () => undefined)
+    const serverConnection: MockServerConnection = { workflowAgentSessionRuntimeEvents: runtimeEvents }
+
+    buildClient({ resolver, serverConnection })
+    const builder = lastBuilder()
+
+    emitFollowup(builder, null)
+    emitFollowup(builder, undefined)
+    await flush()
+
+    expect(prompt).not.toHaveBeenCalled()
+    expect(runtimeEvents).not.toHaveBeenCalled()
   })
 })

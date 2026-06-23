@@ -10,6 +10,7 @@ import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection 
 import { loadBuildInfo } from "./build-info.js"
 import type { WorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
+import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -59,8 +60,22 @@ export class RunnerHost {
       options.runnerId,
       options.runnerRoot,
       this.buildGitHash,
-      { onReconnected: () => this.onDispatchReconnected() },
+      {
+        onReconnected: () => this.onDispatchReconnected(),
+        serverConnection: this.connection,
+        followupTargetResolver: (workflowRunId, sessionName) => this.resolveFollowupTarget(workflowRunId, sessionName),
+      },
     )
+  }
+
+  private resolveFollowupTarget(workflowRunId: string, sessionName: string): { connection: ClientSideConnection; sessionId: string; projectId: string } | null {
+    if (!this.sharedAcpConnection) return null
+    const key = this.sessionManager.key(workflowRunId, sessionName)
+    const entry = this.sessionManager.get(key)
+    if (!entry) return null
+    const projectId = this.options.projectId ?? ""
+    if (!projectId) return null
+    return { connection: this.sharedAcpConnection.connection, sessionId: entry.sessionId, projectId }
   }
 
   async run(signal: AbortSignal) {

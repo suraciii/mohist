@@ -11,6 +11,7 @@ import { useSessionTranscript, projectTurn } from '../../../widgets/session-tran
 import type { AgentSessionMetadata, AgentSessionTranscriptResponse, SessionMetadata, SessionStatusKind, CoderSessionDetail, SessionTurn } from '../../../entities/coder-session'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
 import { SessionRecoveryActions } from '../../../widgets/coder-session'
+import { SessionFollowupComposer } from '../../../widgets/coder-session'
 import { ContextHealthBar } from '../../../widgets/session-health'
 import { Button } from '@/shared/ui/components/button'
 
@@ -730,6 +731,11 @@ export function SessionPage() {
           recoveryBar={recoveryBar}
         />
         <SessionWaitingState />
+        <SessionFollowupComposer
+          issueNumber={issueNumber}
+          sessionName={routeSessionKey}
+          disabled={!isRunning}
+        />
       </div>
     )
   }
@@ -769,6 +775,12 @@ export function SessionPage() {
           isStreaming={isStreaming}
         />
       </div>
+
+      <SessionFollowupComposer
+        issueNumber={issueNumber}
+        sessionName={routeSessionKey}
+        disabled={!isRunning}
+      />
 
       {newContentAvailable && (
         <JumpToBottomButton onClick={handleScrollToBottom} />

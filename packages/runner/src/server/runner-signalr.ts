@@ -1,13 +1,31 @@
 import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
-import type { JsonObject, WorkItem } from "../core/types.js"
+import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import { deleteDirectory, runCommand as defaultRunCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
+import type { JsonObject, WorkItem } from "../core/types.js"
+import type { ServerConnection } from "./connection.js"
+
+export interface FollowupTarget {
+  readonly connection: ClientSideConnection
+  readonly sessionId: string
+  readonly projectId: string
+}
+
+export type FollowupTargetResolver = (workflowRunId: string, sessionName: string) => FollowupTarget | null
+
+export interface ReceiveFollowupPayload {
+  workflowRunId: string
+  sessionName: string
+  text: string
+}
 
 export interface RunnerSignalRClientOptions {
   probeTimeoutMs?: number
   onReconnected?: (connectionId: string) => void
+  serverConnection?: ServerConnection | null
+  followupTargetResolver?: FollowupTargetResolver | null
 }
 
 let runGitCommand: typeof defaultRunCommand = defaultRunCommand
@@ -26,8 +44,16 @@ export class RunnerSignalRClient {
   private readonly workspaceManager: WorkspaceManager
   private readonly probeTimeoutMs: number
   private readonly onReconnected: ((connectionId: string) => void) | undefined
+  private readonly serverConnection: ServerConnection | null
+  private readonly followupTargetResolver: FollowupTargetResolver | null
 
-  constructor(serverUrl: string, runnerId: string, private readonly runnerRoot: string, buildGitHash: string | null = null, options: RunnerSignalRClientOptions = {}) {
+  constructor(
+    serverUrl: string,
+    runnerId: string,
+    private readonly runnerRoot: string,
+    buildGitHash: string | null = null,
+    options: RunnerSignalRClientOptions = {},
+  ) {
     const baseUrl = serverUrl.replace(/\/$/, "")
     const params = new URLSearchParams()
     params.set("runnerId", runnerId)
@@ -39,6 +65,8 @@ export class RunnerSignalRClient {
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build()
     this.workspaceManager = new WorkspaceManager(runnerRoot)
+    this.serverConnection = options.serverConnection ?? null
+    this.followupTargetResolver = options.followupTargetResolver ?? null
 
     this.registerHandlers()
     this.registerLifecycleCallbacks()
@@ -259,6 +287,61 @@ export class RunnerSignalRClient {
       const ac = new AbortController()
       return await this.workspaceManager.materialize(normalizeMaterializePayload(payload), ac.signal)
     })
+
+    this.connection.on("ReceiveFollowup", (payload: ReceiveFollowupPayload | null | undefined) => {
+      void this.handleFollowup(payload)
+    })
+  }
+
+  private async handleFollowup(payload: ReceiveFollowupPayload | null | undefined): Promise<void> {
+    if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return
+    if (!payload.workflowRunId || !payload.sessionName) return
+    if (!this.followupTargetResolver || !this.serverConnection) return
+
+    let target: FollowupTarget | null
+    try {
+      target = this.followupTargetResolver(payload.workflowRunId, payload.sessionName)
+    } catch (error) {
+      console.error("followup target resolver threw:", error)
+      return
+    }
+    if (!target) return
+
+    void this.serverConnection.workflowAgentSessionRuntimeEvents(
+        target.projectId,
+        payload.workflowRunId,
+        payload.sessionName,
+        {
+          workId: null,
+          workType: null,
+          stage: null,
+          runtimeEvents: [
+            {
+              type: "session.input",
+              payload: {
+                role: "user",
+                text: payload.text,
+                kind: "followup",
+                sentAt: new Date().toISOString(),
+                acpSessionId: target.sessionId,
+                source: "followup",
+              },
+            },
+          ],
+        },
+        new AbortController().signal,
+      ).catch((error) => {
+        console.error("failed to emit followup session.input event:", error)
+      })
+
+    void target.connection
+      .prompt({
+        sessionId: target.sessionId,
+        prompt: [{ type: "text", text: payload.text }],
+      })
+      .catch((error) => {
+        console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
+      })
   }
 }
 
@@ -305,9 +388,26 @@ export function normalizeMaterializePayload(payload: unknown): WorkItem {
     projectId: readNullableString(source, "projectId"),
     issueNumber: readNullableNumber(source, "issueNumber") ?? undefined,
     artifacts: parseJsonObject(source["artifacts"], "artifacts"),
+    outputs: parseOutputs(source["outputs"]),
     ownerKind: readNullableString(source, "ownerKind") ?? undefined,
     agentJobId: readNullableString(source, "agentJobId") ?? undefined,
   }
+}
+
+function parseOutputs(value: unknown): WorkItem["outputs"] {
+  if (value === undefined || value === null || value === "") return null
+  const parsed = typeof value === "string" ? JSON.parse(value) : value
+  if (!Array.isArray(parsed)) throw new Error("MaterializeWorkspace outputs must be an array")
+  return parsed.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("MaterializeWorkspace outputs entries must be objects")
+    const source = entry as Record<string, unknown>
+    const name = source["name"]
+    const from = source["from"]
+    if (typeof name !== "string" || name.length === 0 || typeof from !== "string" || from.length === 0) {
+      throw new Error("MaterializeWorkspace outputs entries require name and from")
+    }
+    return { name, from }
+  })
 }
 
 function parseJsonObject(value: unknown, field: string): JsonObject | null {

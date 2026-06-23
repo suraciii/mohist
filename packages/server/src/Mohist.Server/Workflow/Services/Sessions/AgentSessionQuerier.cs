@@ -118,6 +118,25 @@ public class AgentSessionQuerier
         return record?.Session.Id;
     }
 
+    public async Task<FollowupTarget?> ResolveFollowupTargetAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var record = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
+        if (record is null) return null;
+
+        var session = record.Session;
+        var runnerId = record.Row.RunnerId;
+        var workflowRunId = Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId);
+        if (string.IsNullOrWhiteSpace(runnerId) || string.IsNullOrWhiteSpace(workflowRunId))
+            return null;
+
+        return new FollowupTarget(
+            runnerId,
+            workflowRunId,
+            Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
+            AgentSessionJsonHelper.StatusName(session) == "active");
+    }
+
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -703,3 +722,9 @@ internal sealed record TranscriptEventProjection
 internal sealed record AgentSessionTranscriptData(
     IReadOnlyList<AgentSessionTranscriptTurnRow> Turns,
     IReadOnlyList<AgentSessionTranscriptPartRow> Parts);
+
+public sealed record FollowupTarget(
+    string RunnerId,
+    string WorkflowRunId,
+    string SessionName,
+    bool IsActive);
