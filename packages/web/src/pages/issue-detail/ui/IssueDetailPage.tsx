@@ -526,12 +526,16 @@ export function IssueDetailPage() {
             />
           </div>
 
+          <BranchBar
+            issueNumber={issueNumber}
+            stage={workflowStage}
+            isAgentRunning={isAgentRunningOnThis}
+            baseBranch={issue.repository?.baseBranch}
+            allowRebase={!isBacklog && !!issue.workflowRunId}
+          />
+
           <div className="mb-8" data-testid="workflow-view-frame">
             <WorkflowView issue={issue} />
-          </div>
-
-          <div className="mb-8" data-testid="branch-bar-frame">
-            <BranchBar issueNumber={issueNumber} stage={workflowStage} isAgentRunning={isAgentRunningOnThis} />
           </div>
 
           {prDeliveryMetadata && (

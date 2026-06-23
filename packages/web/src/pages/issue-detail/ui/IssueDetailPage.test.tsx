@@ -877,7 +877,7 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
     expect(container.querySelector('[data-testid="diff-summary-banner"]')).toBeFalsy()
   })
 
-  it('places the branch rebase status above the workflow profile editor instead of burying it in the description column', async () => {
+  it('places the branch rebase status above the workflow view instead of burying it below long runtime details', async () => {
     mockUseIssue.mockReturnValue({
       data: makeIssue({
         id: 'issue-14',
@@ -910,10 +910,10 @@ describe('IssueDetailPage density and whitespace rhythm (issue-180 T-004)', () =
     expect(within(branchFrame).getByTestId('branch-bar')).toBeTruthy()
     expect(within(branchFrame).getByText('Rebase onto master')).toBeTruthy()
 
-    const profileFrame = screen.getByTestId('workflow-profile-editor-frame')
+    const workflowFrame = screen.getByTestId('workflow-view-frame')
     const contentGrid = screen.getByTestId('issue-detail-content-grid')
     expect(
-      (branchFrame.compareDocumentPosition(profileFrame) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      (branchFrame.compareDocumentPosition(workflowFrame) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
     ).toBe(true)
     expect(
       (branchFrame.compareDocumentPosition(contentGrid) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,

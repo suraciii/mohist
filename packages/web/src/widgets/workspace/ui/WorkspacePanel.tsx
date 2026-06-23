@@ -142,7 +142,7 @@ export function WorkspacePanel({ issueNumber, isAgentRunning, isDone }: Workspac
       <div className="mb-3">
         {isUpstreamUnknown && !isRebasing && (
           <span className="inline-flex items-center gap-1.5 text-xs text-gray-500">
-            未能检查上游
+            Unable to check upstream
           </span>
         )}
         {isUpToDate && !isUpstreamUnknown && (

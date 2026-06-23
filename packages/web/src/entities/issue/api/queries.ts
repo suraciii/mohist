@@ -103,13 +103,17 @@ export function useWorkflowYaml(workflowRunId: string | null | undefined, enable
   })
 }
 
-export function useWorkspaceStatus(issueNumber: number, enabled: boolean) {
+export function useWorkspaceStatus(issueNumber: number, enabled: boolean = true) {
   const { projectId } = useProject()
   return useQuery({
     queryKey: ['issues', issueNumber, projectId, 'workspace-status'],
     queryFn: () => getWorkspaceStatus(issueNumber, projectId),
     enabled: enabled && issueNumber > 0 && !!projectId,
-    refetchInterval: 30_000,
+    refetchInterval: (query) => {
+      const data = query.state.data as { exists?: boolean; reason?: string; ahead?: number; behind?: number } | undefined
+      const missingAheadBehind = data?.exists === true && (typeof data.ahead !== 'number' || typeof data.behind !== 'number')
+      return !!data?.reason || missingAheadBehind ? 5_000 : 30_000
+    },
   })
 }
 
