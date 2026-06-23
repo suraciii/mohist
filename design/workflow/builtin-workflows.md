@@ -67,15 +67,18 @@ integrate：
 - integrate:spec-sync       # mohist/acp-agent
 - integrate:archive-change  # mohist/archive-change
 - integrate:rebase          # mohist/rebase, squash: false
-- integrate:publish         # mohist/publish-via-pr
+- integrate:open-pr         # mohist/create-pull-request
+- integrate:merge-pr        # mohist/merge-pull-request
 ```
 
 语义：
 
 - `integrate:rebase` fetch 最新 base 并解决冲突，但不做 local squash。
-- `integrate:publish` force-with-lease 推送同一个 `workspace.branch`。
-- 如果同 head/base 已有 open PR，则复用该 PR。
+- `integrate:open-pr` force-with-lease 推送同一个 `workspace.branch`。
+- 如果同 head/base 已有 open PR，则复用并更新该 PR。
 - 如果没有 open PR，则创建 PR。
+- `integrate:open-pr` 通过 `setVars` 写入 `vars.github.pr.number`、`vars.github.pr.url`、`vars.github.pr.headSha`。
+- `integrate:merge-pr` 使用 `vars.github.pr.number` 合并 PR，并可用 `vars.github.pr.headSha` 防止合并意外 revision。
 - PR 由 `gh pr merge --squash` 合并。
 - PR merge 成功并确认 `state=MERGED` 后，workflow 完成。
 
@@ -104,12 +107,12 @@ integrate：
 
 典型恢复：
 
-- `output.errorCode: base-moved` → 插入 `mohist/rebase`，再插入 `mohist/publish-via-pr`。
+- `output.errorCode: base-moved` → 插入 `mohist/rebase`，再插入 `mohist/create-pull-request`，再插入 `mohist/merge-pull-request`。
 - `output.errorCode: gh-not-authenticated` / `gh-missing` → 阻塞 human 修 runner 环境。
 - `output.errorCode: branch-protection-blocked` → 阻塞 human 调整 GitHub 配置或 workflow。
 - `output.errorCode: pr-closed` → 阻塞 human；系统不擅自新开替代 PR。
 
-恢复 task 使用同一个 workflow workspace。PR flow 继续推送同一个 `workspace.branch`，因此 GitHub 会更新并复用同一个 open PR。
+恢复 task 使用同一个 workflow workspace。`recover:open-pr` 继续推送同一个 `workspace.branch`，因此 GitHub 会更新并复用同一个 open PR；它会重新写入 `vars.github.pr.*`，`recover:merge-pr` 再消费这些 workflow variables。
 
 ## Selection
 

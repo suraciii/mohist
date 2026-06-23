@@ -19,6 +19,7 @@ Workflow engine 只负责：
 
 - 展开 `tasks[*].with` 模板并传给 runner。
 - 保存 task output。
+- 按 task 声明把 action output 投影到 workflow variables。
 - 在需要编排时，对 output 做通用 JSON path 匹配。
 - 根据匹配结果插入 workflow profile 声明的恢复 task。
 
@@ -37,7 +38,7 @@ Workflow engine 只负责：
 
 Workflow 只负责模板展开，不解释 `baseBranch`、`remote`、`squash` 的业务语义。
 
-## Output
+## Action Output
 
 `task.output` 是 action output，由 action 自己定义。
 
@@ -55,6 +56,67 @@ Action 可以返回文本 output，也可以返回 JSON object output。需要�
 `errorCode` 是推荐字段名，不是平台枚举。每个 action 自己定义可用 code。profile 作者引用的是该 action 的 output 接口。
 
 非 JSON object output 在字段路径匹配里等价于无字段。
+
+成功 task 的 JSON object output 应自动成为 task-local output。后续 task 可以通过 task id 读取，不需要 workflow profile 重新声明 action 的 output 字段：
+
+```yaml
+- id: integrate:open-pr
+  uses: mohist/create-pull-request
+
+- id: integrate:merge-pr
+  uses: mohist/merge-pull-request
+  with:
+    prNumber: ${{ tasks.integrate:open-pr.outputs.prNumber }}
+```
+
+`tasks.<taskId>.outputs.*` 表示某个 task 的 action output。它适合直接 task-to-task wiring。
+
+## Workflow Variable Projection
+
+Action output 和 workflow variables 是两种机制。Action output 是 action 自己的接口；workflow variables 来自 workflow profile 的分层合并。
+
+task 可以用 `setVars` 把 action output 的部分字段写入 workflow runtime profile：
+
+```yaml
+- id: integrate:open-pr
+  title: Open or update GitHub PR
+  uses: mohist/create-pull-request
+  with:
+    source: ${{ workspace.branch }}
+    target: ${{ repository.baseBranch }}
+    remote: origin
+    title: "Complete issue #${{ issue.number }}"
+  setVars:
+    github.pr.number: output.prNumber
+    github.pr.url: output.prUrl
+    github.pr.headSha: output.headSha
+```
+
+`setVars` 的左侧是 runtime profile `vars` 下的目标路径，右侧是当前 action output 的 JSON path。上例 patch：
+
+```yaml
+vars.github.pr.number
+vars.github.pr.url
+vars.github.pr.headSha
+```
+
+后续 task 不直接读取 runtime profile，而是读取 profile layers merge 后的 effective `vars`：
+
+```yaml
+- id: integrate:merge-pr
+  uses: mohist/merge-pull-request
+  with:
+    prNumber: ${{ vars.github.pr.number }}
+    expectedHeadSha: ${{ vars.github.pr.headSha }}
+```
+
+规则：
+
+- `setVars` 只在 task 成功后执行。
+- `setVars` 只 patch workflow runtime profile 的 `vars.*`。
+- `setVars` 不能覆盖 `workflow`、`stage`、`work`、`issue`、`workspace` 等 dispatch context。
+- 恢复 task 可以重新写同一组 `vars.*`，覆盖旧运行态事实。
+- 失败恢复匹配读取失败 task 的 raw action output，不依赖 `setVars`。
 
 ## Error Code
 
@@ -79,14 +141,13 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
 目标语义：
 
 ```yaml
-- id: integrate:publish
-  title: Publish changes
-  uses: mohist/publish-via-pr
+- id: integrate:merge-pr
+  title: Merge GitHub PR
+  uses: mohist/merge-pull-request
   with:
-    source: ${{ workspace.branch }}
-    target: ${{ repository.baseBranch }}
-    remote: origin
-    message: "Complete issue #${{ issue.number }}"
+    prNumber: ${{ vars.github.pr.number }}
+    method: squash
+    expectedHeadSha: ${{ vars.github.pr.headSha }}
   onFailure:
     limit: 2
     cases:
@@ -104,14 +165,25 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
                 title: Resolve rebase conflicts
                 with:
                   description: Resolve rebase conflicts, stage resolved files, and continue the rebase.
-          - id: recover:publish
-            title: Publish again
-            uses: mohist/publish-via-pr
+          - id: recover:open-pr
+            title: Update GitHub PR
+            uses: mohist/create-pull-request
             with:
               source: ${{ workspace.branch }}
               target: ${{ repository.baseBranch }}
               remote: origin
-              message: "Complete issue #${{ issue.number }}"
+              title: "Complete issue #${{ issue.number }}"
+            setVars:
+              github.pr.number: output.prNumber
+              github.pr.url: output.prUrl
+              github.pr.headSha: output.headSha
+          - id: recover:merge-pr
+            title: Merge GitHub PR
+            uses: mohist/merge-pull-request
+            with:
+              prNumber: ${{ vars.github.pr.number }}
+              method: squash
+              expectedHeadSha: ${{ vars.github.pr.headSha }}
 ```
 
 执行规则：
