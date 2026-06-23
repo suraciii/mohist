@@ -14,6 +14,7 @@ export interface WorkDispatchResponse {
   issueId?: string | null
   issueNumber?: number | null
   artifacts?: string | null
+  outputs?: string | null
   setVars?: string | null
   ownerKind?: string | null
   agentJobId?: string | null

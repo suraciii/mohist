@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   isLoading: false,
   agentStatus: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } as any,
   createProjectMutate: vi.fn(),
-  issues: undefined as any[] | undefined,
+  useIssuesMock: vi.fn(),
+  useArchivedIssuesMock: vi.fn(),
   epics: undefined as any[] | undefined,
   completionTrend: undefined as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] } | undefined,
 }))
@@ -33,6 +34,11 @@ vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: mocks.agentStatus }),
 }))
 
+vi.mock('../../../entities/issue/api/queries', () => ({
+  useIssues: (...args: unknown[]) => mocks.useIssuesMock(...args),
+  useArchivedIssues: (...args: unknown[]) => mocks.useArchivedIssuesMock(...args),
+}))
+
 vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => ({
   CreateProjectDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
     open ? (
@@ -42,10 +48,6 @@ vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => (
         </button>
       </div>
     ) : null,
-}))
-
-vi.mock('../../../entities/issue/api/queries', () => ({
-  useIssues: () => ({ data: mocks.issues }),
 }))
 
 vi.mock('../../../entities/epic/api/queries', () => ({
@@ -76,7 +78,9 @@ describe('DashboardPage', () => {
     vi.clearAllMocks()
     mocks.projects = []
     mocks.isLoading = false
-    mocks.issues = undefined
+    // Default: queries disabled (no projectId), widget renders empty state.
+    mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
+    mocks.useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
     mocks.epics = undefined
     mocks.completionTrend = undefined
   })
@@ -103,92 +107,79 @@ describe('DashboardPage', () => {
     expect(digest).toHaveAttribute('data-zone', 'digest')
   })
 
-  it('renders the productivity zone content in the productivity slot while other slots stay as empty placeholders', () => {
+  it('mounts the dashboard-digest widget inside the digest zone slot', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
-    mocks.issues = [
-      { id: 'i1', number: 1, title: 't', status: 'done', health: 'active', projectId: 'p1', labels: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), isDraft: false, canStart: true, blocker: null },
-    ]
-    mocks.epics = [
-      { id: 'e1', number: 1, title: 'epic one', status: 'active', priority: 'p0', progress: { deliveredCount: 1, totalIssueCount: 2 }, createdAt: '', updatedAt: '' },
-      { id: 'e2', number: 2, title: 'epic two', status: 'active', priority: 'p1', progress: { deliveredCount: 0, totalIssueCount: 3 }, createdAt: '', updatedAt: '' },
-    ]
-    mocks.completionTrend = {
-      bucket: 'week',
-      window: { from: '2026-01-01T00:00:00Z', to: '2026-06-22T00:00:00Z' },
-      buckets: [
-        { boundary: '2026-04-01T00:00:00Z', completed: 1, failed: 0 },
-        { boundary: '2026-04-08T00:00:00Z', completed: 2, failed: 0 },
-        { boundary: '2026-04-15T00:00:00Z', completed: 3, failed: 0 },
-      ],
-    }
 
-    renderPage()
+    const { container } = renderPage()
+
+    const digestSlot = screen.getByTestId('dashboard-zone-digest')
+    // The digest widget should be present inside the digest slot wrapper.
+    expect(digestSlot.contains(screen.getByTestId('dashboard-digest-empty'))).toBe(true)
+    // Sanity: the widget is NOT mounted into the other three slots.
+    expect(container.querySelector('[data-testid="dashboard-zone-attention"] [data-testid="dashboard-digest-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-zone-pulse"] [data-testid="dashboard-digest-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-zone-productivity"] [data-testid="dashboard-digest-empty"]')).toBeNull()
+  })
+
+  it('keeps attention, pulse, and productivity zones as empty placeholders', () => {
+    mocks.projects = [
+      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+    ]
+
+    const { container } = renderPage()
 
     const attention = screen.getByTestId('dashboard-zone-attention')
     const pulse = screen.getByTestId('dashboard-zone-pulse')
     const productivity = screen.getByTestId('dashboard-zone-productivity')
-    const digest = screen.getByTestId('dashboard-zone-digest')
-
-    expect(attention).toHaveAttribute('data-zone', 'attention')
-    expect(pulse).toHaveAttribute('data-zone', 'pulse')
-    expect(productivity).toHaveAttribute('data-zone', 'productivity')
-    expect(digest).toHaveAttribute('data-zone', 'digest')
 
     expect(attention.className).toMatch(/border-dashed/)
     expect(pulse.className).toMatch(/border-dashed/)
-    expect(digest.className).toMatch(/border-dashed/)
+    expect(productivity.className).toMatch(/border-dashed/)
 
-    expect(productivity.className).not.toMatch(/border-dashed/)
-    expect(attention.querySelector('[data-testid="productivity-zone"]')).toBeNull()
-    expect(pulse.querySelector('[data-testid="productivity-zone"]')).toBeNull()
-    expect(digest.querySelector('[data-testid="productivity-zone"]')).toBeNull()
+    expect(attention.childElementCount).toBe(0)
+    expect(pulse.childElementCount).toBe(0)
+    expect(productivity.childElementCount).toBe(0)
 
-    const zone = productivity.querySelector('[data-testid="productivity-zone"]')
-    expect(zone).not.toBeNull()
-    expect(zone).toBe(screen.getByTestId('productivity-zone'))
-
-    expect(zone).toContainElement(screen.getByTestId('productivity-snapshot-row'))
-    expect(zone).toContainElement(screen.getByTestId('productivity-epic-list'))
-    expect(zone).toContainElement(screen.getByTestId('productivity-trend'))
-    expect(zone).toContainElement(screen.getByTestId('productivity-investment'))
+    expect(attention.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
+    expect(pulse.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
+    expect(productivity.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
+    expect(productivity.querySelector('[data-testid="productivity-zone"]')).toBeNull()
+    expect(container).toBeTruthy()
   })
 
-  it('renders four labeled empty states in the productivity zone when all data sources are empty', () => {
+  it('renders digest content inside the digest slot when the widget has resolved data', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
+    mocks.useIssuesMock.mockReturnValue({
+      data: [
+        {
+          id: 'i-1',
+          number: 7,
+          title: 'Done thing',
+          status: 'done',
+          health: 'active',
+          projectId: 'p1',
+          labels: {},
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+          archivedAt: undefined,
+          isDraft: false,
+          canStart: true,
+          blocker: null,
+        },
+      ],
+      isLoading: false,
+    })
+    mocks.useArchivedIssuesMock.mockReturnValue({ data: [], isLoading: false })
 
     renderPage()
 
-    const productivity = screen.getByTestId('dashboard-zone-productivity')
-    expect(productivity).toHaveAttribute('data-zone', 'productivity')
-
-    const zone = screen.getByTestId('productivity-zone')
-    expect(productivity).toContainElement(zone)
-
-    const snapshotEmpty = screen.getByTestId('productivity-snapshot-empty')
-    expect(snapshotEmpty).toBeInTheDocument()
-    expect(snapshotEmpty.textContent ?? '').toMatch(/no issues/i)
-    expect(snapshotEmpty.parentElement).toHaveAttribute('data-state', 'empty')
-
-    const epicEmpty = screen.getByTestId('productivity-epic-list-empty')
-    expect(epicEmpty).toBeInTheDocument()
-    expect(epicEmpty.textContent ?? '').toMatch(/active epics/i)
-    expect(epicEmpty.parentElement).toHaveAttribute('data-state', 'empty')
-
-    const trendEmpty = screen.getByTestId('productivity-trend-empty')
-    expect(trendEmpty).toBeInTheDocument()
-    expect(trendEmpty.textContent ?? '').toMatch(/no completion data/i)
-    expect(trendEmpty.parentElement).toHaveAttribute('data-state', 'empty')
-
-    fireEvent.click(screen.getByTestId('productivity-investment-toggle'))
-
-    const investmentEmpty = screen.getByTestId('productivity-investment-empty')
-    expect(investmentEmpty).toBeInTheDocument()
-    expect(investmentEmpty).toHaveAttribute('data-state', 'empty')
-    expect(investmentEmpty.textContent ?? '').toMatch(/data unavailable/i)
+    const digestSlot = screen.getByTestId('dashboard-zone-digest')
+    expect(digestSlot.contains(screen.getByTestId('dashboard-digest-content'))).toBe(true)
+    expect(digestSlot.contains(screen.getByText('Done thing'))).toBe(true)
   })
 
   it('does not render the Kanban board on the dashboard', () => {

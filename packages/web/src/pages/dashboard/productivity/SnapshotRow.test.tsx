@@ -62,10 +62,12 @@ function renderRow() {
 describe('SnapshotRow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers({ now: new Date(NOW) })
   })
 
   afterEach(() => {
     cleanup()
+    vi.useRealTimers()
   })
 
   it('renders the three counts labeled as Completed, Failed, and New', () => {

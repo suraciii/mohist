@@ -5,6 +5,8 @@ export type { CompletionBucketPoint, CompletionTrendResponse } from './api/compl
 export { statusBadge, statusLabel } from './lib/status-badge'
 export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
 export type { CompletionSnapshot } from './lib/completion-snapshot'
+export { deriveRecentDigest, useRecentDigest, DIGEST_TOP_N } from './lib/recent-digest'
+export type { RecentDigest, UseRecentDigestResult } from './lib/recent-digest'
 export { dispatchRebaseEvent, onRebaseEvent } from './model/rebase-events'
 export { dispatchTimelineEvent, onTimelineEvent } from './model/timeline-events'
 export type { TimelineLiveEvent } from './model/timeline-events'
