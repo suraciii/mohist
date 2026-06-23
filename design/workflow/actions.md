@@ -42,6 +42,8 @@ Workflow 只负责模板展开，不解释 `baseBranch`、`remote`、`squash` �
 
 `task.output` 是 action output，由 action 自己定义。
 
+Action output 是完整的 JSON object（对标 `WithInput`）。`TaskRun.Output` 类型为 `JsonElement?`，直接存储 action 产出的解析后 JSON，不需要 `TaskOutputDefinition` / `capturedOutputs` 提取管道。
+
 Action 可以返回文本 output，也可以返回 JSON object output。需要被 workflow profile 编排读取的 output 应返回 JSON object。
 
 ```json

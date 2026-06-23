@@ -22,8 +22,9 @@ WorkflowGrain ──▶ IWorkflowProfileProvider              端口，Workflow 
 ```
 
 - Workflow 零 Issue 依赖；解析在 adapter，live 不快照。
-- `WorkflowRun` 只保存执行状态和 profile 身份，不内嵌 profile variables。
+- `WorkflowRun` 只保存执行状态和 profile 身份，不内嵌 profile variables。`WorkflowRun.RuntimeVariables` 移除。
 - profile 的读取、更新、合并都走 `WorkflowProfileProvider` / profile service。
+- `TaskRun.Output` 类型为 `JsonElement?`（与 `WithInput` 对标，都是 JSON object），不为 `string?`。
 
 ## VariableBundle
 
@@ -141,9 +142,11 @@ setVars:
 - 不修改 `WorkflowRun` 执行状态。
 - 读取后续 task variables 时通过 `LoadVariables(runId)` 统一合并生效。
 
+`setVars` 由 server 侧执行（编排层），runner 只负责执行 action 和上报 output。server 在 `ProcessTaskResultAsync` 中接收 `result.output`，解析为 `JsonElement` 写入 `task.Output`，然后根据 task 定义中的 `setVars` 映射，从 `task.Output` 按源路径取值并写入 `workflow_run_profile.Variables`。
+
 task output context 和 run profile 分离：
 
-- `tasks.<taskId>.outputs.*`：来自 task action output，属于 dispatch context。
+- `task.Output`（`JsonElement?`）：action 产出的完整 JSON object，归属 `TaskRun` 执行状态。dispatch context 中通过 `tasks.<taskId>.outputs.*` 访问。
 - `vars.*`：来自 profile variables，包含 project/issue/run 三层变量。
 
 ## Write API
