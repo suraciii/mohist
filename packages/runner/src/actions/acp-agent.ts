@@ -1,8 +1,8 @@
 import { ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { numberInput, objectInput, stringInput } from "../core/json.js"
-import { resolvePrompt, type PromptLoaderContext } from "../core/prompt.js"
+import type { ActionContext, ActionResult } from "../core/types.js"
+import { numberInput } from "../core/json.js"
+import { resolvePrompt } from "../core/prompt.js"
 import { runCommand } from "../system/process.js"
 import { verifyExpectations, type TaskArtifactExpectation } from "./expectations.js"
 import { appendOpencodeDiagnostic, findOpencodeProviderErrorDiagnostic, type OpencodeProviderErrorDiagnostic } from "../runtime/opencode-log-diagnostics.js"
@@ -11,12 +11,12 @@ import {
   getAcpProcessFactory,
   setAcpProcessFactoryForTest,
 } from "./acp/process.js"
+import type { AcpProcessFactory } from "./acp/process.js"
 import {
   attachSessionToServer,
   buildPromptEvent,
   buildUsageUpdatePayload,
   classifyAcpLivenessActivity,
-  CompactionStrategy,
   createAcpSessionUpdateHandler,
   createObservabilityAwareEmitter,
   emitLivenessStatusEvent,
@@ -28,10 +28,29 @@ import {
   sessionNameFromContext,
   ToolCallIdGenerator,
 } from "./acp/session-events.js"
+import type { CompactionConfig, CompactionStrategy } from "./acp/compaction.js"
+import {
+  buildSessionMeta,
+  defaultCompactionConfig,
+  resolveCompactionConfig,
+  resolveCompactionConfigFromInput,
+} from "./acp/compaction.js"
+import type { AgentConfig } from "./acp/agent-config.js"
+import { buildPromptLoaderContext, resolveAgentConfig } from "./acp/agent-config.js"
+import type { RequestedModel } from "./acp/model-resolution.js"
+import {
+  applyRequestedModel,
+  cachedModelAllowsReuse,
+  extractResolvedModelId,
+  modelDiagnosticContext,
+  requestedModelMatchesSession,
+  resolveRequestedModel,
+} from "./acp/model-resolution.js"
 
 export { AcpProcessHandle, setAcpProcessFactoryForTest }
 export type { AcpProcessFactory } from "./acp/process.js"
-export type { CompactionStrategy } from "./acp/session-events.js"
+export { resolveCompactionConfig, defaultCompactionConfig }
+export type { CompactionConfig, CompactionStrategy } from "./acp/compaction.js"
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
 const DEFAULT_SESSION_START_TIMEOUT_MS = 30 * 1000
@@ -41,29 +60,6 @@ const DEFAULT_EXPECTATION_REPAIR_LIMIT = 1
 const CANCEL_TIMEOUT_MS = 5_000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
-
-const DEFAULT_COMPACTION_THRESHOLD = 0.8
-const DEFAULT_COMPACTION_STRATEGY = "summary"
-const COMPACTION_META_KEY = "opencode.compaction"
-
-export type CompactionConfig = {
-  threshold: number
-  strategy: CompactionStrategy
-}
-
-interface AgentConfig {
-  model?: string
-  timeoutMs?: number
-  sessionStartTimeoutMs?: number
-  livenessQuietThresholdMs?: number
-  probeTimeoutMs?: number
-  compaction?: CompactionConfig
-}
-
-interface RequestedModel {
-  model?: string
-  source: "agent.model" | "with.model" | "none"
-}
 
 interface LivenessProbeState {
   probeSentAt?: string
@@ -237,125 +233,6 @@ async function restoreAgentToolNoise(context: ActionContext) {
   }
 }
 
-function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined {
-  if (!with_) return undefined
-  const agent = objectInput(with_, "agent")
-  if (agent && typeof agent === "object") {
-    return {
-      model: stringInput(agent as JsonObject, "model") ?? undefined,
-      timeoutMs: numberInput(agent as JsonObject, "timeout") ?? undefined,
-      sessionStartTimeoutMs: numberInput(agent as JsonObject, "sessionStartTimeout") ?? undefined,
-      livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
-      probeTimeoutMs: numberInput(agent as JsonObject, "probeTimeoutMs") ?? undefined,
-      compaction: resolveCompactionConfigFromInput(agent as JsonObject),
-    }
-  }
-  return {
-    model: stringInput(with_, "model") ?? undefined,
-    timeoutMs: numberInput(with_, "timeout") ?? undefined,
-    sessionStartTimeoutMs: numberInput(with_, "sessionStartTimeout") ?? undefined,
-    livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
-    probeTimeoutMs: numberInput(with_, "probeTimeoutMs") ?? undefined,
-    compaction: resolveCompactionConfigFromInput(with_),
-  }
-}
-
-function resolveCompactionConfigFromInput(input: JsonObject | null | undefined): CompactionConfig | undefined {
-  if (!input || typeof input !== "object") return undefined
-  const raw = objectInput(input, "compaction")
-  if (!raw || typeof raw !== "object") return undefined
-  const thresholdValue = numberInput(raw as JsonObject, "threshold")
-  const strategyValue = stringInput(raw as JsonObject, "strategy")
-  if (thresholdValue === undefined && strategyValue === undefined) return undefined
-  return {
-    threshold: thresholdValue !== undefined && Number.isFinite(thresholdValue) && thresholdValue >= 0 && thresholdValue <= 1
-      ? thresholdValue
-      : DEFAULT_COMPACTION_THRESHOLD,
-    strategy: strategyValue === "summary" ? "summary" : DEFAULT_COMPACTION_STRATEGY,
-  }
-}
-
-export function resolveCompactionConfig(agentConfig?: AgentConfig): CompactionConfig {
-  if (!agentConfig?.compaction) return defaultCompactionConfig()
-  return {
-    threshold: agentConfig.compaction.threshold,
-    strategy: agentConfig.compaction.strategy,
-  }
-}
-
-export function defaultCompactionConfig(): CompactionConfig {
-  return {
-    threshold: DEFAULT_COMPACTION_THRESHOLD,
-    strategy: DEFAULT_COMPACTION_STRATEGY,
-  }
-}
-
-function buildSessionMeta(compaction: CompactionConfig): { [key: string]: unknown } {
-  return {
-    [COMPACTION_META_KEY]: {
-      threshold: compaction.threshold,
-      strategy: compaction.strategy,
-    },
-  }
-}
-
-function resolveRequestedModel(context: ActionContext, agentConfig?: AgentConfig): RequestedModel {
-  const agentModel = agentConfig?.model
-  if (agentModel?.trim()) return { model: agentModel, source: "agent.model" }
-  const withModel = stringInput(context.with, "model")
-  if (withModel?.trim()) return { model: withModel, source: "with.model" }
-  return { source: "none" }
-}
-
-async function applyRequestedModel(connection: ClientSideConnection, context: ActionContext, sessionId: string, requested: RequestedModel, notify: (activityType?: string) => void) {
-  if (!requested.model?.trim()) {
-    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested))
-    return
-  }
-
-  console.info("mohist acp setting requested model", modelDiagnosticContext(context, requested))
-  try {
-    await connection.setSessionConfigOption({ sessionId, configId: "model", value: requested.model })
-    recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
-    console.info("mohist acp set model via config option", modelDiagnosticContext(context, requested))
-  } catch (configError) {
-    console.warn("mohist acp set model via config option failed; trying set_session_model", { ...modelDiagnosticContext(context, requested), error: errorMessage(configError) })
-    try {
-      await connection.unstable_setSessionModel({ sessionId, modelId: requested.model })
-      recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
-      console.info("mohist acp set model via set_session_model", modelDiagnosticContext(context, requested))
-    } catch (modelError) {
-      console.warn("mohist acp set requested model failed; provider default may be used", { ...modelDiagnosticContext(context, requested), error: errorMessage(modelError) })
-    }
-  }
-}
-
-function modelDiagnosticContext(context: ActionContext, requested: RequestedModel) {
-  return {
-    workflowRunId: context.workflowRunId,
-    workId: context.workId,
-    stage: context.stage,
-    sessionName: sessionNameFromContext(context),
-    requestedModel: requested.model ?? null,
-    requestedModelSource: requested.source,
-  }
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function buildPromptLoaderContext(context: ActionContext): PromptLoaderContext {
-  return {
-    with: {},
-    variables: context.variables ?? {},
-    workDir: context.workDir,
-    workId: context.workId,
-    title: context.title ?? null,
-    stage: context.stage ?? null,
-  }
-}
-
 async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const sessionName = sessionNameFromContext(context)
   const manager = context.acpSessionManager
@@ -403,20 +280,6 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
   }
 
   return runEphemeralWorkflowAgentSession(context, prompt)
-}
-
-function requestedModelMatchesSession(requestedModel: string | undefined, sessionModel: string | null | undefined) {
-  const requested = requestedModel?.trim()
-  if (!requested) return true
-  return sessionModel?.trim() === requested
-}
-
-function cachedModelAllowsReuse(requestedModel: string | undefined, cachedModel: string | null | undefined) {
-  const requested = requestedModel?.trim()
-  if (!requested) return true
-  const cached = cachedModel?.trim()
-  if (!cached) return true
-  return cached === requested
 }
 
 async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
@@ -969,14 +832,6 @@ async function cancelAndReturn(acpProcess: AcpProcessHandle | undefined, connect
 function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"data"> {
   if (done()) return Promise.resolve("data")
   return new Promise((resolve) => waiters.add(() => resolve("data")))
-}
-
-function extractResolvedModelId(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null) return undefined
-  const models = (value as Record<string, unknown>).models
-  if (typeof models !== "object" || models === null) return undefined
-  const current = (models as Record<string, unknown>).currentModelId
-  return typeof current === "string" && current.trim().length > 0 ? current : undefined
 }
 
 function timeout(ms: number): Promise<"timeout"> {

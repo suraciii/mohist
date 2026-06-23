@@ -1,6 +1,7 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk"
 import type { ActionContext, JsonObject } from "../../core/types.js"
 import { stringInput } from "../../core/json.js"
+import type { CompactionEventPayload, CompactionStrategy } from "./compaction.js"
 
 const SESSION_INPUT_EVENT = "session.input"
 const SESSION_LIVENESS_EVENT = "session.liveness"
@@ -19,14 +20,7 @@ const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
   "compaction",
 ])
 
-export type CompactionStrategy = "summary"
 
-export interface CompactionEventPayload {
-  contextWindowUsedBefore?: number
-  contextWindowUsedAfter?: number
-  contextWindowSize?: number
-  strategy?: CompactionStrategy
-}
 
 export function cleanJson(value: Record<string, unknown>): JsonObject {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as JsonObject
@@ -358,7 +352,7 @@ export function createObservabilityAwareEmitter(
     await emitSessionEvent(context, genericSessionEventType(type, normalized), normalized)
 
     if (type === "config_option_update") {
-      const resolvedModel = extractResolvedModelFromConfigUpdate(update as unknown)
+      const resolvedModel = extractResolvedModelFromConfigUpdateLocal(update as unknown)
       if (resolvedModel) {
         await emitSessionEvent(context, MODEL_RESOLVED_EVENT, buildResolvedModelEventPayload(context, acpSessionId, resolvedModel, "config_option_update"))
       }
@@ -366,7 +360,7 @@ export function createObservabilityAwareEmitter(
 
     if (type === "usage_update") {
       const u = update as unknown as Record<string, unknown>
-      const compaction = extractCompactionEventFromUpdate(update)
+      const compaction = extractCompactionEventFromUpdateLocal(update)
       if (compaction && compaction.contextWindowSize === undefined && typeof u.size === "number") {
         compaction.contextWindowSize = u.size
       }
@@ -386,7 +380,7 @@ export function createObservabilityAwareEmitter(
   }
 }
 
-function extractResolvedModelFromConfigUpdate(value: unknown): string | undefined {
+function extractResolvedModelFromConfigUpdateLocal(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const configOptions = (value as Record<string, unknown>).configOptions
   if (!Array.isArray(configOptions)) return undefined
@@ -401,7 +395,7 @@ function extractResolvedModelFromConfigUpdate(value: unknown): string | undefine
   return undefined
 }
 
-function extractCompactionEventFromUpdate(update: unknown): CompactionEventPayload | undefined {
+function extractCompactionEventFromUpdateLocal(update: unknown): CompactionEventPayload | undefined {
   if (!update || typeof update !== "object") return undefined
   const record = update as Record<string, unknown>
   const candidates: Array<Record<string, unknown>> = []

@@ -37,3 +37,33 @@
 - T-002 must move `extractCompactionEventFromUpdate` out of `session-events.ts` and rewire the observability emitter. The function is currently private to `session-events.ts` so the move is internal.
 - T-003 must move `hasPostProbeActivity`, `createSessionLivenessState`, `recordSessionLivenessActivity`, `beginLivenessProbe`, `clearLivenessProbe`, `probeWasSatisfied`, `SessionLivenessState`, `LivenessProbeState`, `LivenessFailureReason` from `acp-agent.ts` to `liveness.ts`.
 - T-004 will move `acpAgentAction`, `restoreAgentToolNoise`, the 4 run-* functions, `createSharedPromptRunner`, `satisfyExpectations`, the agent config resolver, and the model resolver into `session-strategies.ts` / `agent-config.ts` / `model-resolution.ts`.
+
+## T-002 — extract acp/compaction.ts + acp/model-resolution.ts + acp/agent-config.ts
+
+### Codebase patterns
+
+- The 3 new modules follow the **leaf / one-way dependency** rule: `compaction → core`, `model-resolution → session-events`, `agent-config → compaction`. None of them reach back into `acp-agent.ts` or other acp submodules.
+- The slim entry continues to use the **byte-identical public surface** pattern: `defaultCompactionConfig`, `resolveCompactionConfig`, and types `CompactionConfig`, `CompactionStrategy` are now re-exported from `./acp/compaction.js`. Test imports and external consumer imports remain unchanged.
+- The `applyRequestedModel` log lines and setSessionConfigOption→unstable_setSessionModel fallback ordering were kept byte-identical; only their home moved. The diagnostic-context object shape (`workflowRunId/workId/stage/sessionName/requestedModel/requestedModelSource`) is unchanged.
+- `resolveAgentConfig` retains the two-path parsing (nested `agent.*` keys vs top-level `with.*` keys); only the call site changes (was inline in `acp-agent.ts`, now imported from `./acp/agent-config.js`).
+- The 4 compile-time constants used by `compaction.ts` (`DEFAULT_COMPACTION_THRESHOLD = 0.8`, `DEFAULT_COMPACTION_STRATEGY = "summary"`, `COMPACTION_META_KEY = "opencode.compaction"`) move with the module and stay module-private.
+
+### Gotchas / decisions
+
+- `extractCompactionEventFromUpdate` is a **pure extraction** (no JSON helper deps from session-events). Per the AC, it stays pure: it inlines a tiny `numberField` helper (`typeof === "number" && Number.isFinite(value)`) so it has no runtime dep on `session-events`. This keeps the dependency graph strictly one-way: `session-events` doesn't need to import `compaction` at runtime.
+- `session-events.ts` keeps `import type { CompactionEventPayload, CompactionStrategy } from "./compaction.js"`. This is a **type-only import** — erased at compile time, no runtime cycle. The observability emitter's two extractors (`extractCompactionEventFromUpdateLocal`, `extractResolvedModelFromConfigUpdateLocal`) are local helpers that mirror the logic of `compaction.ts` / `model-resolution.ts`. This is a tiny (~50 line) duplication, intentional to preserve session-events as a runtime leaf.
+- `errorMessage` is folded into `model-resolution.ts` per D1 — its only consumer is `applyRequestedModel`. It is **not** exported (no other module needs it).
+- The `extractResolvedModelFromConfigUpdate` extraction moved from `session-events.ts` (private) to `model-resolution.ts` (exported). It is unused by other modules right now but exposed for future callers; the observability emitter in session-events duplicates the logic inline (`extractResolvedModelFromConfigUpdateLocal`).
+- `buildSessionMeta` in `compaction.ts` returns the same `[COMPACTION_META_KEY]: { threshold, strategy }` object as before. The `newSession` / `resumeSession` callers in `acp-agent.ts` import it from the new module.
+- The `numberInput` import in `acp-agent.ts` is now the only JSON helper still imported directly from `core/json.js` (used by `expectationRepairLimit` and the run-* timeout resolution). The other two helpers (`stringInput`, `objectInput`) are no longer needed in `acp-agent.ts`.
+
+### Baseline / verification
+
+- After T-002: typecheck clean. All 65 ACP tests pass (64 in `acp-agent.spec.ts` + 1 in `acp-tool-noise.spec.ts`). The same 2 pre-existing flaky tests (`tests/executor-branch-stability.spec.ts` `materializeCalls` race and `tests/runner-host.spec.ts` signalR poll) still fail — confirmed by stashing my changes and re-running.
+- File sizes: `acp-agent.ts` 1005 → 860 lines. New: `compaction.ts` 103 lines, `model-resolution.ts` 103 lines, `agent-config.ts` 48 lines. `session-events.ts` 489 → 483 lines (lost 2 helper functions to new modules, gained 1 type-only import).
+- External test files (`tests/support/fake-acp.ts`, `tests/acp-tool-noise.spec.ts`) zero-modified. Public surface unchanged for all consumers.
+
+### Open items for downstream tasks
+
+- T-003 must move `hasPostProbeActivity`, `createSessionLivenessState`, `recordSessionLivenessActivity`, `beginLivenessProbe`, `clearLivenessProbe`, `probeWasSatisfied`, `SessionLivenessState`, `LivenessProbeState`, `LivenessFailureReason`, plus `monitorPrompt`, `ensurePromptAcceptedOrPending`, `waitForData`, and the concurrent primitives (`timeout` / `aborted` / `cancelAndReturn` / `toError`) from `acp-agent.ts` to `liveness.ts`.
+- T-004 will move `acpAgentAction`, `restoreAgentToolNoise`, the 4 run-* functions, `createSharedPromptRunner`, `satisfyExpectations`, `appendAgentText`, `truncateAgentText`, and the `MAX_AGENT_TEXT_LENGTH` constant from `acp-agent.ts` to `session-strategies.ts`. After T-004 the slim entry will be the only remaining file in `src/actions/` outside `acp/`.
