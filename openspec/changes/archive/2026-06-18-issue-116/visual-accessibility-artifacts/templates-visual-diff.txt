@@ -1,5 +1,0 @@
-Section: templates
-Before: Template rows and editor used rounded-lg border bg-card/50 or bg-card/60 wrappers.
-After: page title is rendered by SettingsSection as h3 "Templates".
-After: detected 2 CardSection-style rounded-lg border containers in the rendered snapshot.
-Diff verdict: expected visual contract migration observed in deterministic rendered artifact.

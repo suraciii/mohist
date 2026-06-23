@@ -1,5 +1,0 @@
-Section: workflows
-Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens.
-After: page title is rendered by SettingsSection as h3 "Workflow Profiles".
-After: detected 2 CardSection-style rounded-lg border containers in the rendered snapshot.
-Diff verdict: expected visual contract migration observed in deterministic rendered artifact.

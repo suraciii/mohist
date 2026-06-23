@@ -1,9 +1,0 @@
-# Ralph Progress Log
-Started: 2026-04-09T06:35:54.569Z
-
----
-2026-04-09T08:15:32.734Z | T-002 | EventBus 新增 6 种事件类型 (agent_text_chunk, main_tool_call, coder_text_chunk, coder_tool_call, ralph_task_update, ralph_loop_progress)。EventMap payload 定义参考 design.md Decision 4。Typecheck passes.
-
----
-2026-04-09T08:45:12.456Z | T-003 | runAcpSession 接入 EventBus：在 sessionUpdate 回调中，agent_message_chunk 推送 coder_text_chunk（默认 throttleMs=100ms 节流），tool_call 推送 coder_tool_call。两个事件都检查 eventBus && executionId 才推送。Typecheck passes.
-
