@@ -29,6 +29,14 @@ public record CreateIssueRequest(
 /// (<c>model</c>, <c>modelVariant</c>, <c>stageModels</c>,
 /// <c>stageModelVariants</c>) follow the spec's "present-but-null = clear"
 /// semantic; <see cref="Raw"/> lets the handler detect presence.
+///
+/// <see cref="Fields"/> carries a set of simple-field names (Title, Body,
+/// Labels, Priority, IsDraft, AttachmentIds) that the request body actually
+/// mentioned. The grain uses it to honor three-state semantics on those
+/// fields (absent = leave alone, present-and-null = clear, present-with-value
+/// = replace). <see cref="Raw"/> carries the same presence signal for
+/// model-metadata fields and is consumed by the route handler via
+/// <c>BuildUpdatePatch</c> on the issue-routes helper layer.
 /// </summary>
 public record UpdateIssueRequest
 {
@@ -56,6 +64,18 @@ public record UpdateIssueRequest
     /// </summary>
     public JsonElement Raw { get; init; }
 
+    /// <summary>
+    /// Set of simple-field names that the request body actually mentioned.
+    /// The grain's <c>UpdateFullAsync</c> uses it to honor three-state
+    /// semantics on Title, Body, Labels, Priority, IsDraft, and
+    /// AttachmentIds: absent = leave alone, present-and-null = clear,
+    /// present-with-value = replace. Model-metadata fields are not tracked
+    /// here — the route handler reads presence off <see cref="Raw"/>.
+    /// </summary>
+    public IReadOnlySet<string> Fields { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+    public bool Contains(string fieldName) => Fields.Contains(fieldName);
+
     public static async ValueTask<UpdateIssueRequest?> BindAsync(HttpContext context)
     {
         JsonElement raw;
@@ -73,6 +93,14 @@ public record UpdateIssueRequest
             return null;
         }
 
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        if (raw.TryGetProperty("title", out _)) fields.Add(nameof(Title));
+        if (raw.TryGetProperty("body", out _)) fields.Add(nameof(Body));
+        if (raw.TryGetProperty("labels", out _)) fields.Add(nameof(Labels));
+        if (raw.TryGetProperty("priority", out _)) fields.Add(nameof(Priority));
+        if (raw.TryGetProperty("isDraft", out _)) fields.Add(nameof(IsDraft));
+        if (raw.TryGetProperty("attachmentIds", out _)) fields.Add(nameof(AttachmentIds));
+
         return new UpdateIssueRequest
         {
             Title = GetString(raw, "title"),
@@ -88,6 +116,7 @@ public record UpdateIssueRequest
             IsDraft = GetNullableBool(raw, "isDraft"),
             AttachmentIds = GetStringArray(raw, "attachmentIds"),
             Raw = raw,
+            Fields = fields,
         };
     }
 

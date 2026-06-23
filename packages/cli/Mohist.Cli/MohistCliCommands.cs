@@ -140,7 +140,8 @@ internal static class MohistCliCommands
         var provider = services.BuildServiceProvider();
         var root = Build(api, provider);
         var config = new InvocationConfiguration { Output = output, Error = error };
-        return root.Parse(args).InvokeAsync(config);
+        var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
+        return CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config);
     }
 
     internal static string Query(

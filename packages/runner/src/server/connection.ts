@@ -206,7 +206,6 @@ function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
     projectId: dispatch.projectId,
     issueNumber: dispatch.issueNumber ?? undefined,
     artifacts: parseObject(dispatch.artifacts),
-    outputs: dispatch.outputs ? (JSON.parse(dispatch.outputs) as WorkItem["outputs"]) : null,
     setVars: dispatch.setVars ? (parseObject(dispatch.setVars) as Record<string, string> | null) : null,
     ownerKind: dispatch.ownerKind ?? undefined,
     agentJobId: dispatch.agentJobId ?? undefined,

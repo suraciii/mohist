@@ -324,12 +324,54 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task UpdateFullAsync(UpdateIssueData data)
     {
         EnsureIssue();
-        await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Id, data.AttachmentIds);
-        _issue!.Update(data.Title, data.Body, data.Labels, data.Priority);
-        if (data.IsDraft.HasValue)
+        var present = data.PresentFields ?? (IReadOnlySet<string>)new HashSet<string>(StringComparer.Ordinal);
+        var hasTitle = present.Contains(nameof(UpdateIssueData.Title));
+        var hasBody = present.Contains(nameof(UpdateIssueData.Body));
+        var hasLabels = present.Contains(nameof(UpdateIssueData.Labels));
+        var hasPriority = present.Contains(nameof(UpdateIssueData.Priority));
+        var hasIsDraft = present.Contains(nameof(UpdateIssueData.IsDraft));
+        var hasAttachments = present.Contains(nameof(UpdateIssueData.AttachmentIds));
+
+        var title = hasTitle ? data.Title : null;
+        var body = hasBody ? data.Body : null;
+        var priority = hasPriority ? data.Priority : null;
+
+        var presentAttachmentsNull = hasAttachments && data.AttachmentIds is null;
+        if (hasAttachments && !presentAttachmentsNull)
+        {
+            await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Id, data.AttachmentIds);
+        }
+
+        // For labels, the grain honors three-state semantics:
+        //  - absent (hasLabels = false): leave labels untouched
+        //  - present-and-null: clear to empty
+        //  - present-and-value: pass to Issue.Update which deep-merges and
+        //    emits IssueLabelsChanged only when the resulting map actually
+        //    differs (matching the pre-fix event semantics).
+        IReadOnlyDictionary<string, string>? labelsForUpdate = null;
+        if (hasLabels)
+        {
+            labelsForUpdate = data.Labels ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        _issue!.Update(title, body, labelsForUpdate, priority);
+
+        if (hasIsDraft && data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
+
         await SaveIssueAsync();
-        await _attachmentService.BindIssueAsync(_issue.ProjectId, _issue.Id, data.AttachmentIds);
+
+        if (presentAttachmentsNull)
+        {
+            // Three-state: present-and-null = unbind all attachments. The
+            // ValidateBindAsync/BindAsync pair above would be a no-op for an
+            // empty id list, so we go through the dedicated clear path.
+            await _attachmentService.UnbindAllIssueAsync(_issue.ProjectId, _issue.Id);
+        }
+        else if (hasAttachments)
+        {
+            await _attachmentService.ReplaceIssueAsync(_issue.ProjectId, _issue.Id, data.AttachmentIds!);
+        }
     }
 
     public async Task<IssueWorkflowStatus?> GetWorkflowStatusAsync()
@@ -569,5 +611,6 @@ public record UpdateIssueData(
 [property: Id(2)] IReadOnlyDictionary<string, string>? Labels = null,
     [property: Id(3)] string? Priority = null,
     [property: Id(4)] bool? IsDraft = null,
-    [property: Id(5)] string[]? AttachmentIds = null
+    [property: Id(5)] string[]? AttachmentIds = null,
+    [property: Id(6)] IReadOnlySet<string>? PresentFields = null
 );

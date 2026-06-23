@@ -22,6 +22,8 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildAction("rerun", "Rerun issue", api));
         issue.Subcommands.Add(BuildAction("force-stop", "Force stop workflow", api));
         issue.Subcommands.Add(BuildAction("resume", "Resume workflow", api));
+        issue.Subcommands.Add(BuildReject(api));
+        issue.Subcommands.Add(BuildStop(api));
         issue.Subcommands.Add(BuildRebase(api));
         issue.Subcommands.Add(BuildArchive(api));
         issue.Subcommands.Add(BuildAction("unarchive", "Unarchive issue", api));
@@ -32,6 +34,8 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildSessions(api));
         issue.Subcommands.Add(BuildWorkflow(api));
         issue.Subcommands.Add(BuildFeedback(api));
+        issue.Subcommands.Add(BuildPrereq(api));
+        issue.Subcommands.Add(BuildComment(api));
         issue.Subcommands.Add(BuildTemplate(api));
 
         return issue;
@@ -127,6 +131,9 @@ internal static class IssueCommands
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
         var riskOpt = new Option<string?>("--risk") { Description = "Risk level (low, medium, high); overrides frontmatter risk" };
+        var repositoryOpt = new Option<string?>("--repository") { Description = "Target repository name in multi-repository projects" };
+        var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
+        var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("creating");
         cmd.Arguments.Add(titleArg);
         cmd.Options.Add(bodyOpt);
@@ -140,6 +147,9 @@ internal static class IssueCommands
         cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
         cmd.Options.Add(riskOpt);
+        cmd.Options.Add(repositoryOpt);
+        cmd.Options.Add(stageModelsOpt);
+        cmd.Options.Add(stageModelVariantsOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
         cmd.SetAction(ctx =>
@@ -156,6 +166,9 @@ internal static class IssueCommands
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
             var risk = ctx.GetValue(riskOpt);
+            var repository = ctx.GetValue(repositoryOpt);
+            var stageModels = ctx.GetValue(stageModelsOpt);
+            var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
             return CreateAsync();
@@ -165,7 +178,7 @@ internal static class IssueCommands
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
-var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
+                var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 if (draftState == MohistCliCommands.DraftFlagState.Conflicting)
                 {
                     api.Error.WriteLine("--ready and --draft are mutually exclusive");
@@ -192,6 +205,24 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                 var (effectiveBody, effectiveWorkflow, effectiveRisk) =
                     ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
 
+                object? stageModelsPayload = null;
+                if (ctx.GetResult(stageModelsOpt) is not null)
+                {
+                    var sm = await JsonInputResolver.ResolveAsync(stageModels, api.FileSystem, api.Error, "--stage-models");
+                    if (sm is JsonInputResolver.Result.Failure)
+                        return 1;
+                    stageModelsPayload = ((JsonInputResolver.Result.Success)sm).Value;
+                }
+
+                object? stageModelVariantsPayload = null;
+                if (ctx.GetResult(stageModelVariantsOpt) is not null)
+                {
+                    var smv = await JsonInputResolver.ResolveAsync(stageModelVariants, api.FileSystem, api.Error, "--stage-model-variants");
+                    if (smv is JsonInputResolver.Result.Failure)
+                        return 1;
+                    stageModelVariantsPayload = ((JsonInputResolver.Result.Success)smv).Value;
+                }
+
                 Dictionary<string, string>? labelMap = null;
                 foreach (var entry in labelParse.Entries)
                 {
@@ -200,18 +231,26 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                     labelMap[entry.Key] = entry.Value!;
                 }
 
-                var result = await api.PostAndReadAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), new
+                var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
-                    title,
-                    body = effectiveBody,
-                    labels = labelMap,
-                    priority = priority ?? "p2",
-                    model,
-                    modelVariant,
-                    workflowProfileId = effectiveWorkflow,
-                    risk = effectiveRisk,
-                    isDraft,
-                });
+                    ["title"] = title,
+                    ["body"] = effectiveBody,
+                    ["labels"] = labelMap,
+                    ["priority"] = priority ?? "p2",
+                    ["model"] = model,
+                    ["modelVariant"] = modelVariant,
+                    ["workflowProfileId"] = effectiveWorkflow,
+                    ["risk"] = effectiveRisk,
+                    ["isDraft"] = isDraft,
+                };
+                if (ctx.GetResult(repositoryOpt) is not null)
+                    payload["repositoryName"] = repository;
+                if (stageModelsPayload is not null)
+                    payload["stageModels"] = stageModelsPayload;
+                if (stageModelVariantsPayload is not null)
+                    payload["stageModelVariants"] = stageModelVariantsPayload;
+
+                var result = await api.PostAndReadAsync(ProjectIssuesPath(resolvedProjectId, "/issues"), payload);
                 if (result.ExitCode == 0)
                     PrintCreateGuidance(result.Data, api.Output);
                 return result.ExitCode;
@@ -306,6 +345,13 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
         return cmd;
     }
 
+    private static bool IsOptionProvided(ParseResult ctx, Option option)
+    {
+        var result = ctx.GetResult(option);
+        if (result is null) return false;
+        return !result.Implicit;
+    }
+
     private static Command BuildUpdate(MohistCliApi api)
     {
         var cmd = new Command("update", "Update an issue");
@@ -319,6 +365,9 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
+        var repositoryOpt = new Option<string?>("--repository") { Description = "(Not allowed) Repository ownership is immutable after creation" };
+        var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
+        var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
         var (readyOpt, draftOpt) = MohistCliCommands.IsDraftFlags("updating");
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(titleOpt);
@@ -331,6 +380,9 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(modelVariantOpt);
+        cmd.Options.Add(repositoryOpt);
+        cmd.Options.Add(stageModelsOpt);
+        cmd.Options.Add(stageModelVariantsOpt);
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
         cmd.SetAction(ctx =>
@@ -348,10 +400,28 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
+            var stageModels = ctx.GetValue(stageModelsOpt);
+            var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
+            var titleProvided = ctx.GetResult(titleOpt) is not null;
+            var bodyProvided = ctx.GetResult(bodyOpt) is not null;
+            var bodyFileProvided = ctx.GetResult(bodyFileOpt) is not null;
+            var bodyStdinProvided = IsOptionProvided(ctx, bodyStdinOpt);
+            var labelsProvided = ctx.GetResult(labelOpt) is not null;
+            var priorityProvided = ctx.GetResult(priorityOpt) is not null;
+            var modelProvided = ctx.GetResult(modelOpt) is not null;
+            var stageModelsProvided = ctx.GetResult(stageModelsOpt) is not null;
+            var stageModelVariantsProvided = ctx.GetResult(stageModelVariantsOpt) is not null;
+            var readyProvided = IsOptionProvided(ctx, readyOpt);
+            var draftProvided = IsOptionProvided(ctx, draftOpt);
             return UpdateAsync();
 
             async Task<int> UpdateAsync()
             {
+                if (ctx.GetResult(repositoryOpt) is not null)
+                {
+                    api.Error.WriteLine("--repository cannot be used with 'issue update' — repository ownership is immutable after creation");
+                    return 1;
+                }
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
@@ -361,23 +431,56 @@ var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
                     api.Error.WriteLine("--ready and --draft are mutually exclusive");
                     return 1;
                 }
-                var hasAnyBodySource =
-                    !string.IsNullOrWhiteSpace(body) ||
-                    !string.IsNullOrWhiteSpace(bodyFile) ||
-                    bodyStdin;
-                if (hasAnyBodySource)
+                var bodySourceCount =
+                    (bodyProvided ? 1 : 0)
+                    + (bodyFileProvided ? 1 : 0)
+                    + (bodyStdinProvided ? 1 : 0);
+                if (bodySourceCount > 1)
                 {
-                    var resolvedBody = await BodyInputResolver.ResolveAsync(
+                    api.Error.WriteLine("the following options are mutually exclusive: --body, --body-file, --body-stdin; pass only one");
+                    return 1;
+                }
+                string? resolvedBody = null;
+                var bodyWillBeSent = bodySourceCount > 0;
+                if (bodyWillBeSent)
+                {
+                    var resolved = await BodyInputResolver.ResolveAsync(
                         body, bodyFile, bodyStdin, api.FileSystem, api.StandardInput, api.Error);
-                    if (resolvedBody is BodyInputResolver.Result.Failure)
+                    if (resolved is BodyInputResolver.Result.Failure)
                         return 1;
-                    body = ((BodyInputResolver.Result.Success)resolvedBody).Body;
+                    resolvedBody = ((BodyInputResolver.Result.Success)resolved).Body;
                 }
 
-                object payload;
-                if (labels is { Length: > 0 })
+                var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+                if (titleProvided)
+                    payload["title"] = title;
+                if (bodyWillBeSent)
+                    payload["body"] = resolvedBody;
+                if (priorityProvided)
+                    payload["priority"] = priority;
+                if (modelProvided)
+                    payload["model"] = model;
+
+                if (stageModelsProvided)
                 {
-var labelParse = LabelDelta.Parse(labels);
+                    var sm = await JsonInputResolver.ResolveAsync(stageModels, api.FileSystem, api.Error, "--stage-models");
+                    if (sm is JsonInputResolver.Result.Failure)
+                        return 1;
+                    payload["stageModels"] = ((JsonInputResolver.Result.Success)sm).Value;
+                }
+
+                if (stageModelVariantsProvided)
+                {
+                    var smv = await JsonInputResolver.ResolveAsync(stageModelVariants, api.FileSystem, api.Error, "--stage-model-variants");
+                    if (smv is JsonInputResolver.Result.Failure)
+                        return 1;
+                    payload["stageModelVariants"] = ((JsonInputResolver.Result.Success)smv).Value;
+                }
+
+                if (labelsProvided)
+                {
+                    var labelParse = LabelDelta.Parse(labels);
                     if (!labelParse.IsValid)
                     {
                         api.Error.WriteLine(labelParse.Error);
@@ -387,40 +490,12 @@ var labelParse = LabelDelta.Parse(labels);
                     var (loadExit, current) = await LoadCurrentLabelsAsync(api, issuePath);
                     if (loadExit != 0)
                         return loadExit;
-                    var merged = LabelDelta.Apply(labelParse.Entries, current);
-                    payload = new
-                    {
-                        title,
-                        body,
-                        labels = merged,
-                        priority,
-                        model,
-                        modelVariant,
-                        isDraft = draftState switch
-                        {
-                            MohistCliCommands.DraftFlagState.Draft => (bool?)true,
-                            MohistCliCommands.DraftFlagState.Ready => (bool?)false,
-                            _ => null,
-                        },
-                    };
+                    payload["labels"] = LabelDelta.Apply(labelParse.Entries, current);
                 }
-                else
+
+                if (readyProvided || draftProvided)
                 {
-                    payload = new
-                    {
-                        title,
-                        body,
-                        labels = (Dictionary<string, string>?)null,
-                        priority,
-                        model,
-                        modelVariant,
-                        isDraft = draftState switch
-                        {
-                            MohistCliCommands.DraftFlagState.Draft => (bool?)true,
-                            MohistCliCommands.DraftFlagState.Ready => (bool?)false,
-                            _ => null,
-                        },
-                    };
+                    payload["isDraft"] = draftState == MohistCliCommands.DraftFlagState.Draft;
                 }
 
                 return await api.PrintPatchAsync(
@@ -489,6 +564,101 @@ var labelParse = LabelDelta.Parse(labels);
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/{name}"),
                     new { });
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildReject(MohistCliApi api)
+    {
+        var cmd = new Command("reject", "Reject the workflow run with a message (request changes at an approval gate)");
+        var numberArg = NumberArg();
+        var messageOpt = new Option<string?>("--message", "-m")
+        {
+            Description = "Reject reason / change request message (required)",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(messageOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var message = ctx.GetValue(messageOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return RejectAsync();
+
+            async Task<int> RejectAsync()
+            {
+                if (string.IsNullOrWhiteSpace(message))
+                {
+                    api.Error.WriteLine("--message is required and must not be empty");
+                    return 1;
+                }
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/reject");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { message },
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildStop(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "stop",
+            "Stop the workflow run permanently (terminal — cannot be resumed; use 'force-stop' if you want a pause you can resume)");
+        var numberArg = NumberArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return StopAsync();
+
+            async Task<int> StopAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/stop");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
             }
         });
         return cmd;
@@ -737,7 +907,72 @@ var labelParse = LabelDelta.Parse(labels);
         var feedback = new Command("feedback", "Issue approval feedback");
         feedback.Subcommands.Add(BuildFeedbackList(api));
         feedback.Subcommands.Add(BuildFeedbackShow(api));
+        feedback.Subcommands.Add(BuildFeedbackCreate(api));
         return feedback;
+    }
+
+    private static Command BuildFeedbackCreate(MohistCliApi api)
+    {
+        var cmd = new Command("create", "Create an approval feedback record");
+        var numberArg = NumberArg();
+        var stageOpt = new Option<string?>("--stage", "-s") { Description = "Workflow stage (e.g. plan, build, check)" };
+        var bodyOpt = new Option<string?>("--body", "-b") { Description = "Feedback body text (mutually exclusive with --body-file)" };
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read feedback body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(stageOpt);
+        cmd.Options.Add(bodyOpt);
+        cmd.Options.Add(bodyFileOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var stage = ctx.GetValue(stageOpt);
+            var body = ctx.GetValue(bodyOpt);
+            var bodyFile = ctx.GetValue(bodyFileOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            var stageProvided = ctx.GetResult(stageOpt) is not null;
+            var bodyProvided = ctx.GetResult(bodyOpt) is not null;
+            var bodyFileProvided = ctx.GetResult(bodyFileOpt) is not null;
+            return CreateAsync();
+
+            async Task<int> CreateAsync()
+            {
+                if (!stageProvided || string.IsNullOrWhiteSpace(stage))
+                {
+                    api.Error.WriteLine("--stage is required");
+                    return 1;
+                }
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var resolved = await BodyInputResolver.ResolveAsync(
+                    body, bodyFile, false, api.FileSystem, api.StandardInput, api.Error);
+                if (resolved is BodyInputResolver.Result.Failure)
+                    return 1;
+                var bodyText = ((BodyInputResolver.Result.Success)resolved).Body;
+                var payload = new { stage, body = bodyText };
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/feedback");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    payload,
+                    mode,
+                    nameof(MohistCliApi.TableShape.FeedbackShow));
+            }
+        });
+        return cmd;
     }
 
     private static Command BuildFeedbackList(MohistCliApi api)
@@ -881,6 +1116,170 @@ var labelParse = LabelDelta.Parse(labels);
                 return id;
         }
         return null;
+    }
+
+    private static Command BuildPrereq(MohistCliApi api)
+    {
+        var prereq = new Command("prereq", "Manage issue start prerequisites");
+        prereq.Subcommands.Add(BuildPrereqAdd(api));
+        prereq.Subcommands.Add(BuildPrereqRemove(api));
+        return prereq;
+    }
+
+    private static Command BuildPrereqAdd(MohistCliApi api)
+    {
+        var cmd = new Command("add", "Add a start prerequisite to an issue");
+        var numberArg = NumberArg();
+        var prereqNumberArg = new Argument<int>("prereq-number")
+        {
+            Description = "Prerequisite issue number",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(prereqNumberArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var prereqNumber = ctx.GetValue(prereqNumberArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return AddAsync();
+
+            async Task<int> AddAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { prerequisiteNumber = prereqNumber },
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildPrereqRemove(MohistCliApi api)
+    {
+        var cmd = new Command("remove", "Remove a start prerequisite from an issue");
+        var numberArg = NumberArg();
+        var prereqNumberArg = new Argument<int>("prereq-number")
+        {
+            Description = "Prerequisite issue number",
+        };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(prereqNumberArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var prereqNumber = ctx.GetValue(prereqNumberArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return RemoveAsync();
+
+            async Task<int> RemoveAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/prerequisites/{prereqNumber}");
+                return await api.PrintDeleteWithOutputAsync(
+                    path,
+                    mode,
+                    nameof(MohistCliApi.TableShape.IssueShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildComment(MohistCliApi api)
+    {
+        var comment = new Command("comment", "Manage issue comments");
+        comment.Subcommands.Add(BuildCommentAdd(api));
+        return comment;
+    }
+
+    private static Command BuildCommentAdd(MohistCliApi api)
+    {
+        var cmd = new Command("add", "Add a comment to an issue");
+        var numberArg = NumberArg();
+        var bodyOpt = new Option<string?>("--body", "-b") { Description = "Comment body text (mutually exclusive with --body-file)" };
+        var bodyFileOpt = new Option<string?>("--body-file") { Description = "Read comment body from a UTF-8 file path (recommended for long Markdown; mutually exclusive with --body)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Options.Add(bodyOpt);
+        cmd.Options.Add(bodyFileOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var body = ctx.GetValue(bodyOpt);
+            var bodyFile = ctx.GetValue(bodyFileOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            var bodyProvided = ctx.GetResult(bodyOpt) is not null;
+            var bodyFileProvided = ctx.GetResult(bodyFileOpt) is not null;
+            return AddAsync();
+
+            async Task<int> AddAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var resolved = await BodyInputResolver.ResolveAsync(
+                    body, bodyFile, false, api.FileSystem, api.StandardInput, api.Error);
+                if (resolved is BodyInputResolver.Result.Failure)
+                    return 1;
+                var bodyText = ((BodyInputResolver.Result.Success)resolved).Body;
+                var path = ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/comments");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { body = bodyText },
+                    mode,
+                    nameof(MohistCliApi.TableShape.FeedbackShow));
+            }
+        });
+        return cmd;
     }
 
     private static Command BuildTemplate(MohistCliApi api)
