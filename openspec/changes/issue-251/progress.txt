@@ -1,0 +1,33 @@
+## Codebase Patterns
+
+### FSD / widget structure
+- `packages/web/src/widgets/<widget>/` has `model/`, `ui/`, optional `index.ts` barrel.
+- Public barrel at `index.ts` re-exports stable symbols (e.g. `projectTurn`, `useSessionTranscript`, `SessionTranscriptLayout`).
+- Model modules contain pure domain logic; UI modules contain React components.
+- `model/transcript-tool-utils.ts` already owns patch *parsing* (`parsePatchOperations`, `parseEditInput`, `parseEditWriteChanges`); `model/diff-builder.ts` is the new home for patch *diff-building* (the companion half). Both belong in model — the split-brain at the model/UI layer boundary is what T-001 fixes.
+
+### Diff types
+- `FileBlock`, `DiffLine`, etc. live in `packages/web/src/widgets/issue-changed-files/model/diffModel.ts`.
+- `parseDiff`, `isLargeDiff` are also there. session-transcript imports them cross-widget for the diff rendering components.
+
+### Test patterns
+- Tests use `vitest` + `describe/it/expect` style.
+- Pure model tests live as `<name>.test.ts` next to the source.
+- Render/harness tests use `@testing-library/react` and `// @vitest-environment jsdom`.
+- Current transcript widget had only one test file: `model/useSessionTranscript.test.tsx` (cover the hook, no diff calc coverage before T-001).
+
+### Tooling
+- Typecheck: `npm run typecheck -w packages/web` (`tsc -b`).
+- Tests: `npm run test:run -w packages/web` (`vitest run`).
+- tsconfig is strict with `noUnusedLocals` and `noUnusedParameters`.
+
+### Branch
+- Workflow branch is `mohist/run-wr_d034710a05a74df984095723e87b2df0`; commit on this branch only.
+
+## T-001 Learnings
+
+- `model/diff-builder.ts` exports `buildDiffFromEdit`, `buildDiffFromPatchText`, `extractPatchForFile`, and re-exports `FileBlock`/`DiffLine` (so UI imports them via `../model/diff-builder` rather than reaching cross-widget into `issue-changed-files/model/diffModel` for the data type). `parseDiff`/`isLargeDiff` stay imported from the source widget since they are pure render helpers.
+- Layer contract enforced: `diff-builder.ts` only imports from `transcript-tool-utils.ts` (sibling model module) and the upstream `issue-changed-files` model; UI imports calc via `../model/diff-builder` only — no pure diff computation remains inline.
+- 13 unit tests in `diff-builder.test.ts` cover: edit (oldStr/newStr) shape & counts, identical-input edge case, symmetric oldPath/newPath, `extractPatchForFile` for empty/missing/Add/Delete directives, `buildDiffFromPatchText` block count/status mapping (`added`/`modified`/`deleted`/`renamed` via `Move to`), OldPath oldPath override, hunk header + per-line emission, additions/deletions counts from `parsePatchOperations`, and empty-input short-circuit.
+- Pre-existing test failures (NOT caused by T-001, verified by stash + baseline): `MarkdownReader.test.tsx` (`delete (globalThis).ResizeObserver` teardown — global is non-configurable in current jsdom) and `completion-snapshot.test.ts` (one assertion). These hang `npm run test:run -w packages/web` because vitest 4's reporter does not exit cleanly after a teardown throw; running the session-transcript subset directly (33 widget files / 455 tests) is green.
+- The `npm run test:run -w packages/web` command resolves to the root `node_modules/vitest@1.6.1` via npm workspace hoisting; the workspace-local `packages/web/node_modules/vitest@4.1.7` is what actually runs tests. Use `cd packages/web && npx vitest run ...` (or set the workspace prefix) to get the right binary.
