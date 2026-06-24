@@ -296,7 +296,7 @@ stages:
           baseBranch: ${{ repository.baseBranch }}
           remote: origin
           squash: true
-          message: "Complete issue #${{ issue.number }}"
+          messageFrom: issue.title
           conflictResolver:
             title: Resolve rebase conflicts
             with:

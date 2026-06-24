@@ -136,7 +136,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("${{ repository.baseBranch }}", rebaseWithJson);
         Assert.Contains("\"conflictResolver\"", rebaseWithJson);
         Assert.Contains("Resolve rebase conflicts", rebaseWithJson);
-        Assert.Contains("Complete issue #${{ issue.number }}", rebaseWithJson);
+        Assert.Contains("\"messageFrom\"", rebaseWithJson);
+        Assert.Contains("issue.title", rebaseWithJson);
         Assert.Equal("mohist/push", push.Uses);
         var pushWithJson = JsonSerializer.Serialize(push.With);
         Assert.Contains("workspace.branch", pushWithJson);

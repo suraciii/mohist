@@ -15,6 +15,7 @@ import {
   setPublishViaPrGitRunnerForTest,
 } from "../src/actions/publish-via-pr.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
+import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string }
@@ -26,6 +27,7 @@ const WORKSPACE_PATH = "/workspace"
 afterEach(() => {
   setPublishViaPrGitRunnerForTest(null)
   setPublishViaPrGhRunnerForTest(null)
+  setIssueFieldCommandRunnerForTest(null)
 })
 
 function ok(stdout: string): GitResponse {
@@ -55,7 +57,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     with: withOverrides,
     variables: {
       project: { path: WORKSPACE_PATH },
-      issue: { title: "PR delivery", number: 190 },
+      issue: { title: "stale variable title", body: "stale variable body", number: 190 },
       repository: {
         gitUrl: "https://example.com/repo.git",
         baseBranch: "master",
@@ -66,6 +68,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
       ...variables,
     },
     workDir: WORKSPACE_PATH,
+    projectId: "proj_1",
     issueNumber: 190,
     signal: new AbortController().signal,
   }
@@ -79,6 +82,19 @@ function installGh(respond: (command: string, args: string[]) => CommandResult |
   setPublishViaPrGhRunnerForTest(async (cmd, args, _cwd, _signal) => await respond(cmd, args))
 }
 
+function installMoIssueShow(title = "PR delivery", body = "Implement the PR delivery workflow") {
+  const calls: string[] = []
+  setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+    calls.push([cmd, ...args].join(" "))
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({ success: true, data: { title, body } }),
+      stderr: "",
+    }
+  })
+  return calls
+}
+
 describe("mohist/publish-via-pr action", () => {
   it("is registered under mohist/publish-via-pr in the default registry", () => {
     const registry = createDefaultRegistry()
@@ -90,6 +106,7 @@ describe("mohist/publish-via-pr action", () => {
   it("happy path: precheck, push, create PR, merge, and confirm state=merged", async () => {
     const gitCalls: string[] = []
     const ghCalls: string[] = []
+    const moCalls = installMoIssueShow("PR delivery", "Implement the PR delivery workflow")
 
     installGit((_workDir, args) => {
       const cmd = args.join(" ")
@@ -116,11 +133,11 @@ describe("mohist/publish-via-pr action", () => {
           return ghOk("You are authenticated with GitHub as: octocat\n")
         case "gh pr list --head mohist/run-wr-pr-1 --base master --state open --json number,url":
           return ghOk("[]\n")
-        case "gh pr create --head mohist/run-wr-pr-1 --base master --title Complete issue #190 --body Mohist issue #190":
+        case "gh pr create --head mohist/run-wr-pr-1 --base master --title PR delivery --body Implement the PR delivery workflow":
           return ghOk("https://github.com/example/repo/pull/42\n")
         case "gh pr view 42 --json state,mergeCommit,url,number":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
-        case "gh pr merge 42 --squash --subject Complete issue #190 --body ":
+        case "gh pr merge 42 --squash --subject PR delivery --body ":
           return ghOk("Merged pull request #42\n")
         case "gh pr view 42 --json state,mergeCommit,url":
           return ghOk(JSON.stringify({ state: "MERGED", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
@@ -133,7 +150,8 @@ describe("mohist/publish-via-pr action", () => {
       source: "mohist/run-wr-pr-1",
       target: "master",
       remote: "origin",
-      message: "Complete issue #190",
+      titleFrom: "issue.title",
+      bodyFrom: "issue.body",
     }))
     const output = JSON.parse(result.output ?? "{}")
 
@@ -147,10 +165,13 @@ describe("mohist/publish-via-pr action", () => {
       "gh --version",
       "gh auth status",
       "gh pr list --head mohist/run-wr-pr-1 --base master --state open --json number,url",
-      "gh pr create --head mohist/run-wr-pr-1 --base master --title Complete issue #190 --body Mohist issue #190",
+      "gh pr create --head mohist/run-wr-pr-1 --base master --title PR delivery --body Implement the PR delivery workflow",
       "gh pr view 42 --json state,mergeCommit,url,number",
-      "gh pr merge 42 --squash --subject Complete issue #190 --body ",
+      "gh pr merge 42 --squash --subject PR delivery --body ",
       "gh pr view 42 --json state,mergeCommit,url",
+    ])
+    expect(moCalls).toEqual([
+      "mo issue show 190 --project-id proj_1 --output json",
     ])
     expect(output).toMatchObject({
       kind: "publish-via-pr",
@@ -235,6 +256,87 @@ describe("mohist/publish-via-pr action", () => {
     expect(output.failureKind).toBe("config-error")
     expect(output.failureMessage).toContain("gh auth login")
     expect(gitCalls).toEqual([])
+  })
+
+  it("issue title/body source failure reports config-error before pushing", async () => {
+    const gitCalls: string[] = []
+    const moCalls: string[] = []
+    installGit((_workDir, args) => {
+      gitCalls.push(args.join(" "))
+      return fail(`unexpected git call: ${args.join(" ")}`)
+    })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+          return ghOk("gh version 2.55.0\n")
+        case "gh auth status":
+          return ghOk("ok")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+      moCalls.push([cmd, ...args].join(" "))
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "issue not found",
+      }
+    })
+
+    const result = await publishViaPrAction(context({
+      titleFrom: "issue.title",
+      bodyFrom: "issue.body",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("config-error")
+    expect(output.failureMessage).toContain("mo issue show 190 failed")
+    expect(output.failureMessage).toContain("issue not found")
+    expect(gitCalls).toEqual([])
+    expect(moCalls).toEqual(["mo issue show 190 --project-id proj_1 --output json"])
+  })
+
+  it("unsupported issue field source reports config-error before pushing", async () => {
+    const gitCalls: string[] = []
+    const moCalls: string[] = []
+    installGit((_workDir, args) => {
+      gitCalls.push(args.join(" "))
+      return fail(`unexpected git call: ${args.join(" ")}`)
+    })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+          return ghOk("gh version 2.55.0\n")
+        case "gh auth status":
+          return ghOk("ok")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+      moCalls.push([cmd, ...args].join(" "))
+      return {
+        exitCode: 0,
+        stdout: "unexpected",
+        stderr: "",
+      }
+    })
+
+    const result = await publishViaPrAction(context({
+      titleFrom: "issue.summary",
+      bodyFrom: "issue.body",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("config-error")
+    expect(output.failureMessage).toContain("Unsupported titleFrom source 'issue.summary'")
+    expect(gitCalls).toEqual([])
+    expect(moCalls).toEqual([])
   })
 
   it("reuses an existing open PR and does not create a duplicate", async () => {

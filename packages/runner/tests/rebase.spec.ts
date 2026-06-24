@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
+import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
 import { applyWorkflowAgentDefault, rebaseAction, setRebaseConflictResolverForTest, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
@@ -6,6 +7,7 @@ afterEach(() => {
   setRebaseGitRunnerForTest(null)
   setRebaseExistsCheckerForTest(null)
   setRebaseConflictResolverForTest(null)
+  setIssueFieldCommandRunnerForTest(null)
 })
 
 describe("mohist/rebase", () => {
@@ -122,6 +124,52 @@ describe("mohist/rebase", () => {
     expect(result.message).toBe("Rebase completed")
   })
 
+  it("MessageFrom_IsIgnoredWhenSquashIsFalse", async () => {
+    const calls: string[] = []
+    const moCalls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+      moCalls.push([cmd, ...args].join(" "))
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "should not run",
+      }
+    })
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("baseShaRemote\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
+          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase origin/master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await rebaseAction(context({
+      baseBranch: "master",
+      remote: "origin",
+      squash: false,
+      messageFrom: "issue.title",
+    }))
+
+    expect(result.status).toBe("success")
+    expect(moCalls).toEqual([])
+    expect(calls).not.toContain("commit -m")
+  })
+
   it("SquashOption_FoldsMultipleCommitsIntoOneOnRunBranch", async () => {
     const calls: string[] = []
     setRebaseExistsCheckerForTest(() => false)
@@ -193,6 +241,134 @@ describe("mohist/rebase", () => {
       failureKind: null,
     })
     expect(result.message).toBe("Rebase and squash completed")
+  })
+
+  it("SquashOption_MessageFromIssueTitle_ResolvesTitleWithMoIssueShow", async () => {
+    const calls: string[] = []
+    const moCalls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+      moCalls.push([cmd, ...args].join(" "))
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ success: true, data: { title: "Use issue title for squash", body: "ignored" } }),
+        stderr: "",
+      }
+    })
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("baseSha\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD": {
+          const index = calls.filter((call) => call === "rev-parse HEAD").length
+          if (index === 1) return ok("beforeRebase\n")
+          if (index === 2) return ok("afterRebase\n")
+          return ok("squashedHead\n")
+        }
+        case "rebase origin/master":
+          return ok("Successfully rebased and updated refs/heads/mo/issue-217.")
+        case "reset --soft baseSha":
+          return ok("")
+        case "commit -m Use issue title for squash":
+          return ok("[mo/issue-217 1a2b3c4] Use issue title for squash\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await rebaseAction(context({
+      baseBranch: "master",
+      remote: "origin",
+      squash: true,
+      messageFrom: "issue.title",
+    }))
+
+    expect(result.status).toBe("success")
+    expect(moCalls).toEqual(["mo issue show 217 --project-id proj_1 --output json"])
+    expect(calls).toContain("commit -m Use issue title for squash")
+  })
+
+  it("SquashOption_MessageFromIssueTitleFailure_ReturnsStructuredFailure", async () => {
+    const calls: string[] = []
+    const moCalls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+      moCalls.push([cmd, ...args].join(" "))
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "issue not found",
+      }
+    })
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      return fail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const result = await rebaseAction(context({
+      baseBranch: "master",
+      remote: "origin",
+      squash: true,
+      messageFrom: "issue.title",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("retry-safe")
+    expect(output.output).toContain("mo issue show 217 failed")
+    expect(output.output).toContain("issue not found")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+    ])
+    expect(calls).not.toContain("fetch origin master")
+    expect(calls).not.toContain("rebase origin/master")
+    expect(calls).not.toContain("commit -m Use issue title for squash")
+    expect(moCalls).toEqual(["mo issue show 217 --project-id proj_1 --output json"])
+  })
+
+  it("SquashOption_UnsupportedMessageFrom_ReturnsStructuredFailure", async () => {
+    const calls: string[] = []
+    const moCalls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+      moCalls.push([cmd, ...args].join(" "))
+      return {
+        exitCode: 0,
+        stdout: "unexpected",
+        stderr: "",
+      }
+    })
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      return fail(`unexpected git call: ${args.join(" ")}`)
+    })
+
+    const result = await rebaseAction(context({
+      baseBranch: "master",
+      remote: "origin",
+      squash: true,
+      messageFrom: "issue.summary",
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.failureKind).toBe("retry-safe")
+    expect(output.output).toContain("Unsupported messageFrom source 'issue.summary'")
+    expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
+    ])
+    expect(moCalls).toEqual([])
   })
 
   it("SquashOptionWithoutMessage_FailsBeforeSquash", async () => {
@@ -565,8 +741,14 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     title: "Rebase onto master",
     uses: "mohist/rebase",
     with: { baseBranch: "master", ...withOverrides },
-    variables,
+    variables: {
+      project: { id: "proj_1" },
+      issue: { number: 217 },
+      ...variables,
+    },
     workDir: "/fake/worktree",
+    projectId: "proj_1",
+    issueNumber: 217,
     signal: new AbortController().signal,
   }
 }

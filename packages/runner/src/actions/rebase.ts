@@ -4,6 +4,7 @@ import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { numberInput, objectInput, stringInput } from "../core/json.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { git as defaultGit } from "./git.js"
+import { isIssueFieldSource, resolveIssueField } from "./issue-fields.js"
 
 const DEFAULT_MAX_CONFLICT_RETRIES = 3
 
@@ -33,14 +34,17 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
   const remote = stringInput(context.with, "remote") ?? null
   const squash = booleanInput(context.with, "squash") === true
-  const squashMessage = stringInput(context.with, "message")
   const maxRetries = numberInput(context.with, "maxConflictRetries") ?? DEFAULT_MAX_CONFLICT_RETRIES
   const conflictResolver = objectInput(context.with, "conflictResolver")
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
-  const requiresSquashMessage = squash && !squashMessage
   const abortResult = await abortRebaseIfInProgress(context)
   if (!abortResult.success) {
-    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, abortResult.combinedOutput, requiresSquashMessage ? "squash-message-missing" : "retry-safe", abortResult.exitCode)
+    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, abortResult.combinedOutput, "retry-safe", abortResult.exitCode)
+  }
+  const squashMessageResult = squash ? await resolveSquashMessage(context) : { kind: "ok" as const, message: undefined }
+  const squashMessage = squashMessageResult.kind === "ok" ? squashMessageResult.message : undefined
+  if (squashMessageResult.kind === "failure") {
+    return rebaseOutput(false, baseBranch, remote, baseRef, null, null, null, null, false, [], 0, squashMessageResult.message, "retry-safe", 1)
   }
   if (remote) {
     const fetch = await git(context.workDir, ["fetch", remote, baseBranch], context.signal)
@@ -132,6 +136,21 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
 
   await git(context.workDir, ["rebase", "--abort"], context.signal)
   return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, allConflicts.flat(), attempts, combinedGitOutput(gitOutputs), "conflict", 1)
+}
+
+async function resolveSquashMessage(context: ActionContext): Promise<{ kind: "ok"; message: string | undefined } | { kind: "failure"; message: string }> {
+  const literal = stringInput(context.with, "message")
+  if (literal !== undefined) return { kind: "ok", message: literal }
+  const source = stringInput(context.with, "messageFrom")
+  if (source === undefined) return { kind: "ok", message: undefined }
+  if (!isIssueFieldSource(source)) {
+    return { kind: "failure", message: `Unsupported messageFrom source '${source}'. Supported sources: issue.title, issue.body.` }
+  }
+  try {
+    return { kind: "ok", message: await resolveIssueField(context, source) }
+  } catch (error) {
+    return { kind: "failure", message: errorMessage(error) }
+  }
 }
 
 interface SquashRequest {
@@ -296,6 +315,10 @@ function booleanInput(input: JsonObject | null | undefined, key: string) {
     if (/^(false|0|no|off)$/i.test(value)) return false
   }
   return undefined
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 async function runConflictResolver(

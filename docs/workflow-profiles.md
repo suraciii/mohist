@@ -66,6 +66,15 @@ stages:
 
 目标语义是正常路径不预先 rebase。Mohist 会推送 workflow branch，打开或复用同 head/base 的 PR，然后通过 GitHub squash merge。只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并时，workflow 才通过 recovery task rebase 后重新 publish。
 
+PR title/body 不从 workflow metadata 读取。profile 通过 `titleFrom: issue.title`、`bodyFrom: issue.body` 指示 action 在运行时执行 `mo issue show <number> --project-id <projectId> --output json`，再用返回的 issue title/body 创建 PR。
+
+后续目标是把 `publish-via-pr` 拆成 `create-pull-request` 与 `merge-pull-request` 两个 task：
+
+- `create-pull-request` 负责推送 workflow branch、创建/复用 PR，并通过 `titleFrom` / `bodyFrom` 在运行时读取 issue title/body 作为 PR title/body。
+- `create-pull-request` 只把稳定 PR 身份写入 workflow runtime variables：`vars.github.pr.number` 和 `vars.github.pr.url`。
+- `merge-pull-request` 读取 `vars.github.pr.number` 合并 PR；合并语义是把当前 workflow branch 合入 base branch，不要求 head SHA 锁。
+- recovery 重新执行 `rebase -> create-pull-request -> merge-pull-request`，复用同一个 workflow branch 和 open PR。
+
 ## 关键字段
 
 ### stage

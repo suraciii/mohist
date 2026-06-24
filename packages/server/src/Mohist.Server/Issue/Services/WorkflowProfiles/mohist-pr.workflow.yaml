@@ -297,7 +297,8 @@ stages:
           source: ${{ workspace.branch }}
           target: ${{ repository.baseBranch }}
           remote: origin
-          message: "Complete issue #${{ issue.number }}"
+          titleFrom: issue.title
+          bodyFrom: issue.body
         onFailure:
           limit: 1
           cases:
@@ -322,7 +323,8 @@ stages:
                     source: ${{ workspace.branch }}
                     target: ${{ repository.baseBranch }}
                     remote: origin
-                    message: "Complete issue #${{ issue.number }}"
+                    titleFrom: issue.title
+                    bodyFrom: issue.body
     checks:
       - name: health
         title: Health

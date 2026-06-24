@@ -236,6 +236,8 @@ public class MohistPrIssueWorkflowProfileSpecs
         Assert.Equal(ReadStringWith(prPublish, "source"), ReadStringWith(defPush, "source"));
         Assert.Equal(ReadStringWith(prPublish, "target"), ReadStringWith(defPush, "target"));
         Assert.Equal(ReadStringWith(prPublish, "remote"), ReadStringWith(defPush, "remote"));
+        Assert.Equal("issue.title", ReadStringWith(prPublish, "titleFrom"));
+        Assert.Equal("issue.body", ReadStringWith(prPublish, "bodyFrom"));
 
         var onFailure = prPublish.OnFailure;
         Assert.NotNull(onFailure);
@@ -347,7 +349,8 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "          source: ${{ workspace.branch }}\n" +
                 "          target: ${{ repository.baseBranch }}\n" +
                 "          remote: origin\n" +
-                "          message: \"Complete issue #${{ issue.number }}\"\n" +
+                "          titleFrom: issue.title\n" +
+                "          bodyFrom: issue.body\n" +
                 "        onFailure:\n" +
                 "          limit: 1\n" +
                 "          cases:\n" +
@@ -372,7 +375,8 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "                    source: ${{ workspace.branch }}\n" +
                 "                    target: ${{ repository.baseBranch }}\n" +
                 "                    remote: origin\n" +
-                "                    message: \"Complete issue #${{ issue.number }}\"",
+                "                    titleFrom: issue.title\n" +
+                "                    bodyFrom: issue.body",
                 "      - id: integrate:rebase\n" +
                 "        title: Rebase and squash branch\n" +
                 "        uses: mohist/rebase\n" +
@@ -380,7 +384,7 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "          baseBranch: ${{ repository.baseBranch }}\n" +
                 "          remote: origin\n" +
                 "          squash: true\n" +
-                "          message: \"Complete issue #${{ issue.number }}\"\n" +
+                "          messageFrom: issue.title\n" +
                 "          conflictResolver:\n" +
                 "            title: Resolve rebase conflicts\n" +
                 "            with:\n" +

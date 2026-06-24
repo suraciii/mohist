@@ -3,6 +3,7 @@ import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { runCommand } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
+import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
 
 type GitRunner = typeof defaultGit
 type GhRunner = typeof runCommand
@@ -53,9 +54,7 @@ export async function publishViaPrAction(context: ActionContext): Promise<Action
   const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
   const remote = stringInput(context.with, "remote") ?? "origin"
   const issueNumber = resolveIssueNumber(context)
-  const title = stringInput(context.with, "message") ?? `Complete issue #${issueNumber ?? ""}`.trim()
   const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
-  const body = `Mohist issue #${issueNumber ?? ""}`.trim()
 
   const steps: PublishViaPrStep[] = []
   const record = (name: string, command: string, exitCode: number, output: string) => {
@@ -107,6 +106,18 @@ export async function publishViaPrAction(context: ActionContext): Promise<Action
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
+
+  const sourceValidationError = validateIssueFieldSources(context)
+  if (sourceValidationError) {
+    return fail("config-error", sourceValidationError, { output: sourceValidationError })
+  }
+  const issueFieldsResult = await loadIssueFieldsIfNeeded(context)
+  if (issueFieldsResult.kind === "failure") {
+    return fail("config-error", issueFieldsResult.message, { output: issueFieldsResult.message })
+  }
+  const issueFields = issueFieldsResult.issueFields
+  const title = resolveTitle(context, issueNumber, issueFields)
+  const body = resolveBody(context, issueNumber, issueFields)
 
   // Phase 2: resolve the head branch from the workflow workspace. The
   // workflow workspace stays on `workspace.branch` for the entire action
@@ -173,6 +184,57 @@ export async function publishViaPrAction(context: ActionContext): Promise<Action
     baseSha: baseSha.sha,
     output: merge.output,
   })
+}
+
+function resolveTitle(context: ActionContext, issueNumber: number | null, issueFields: IssueFields | null): string {
+  const literal = stringInput(context.with, "title") ?? stringInput(context.with, "message")
+  if (literal !== undefined) return literal
+  const source = stringInput(context.with, "titleFrom")
+  if (source === "issue.title" && issueFields) return issueFields.title
+  if (source === "issue.body" && issueFields) return issueFields.body
+  return `Complete issue #${issueNumber ?? ""}`.trim()
+}
+
+function resolveBody(context: ActionContext, issueNumber: number | null, issueFields: IssueFields | null): string {
+  const literal = stringInput(context.with, "body")
+  if (literal !== undefined) return literal
+  const source = stringInput(context.with, "bodyFrom")
+  if (source === "issue.title" && issueFields) return issueFields.title
+  if (source === "issue.body" && issueFields) return issueFields.body
+  return `Mohist issue #${issueNumber ?? ""}`.trim()
+}
+
+function needsIssueFields(context: ActionContext): boolean {
+  const titleLiteral = stringInput(context.with, "title") ?? stringInput(context.with, "message")
+  const bodyLiteral = stringInput(context.with, "body")
+  return (titleLiteral === undefined && isIssueFieldSource(stringInput(context.with, "titleFrom"))) ||
+    (bodyLiteral === undefined && isIssueFieldSource(stringInput(context.with, "bodyFrom")))
+}
+
+function validateIssueFieldSources(context: ActionContext): string | null {
+  const titleLiteral = stringInput(context.with, "title") ?? stringInput(context.with, "message")
+  const bodyLiteral = stringInput(context.with, "body")
+  const titleFrom = stringInput(context.with, "titleFrom")
+  if (titleLiteral === undefined && titleFrom !== undefined && !isIssueFieldSource(titleFrom)) {
+    return `Unsupported titleFrom source '${titleFrom}'. Supported sources: issue.title, issue.body.`
+  }
+  const bodyFrom = stringInput(context.with, "bodyFrom")
+  if (bodyLiteral === undefined && bodyFrom !== undefined && !isIssueFieldSource(bodyFrom)) {
+    return `Unsupported bodyFrom source '${bodyFrom}'. Supported sources: issue.title, issue.body.`
+  }
+  return null
+}
+
+async function loadIssueFieldsIfNeeded(context: ActionContext): Promise<
+  | { kind: "ok"; issueFields: IssueFields | null }
+  | { kind: "failure"; message: string }
+> {
+  if (!needsIssueFields(context)) return { kind: "ok", issueFields: null }
+  try {
+    return { kind: "ok", issueFields: await resolveIssueFields(context) }
+  } catch (error) {
+    return { kind: "failure", message: errorMessage(error) }
+  }
 }
 
 interface OpenOrReusePrOk {
@@ -561,6 +623,10 @@ export function extractIssueNumberFromMessage(message: string): string | null {
 
 function combinedGhOutput(result: { stdout: string; stderr: string }): string {
   return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function resolveIssueNumber(context: ActionContext): number | null {
