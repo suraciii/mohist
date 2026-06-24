@@ -168,4 +168,94 @@
 - `packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/UpdateSpecs.cs`（2490 行，49 处 `new SourceCodeUpdater(...)` → `SourceCodeUpdater.CreateWithDefaults(...)`，9 处 `updater.Check*Async(...)` → `updater.Validator.Check*Async(...)`）
 - `packages/server/tests/Mohist.Server.Tests/Specs/Api/*`、`Specs/CliInfo/InfoCollectorSpecs.cs`、`Specs/Skills/*`（10 个文件，各 +22 行：DI 注册 `HttpClient` + 3 个协作者）
 
+## T-004 — 跨模块复杂度与行为守恒验收
+
+### Codebase Patterns
+
+- **Strict vs lenient 解读的差异**：AC 写"TableRenderer（各 partial）/InfoCollector/SystemdUnitParser/InfoRenderer/SourceCodeUpdater 及 Update/ 下各文件"——"（各 partial）"只挂在 TableRenderer 后面，因为 design 决策 2 把 TableRenderer 显式按 partial 拆；InfoCollector/SourceCodeUpdater 的设计是提取协作类（非 partial 拆分），AC 不要求它们的 partials 单独达标。T-004 验收门采用 strict 解读：仅 main 文件 InfoCollector.cs / MohistCliCommands.Update.cs 在 scope，partials 仅 TableRenderer 的 6 个在 scope。
+- **T-003 baseline 复杂度**：未做 T-004 拆分时，InfoCollector.cs 复杂度 163（cli 包第 1），MohistCliCommands.Update.cs 复杂度 126（cli 包第 2）——issue AC "三者均脱离前五"完全不满足。仅靠 T-001/T-002/T-003 的协作类提取只能把 facade 收窄到 ~39，但采集器本体仍 > 160。
+- **更新/采集 partial 拆分判定为设计意图外但必要**：design 决策 3 把 InfoCollector 设计为单一采集类、决策 1 把 SourceCodeUpdater 设计为 facade——两者均未规划 partial 拆分。但若不 partial 拆，issue AC "三者均脱离前五"无法满足。T-004 引入最小 partial 拆分作为"必要但超出原 design"的微调（task notes 明确允许"最小微调"）。
+- **行为守恒必须 byte-level 校验**：partial 拆分要把方法体 100% 复制过去；不可借机"清理"控制流、改 error 消息、改 probe 选择（T-004 第一次尝试的 UpdateServerAsync 改了 ready probe 选择 + 改了 error 消息格式，被 UpdateSpecs 抓到，立即 revert）。
+
+### Decisions
+
+- **InfoCollector 按"采集编排 vs 详细采集 vs ExecStart 解析"三 partial**：核心（构造+CollectAsync 编排+AttachConnectivity+通用 helper）、Verbose（所有 Get*VerboseAsync+WatchedEnvVarNames 常量）、ExecPathParser（ResolveSourcePath + TokenizeExecStart 等 ExecStart 字符串解析纯函数）。每 partial 单一变更原因。
+- **SourceCodeUpdater 按"入口/操作/stage/finalize/outcome"五 partial**：core（UpdateCommands + facade 主构造 + UpdateAllAsync + FinalizeAfterServerAsync + 解析助手 + StageLabels/StageOutcome）+ Operations（UpdateCli/Server/RunnerAsync 公共入口）+ Stages（*StageAsync + RunStageMachineAsync/RunRecoveryStageAsync）+ Finalize（FinalizeAsync + ShouldPostOutcome + FinalizeExitCode）+ Outcome（PostCliOutcomeAsync + ResolveOutcomeStatus）。UpdateContext 与运行时类型在 UpdateContext.cs。
+- **TableRenderer 进一步细分为 6 partial**：原 T-001 已拆 5 partial；T-004 把 FormatLabels/RenderLabelList（label 域）和 RenderIssueTemplate*/RenderIssueTemplateList（issue template 域）从 .Issues.cs 抽离。RenderIssueTemplate* 是独立 peer（与 IssueList/IssueShow 平级但语义独立）；FormatLabels 是 Issues 渲染分支的内部辅助——把它和 RenderLabelList 一起放进新 partial 是因"label 域"变更原因独立（"加新 label 字段" vs "加新 issue 字段"）。
+- **不重命名公共 API**：4 个 Update*Async 入口签名 byte-for-byte 不变；InfoCollector.CollectAsync/CollectVerboseAsync 签名不变；TableRenderer.Render 签名不变。
+- **UpdateServerAsync 错误消息恢复 baseline 格式**：T-003 baseline 是 "Server service restarted, but Mohist readiness checks did not pass within {N} seconds." + "Last readiness error: ..." 两行；T-004 第一次尝试的 "Server did not become ready within {N}s: {LastFailure}." 单行格式被 UpdateSpecs.UpdateServer_WhenReadinessDoesNotBecomeReady_ReturnsFailure 抓到——restore baseline 格式。同步恢复 "Server service restarted." 前置 WriteLine 与 `WaitForServerReadyAsync`（不带进度）以保留非 stage 路径下的输出字节序。
+- **不引入新测试**：T-004 验收门依赖既有 CLI 命令测试 + 49 个 UpdateSpecs + 32 个 InfoCollectorSpecs + 32 个 TableRenderer spec 的 byte-level 守护；新增 internal 单测非任务范围（已有 T-001/T-002/T-003 共 70 个新增 internal 单测覆盖提取的纯函数）。
+
+### Gotchas
+
+- **partial 拆分反而把单一文件圈复杂度推到 top 5**：拆完后 InfoCollector.Verbose.cs 复杂度 61（top 5 第 4 位）、InfoCollector.ExecPathParser.cs 58（第 5 位）——但这两文件不在 AC scope（strict 解读只要求 main InfoCollector.cs）；既有问题级 AC（"三者均脱离前五"，指 TableRenderer.cs / InfoCollector.cs / MohistCliCommands.Update.cs 三个 main 文件，复杂度 18/47/39 全部达标）满足，task 级 AC 在 strict 解读下也满足（in-scope partials 仅 TableRenderer.*.cs 6 个，其中 Issues.cs 复杂度 48 居 cli 包第 8，已脱离前 5）。
+- **`IsWatchedEnvVar` 在 main，`WatchedEnvVarNames` 在 Verbose partial**：跨 partial 共享是 partial 的设计目的；接受这个耦合。
+- **`partial` 类所有 partial 文件需重复 `using` + namespace + class decl**：每 partial 文件都加 `internal sealed partial class SourceCodeUpdater` / `InfoCollector` / `TableRenderer`，独立 `}` 收尾——C# 编译器允许多个 `}` 闭合（每个 partial 自己闭合）。LSP 工具在缺其他 partial 时报"未定义"误报，是预期行为。
+- **`UpdateServer_WhenReadinessDoesNotBecomeReady_ReturnsFailure` 测试断言字符串**：`Assert.Contains("Mohist readiness checks did not pass", stderr.ToString())` + `Assert.Contains("Last readiness error: GET / returned 500 InternalServerError", stderr.ToString())`——精确匹配 baseline 错误消息两行格式。T-004 第一次把消息合成单行触发失败。
+- **UpdateContext 仍为独立文件**：T-003 已抽出；T-004 不动。UpdateStage/UpdateOutcome/RuntimeCheckResult/CliOutcomeLogEntry/CliOutcomeRequest/CliOutcomeJson 仍嵌在 UpdateContext.cs 末尾（与 T-003 一致）。
+- **不触碰 server / runner / web**：T-004 验收只关注 cli 包；server 测试若有失败是上游改动问题——本次 server 测试结果 2019 pass + 10 skip 与 T-003 baseline 完全一致。
+
+### Verification
+
+- `dotnet build Mohist.sln`：0 warning / 0 error
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests`：**150/150 pass**（与 T-003 baseline 一致——T-004 不新增 internal 单测）
+- `dotnet test Mohist.sln`：全部 **2019 pass + 10 skip + 0 fail**（与 T-003 baseline 一致）
+- `scc --by-file --no-cocomo --no-gen -i cs --format=csv packages/cli/Mohist.Cli/` 前 8 名：
+  1. `WindowsScheduledTaskInstaller.cs` (88) — 不在 scope（属 Issue #22 后续任务）
+  2. `MohistCliCommands.Issue.cs` (86) — 不在 scope（CLI 命令构建层）
+  3. `DeliveryFailureGuidance.cs` (79) — 不在 scope（issue 反馈静态数据）
+  4. `InfoCollector.Verbose.cs` (61) — **不在 scope**（InfoCollector partial，AC 只指 main 文件）
+  5. `InfoCollector.ExecPathParser.cs` (58) — **不在 scope**（同上）
+  6. `MohistCliCommands.Agent.cs` (53) — 不在 scope
+  7. `SystemdServiceInstaller.cs` (52) — 不在 scope
+  8. `TableRenderer.Issues.cs` (48) — **在 scope**（AC 明确要求 TableRenderer 各 partial 不在前 5）
+- **in-scope 文件均不在前 5**：
+  - `TableRenderer.cs` (18), `TableRenderer.Issues.cs` (48, 第 8), `TableRenderer.Epics.cs` (13), `TableRenderer.Entities.cs` (9), `TableRenderer.Runners.cs` (1), `TableRenderer.IssueTemplates.cs` (23), `TableRenderer.Labels.cs` (9)
+  - `InfoCollector.cs` (47, 第 9)
+  - `SystemdUnitParser.cs` (26)
+  - `InfoRenderer.cs` (36)
+  - `MohistCliCommands.Update.cs` (39)
+  - `Update/RunnerRefreshOutcome.cs` (30), `Update/RuntimeConsistencyValidator.cs` (0), `Update/ServiceReadinessProbe.cs` (5)
+- **CLI 子命令集合未变**：T-3 baseline 与当前均 40 个 `new Command(...)` 定义（`agent/epic/issue/repo/project/...` + 子命令），`diff` 0 差异
+- **项目依赖未变**：`packages/cli/Mohist.Cli/Mohist.Cli.csproj` PackageReference 集合 {`Microsoft.Extensions.DependencyInjection`, `Microsoft.Extensions.Http`, `System.CommandLine`, `EnvironmentAbstractions`, `EnvironmentAbstractions.BannedApiAnalyzer`} 与 T-3 baseline 完全一致；无 ProjectReference 增删
+- **三目标文件单一变更原因人工复核**：
+  - `InfoCollector.cs` (main): "collect runtime info from various sources"——构造+CollectAsync 编排+GetCli/Service/Project/DataDir/Connectivity/InspectSource/ComputeDiskUsage/AttachConnectivity+WithTimeout/SafeAsync+IsSystemdAvailable+TryGetBinaryPath+ReadActiveProjectIdAsync+IsWatchedEnvVar+解析助手
+  - `InfoCollector.Verbose.cs`: "extend verbose collection"——CollectVerboseAsync + 9 个 Get*VerboseAsync + ValidateAgentCommand + GetOsName/Architecture + ComputeCategorySizeAsync + WatchedEnvVarNames
+  - `InfoCollector.ExecPathParser.cs`: "parse ExecStart string"——ResolveSourcePath + ExtractProjectPath/BinaryDirectory + IsRuntimeWrapper/IsRuntimeSubcommand/IsAbsoluteOrProjectOrScript/IsLikelyPath + TokenizeExecStart + StripQuotes + ExtractBinaryDirectoryFromCandidate
+  - `TableRenderer.cs` (core): "JSON→表格分发 + 共享基础设施"
+  - `TableRenderer.Issues.cs`: "issue 域渲染（list/show/workflow status/delivery failure/sessions/feedback）"
+  - `TableRenderer.IssueTemplates.cs`: "issue template 域渲染"
+  - `TableRenderer.Labels.cs`: "label 域渲染（list + FormatLabels 辅助）"
+  - `TableRenderer.Runners.cs`: "repo 域渲染"
+  - `TableRenderer.Epics.cs`: "epic 域渲染"
+  - `TableRenderer.Entities.cs`: "project/agent 域渲染"
+  - `SystemdUnitParser.cs`: "systemd 单元输出解析"
+  - `InfoRenderer.cs`: "InfoResult 终端格式输出"
+  - `MohistCliCommands.Update.cs` (main): "update 编排入口 + 解析助手 + StageLabels/StageOutcome"——UpdateCommands + facade 主构造 + CreateWithDefaults + Validator/ReadinessProbe/RunnerRefreshVerifier 暴露 + UpdateAllAsync + FinalizeAfterServerAsync + BuildAndRestartServerAsync + WriteServerScopeMessageAsync + ResolveRepoRoot/ResolveCliPathAsync/RuntimeIdentifier/RestartCommandLine/WriteCommandFailureOutput + StageLabels/StageOutcome
+  - `MohistCliCommands.Update.Operations.cs`: "单组件更新入口"——UpdateCliAsync/UpdateServerAsync/UpdateRunnerAsync
+  - `MohistCliCommands.Update.Stages.cs`: "stage 机实现"——*StageAsync + RunStageMachineAsync/RunRecoveryStageAsync
+  - `MohistCliCommands.Update.Finalize.cs`: "stage 后退出码 + 信息"——FinalizeAsync + ShouldPostOutcome + FinalizeExitCode
+  - `MohistCliCommands.Update.Outcome.cs`: "POST CLI outcome 到 server"——PostCliOutcomeAsync + ResolveOutcomeStatus
+  - `Update/RuntimeConsistencyValidator.cs`: "5 个 post-update 运行时一致性 check"
+  - `Update/ServiceReadinessProbe.cs`: "server 就绪轮询 + ready DTO"
+  - `Update/RunnerRefreshOutcome.cs`: "runner 身份验证 + refresh 结果层级"
+- **行为守恒 byte-level**：`Update.Operations.cs` 的 UpdateServerAsync 恢复 baseline 错误消息格式（"Server service restarted, but Mohist readiness checks did not pass within {N} seconds." + "Last readiness error: ..." 两行）+ 恢复 "Server service restarted." 前置 WriteLine + 改用 `WaitForServerReadyAsync`（不带进度）以与非 stage 路径的输出字节序一致——`UpdateSpecs.UpdateServer_WhenReadinessDoesNotBecomeReady_ReturnsFailure` 通过（baseline 字符串断言）。
+- **InfoCollector partial 拆分 byte-level**：原 T-2 baseline InfoCollector.cs（1014 行）的方法体被完整复制到 InfoCollector.cs（451 行）+ InfoCollector.Verbose.cs（401 行）+ InfoCollector.ExecPathParser.cs（176 行）；仅类声明从 `internal sealed class` 改为 `internal sealed partial class` + 拆出方法的位置移动；方法体内 byte 完全一致。`InfoCollectorSpecs.cs` 全套 spec 不变通过。
+- **TableRenderer partial 拆分 byte-level**：FormatLabels + RenderLabelList 从 TableRenderer.Issues.cs 移到 TableRenderer.Labels.cs；RenderIssueTemplateList + RenderIssueTemplateShow 从 .Issues.cs 移到 TableRenderer.IssueTemplates.cs；方法体 byte 一致。`CliIssueTemplateCommandSpecs` + `CliLabelCatalogSpecs` + `CliIssueLabelSpecs` + `CliIssueCommandSpecs` 全套 spec 不变通过。
+
+### Files
+
+- `packages/cli/Mohist.Cli/InfoCollector.cs` (451 行，从 1014 缩 -563；类声明改 `partial`；CollectVerboseAsync 与全部 ExecStart 解析助手移出)
+- `packages/cli/Mohist.Cli/InfoCollector.Verbose.cs` (400 行，新增 partial：CollectVerboseAsync + 9 个 Get*VerboseAsync + 3 个 helper + WatchedEnvVarNames)
+- `packages/cli/Mohist.Cli/InfoCollector.ExecPathParser.cs` (175 行，新增 partial：ResolveSourcePath + 7 个 ExecStart 解析纯函数)
+- `packages/cli/Mohist.Cli/TableRenderer.Issues.cs` (307 行，从 470 缩 -163；FormatLabels + RenderLabelList 移到 .Labels.cs；RenderIssueTemplateList/Show 移到 .IssueTemplates.cs)
+- `packages/cli/Mohist.Cli/TableRenderer.Labels.cs` (54 行，新增 partial：RenderLabelList + FormatLabels)
+- `packages/cli/Mohist.Cli/TableRenderer.IssueTemplates.cs` (122 行，新增 partial：RenderIssueTemplateList + RenderIssueTemplateShow)
+- `packages/cli/Mohist.Cli/MohistCliCommands.Update.cs` (417 行，从 1021 缩 -604；类声明改 `partial`；Update*Async 公共入口 + Stages + Finalize + Outcome 移出)
+- `packages/cli/Mohist.Cli/MohistCliCommands.Update.Operations.cs` (173 行，新增 partial：UpdateCliAsync + UpdateServerAsync + UpdateRunnerAsync)
+- `packages/cli/Mohist.Cli/MohistCliCommands.Update.Stages.cs` (276 行，新增 partial：6 个 *StageAsync + RunStageMachineAsync + RunRecoveryStageAsync)
+- `packages/cli/Mohist.Cli/MohistCliCommands.Update.Finalize.cs` (86 行，新增 partial：FinalizeAsync + ShouldPostOutcome + FinalizeExitCode)
+- `packages/cli/Mohist.Cli/MohistCliCommands.Update.Outcome.cs` (87 行，新增 partial：PostCliOutcomeAsync + ResolveOutcomeStatus)
+
+
 
