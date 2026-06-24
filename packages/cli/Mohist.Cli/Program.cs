@@ -17,7 +17,20 @@ internal static class CliProgram
         var commandExecutor = new SystemCommandExecutor();
         var api = new MohistCliApi(http, Console.Out, Console.Error, fileSystem, commandExecutor, Console.In);
         var installer = new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor);
-        var updater = new SourceCodeUpdater(Console.Out, Console.Error, installer, commandExecutor, fileSystem, environment);
+        var validator = new RuntimeConsistencyValidator(http, commandExecutor, fileSystem, environment, Console.Out);
+        var readinessProbe = new ServiceReadinessProbe(http, Console.Out);
+        var runnerRefreshVerifier = new RunnerRefreshVerifier(http, commandExecutor, fileSystem);
+        var updater = new SourceCodeUpdater(
+            Console.Out,
+            Console.Error,
+            installer,
+            commandExecutor,
+            fileSystem,
+            environment,
+            http,
+            validator,
+            readinessProbe,
+            runnerRefreshVerifier);
 
         var services = new ServiceCollection();
         services.AddSingleton(api);
@@ -27,6 +40,9 @@ internal static class CliProgram
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
         services.AddSingleton<IServiceInstaller>(_ => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(Console.Out, Console.Error, fileSystem, commandExecutor) : new SystemdServiceInstaller(Console.Out, Console.Error, fileSystem, commandExecutor));
+        services.AddSingleton<RuntimeConsistencyValidator>(validator);
+        services.AddSingleton<ServiceReadinessProbe>(readinessProbe);
+        services.AddSingleton<RunnerRefreshVerifier>(runnerRefreshVerifier);
         services.AddSingleton(updater);
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();

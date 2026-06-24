@@ -35,7 +35,7 @@ public class UpdateSpecs
             {
                 BaseAddress = new Uri("http://localhost:3456"),
             };
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 new StringWriter(),
                 new StringWriter(),
                 installer,
@@ -103,7 +103,7 @@ public class UpdateSpecs
                 stderr,
                 files,
                 commands);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -155,7 +155,7 @@ public class UpdateSpecs
                 new StringWriter(),
                 files,
                 commands);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 new StringWriter(),
                 new StringWriter(),
                 installer,
@@ -206,7 +206,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -247,7 +247,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -285,7 +285,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -326,7 +326,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -366,7 +366,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -402,7 +402,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -438,7 +438,7 @@ public class UpdateSpecs
             stderr,
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -476,7 +476,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -508,7 +508,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -532,7 +532,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -564,7 +564,7 @@ public class UpdateSpecs
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var installer = new SystemdServiceInstaller(stdout, stderr, files, commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             stderr,
             installer,
@@ -597,7 +597,7 @@ public class UpdateSpecs
             files,
             commands);
         var identityResponse = BuildRunnerIdentityResponse("runner-1", "test-host", hash, "online");
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -637,7 +637,7 @@ public class UpdateSpecs
             files,
             commands);
         var identityResponse = BuildRunnerIdentityResponse("runner-1", "test-host", staleHash, "online");
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -679,7 +679,7 @@ public class UpdateSpecs
             stderr,
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -719,7 +719,7 @@ public class UpdateSpecs
             stderr,
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -764,7 +764,7 @@ public class UpdateSpecs
                 stderr,
                 files,
                 commands);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -818,7 +818,7 @@ public class UpdateSpecs
                 stderr,
                 files,
                 commands);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 new StringWriter(),
                 stderr,
                 installer,
@@ -873,7 +873,7 @@ public class UpdateSpecs
                 commands);
             var readiness = new SequenceHttpHandler(
                 new ResponseSpec(HttpStatusCode.ServiceUnavailable));
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -924,7 +924,7 @@ public class UpdateSpecs
                 stderr,
                 files,
                 commands);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 new StringWriter(),
                 stderr,
                 installer,
@@ -977,7 +977,7 @@ public class UpdateSpecs
                 stderr,
                 files,
                 commands);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -1032,7 +1032,7 @@ public class UpdateSpecs
                 commands);
             var readiness = new SequenceHttpHandler(
                 new ResponseSpec(HttpStatusCode.ServiceUnavailable));
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 new StringWriter(),
                 stderr,
                 installer,
@@ -1074,7 +1074,7 @@ public class UpdateSpecs
             stderr,
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -1101,7 +1101,7 @@ public class UpdateSpecs
             stderr,
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -1130,7 +1130,7 @@ public class UpdateSpecs
             stderr,
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             stderr,
             installer,
@@ -1158,7 +1158,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             stdout,
             new StringWriter(),
             installer,
@@ -1199,7 +1199,7 @@ public class UpdateSpecs
                 commands);
             var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
             var handler = SequenceHttpHandler.WithSystemInfo(systemInfo, new ResponseSpec(HttpStatusCode.OK));
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -1251,7 +1251,7 @@ public class UpdateSpecs
                 files,
                 commands);
             var systemInfo = HealthySystemInfoJson(runningGitHash: "oldhash");
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -1304,7 +1304,7 @@ public class UpdateSpecs
                 files,
                 commands);
             var systemInfo = HealthySystemInfoJson(runnerStatus: "inactive");
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -1361,7 +1361,7 @@ public class UpdateSpecs
             Directory.CreateDirectory(emptyHome);
             try
             {
-                var updater = new SourceCodeUpdater(
+                var updater = SourceCodeUpdater.CreateWithDefaults(
                     stdout,
                     stderr,
                     installer,
@@ -1428,7 +1428,7 @@ public class UpdateSpecs
                 new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
                 new ResponseSpec(HttpStatusCode.OK),
                 new ResponseSpec(HttpStatusCode.InternalServerError));
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -1471,7 +1471,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1487,7 +1487,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckCliBinaryAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
 
             Assert.Equal("CLI binary", result.Component);
             Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
@@ -1514,7 +1514,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1530,7 +1530,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckCliBinaryAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
 
             Assert.Equal("CLI binary", result.Component);
             Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
@@ -1555,7 +1555,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1571,7 +1571,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckCliBinaryAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckCliBinaryAsync(context, CancellationToken.None);
 
             Assert.Equal("CLI binary", result.Component);
             Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
@@ -1598,7 +1598,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1614,7 +1614,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckServerIdentityAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
         }
@@ -1639,7 +1639,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1655,7 +1655,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckServerIdentityAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckServerIdentityAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
             Assert.Contains("does not match source HEAD", result.Message);
@@ -1680,7 +1680,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1696,7 +1696,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckRunnerConnectionAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckRunnerConnectionAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
         }
@@ -1720,7 +1720,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1736,7 +1736,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckRunnerConnectionAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckRunnerConnectionAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
             Assert.Contains("'inactive'", result.Message);
@@ -1764,7 +1764,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1780,7 +1780,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
         }
@@ -1804,7 +1804,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1820,7 +1820,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckManagedSkillAssetsAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
             Assert.Contains("missing", result.Message);
@@ -1845,7 +1845,7 @@ public class UpdateSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1861,7 +1861,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckWebAssetsAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckWebAssetsAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
         }
@@ -1888,7 +1888,7 @@ public class UpdateSpecs
         var handler = new SequenceHttpHandler(
             new ResponseSpec(HttpStatusCode.InternalServerError));
         handler.SetSystemInfoJson(null);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,
@@ -1904,7 +1904,7 @@ public class UpdateSpecs
 
         try
         {
-            var result = await updater.CheckWebAssetsAsync(context, CancellationToken.None);
+            var result = await updater.Validator.CheckWebAssetsAsync(context, CancellationToken.None);
 
             Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
             Assert.Contains("500", result.Message);
@@ -1945,7 +1945,7 @@ public class UpdateSpecs
                 commands);
             var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
             var handler = new OutcomeCapturingHttpHandler(systemInfo);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -2008,7 +2008,7 @@ public class UpdateSpecs
             {
                 OutcomeResponseStatusCode = HttpStatusCode.ServiceUnavailable,
             };
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -2056,7 +2056,7 @@ public class UpdateSpecs
                 files,
                 commands);
             var handler = new OutcomeCapturingHttpHandler(HealthySystemInfoJson());
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,
@@ -2109,7 +2109,7 @@ public class UpdateSpecs
                 commands);
             var systemInfo = HealthySystemInfoJson(runningGitHash: "abc123", runnerStatus: "active");
             var handler = new OutcomeCapturingHttpHandler(systemInfo);
-            var updater = new SourceCodeUpdater(
+            var updater = SourceCodeUpdater.CreateWithDefaults(
                 stdout,
                 stderr,
                 installer,

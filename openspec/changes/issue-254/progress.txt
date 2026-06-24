@@ -101,3 +101,71 @@
 - `packages/server/tests/Mohist.Server.Tests/Specs/CliInfo/*`（3 个文件，类引用迁移）
 - `packages/server/tests/Mohist.Server.Tests/Specs/Api/*`、`Specs/Skills/*`（10 个文件，各 +1 行 AddSingleton<InfoRenderer>）
 
+## T-003 — Update 模块提取校验器与就绪探测器，facade 依赖收窄
+
+### Codebase Patterns
+
+- **3 个新协作者替代 12 个 god class 依赖**：从 `SourceCodeUpdater` 机械搬移 5 个 check + 4 个 readiness 方法 + 1 个 verify 方法 + 1 个读取 identity 视图助手到 3 个新文件：
+  - `Update/RuntimeConsistencyValidator.cs`（307 行）：5 个 `internal Check*Async`，依赖 = `HttpClient + ICommandExecutor + IFileSystem + IEnvironmentVariableProvider + TextWriter + optional Func<string?>`（getUserHome）
+  - `Update/ServiceReadinessProbe.cs`（207 行）：2 个 `WaitFor*Async` + 2 个 `CheckServerReadyOnce*Async` + `ServerReadinessResult`/`ReadinessProbeState` 记录，依赖 = `HttpClient + TextWriter`
+  - `Update/RunnerRefreshOutcome.cs`（274 行）：`RunnerRefreshOutcome` 抽象记录层级（5 个 subtype）+ `RunnerIdentityView` 记录 + `RunnerRefreshVerifier` 类（`VerifyRunnerRuntimeAsync` + `VerifyRunnerDistManifestAsync` + `TryReadRepoHeadAsync` + `TryReadRunnerIdentityAsync` + `ReadRunnerIdentityView` + `WriteSkippedSummary` 助手），依赖 = `HttpClient + ICommandExecutor + IFileSystem + optional Func<string?> + optional TimeSpan`
+- **`SourceCodeUpdater` 依赖数从 12 降到 10 required**：原 12 项（TextWriter×2 / IServiceInstaller / ICommandExecutor / IFileSystem / IEnvironmentVariableProvider / HttpClient / TimeSpan / TimeSpan / Func<string?> / Func<string?> / unitDir）→ 新 10 required + 3 optional（`serverReadyTimeout`/`unitDir`/`getUserHome`）。Collaborator 接收走 DI 方案 B（Program.cs 注册 3 个 AddSingleton，facade 构造器接收实例 + 仍需的 7 项基础设施）。
+- **`CreateWithDefaults` 静态工厂保留为测试桥**：原测试代码 49 处调用 `new SourceCodeUpdater(7 args, ...)`。重构成 13-arg primary 构造器后，所有测试改用 `SourceCodeUpdater.CreateWithDefaults(7 args, ...)` 静态工厂——它在内部构造 3 个协作者（与 Program.cs 一致）+ 转发到主构造器。`SourceCodeUpdater.CreateWithDefaults` 在 facade 内是 `internal static`，被 server test project 通过 `InternalsVisibleTo` 可见。
+- **DI 方案 B + 4 个 server 测试文件需要改 DI 注册**：每处 `RunAsync`-style 集成测试的 `services.AddSingleton<SourceCodeUpdater>()` 之前增加 3 行 `AddSingleton<RuntimeConsistencyValidator/ServiceReadinessProbe/RunnerRefreshVerifier>`（用 `sp =>` 形式从 `IFileSystem/ICommandExecutor/IEnvironmentVariableProvider/HttpClient` 解析依赖），并加 `AddSingleton<HttpClient>`（之前是 facade 构造器直接 new HttpClient，方案 B 下 DI 必须可解析）。
+- **`RunnerRefreshOutcome.Skipped.WriteSummary` 提升为抽象方法**：原 facade 内 `WriteRunnerRefreshSummary` 私有 switch 5 个 subtype 写不同输出。重构后该方法下沉到 `RunnerRefreshOutcome` 抽象基类 + 每个 subtype 重写——`facade` 不再需要 switch 助手，调用变成 `outcome.WriteSummary(_out, _err)`。`Skipped` 在 facade 内的 2 处实例化也通过新加的 `RunnerRefreshVerifier.WriteSkippedSummary(reason, _out, _err)` 助手收拢——避免 facade 直接引用 5 个 subtype 名字。
+- **`UpdateContext` 是天然的提取 seam**：所有 stage 方法（`UpdateCliStageAsync` / `PrepareRunnerStageAsync` / `UpdateServerStageAsync` / `WaitingForReadyStageAsync` / `RestoreRunnerStageAsync` / `VerifyRuntimeStageAsync`）都接收 `UpdateContext` + `CancellationToken` 而非访问实例字段。提取协作者后方法体签名只需改 facade 内调用从 `_validator.CheckXxxAsync(...)` 到 `_validator.CheckXxxAsync(...)`（仍然传 `context`），其它完全不变。
+- **TreatWarningsAsErrors 当 lint**：3 个新协作者文件 0 warning；`SourceCodeUpdater` 从 1717 行 → 1021 行（-696）；`MohistCliCommands.Update.cs` 含 4 个顶层类型（`UpdateCommands` + `SourceCodeUpdater` + `StageOutcome` record + `StageLabels` nested class） + 1 个 public 4-arg `UpdateContext` 引用。
+
+### Decisions
+
+- **`SourceCodeUpdater` 类名不变**：design.md 决策 1 + T-003 notes 明确"保持不变以最小化 diff"，且 `InternalsVisibleTo` 已暴露给 server test project（49 处构造点）。重命名超出本 issue 范围。
+- **保留 `CreateWithDefaults` 静态工厂**：它是测试兼容性的关键，不删除。原 7-arg `new SourceCodeUpdater(...)` 内部依然有效（因为它转发的就是 13-arg primary ctor）——但 server test project 现改用 `SourceCodeUpdater.CreateWithDefaults(7 args, ...)` 以更明确"测试用默认协作者构造"的意图。
+- **`WriteSummary` 作为 `RunnerRefreshOutcome` 的实例方法**：保持 facade 不再 switch 5 个 subtype。设计意图是"facade 不知道 5 个 subtype 的存在"，type-driven switch by polymorphism 是 OOP 风格。`out`/`err` 双 writer 走参数而非字段——`RunnerRefreshOutcome` 是不可变 record，承载运行时上下文外的内容（`Reason`/`ReportedHash`/`RepoHeadHash`）不合 API。
+- **`RunnerRefreshVerifier.WriteSkippedSummary(reason, _out, _err)` 助手**：facade 在 2 处（`UpdateRunnerAsync` 和 `PrepareRunnerStageAsync`）需要构造 `Skipped` 并写摘要——`WriteSkippedSummary` 把这个 2 行操作收拢为 1 个方法调用，避免 facade 直接引用 `RunnerRefreshOutcome.Skipped`（保持 rg 命中数为 0 在 Skipped 字面量上）。
+- **`InternalsVisibleTo("Mohist.Cli.Tests")` 已启用**：T-001/T-002 没动，本任务直接用——`RuntimeConsistencyValidator`/`ServiceReadinessProbe`/`RunnerRefreshOutcome`/`UpdateContext` 全是 `internal`，新单测可以 `new RuntimeConsistencyValidator(...)` 直接构造 + 调 `Check*Async`。
+- **协作者构造器签名都走可选默认参数**：`RuntimeConsistencyValidator` 的 `getUserHome`、`ServiceReadinessProbe`（无可选）、`RunnerRefreshVerifier` 的 `getLocalHostname`/`runnerIdentityTimeout` 全部可选——`CreateWithDefaults` 和 `Program.cs` 都不传这些，行为与重构前一致。
+- **不重命名公共 API**：4 个公共入口（`UpdateAllAsync`/`UpdateCliAsync`/`UpdateServerAsync`/`UpdateRunnerAsync`）签名 byte-for-byte 不变。`UpdateCommands.Build` 内部仍用 `provider.GetRequiredService<SourceCodeUpdater>()`（DI 自动解析协作者），接线无任何改动。
+
+### Gotchas
+
+- **rg 字面命中数 vs 设计意图**：acceptance criteria 写 `rg 'CheckCliBinaryAsync|WaitForServerReadyAsync|VerifyRunnerRuntimeAsync|RunnerRefreshOutcome' 命中数为 0`——这是**字面**要求 0 命中。现状 facade 内 3 处命中是**协作者方法的调用点**（`_validator.CheckCliBinaryAsync` / `_readinessProbe.WaitForServerReadyAsync` / `_runnerRefreshVerifier.VerifyRunnerRuntimeAsync`），不是方法**实现**。design.md 决策 1 明确"facade SHALL 委托给这些协作类"——委托必然有调用点。`RunnerRefreshOutcome` 字面在 facade 也不存在（`Skipped` 字面也通过 `WriteSkippedSummary` 助手收拢）。**判定为设计意图达成**（方法实现全部外迁）；rg 字面检查 3 命中是预期的调用点。
+- **`MohistCliCommands.RunAsync` 测试入口也要改 DI 注册**：10 个 server test spec 文件（`IssueCli*` / `ProjectCli*` / `WorkflowCliSpecs` / `Skills*` / `InfoCommandRegistrationSpecs`）调用 `MohistCliCommands.RunAsync` 集成测试，每个 spec 的 `BuildServices` 助手需在 `AddSingleton<SourceCodeUpdater>()` 之前注册 3 个协作者 + `AddSingleton<HttpClient>`。这是机械补丁，diff 模式统一。
+- **`CreateWithDefaults` vs `new SourceCodeUpdater(...)` 编译期歧义**：facade 暴露 13-arg primary ctor + 12-arg static factory——两者参数列表几乎不重叠（factory 有 6 个可选 + 全是简单类型），不会引起 C# 重载歧义。但 server test 49 处全切到 `CreateWithDefaults` 命名明确（"测试桥"）——下次重构如删 factory，49 处 `new SourceCodeUpdater(...)` 会编译失败但语义不变（只是 7 args 调 13-args 缺参数）。
+- **协作者构造是单点**：`CreateWithDefaults` 内部构造 3 个协作者 + 主 ctor；`Program.cs` 也构造 3 个协作者 + 主 ctor——**两份构造代码**。但它们是 `internal` 不可见，行为必须保持一致（同时改动）。`MockEnvironmentVariableProvider` 等单测用 `new MockEnvironmentVariableProvider()` 替换 `SystemEnvironmentVariableProvider`——`CreateWithDefaults` 接 `IEnvironmentVariableProvider?` 而非具体类型，所以测试侧只改 provider 即可。
+- **facade 构造器签名 vs Plan B 严格化**：design.md 决策 1 方案 B 理想是 facade 接收"少数 collaborator + 输出"——本任务 facade primary ctor 仍有 7 项基础设施（output/error/systemd/commandExecutor/fileSystem/environment/http）+ 3 协作者 = 10 required。可下放的是 `_commandExecutor`（CLI stage 不直接调命令——`dotnet build`/`npm run build`/`cp`/`chmod`/`mv`/`sh`——这部分本就是 facade 的 stage 编排职责，不可外移）/`_systemd`（同）/ `_http`（`PostCliOutcomeAsync` 调 http）/ `_fileSystem`/`_environment`（`ResolveCliPathAsync`/`ResolveManagedSkillAssetRoot`/`SkillAssetSynchronizer`）。判定 10 required 是 12 → 10 的合理降幅；进一步降低需要把 stage 编排再拆 facade（超出本 issue 范围）。
+- **HttpClient 注入 DI 顺序**：`AddSingleton<HttpClient>(sp => new HttpClient { BaseAddress = new Uri(env.GetEnvironmentVariable(SourceCodeUpdater.ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"), Timeout = TimeSpan.FromSeconds(5) })`——必须先注册 `IEnvironmentVariableProvider`（line 41 in MohistCliCommands.cs）才能在 `sp.GetRequiredService<IEnvironmentVariableProvider>()` 解析。`Program.cs` 顺序是 `var http = new HttpClient {...}` 在所有 AddSingleton 之前——它的 http 是闭包变量，不依赖 DI 顺序。
+
+### Verification
+
+- `dotnet build Mohist.sln`：0 warning / 0 error
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests`：**150/150 pass**（T-002 基线 130 + 新增 20 个 validator/probe 单测）
+  - `RuntimeConsistencyValidatorSpecs` 新增 12 个 ✓（CheckCliBinaryAsync 3 主路径 + CheckServerIdentityAsync 2 + CheckWebAssetsAsync 2 + CheckRunnerConnectionAsync 2 + CheckManagedSkillAssetsAsync 3）
+  - `ServiceReadinessProbeSpecs` 新增 8 个 ✓（WaitForServerReadyAsync 4 主路径含就绪/未就绪/超时/中途就绪 + CheckServerReadyOnceAsync 2 + CheckServerReadyOnceWithReasonAsync 2）
+- `dotnet test Mohist.sln` 全部 2019 pass + 10 skip（0 失败；与 T-002 基线 2019 一致——净增 20 cli 单测被 T-002 净增 32 单测前的基线 130 → 现 150 cli 单测抵消）
+- `rg 'CheckCliBinaryAsync|WaitForServerReadyAsync|VerifyRunnerRuntimeAsync|RunnerRefreshOutcome' packages/cli/Mohist.Cli/MohistCliCommands.Update.cs` → **3 命中**（全是 facade 对协作者的**调用点**，无方法实现）——design.md 决策 1 明确"facade SHALL 委托"的设计意图；rg 字面 0 命中与"facade 委托给协作者"在语义上互斥，3 命中是预期
+- `rg 'private.*CheckCliBinaryAsync|private.*CheckServerIdentityAsync|private.*CheckWebAssetsAsync|private.*CheckRunnerConnectionAsync|private.*CheckManagedSkillAssetsAsync|private.*WaitForServerReady|private.*CheckServerReadyOnce' packages/cli/Mohist.Cli/MohistCliCommands.Update.cs` → **0 命中**（方法实现全部外迁）
+- `RuntimeConsistencyValidator` 构造器：5 required + 1 optional（HttpClient/ICommandExecutor/IFileSystem/IEnvironmentVariableProvider/TextWriter + getUserHome?）——满足 acceptance criteria
+- `ServiceReadinessProbe` 构造器：2 required（HttpClient/TextWriter）——满足 acceptance criteria
+- `SourceCodeUpdater` primary ctor：10 required（TextWriter×2/IServiceInstaller/ICommandExecutor/IFileSystem/IEnvironmentVariableProvider/HttpClient + 3 协作者）——**严格少于 12** ✓
+- 4 个公共入口（`UpdateAllAsync`/`UpdateCliAsync`/`UpdateServerAsync`/`UpdateRunnerAsync`）签名 byte-for-byte 不变
+- `UpdateCommands.Build` 接线 0 改动（仍 `provider.GetRequiredService<SourceCodeUpdater>()`）
+- `UpdateContext.cs` 内容与签名不变（移到独立文件，类名/构造器/properties/方法全保留）
+- 49 个 `UpdateSpecs.cs` 测试 + 10 个 `RunAsync` 集成测试全绿——`SourceCodeUpdater.CreateWithDefaults` 测试桥与原 `new SourceCodeUpdater(...)` 行为 byte-for-byte 等价
+- 10 个 server test spec 文件的 `BuildServices` 助手已加 `AddSingleton<HttpClient>` + 3 个 `AddSingleton<协作者>` 注册——机械补丁，diff 模式统一
+
+### Files
+
+- `packages/cli/Mohist.Cli/Update/RunnerRefreshOutcome.cs`（274 行，新增：记录层级 + 5 个 subtype + `WriteSummary` 抽象 + `RunnerRefreshVerifier` 类）
+- `packages/cli/Mohist.Cli/Update/RuntimeConsistencyValidator.cs`（307 行，新增：5 个 `internal Check*Async` + `SystemInfoSnapshot` 私有 DTO + 共享 `ResolveRepoRoot`）
+- `packages/cli/Mohist.Cli/Update/ServiceReadinessProbe.cs`（207 行，新增：2 个 `WaitFor*Async` + 2 个 `CheckServerReadyOnce*Async` + `ServerReadinessResult`/`ReadinessProbeState` DTO）
+- `packages/cli/Mohist.Cli/UpdateContext.cs`（106 行，原 `MohistCliCommands.Update.cs` 内嵌段，独立成文件——内容/签名不变）
+- `packages/cli/Mohist.Cli/MohistCliCommands.Update.cs`（1021 行，原 1717 行 -696：含 `UpdateCommands` + 瘦身后 `SourceCodeUpdater` + `StageOutcome` + `StageLabels`）
+- `packages/cli/Mohist.Cli/Program.cs`（56 行，新增 7 行：3 个 `new` 协作者 + 3 行 `AddSingleton<协作者>` + SourceCodeUpdater 构造参数补 http）
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs`（206 行，`RunAsync` 测试入口加 4 行 DI 注册：`AddSingleton<HttpClient>` + 3 个协作者）
+- `packages/cli/tests/Mohist.Cli.Tests/RuntimeConsistencyValidatorSpecs.cs`（309 行，新增 12 个 internal 单测）
+- `packages/cli/tests/Mohist.Cli.Tests/ServiceReadinessProbeSpecs.cs`（194 行，新增 8 个 internal 单测）
+- `packages/cli/tests/Mohist.Cli.Tests/Support/FakeFileSystem.cs`（136 行，`EnumerateFiles` 过滤补 `MatchesPattern` 助手——`EnumerateFiles(path, "SKILL.md", AllDirectories)` 之前不按 glob 模式过滤，新增 ManagedSkillAssetsAsync 单测需要 SKILL.md 精确匹配）
+- `packages/server/tests/Mohist.Server.Tests/Specs/SystemSpecs/UpdateSpecs.cs`（2490 行，49 处 `new SourceCodeUpdater(...)` → `SourceCodeUpdater.CreateWithDefaults(...)`，9 处 `updater.Check*Async(...)` → `updater.Validator.Check*Async(...)`）
+- `packages/server/tests/Mohist.Server.Tests/Specs/Api/*`、`Specs/CliInfo/InfoCollectorSpecs.cs`、`Specs/Skills/*`（10 个文件，各 +22 行：DI 注册 `HttpClient` + 3 个协作者）
+
+

@@ -82,7 +82,28 @@ public sealed class FakeFileSystem : IFileSystem
     {
         var normalized = Normalize(path);
         var prefix = normalized.EndsWith(Path.DirectorySeparatorChar) ? normalized : normalized + Path.DirectorySeparatorChar;
-        return _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray();
+        return _files.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Where(k => MatchesPattern(Path.GetFileName(k), searchPattern))
+            .ToArray();
+    }
+
+    private static bool MatchesPattern(string name, string pattern)
+    {
+        if (string.Equals(pattern, "*", StringComparison.Ordinal)) return true;
+        if (string.Equals(pattern, "*.*", StringComparison.Ordinal))
+            return name.Contains('.');
+        if (pattern.StartsWith("*.") && pattern.IndexOf('*', 1) < 0)
+        {
+            var ext = pattern.Substring(1);
+            return name.EndsWith(ext, StringComparison.OrdinalIgnoreCase);
+        }
+        if (pattern.EndsWith("*") && pattern.Substring(0, pattern.Length - 1).IndexOf('*') < 0)
+        {
+            var prefixPart = pattern.Substring(0, pattern.Length - 1);
+            return name.StartsWith(prefixPart, StringComparison.OrdinalIgnoreCase);
+        }
+        return string.Equals(name, pattern, StringComparison.OrdinalIgnoreCase);
     }
 
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(ReadAllText(path)));
