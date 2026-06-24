@@ -130,6 +130,36 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task TaskDispatch_DoesNotInjectDisplayTitleIntoWith()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("integrate",
+                [new("integrate:open-pr", "Open or update GitHub PR", "mohist/create-pull-request", With("""
+                {
+                  "source": "mohist/run-1",
+                  "target": "master",
+                  "remote": "origin",
+                  "titleFrom": "issue.title",
+                  "bodyFrom": "issue.body"
+                }
+                """))],
+                [])
+        ]));
+
+        var (task, _) = await PollWorkAnyAsync();
+
+        Assert.Equal("Open or update GitHub PR", task.Title);
+        Assert.NotNull(task.With);
+        using var with = JsonDocument.Parse(task.With);
+        Assert.False(with.RootElement.TryGetProperty("title", out _));
+        Assert.Equal("issue.title", with.RootElement.GetProperty("titleFrom").GetString());
+        Assert.Equal("issue.body", with.RootElement.GetProperty("bodyFrom").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task StageWithDynamicTasks_TaskWithContract_DispatchPreservesWithContract()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
