@@ -60,6 +60,8 @@ public static class MohistServiceRegistration
     /// </remarks>
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddMohistConventionalServices();
+
         var connectionString = ResolveSqliteConnectionString(configuration);
 
         services.AddMohistOpenTelemetry(configuration);

@@ -1,0 +1,36 @@
+# Progress — Issue 226 (Scrutor DI migration)
+
+## Codebase Patterns
+
+- **Service registration lives in one place.** `MohistServiceRegistration.ConfigureMohistServices` is the single registration entry point, called by both production (`Program.cs` → `AddMohistServerCore`) and tests (`MohistDbFixture` etc.). Anything that should be available in both must live there.
+- **MS DI "last registration wins".** Adding the same `ServiceDescriptor` twice does NOT throw — `GetService` returns the implementation registered most recently. This is the lever that makes scanning safe to coexist with hand-written registrations: scan first, then hand-write overrides.
+- **Central package management.** `Directory.Packages.props` at the repo root holds `<PackageVersion>` entries; `.csproj` files only declare `<PackageReference Include="..." />` without a version. Add a new package in both places.
+- **`.csproj` convention.** New `PackageReference` entries are alphabetised within the `<ItemGroup>` block (Scrutor sits between EnvironmentAbstractions/CloudNative.CloudEvents items).
+- **Marker interfaces live in `Mohist.Server.Infrastructure.Hosting`.** They sit next to `MohistServiceRegistration` so the registration contract is discoverable in one folder.
+- **Scrutor 7.0.0** is the latest stable (targets net8.0+; compatible with our net11.0 TFM).
+- **Scrutor `Scan` filter for open generics.** `AddClasses(...).AssignableTo<IOpenGeneric>()` matches closed generics, not the unbound definition — known limitation, not relevant to T-001.
+- **Scrutor `AddClasses()` defaults to `publicOnly: true`.** It silently drops `internal` types. Test fixtures that live in the production assembly but need to be picked up by the scanner must be `public`. We use a dedicated `Mohist.Server.Infrastructure.Hosting.TestTypes` sub-namespace and never reference them from production code.
+- **Test fixtures for Specs that need the production service graph.** Use `[Collection("MohistDb")]` + constructor injection of `MohistDbFixture`; do NOT instantiate the fixture inside the test (xunit linter forbids blocking `.GetAwaiter().GetResult()` on fixture init/dispose).
+
+## Gotchas
+
+- `services.Scan` from Scrutor with `AsSelf()` is idempotent in the sense that re-running it appends registrations; that's the design — combined with the "last wins" MS DI behaviour, hand-written `AddXxx` calls later in the pipeline override the scan.
+- `nullable enable` is on at the solution level (`Directory.Build.props`) and `TreatWarningsAsErrors=true`, so every new file must respect nullable annotations and avoid unreferenced private members.
+- `MohistDbFixture` overrides several services after `ConfigureMohistServices` via `RemoveAll<...>` + `AddSingleton` — this pattern continues to work unchanged because scanning sits underneath those overrides.
+- `AddMohistServerCore(EmptyConfig())` is safe to call from a unit test even though it runs the full pipeline: `BuildServiceProvider()` is lazy, so no DB connection / hosted service / `IHttpClientFactory` is opened unless the test actually resolves a service that needs them. Use this in the "production entry" test to exercise the real `ConfigureMohistServices` path.
+- `ServiceCollection.Last(d => d.ServiceType == T)` is the right way to assert which lifetime "wins" when an explicit hand-written registration follows the scan; `Single` would throw because both descriptors remain in the collection.
+
+## Decisions made in T-001
+
+- `AsSelf()` only (no `AsMatchingInterface`); the candidate set is all concrete self-registrations and this matches current behaviour exactly.
+- A type implementing both `IScopedService` and `ISingletonService` is allowed at T-001; the scan will register it twice (once Scoped, once Singleton) and the LAST `AddMohistConventionalServices` segment wins. We will revisit this in T-002/T-003/T-004 if any real domain type ever lands in that state; for now it is "fail-loud at review", not "fail-fast at scan". This matches the task's `notes` field.
+- Scan call sits at the very top of `ConfigureMohistServices`, before `ResolveSqliteConnectionString` / `AddDbContextFactory<…>` and before every other `services.AddXxx` line.
+
+## T-001 outcome
+
+- `Directory.Packages.props` + `Mohist.Server.csproj` now reference `Scrutor 7.0.0`.
+- `IScopedService` / `ISingletonService` empty marker interfaces added under `Mohist.Server.Infrastructure.Hosting`.
+- `ServiceCollectionExtensions.AddMohistConventionalServices` is the new scan entry point, scanning `typeof(MohistServiceRegistration).Assembly` only.
+- `ConfigureMohistServices` calls `AddMohistConventionalServices` as its first line, before every other registration.
+- 5 new tests in `Specs/Foundation/ConventionalRegistrationSpecs.cs` (all passing) — three of them map 1:1 onto the acceptance criteria's bullet points; the other two (singleton lifetime + Scoped-vs-Scoped cross-scope identity) are extra defence for the lifetime mapping.
+- `npm test` (server): 2024 passed, 10 skipped, 0 failed. `npm run build` (Mohist.sln): succeeded, 0 warnings, 0 errors.
