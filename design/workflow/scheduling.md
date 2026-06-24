@@ -204,8 +204,8 @@ runner transient loss (process restart) -> heartbeat recovers: runner resumes pu
 runner permanently gone -> out of scope: user starts a fresh run (new workflow, new assignment)
 ```
 
-- Resume: same runner returns, pulls PENDING/in-flight work, continues.
-- Permanent runner loss is a user operation (start a new run). No automatic failover or reassignment.
+- Resume: a returning runner pulls the current work (in-flight if no closeout occurred, else the next).
+- Permanent loss (runner never returns): user starts a new run; no automatic failover.
 
 Pipeline rule: once claimed, the workflow must flow continuously — every work reaches COMPLETED or FAILED (by the runner's own report, or by RunnerGrain's closeout on loss). Any stall after assignment is a bug. Pending before assignment is normal waiting, not a stall.
 
@@ -224,5 +224,3 @@ process dies mid-work            -> no report; RunnerGrain detects heartbeat los
 Runner-loss detection must be persistent (Orleans reminder, not a grain timer) and keyed off persisted heartbeat state, so it survives silo restart and still catches a permanently-gone runner.
 
 Before start (no runner): pending is normal; the workflow is claimable and waits.
-
-After start (has runner): every work reaches COMPLETED or FAILED — by the runner's own report, or by RunnerGrain's closeout on loss.
