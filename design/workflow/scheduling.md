@@ -26,18 +26,19 @@ WorkflowGrain
   owns work lifecycle + progression
   owns Assignment (the single assignment truth)
   serves work on pull; passive between polls
-  completion watchdog: no report by work timeout -> work FAILED
+  no timer, no runner concept — consumes only work results
   never queries runner state
 
 RunnerGrain
   supervises runner process liveness only (heartbeat, online/offline)
+  tracks its outstanding works; on detected loss synthesizes their failure via the normal report channel
   discovers assigned-to-me and claimable workflows by querying the store
   claims via AssignRunnerAsync; pulls work from assigned workflows
-  does not supervise works
+  does not supervise work progress (that is the runner process's job)
 
 runner process (physical)
   executes work; spawns subprocesses
-  enforces execution timeout: kill hung subprocess, report failure
+  owns execution timeout (progress-aware): kill hung/runaway work, report failure
   no supervision duty
 ```
 
@@ -53,14 +54,13 @@ the store        = shared query layer: runners read it to discover assigned-to-m
 IWorkflowGrain
   AssignRunnerAsync(runnerId) -> Assigned | Rejected   # called by runner; sets Assignment
   PollWork(runnerId) -> WorkDispatch?                   # assigned runner pulls work
-  ReportResultAsync(runnerId, workId, result)
-  NotifyRunnerLostAsync(runnerId)
+  ReportResultAsync(runnerId, workId, result)           # only work results; never runner state
 
 IRunnerGrain
   RegisterAsync(info)
   HeartbeatAsync()
   PollAsync() -> WorkDispatch?                          # process pulls; grain queries its assigned workflows and PollWork
-  ReportResultAsync(workflowRunId, workId, result)      # relay to workflow
+  ReportResultAsync(workflowRunId, workId, result)      # relay to workflow; on loss, synthesize failure for outstanding works
 ```
 
 Delivery is pull. No push from WorkflowGrain to runner.
@@ -144,30 +144,32 @@ No forward call from WorkflowGrain to runner. The runner's assigned set is the d
 
 ```text
 PENDING --pull--> STARTED --report(success|fail)--> COMPLETED | FAILED
-                       |
-                       | no report by declared timeout: watchdog -> FAILED
 ```
 
-- PENDING: work exists, waiting to be pulled. No timeout (waiting for capacity is normal).
-- STARTED: pulled by assigned runner. Watchdog armed with the work's declared timeout.
+- PENDING: work exists, waiting to be pulled.
+- STARTED: pulled by a runner. Stays STARTED until a report arrives.
 - COMPLETED | FAILED: report received; workflow advances.
-- FAILED by watchdog: no report within timeout. Workflow advances (repair / stage-fail).
 
-The watchdog is a local timer plus "report arrived?". It does not query runner state.
+Reports arrive from two producers, indistinguishable to the grain:
+
+- the executing runner process (normal completion, or its own progress-aware timeout failure);
+- RunnerGrain, synthesizing failure for outstanding works when it detects the runner is lost.
+
+WorkflowGrain arms no timer. It never learns why a work failed — only that it did.
 
 ## Supervision
 
-Supervision is split by level. Nothing crosses levels.
+Supervision is split by level. Nothing crosses levels, and no runner state ever reaches WorkflowGrain.
 
 ```text
-subprocess execution    runner process     kill hung subprocess, report failure
-work completion         WorkflowGrain      watchdog: no report by timeout -> FAILED
-runner process liveness RunnerGrain        heartbeat -> online/offline
+work execution timeout   runner process     progress-aware: kill hung/runaway work, report failure
+runner process liveness  RunnerGrain        heartbeat -> online/offline; on loss synthesize failure for outstanding works
+(work timeout)           WorkflowGrain      none — no timer, consumes only work results
 ```
 
-RunnerGrain supervises the runner process only. A runner serves many workflows; work supervision belongs to the owning WorkflowGrain, which owns the work and its timeout value.
+The runner process is the only party with progress signal (tokens streaming, subprocess alive), so only it judges "this work is too slow / wedged" — never the server. RunnerGrain judges only "the runner is gone" (heartbeat loss) and, as the dead runner's executor-of-last-resort, closes out its outstanding works as plain failure through the normal report channel.
 
-Execution timeout (kill) is in the runner process — only it can kill its own subprocesses.
+WorkflowGrain never knows a runner was lost. It receives identical `failed` reports whether the runner failed on its own or was closed out by RunnerGrain.
 
 ## Report
 
@@ -197,15 +199,15 @@ An assigned workflow is held by its runner for the whole run — through idle, a
 
 ```text
 assigned            -> stays assigned through work items, idle periods, and gates; must flow continuously
-work stalls         -> watchdog fails the WORK (not the assignment); workflow advances
-runner transient loss (process restart) -> grain survives; assigned runner resumes pulling on recovery (in-flight failed fast, re-pulled)
+work stalls         -> runner process progress-aware timeout fails the WORK (not the assignment); workflow advances
+runner transient loss (process restart) -> heartbeat recovers: runner resumes pulling; heartbeat lost: RunnerGrain closes out in-flight works as FAILED, re-pulled on recovery
 runner permanently gone -> out of scope: user starts a fresh run (new workflow, new assignment)
 ```
 
 - Resume: same runner returns, pulls PENDING/in-flight work, continues.
 - Permanent runner loss is a user operation (start a new run). No automatic failover or reassignment.
 
-Pipeline rule: once claimed, the workflow must flow continuously — every work reaches COMPLETED or FAILED (report or watchdog). Any stall after assignment is a bug. Pending before assignment is normal waiting, not a stall.
+Pipeline rule: once claimed, the workflow must flow continuously — every work reaches COMPLETED or FAILED (by the runner's own report, or by RunnerGrain's closeout on loss). Any stall after assignment is a bug. Pending before assignment is normal waiting, not a stall.
 
 ## Recovery
 
@@ -215,10 +217,12 @@ Retry + idempotency throughout. An assigned workflow never becomes claimable aga
 claim call lost                  -> runner retries AssignRunnerAsync (idempotent)
 work pull lost                   -> runner polls again; workflow re-serves (idempotent)
 report lost                      -> runner re-reports; workflow dedups (idempotent)
-work pulled, no report           -> watchdog -> FAILED -> advance
-process dies mid-work            -> no report -> watchdog -> FAILED; next work waits for runner
-process lost (heartbeat)         -> RunnerGrain -> NotifyRunnerLostAsync -> fail in-flight fast; workflow waits for recovery (never re-claimable)
+work wedged / runaway            -> runner process progress-aware timeout -> reports FAILED
+process dies mid-work            -> no report; RunnerGrain detects heartbeat loss -> synthesizes FAILED for outstanding works
 ```
 
+Runner-loss detection must be persistent (Orleans reminder, not a grain timer) and keyed off persisted heartbeat state, so it survives silo restart and still catches a permanently-gone runner.
+
 Before start (no runner): pending is normal; the workflow is claimable and waits.
-After start (has runner): must progress or fail; the watchdog bounds every work.
+
+After start (has runner): every work reaches COMPLETED or FAILED — by the runner's own report, or by RunnerGrain's closeout on loss.
