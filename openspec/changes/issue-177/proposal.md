@@ -16,7 +16,7 @@ When every issue under an epic finishes, the user must still navigate to the epi
 - `epic-lifecycle`: Governs epic status transitions and their invariants, including the new event-driven auto-`done` transition and its interaction with the `paused` state.
 
 ### Modified Capabilities
-- `http-api`: No new endpoint, but the existing `SetStatusAsync("done")` flow gains an internal auto-invocation path; response semantics unchanged.
+<!-- None. The existing `SetStatusAsync("done")` HTTP flow gains an internal auto-invocation path, but response semantics and the endpoint contract are unchanged, so no http-api spec delta is required. -->
 
 ## Impact
 
