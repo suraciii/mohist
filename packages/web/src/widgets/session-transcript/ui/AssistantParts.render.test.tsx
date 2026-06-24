@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { DisplayAssistantPart, DisplayToolPart } from '../../model/session-transcript-display'
+import type { DisplayAssistantPart, DisplayToolPart } from '../model/session-transcript-display'
 import { AssistantParts } from './AssistantParts'
 
 function makeToolPart(overrides: Partial<DisplayToolPart>): DisplayToolPart {
