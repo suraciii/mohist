@@ -90,6 +90,44 @@ public class VariableBundleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
+    public void Patch_VarsDeepMerge_NullOverlayPropertiesDoNotOverrideBase()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "minimax-coding-plan/MiniMax-M3",
+                "variant": "max"
+              }
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "model": null,
+                "variant": null,
+                "probeTimeoutMs": 120000
+              }
+            }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
+        Assert.Equal("max", agent.GetProperty("variant").GetString());
+        Assert.Equal(120000, agent.GetProperty("probeTimeoutMs").GetInt32());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
     public void Patch_StagesMerge_PerStageDeepMerge()
     {
         var @base = new VariableBundle(
@@ -217,6 +255,44 @@ public class VariableBundleSpecs
         Assert.NotNull(result);
         Assert.Equal(JsonValueKind.String, result.Value.ValueKind);
         Assert.Equal("string", result.Value.GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void ResolveStageVars_NullStageAgentModelFallsBackToTopLevelModel()
+    {
+        var bundle = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "agent": {
+                "type": "opencode",
+                "model": "minimax-coding-plan/MiniMax-M3",
+                "livenessQuietThresholdMs": 1200000
+              }
+            }
+            """),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["build"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                {
+                  "agent": {
+                    "type": "opencode",
+                    "model": null,
+                    "probeTimeoutMs": 120000
+                  }
+                }
+                """))
+            });
+
+        var result = bundle.ResolveStageVars("build");
+
+        Assert.NotNull(result);
+        var agent = result.Value.GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
+        Assert.Equal(1200000, agent.GetProperty("livenessQuietThresholdMs").GetInt32());
+        Assert.Equal(120000, agent.GetProperty("probeTimeoutMs").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
