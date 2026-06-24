@@ -48,14 +48,14 @@ Action 可以返回文本 output，也可以返回 JSON object output。需要�
 
 ```json
 {
-  "errorCode": "base-moved",
-  "message": "Pull request is not mergeable because the base branch moved",
+  "failureKind": "base-moved",
+  "failureMessage": "Pull request is not mergeable because the base branch moved",
   "prNumber": 42,
   "prUrl": "https://github.com/acme/repo/pull/42"
 }
 ```
 
-`errorCode` 是推荐字段名，不是平台枚举。每个 action 自己定义可用 code。profile 作者引用的是该 action 的 output 接口。
+`failureKind` / `errorCode` 这类字段是 action 自己定义的接口，不是平台枚举。profile 作者引用的是该 action 的 output 接口。
 
 非 JSON object output 在字段路径匹配里等价于无字段。
 
@@ -120,14 +120,14 @@ vars.change.url
 
 推荐：
 
-- 用 `errorCode` 表达可编排错误码。
-- 用 `message` 表达人读说明。
+- 用 `failureKind` / `errorCode` 表达可编排错误码。
+- 用 `failureMessage` / `message` 表达人读说明。
 - 额外上下文字段由 action 自己定义，例如 `prNumber`、`prUrl`、`mergeCommitSha`。
 
 避免：
 
 - 不创建全局 `FailureKind`。
-- 不要求所有 action 都返回同一组错误码。
+- 不要求所有 action 都返回同一组错误码或字段名。
 - 不让 engine 理解 `base-moved`、`config-error` 等具体含义。
 
 ## Failure Recovery
@@ -146,10 +146,10 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
     remote: origin
     message: "Complete issue #${{ issue.number }}"
   onFailure:
-    limit: 2
+    limit: 1
     cases:
       - when:
-          output.errorCode: base-moved
+          output.failureKind: base-moved
         tasks:
           - id: recover:rebase
             title: Rebase after base moved

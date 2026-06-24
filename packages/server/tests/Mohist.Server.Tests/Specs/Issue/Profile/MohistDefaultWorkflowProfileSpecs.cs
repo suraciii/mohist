@@ -859,6 +859,46 @@ public class MohistDefaultWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void WorkflowYamlSerializer_RoundTripsTaskOnFailureCases()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: integrate
+            tasks:
+              - id: integrate:publish
+                title: Publish changes
+                uses: mohist/publish-via-pr
+                onFailure:
+                  limit: 1
+                  cases:
+                    - when:
+                        output.failureKind: base-moved
+                      tasks:
+                        - id: recover:rebase
+                          title: Rebase after base moved
+                          uses: mohist/rebase
+                        - id: recover:publish
+                          title: Publish changes
+                          uses: mohist/publish-via-pr
+            checks: []
+        """);
+
+        var yaml = WorkflowYamlSerializer.ToYaml(definition);
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
+        var onFailure = reparsed.Stages.Single().Tasks.Single().OnFailure;
+
+        Assert.NotNull(onFailure);
+        Assert.Equal(1, onFailure!.Limit);
+        var failureCase = Assert.Single(onFailure.Cases);
+        Assert.Equal("base-moved", failureCase.When["output.failureKind"]!.Value.GetString());
+        Assert.Equal(new[] { "recover:rebase", "recover:publish" }, failureCase.Tasks.Select(t => t.Id).ToArray());
+        Assert.Contains("onFailure:", yaml);
+        Assert.Contains("output.failureKind: base-moved", yaml);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void DefaultWorkflowDefinition_DeclaresExpectedArtifactCapturePaths()
     {
         var definition = MohistWorkflow.Definition;

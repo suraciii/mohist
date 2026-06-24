@@ -135,13 +135,14 @@ public struct TaskDefinitionSurrogate
     [Id(3)] public Dictionary<string, JsonElement?>? With;
     [Id(4)] public TaskArtifactCapture? Artifacts;
     [Id(6)] public Dictionary<string, string>? SetVars;
+    [Id(7)] public TaskFailureAction? OnFailure;
 }
 
 [RegisterConverter]
 public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition, TaskDefinitionSurrogate>
 {
     public TaskDefinition ConvertFromSurrogate(in TaskDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Artifacts, surrogate.SetVars);
+        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Artifacts, surrogate.SetVars, surrogate.OnFailure);
 
     public TaskDefinitionSurrogate ConvertToSurrogate(in TaskDefinition value) => new()
     {
@@ -151,6 +152,47 @@ public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition
         With = value.With,
         Artifacts = value.Artifacts,
         SetVars = value.SetVars,
+        OnFailure = value.OnFailure,
+    };
+}
+
+[GenerateSerializer]
+public struct TaskFailureActionSurrogate
+{
+    [Id(0)] public int Limit;
+    [Id(1)] public List<TaskFailureCase> Cases;
+}
+
+[RegisterConverter]
+public sealed class TaskFailureActionSurrogateConverter : IConverter<TaskFailureAction, TaskFailureActionSurrogate>
+{
+    public TaskFailureAction ConvertFromSurrogate(in TaskFailureActionSurrogate surrogate) =>
+        new(surrogate.Limit, surrogate.Cases);
+
+    public TaskFailureActionSurrogate ConvertToSurrogate(in TaskFailureAction value) => new()
+    {
+        Limit = value.Limit,
+        Cases = value.Cases,
+    };
+}
+
+[GenerateSerializer]
+public struct TaskFailureCaseSurrogate
+{
+    [Id(0)] public Dictionary<string, JsonElement?> When;
+    [Id(1)] public List<TaskDefinition> Tasks;
+}
+
+[RegisterConverter]
+public sealed class TaskFailureCaseSurrogateConverter : IConverter<TaskFailureCase, TaskFailureCaseSurrogate>
+{
+    public TaskFailureCase ConvertFromSurrogate(in TaskFailureCaseSurrogate surrogate) =>
+        new(surrogate.When, surrogate.Tasks);
+
+    public TaskFailureCaseSurrogate ConvertToSurrogate(in TaskFailureCase value) => new()
+    {
+        When = value.When,
+        Tasks = value.Tasks,
     };
 }
 

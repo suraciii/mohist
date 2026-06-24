@@ -100,14 +100,14 @@ integrate：
 
 ## PR Recovery
 
-`mohist/pr` 的恢复应基于 action output error code 编排，见 `actions.md`。
+`mohist/pr` 的恢复应基于 action output 编排，见 `actions.md`。
 
 典型恢复：
 
-- `output.errorCode: base-moved` → 插入 `mohist/rebase`，再插入 `mohist/publish-via-pr`。
-- `output.errorCode: gh-not-authenticated` / `gh-missing` → 阻塞 human 修 runner 环境。
-- `output.errorCode: branch-protection-blocked` → 阻塞 human 调整 GitHub 配置或 workflow。
-- `output.errorCode: pr-closed` → 阻塞 human；系统不擅自新开替代 PR。
+- `output.failureKind: base-moved` → 插入 `mohist/rebase`，再插入 `mohist/publish-via-pr`。
+- `output.failureKind: config-error` → 阻塞 human 修 runner 环境。
+- `output.failureKind: protection-conflict` → 阻塞 human 调整 GitHub 配置或 workflow。
+- `output.failureKind: pr-state-conflict` → 阻塞 human；系统不擅自新开替代 PR。
 
 恢复 task 使用同一个 workflow workspace。`recover:publish` 继续推送同一个 `workspace.branch`，因此 GitHub 会更新并复用同一个 open PR；如果 mergeability 仍失败，则保留普通 task failure，等待人工处理或下一次 retry。
 
