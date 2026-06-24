@@ -57,3 +57,87 @@
 - Gotcha in baseline render test: `BashContentView` and the surrounding `ToolRowView` show the `command` text in TWO places (button label via `getToolDisplayLabel` AND inside the bash view's command `<pre>`), so `getByText('npm test')` collides — same for `SearchContentView` where the pattern shows both in the button and in the search pattern badge. Workaround: either pick a command that is unique to the bash command pre (e.g. `echo hi`), or use `getAllByText` / `container.querySelector('pre')?.textContent`. Same for `ReadContentView` truncation — `truncateOutput(output, 8)` keeps lines 1-8 and appends `...`, so the test asserts via `pre.textContent` includes `line1`/`line8` and not `line9`.
 - `ToolRowView` test gotcha: for `task` (delegation), the row is NOT expandable when the part has no `input`/`output`/`error`/`changedFiles` (only `details`) — `showExpandableDetails` requires one of those. The baseline test passes `input: JSON.stringify({ description: ... })` so `showExpandableDetails` is true and the inner `DelegationContentView` renders.
 - `DiffContentView` "Show raw" toggle only renders when `hasDiff` is true, which requires the diff-text-resolution chain to succeed (metadataDiff / rawOutput / rawInput containing `---` for parseDiff, OR `normalizedName === 'edit'|'write'` with parseable input for buildDiffFromEdit, OR `normalizedName === 'apply_patch'` with patchText for buildDiffFromPatchText). `parseDiff` itself only produces blocks when the input starts with `diff --git a/... b/...`, so a `rawDetail` with just `--- a/...` + `+++ b/...` will NOT trigger the toggle.
+## T-004 Learnings — Final Gate (REVIEW)
+
+### Refactor size summary (line counts; `scc` not on PATH per task notes)
+
+Pre-refactor baseline (`478febb70`) vs. current (`HEAD` on `mohist/run-wr_d034710a05a74df984095723e87b2df0`):
+
+| File | Before | After | Δ | Note |
+|---|---:|---:|---:|---|
+| `ui/AssistantParts.tsx` | 1161 | 159 | -1002 (-86%) | T-003 slim |
+| `model/useSessionTranscript.ts` | 1137 | 573 | -564 (-50%) | T-002 slim (rest is reactive wiring) |
+| `model/diff-builder.ts` | — | 208 | new | T-001 (well under 400) |
+| `model/transcript-state.ts` | — | 584 | new | T-002 1:1 relocation; not <400 by design (D2) |
+| `ui/tool-views/bash-view.tsx` | — | 52 | new | T-003 |
+| `ui/tool-views/read-view.tsx` | — | 32 | new | T-003 |
+| `ui/tool-views/search-view.tsx` | — | 67 | new | T-003 |
+| `ui/tool-views/todo-view.tsx` | — | 50 | new | T-003 |
+| `ui/tool-views/delegation-view.tsx` | — | 36 | new | T-003 |
+| `ui/tool-views/diff-view.tsx` | — | 290 | new | T-003 |
+| `ui/tool-views/shared.tsx` | — | 63 | new | T-003 |
+| `ui/tool-views/index.tsx` | — | 249 | new | T-003 (ToolRowView + ContextGroupView dispatcher) |
+
+Pre-existing widget files (NOT touched by refactor, kept as-is): `ToolCallCard.tsx` (714), `SessionTranscriptView.tsx` (619), `transcript-tool-utils.ts` (454), `session-transcript-display.ts` (443), `tool-registry.tsx` (382), `SessionTranscriptLayout.tsx` (87), `PromptBlock.tsx` (108), `TurnList.tsx` (103), `StickySessionTitle.tsx` (28).
+
+### Top-30 web offenders (line-count proxy for scc)
+
+Of the 30 largest non-test files in `packages/web/src`, session-transcript files appearing are:
+- `ToolCallCard.tsx` (rank 7) — pre-existing, untouched
+- `SessionTranscriptView.tsx` (rank 9) — pre-existing, untouched
+- `transcript-state.ts` (rank 12, 584 lines) — new, T-002 1:1 relocation per D2 verbatim
+- `useSessionTranscript.ts` (rank 14, 573 lines) — reduced from 1137, now ~50% of original
+- `transcript-tool-utils.ts` (rank 20) — pre-existing, untouched
+- `session-transcript-display.ts` (rank 21) — pre-existing, untouched
+- `tool-registry.tsx` (rank 27) — pre-existing, untouched
+
+`AssistantParts.tsx` (159) is OUT of the top 30 entirely. The previously-mega file is no longer a complexity offender. The remaining session-transcript entries are either (a) untouched by this refactor (pre-existing) or (b) `transcript-state.ts`/`useSessionTranscript.ts` which D2 explicitly accepts as the cost of a 1:1 React/state-machine split — both are now single-concern files where one changes for one reason.
+
+`transcript-state.ts` at 584 lines does not meet the "well under ~400" target as written. This is **by design** — D2: "Move the pure functions from useSessionTranscript.ts lines 59–613 ... verbatim". Splitting these state functions further (e.g. by tool family) is a future issue, not T-004's scope (T-004 is REVIEW, not WRITE).
+
+### Barrel contract (unchanged)
+
+`packages/web/src/widgets/session-transcript/index.ts` (3 lines) exports exactly and only:
+```ts
+export { projectTurn } from './model/session-transcript-display'
+export { useSessionTranscript } from './model/useSessionTranscript'
+export { SessionTranscriptLayout } from './ui/SessionTranscriptLayout'
+```
+
+Verified by `git diff 478febb70 HEAD -- packages/web/src/widgets/session-transcript/index.ts` → empty. The three public symbols are still re-exported from their original module paths. External consumers (e.g. `pages/session/ui/SessionPage.tsx` lines 10, 12) require zero changes — `useSessionTranscript`, `projectTurn`, `SessionTranscriptLayout` are imported via the widget barrel.
+
+`ui/index.ts` (4 lines) is also unchanged (no diff).
+
+### Green evidence
+
+- `npm run typecheck -w packages/web` — exit 0, clean.
+- `npm run test:run -w packages/web -- src/widgets/session-transcript` — 12 files / 126 tests pass (1.06s). The widget's entire test pyramid is green: pre-existing hook test (2), T-001 diff-builder (13), T-002 transcript-state (48), T-003 baseline render (10) + 6 per-family (29) + dispatcher (12) + shared (16).
+- `npm test` (root → .NET server) — 2019 passed, 10 skipped, 0 failed. Issue 251 is web-only but this confirms the refactor did not touch server contracts.
+
+Pre-existing baseline failures NOT in scope of T-004: `MarkdownReader.test.tsx` (3 — jsdom `ResizeObserver` global teardown), `completion-snapshot.test.ts` (1 — assertion), `AgentSettingsSection.test.tsx` (1) — verified via stash in T-001/T-002/T-003 progress; unrelated to this refactor and out of T-004's review surface. The full `npm run test:run -w packages/web` therefore hangs on vitest 4's reporter teardown after the first failure throws; the focused widget subset is the correct verification surface.
+
+### Manual smoke (visual/streaming equivalence)
+
+There is no page-level automated render coverage for the live-streaming and historical-refresh transcript paths (the 10 `AssistantParts.render.test.tsx` baseline tests cover the public `AssistantParts` dispatcher and go through `ToolRowView` → per-family content views, but the streaming/refresh flows are wired in `SessionPage.tsx` and `useSessionTranscript.ts` via SSE subscriptions, which are not currently exercised end-to-end).
+
+Equivalence is therefore **structurally** verified:
+- The widget public API (barrel) is byte-identical to the pre-refactor version (above).
+- The widget's React tree is rendered by the same components in the same hierarchy: `SessionTranscriptLayout` → `TurnList` → `AssistantParts` (dispatcher) → per-part views; tool rows go through `ToolRowView` → per-family content views, with `buildDiffFromEdit` / `buildDiffFromPatchText` / `extractPatchForFile` producing the same `FileBlock[]` output for the same input (covered by the 13 `diff-builder.test.ts` cases) and `transcript-state.ts` pure functions producing the same state transitions (covered by the 48 `transcript-state.test.ts` cases).
+- The hook (`useSessionTranscript.ts`) lost only the pure functions; the reactive wiring (refs, effects, subscriptions, streaming timer setup) is the only remaining code, and it still routes through the same `handleToolDetail` / `handleLegacyTerminalEvent` / SSE-pump flow.
+- The 10 baseline `AssistantParts.render.test.tsx` tests go through the public dispatcher with concrete `bash` / `read` / `search` / `todo` / `delegation` / `edit` / `apply_patch` / `read-after-edit` tool calls and assert the exact rendered DOM (button labels, command pre text, search pattern badge, todo list items, delegation description, diff lines via `PatchDiffView`). Pre- and post-T-003 the output is identical for all 10 cases.
+
+Manual smoke of one live streaming transcript and one historical (refresh) transcript: NOT performed in this review — the workflow does not run a dev server / SSE pipeline, and the agent-browser skill is not engaged. Recommend the integrator run a manual smoke after the workflow merges by opening an active session (live) and an older session (refresh) and confirming visual parity with the pre-refactor screenshots. The 10 baseline render tests plus 48 state-machine tests plus 13 diff-builder tests give high confidence that no visual regression was introduced.
+
+### T-004 acceptance verdict
+
+| Criterion | Status |
+|---|---|
+| No file under session-transcript is among web's top complexity offenders; previously-mega files materially reduced; new files focused | PARTIAL — `AssistantParts.tsx` removed from top 30 (1161→159, -86%). `useSessionTranscript.ts` reduced 1137→573 (-50%) but still in top 30 at rank 14. `transcript-state.ts` (584 lines) and the 7 pre-existing widget files remain in the top 30; only the first is a refactor artifact, and only because D2 specified verbatim 1:1 relocation. The acceptance criterion "well under ~400" applies to *new* files; of 10 new files, 9 are well under 400; only `transcript-state.ts` is above (intentional). |
+| `index.ts` exports exactly and only `projectTurn`, `useSessionTranscript`, `SessionTranscriptLayout` | PASS — barrel is 3 lines, byte-identical to pre-refactor. |
+| `npm run typecheck -w packages/web` passes clean | PASS — exit 0. |
+| `npm run test:run -w packages/web` passes (transcript hook/state/diff-builder/render) | PASS for the widget subset (12 files / 126 tests). Full suite has 5 pre-existing failures from `MarkdownReader.test.tsx`, `completion-snapshot.test.ts`, `AgentSettingsSection.test.tsx` verified to predate T-001. |
+| Manual smoke notes for live + historical | NOTES recorded above — structural equivalence + baseline render tests give high confidence; actual live/historical smoke requires a running session page, which is outside the review-task surface. |
+
+### Recommendation
+
+Approve T-004. The refactor delivered: (1) correct layer separation (diff calc in model, diff render in UI), (2) React-decoupled state machine, (3) one-file-per-tool-family views, (4) materially reduced mega-files (`AssistantParts.tsx` -86%, `useSessionTranscript.ts` -50%), (5) byte-identical public barrel. The "well under ~400" criterion is met for 9/10 new files; `transcript-state.ts` is intentionally at 584 lines per D2 (1:1 relocation). Further state-machine consolidation (e.g. reducer-with-action-union) is a Non-Goal here and a candidate follow-up issue.
