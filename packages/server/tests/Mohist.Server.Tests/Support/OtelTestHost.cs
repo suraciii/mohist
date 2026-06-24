@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
 using OpenTelemetry;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Trace;
 
 namespace Mohist.Server.Tests.Support;
@@ -50,19 +51,30 @@ public sealed class OtelTestHost : IAsyncDisposable
 {
     private readonly WebApplication _app;
     private readonly TestServer _server;
+    private readonly RecordingHttpMessageHandler _otlpExporterHandler;
 
     public RecordingActivityProcessor Recorder { get; }
+    public IReadOnlyList<HttpRequestMessage> OtlpExporterRequests => _otlpExporterHandler.Requests;
 
     public OtelTestHost(OtelTestHostOptions options)
     {
         Recorder = new RecordingActivityProcessor();
+        _otlpExporterHandler = new RecordingHttpMessageHandler(options.FailExporterRequests);
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(options.AsConfiguration());
 
         builder.Services.AddRouting();
-        builder.Services.AddMohistOpenTelemetry(builder.Configuration);
+        builder.Services.Configure<OtelOptions>(builder.Configuration.GetSection(OtelOptions.SectionName));
+        var otelOptions = builder.Configuration.GetSection(OtelOptions.SectionName).Get<OtelOptions>() ?? new OtelOptions();
+        if (otelOptions.Enabled)
+        {
+            MohistOpenTelemetryRegistration.ConfigureTracing(
+                builder.Services.AddOpenTelemetry(),
+                otelOptions,
+                ConfigureFakeExporter);
+        }
 
         if (options.Enabled)
         {
@@ -102,6 +114,18 @@ public sealed class OtelTestHost : IAsyncDisposable
         _app.Start();
     }
 
+    public bool ForceFlushOtelExporter(TimeSpan timeout)
+    {
+        var provider = _app.Services.GetRequiredService<TracerProvider>();
+        return provider.ForceFlush((int)timeout.TotalMilliseconds);
+    }
+
+    private void ConfigureFakeExporter(OtlpExporterOptions options)
+    {
+        options.ExportProcessorType = ExportProcessorType.Simple;
+        options.HttpClientFactory = () => new HttpClient(_otlpExporterHandler, disposeHandler: false);
+    }
+
     public HttpClient CreateClient() => _server.CreateClient();
 
     /// <summary>
@@ -125,6 +149,7 @@ public sealed class OtelTestHostOptions
 {
     public bool Enabled { get; init; } = true;
     public string? Endpoint { get; init; }
+    public bool FailExporterRequests { get; init; }
 
     /// <summary>
     /// Optional hook to register additional services BEFORE
@@ -166,4 +191,35 @@ public sealed class RecordingActivityProcessor : BaseProcessor<Activity>
     public IReadOnlyList<Activity> EndedActivities => _ended;
 
     public override void OnEnd(Activity activity) => _ended.Add(activity);
+}
+
+internal sealed class RecordingHttpMessageHandler : HttpMessageHandler
+{
+    private readonly List<HttpRequestMessage> _requests = new();
+    private readonly bool _failRequests;
+
+    public RecordingHttpMessageHandler(bool failRequests)
+    {
+        _failRequests = failRequests;
+    }
+
+    public IReadOnlyList<HttpRequestMessage> Requests => _requests;
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        _requests.Add(request);
+        if (_failRequests)
+        {
+            return Task.FromException<HttpResponseMessage>(
+                new HttpRequestException("Fake OTLP exporter transport failure."));
+        }
+
+        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(Array.Empty<byte>()),
+            RequestMessage = request,
+        });
+    }
 }

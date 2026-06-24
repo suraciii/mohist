@@ -1,5 +1,3 @@
-using System.Net.Sockets;
-
 namespace Mohist.Server.Otel;
 
 /// <summary>
@@ -38,25 +36,5 @@ public static class OtelBindFailureDetector
             || msg.Contains($"0.0.0.0:{otlpPort}", StringComparison.Ordinal)
             || msg.Contains($"[::]:{otlpPort}", StringComparison.Ordinal)
             || msg.Contains($"localhost:{otlpPort}", StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Allocates an ephemeral local port by briefly binding a
-    /// <see cref="TcpListener"/> and reading the assigned port. Useful
-    /// for tests that need to seed a port collision without hard-coding
-    /// a value that may be in use on a developer machine.
-    /// </summary>
-    public static int AllocateEphemeralLoopbackPort()
-    {
-        var probe = new TcpListener(System.Net.IPAddress.Loopback, 0);
-        probe.Start();
-        try
-        {
-            return ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
-        }
-        finally
-        {
-            probe.Stop();
-        }
     }
 }

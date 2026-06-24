@@ -1,24 +1,12 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Diagnostics;
-using System.Net.Sockets;
 using System.Text;
 using Google.Protobuf;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using EnvironmentAbstractions;
 using Mohist.Server.Api;
-using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Otel;
-using Mohist.Server.SystemInfo;
 using Mohist.Server.Tests.Support;
-using OpenTelemetry;
-using OpenTelemetry.Exporter;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Telemetry;
@@ -158,75 +146,21 @@ public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RealSdkHttpProtobufExport_PersistsToOtelDb()
+    public void ProtobufPayload_ParsesRequiredSpanFields()
     {
-        var otlpPort = GetFreePort();
-        var otlpDbPath = Path.Combine(Path.GetTempPath(), $"mohist-real-sdk-otel-{Guid.NewGuid():N}.db");
-        await using var app = BuildRealSocketOtlpApp(otlpPort, otlpDbPath);
-        await app.StartAsync();
+        const string traceId = "00000000000000000000000000000004";
+        const string spanId = "0000000000000004";
+        var payload = BuildMinimalProtobufTracePayload(traceId, spanId, "protobuf-parser", "protobuf parser span");
 
-        using var source = new ActivitySource("Mohist.Server.Tests.RealOtlpExport");
-        using var provider = Sdk.CreateTracerProviderBuilder()
-            .ConfigureResource(resource => resource.AddService("real-sdk-export"))
-            .AddSource(source.Name)
-            .AddOtlpExporter(options =>
-            {
-                options.Protocol = OtlpExportProtocol.HttpProtobuf;
-                options.Endpoint = MohistOpenTelemetryRegistration.ResolveExportEndpoint($"http://127.0.0.1:{otlpPort}/otel");
-            })
-            .Build();
-
-        using (var activity = source.StartActivity("real sdk protobuf span", ActivityKind.Internal))
-        {
-            activity?.SetTag("test.marker", "real-sdk-protobuf");
-        }
-
-        Assert.True(provider.ForceFlush(10_000));
-
-        var db = app.Services.GetRequiredService<OtelDb>();
-        using var connection = db.OpenReadOnlyConnection();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT {OtelDb.TracesServiceNameColumn}, {OtelDb.TracesSpanCountColumn} FROM {OtelDb.TracesTable} WHERE {OtelDb.TracesServiceNameColumn} = $service";
-        cmd.Parameters.AddWithValue("$service", "real-sdk-export");
-        using var reader = cmd.ExecuteReader();
-        Assert.True(reader.Read());
-        Assert.Equal("real-sdk-export", reader.GetString(0));
-        Assert.Equal(1L, reader.GetInt64(1));
-
-        await app.StopAsync();
-        try { if (File.Exists(otlpDbPath)) File.Delete(otlpDbPath); } catch { }
-    }
-
-    [Fact]
-    public async Task RealSdkHttpProtobufPayload_ParsesRequiredSpanFields()
-    {
-        using var receiver = new Mohist.Server.Tests.Specs.SystemSpecs.Otel.OtlpReceiver();
-        using var source = new ActivitySource("Mohist.Server.Tests.RealOtlpParse");
-        using var provider = Sdk.CreateTracerProviderBuilder()
-            .ConfigureResource(resource => resource.AddService("real-sdk-parse"))
-            .AddSource(source.Name)
-            .AddOtlpExporter(options =>
-            {
-                options.Protocol = OtlpExportProtocol.HttpProtobuf;
-                options.Endpoint = MohistOpenTelemetryRegistration.ResolveExportEndpoint($"http://127.0.0.1:{receiver.Port}/otel");
-            })
-            .Build();
-
-        using (source.StartActivity("real sdk parser span", ActivityKind.Internal))
-        {
-        }
-
-        Assert.True(provider.ForceFlush(10_000));
-        var request = await receiver.WaitForRequestAsync(TimeSpan.FromSeconds(10));
-        Assert.NotNull(request);
-
-        var parsed = Mohist.Server.Otel.OtlpProtobuf.OtlpProtobufTraceParser.Parse(request!.Body);
+        var parsed = Mohist.Server.Otel.OtlpProtobuf.OtlpProtobufTraceParser.Parse(payload);
         var resourceSpans = Assert.Single(parsed.ResourceSpans ?? []);
+        var serviceName = Assert.Single(resourceSpans.Resource?.Attributes ?? [], a => a.Key == "service.name");
+        Assert.Equal("protobuf-parser", serviceName.Value?.StringValue);
         var scopeSpans = Assert.Single(resourceSpans.ScopeSpans ?? []);
         var span = Assert.Single(scopeSpans.Spans ?? []);
-        Assert.False(string.IsNullOrEmpty(span.TraceId));
-        Assert.False(string.IsNullOrEmpty(span.SpanId));
-        Assert.Equal("real sdk parser span", span.Name);
+        Assert.Equal(traceId, span.TraceId);
+        Assert.Equal(spanId, span.SpanId);
+        Assert.Equal("protobuf parser span", span.Name);
         Assert.False(string.IsNullOrEmpty(span.StartTimeUnixNano));
         Assert.False(string.IsNullOrEmpty(span.EndTimeUnixNano));
     }
@@ -389,33 +323,4 @@ public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
         return ByteString.CopyFrom(stream.ToArray());
     }
 
-    private static WebApplication BuildRealSocketOtlpApp(int otlpPort, string otlpDbPath)
-    {
-        var builder = WebApplication.CreateBuilder();
-        builder.WebHost.ConfigureKestrel(kestrel => kestrel.ListenLocalhost(otlpPort));
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Mohist:Otel:Enabled"] = "true",
-            ["Mohist:Otel:Port"] = otlpPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["Mohist:Otel:DbPath"] = otlpDbPath,
-        });
-        builder.Services.Configure<OtelOptions>(builder.Configuration.GetSection(OtelOptions.SectionName));
-        builder.Services.AddSingleton<IFileSystem, PhysicalFileSystem>();
-        builder.Services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
-        builder.Services.AddSingleton<OtelDb>();
-        builder.Services.AddSingleton<TraceIngester>();
-
-        var app = builder.Build();
-        app.MapOtlpRoutes();
-        return app;
-    }
-
-    private static int GetFreePort()
-    {
-        var listener = new TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
 }

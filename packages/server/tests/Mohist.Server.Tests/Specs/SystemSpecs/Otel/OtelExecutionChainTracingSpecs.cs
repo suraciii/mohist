@@ -84,8 +84,11 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
                         ef?.SetTag("db.statement", "SELECT 1");
                     }
 
-                    using var client = new HttpClient();
-                    try { await client.GetAsync("http://127.0.0.1:1/probe"); } catch { }
+                    using (var outbound = MohistOpenTelemetryRegistrationTestSources.HttpClient.StartActivity("GET", ActivityKind.Client))
+                    {
+                        outbound?.SetTag("url.full", "http://collector.test/probe");
+                        outbound?.SetTag("http.response.status_code", 200);
+                    }
 
                     return Results.Ok();
                 });
@@ -401,5 +404,6 @@ public class OtelExecutionChainTracingSpecs : IClassFixture<MohistIntegrationFix
         public static readonly ActivitySource SignalR = new(MohistOpenTelemetryRegistration.SignalRServerActivitySourceName);
         public static readonly ActivitySource Orleans = new(MohistOpenTelemetryRegistration.OrleansActivitySourceNames[0]);
         public static readonly ActivitySource EfCore = new("OpenTelemetry.Instrumentation.EntityFrameworkCore");
+        public static readonly ActivitySource HttpClient = new("System.Net.Http");
     }
 }

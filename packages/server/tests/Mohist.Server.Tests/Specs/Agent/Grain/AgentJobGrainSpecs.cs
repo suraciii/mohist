@@ -5,14 +5,22 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
+using Orleans;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Agent.Grain;
 
-[Collection("WorkflowGrain")]
-public class AgentJobGrainSpecs : WorkflowGrainSpecs
+[Collection("AgentJobGrain")]
+public class AgentJobGrainSpecs
 {
-    public AgentJobGrainSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+    private readonly AgentJobGrainFixture _fixture;
+
+    public AgentJobGrainSpecs(AgentJobGrainFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    private IGrainFactory Grains => _fixture.Grains;
 
     private IAgentJobGrain JobGrain(string key) => Grains.GetGrain<IAgentJobGrain>(key);
 
@@ -70,6 +78,22 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
             await runner.UpdateAsync(maxWorkflowSlots);
         }
         return (runnerId, pid);
+    }
+
+    private async Task ClearBacklogAsync()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+    }
+
+    private async Task ClearGlobalRunnerRegistryAsync()
+    {
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var ids = await registry.ListRunnerIdsAsync();
+        foreach (var id in ids)
+            await registry.UnregisterAsync(id);
     }
 
     private static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
@@ -284,7 +308,8 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
 
         await job.SubmitAsync(MakeInput("no runner ever", $"agent-job-missing-project-bound-{Guid.NewGuid():N}", "/tmp/agent-job-bound"));
 
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(8));
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        await job.CheckTimeoutsAsync();
 
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
@@ -323,7 +348,8 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(15));
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
+        await job.CheckTimeoutsAsync();
 
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Failed, terminal.Status);
@@ -379,12 +405,9 @@ public class AgentJobGrainSpecs : WorkflowGrainSpecs
 
         await job.SubmitAsync(MakeInput("retry attempts", $"missing-project-{Guid.NewGuid():N}", "/tmp/agent-job-retry"));
 
-        var snapshot = await WaitForAsync(
-            () => job.GetRuntimeSnapshotAsync(),
-            s => s.DispatchAttempts >= 2,
-            TimeSpan.FromSeconds(2),
-            TimeSpan.FromMilliseconds(25),
-            "dispatch attempts >= 2");
+        _fixture.TimeProvider.Advance(TimeSpan.FromMilliseconds(75));
+        await job.CheckTimeoutsAsync();
+        var snapshot = await job.GetRuntimeSnapshotAsync();
 
         Assert.Equal(AgentJobStatus.Pending, snapshot.Status);
         Assert.True(snapshot.DispatchAttempts >= 2);
