@@ -110,3 +110,38 @@
   - Configuration bindings (`WorkflowArtifactStorageOptions`, `AttachmentStorageOptions`, `AgentJobOptions`, `IStateStore<…>`, ~4 lines).
   - `AddHttpClient<ISystemReadinessProbe, …>`, `AddHostedService<…>`, `AddCloudEventBus`, `AddSignalR`, `AddDbContextFactory<MohistDbContext>`, ~5 lines.
 - Net line count for `ConfigureMohistServices` body: 80 → 50 (~37% reduction since T-001). The "concrete self-registration" pattern that motivated the issue no longer exists in this entry point.
+
+## Verify check (in-progress)
+
+After T-004, ran the verify commands:
+
+- `npm run build` (server dotnet build Mohist.sln) — **PASS** (0 warnings, 0 errors).
+- `npm test` (server dotnet test) — **PASS** (2118 passed, 10 skipped, 0 failed).
+- `npm run typecheck -w packages/web` — **PASS**.
+- `npm run test:run -w packages/web` — **FAIL**: 6 failing tests.
+- `npm run typecheck -w packages/runner` and `npm test -w packages/runner` — **not yet run**.
+
+### Failing web tests (6 total)
+
+1. **`src/shared/ui/markdown-reader/MarkdownReader.test.tsx`** (4 failures)
+   - `does not produce page-level horizontal overflow for a long code line`
+   - `collapses long content in collapsible mode, expands, and collapses again`
+   - `does not render an Expand control in collapsible mode for short content`
+   - `never renders a Reader-level collapse control in full mode`
+   - All four fail with `TypeError: Cannot delete property 'ResizeObserver' of #<Object>` thrown from `teardownResizeObserver` (test file line 56): `delete (globalThis as …).ResizeObserver`. The test installs `ResizeObserver` via `setupResizeObserver` (`globalThis.ResizeObserver = spy`) and tears it down with `delete`. In strict mode (vitest `globals: true` runs files as ES modules by default in this setup) `delete` of a non-configurable own property throws `TypeError`. Earlier in the suite `tests/setup.ts` installs `ResizeObserver` via `Object.defineProperty(window, 'ResizeObserver', { writable: true, value: ResizeObserverPolyfill })` without `configurable: true`, but the test installs a new value via plain assignment which should make it configurable — however the actual failure reproduces only on certain code paths. Next session must investigate why `delete` throws (likely because setup.ts property descriptor lacks `configurable: true` and survives across tests via the `jsdom` environment). Fix options: (a) install the polyfill with `configurable: true` in `tests/setup.ts`; (b) change the test setup to not `delete` but reassign to a no-op / use `beforeEach`/`afterEach` to restore the prior descriptor via `Object.defineProperty`. Prefer (a) at the root cause because the failing tests already assume the property is configurable.
+
+2. **`tests/AgentSettingsSection.test.tsx`** (1 failure)
+   - `renders field-level validation errors inline and does not toast them`
+   - Error: `expected 'text-xs text-red-600' to contain 'text-red-700'`. Test expects the inline validation error to use Tailwind class `text-red-700` but the component currently renders `text-red-600`. Next session: inspect the component's error rendering and update either the component (use `text-red-700`) or the test (accept `text-red-600`) — prefer fixing the component if the design calls for stronger contrast.
+
+3. **`src/entities/issue/lib/completion-snapshot.test.ts`** (1 failure)
+   - `returns the {completed, failed, new} shape derived from useIssues()` — exact assertion mismatch not yet captured; need to inspect test source and `completion-snapshot` lib in next session.
+
+### Next steps
+
+1. Fix `tests/setup.ts` `ResizeObserver` polyfill: add `configurable: true` to the `Object.defineProperty` descriptor (and probably `enumerable: false` for hygiene). Re-run `MarkdownReader.test.tsx` to confirm all 4 pass.
+2. Inspect `AgentSettingsSection` component → adjust error class to `text-red-700` (or update test if `text-red-600` is the correct design value).
+3. Inspect `src/entities/issue/lib/completion-snapshot.test.ts` and `completion-snapshot.ts` → reconcile `{completed, failed, new}` shape mismatch.
+4. Re-run `npm run test:run -w packages/web` to confirm green.
+5. Run `npm run typecheck -w packages/runner` and `npm test -w packages/runner` to confirm runner suites are clean.
+6. Update `progress.txt` with final tally and bump `openspec/changes/issue-226/tasks.json` if any T-004 test counts change as a side effect.
