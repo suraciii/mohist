@@ -1,0 +1,417 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Epic.Grains;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Issue.Domain;
+using Mohist.Server.Tests.Support;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs.Epic.Grain;
+
+public class EpicAutoDoneSpecs
+{
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_ActiveEpicWithAllDoneIssues_TransitionsToDone()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("done", result!.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("done", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_AlreadyDoneEpic_IsIdempotentNoOp()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "done");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("done", result!.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("done", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_AlreadyClosedEpic_IsIdempotentNoOp()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "closed");
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("closed", result!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_PausedEpic_IsIdempotentNoOp()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused", pauseReason: "on hold");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("paused", result!.Status);
+        Assert.Equal("on hold", result.PauseReason);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("paused", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_ActiveEpicWithIncompleteIssue_StaysActive()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("active", result!.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("active", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_CancelledIssueNotTreatedAsComplete_StaysActive()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("active", result!.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("active", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_UnknownEpic_ReturnsNull()
+    {
+        await using var database = CreateDatabase();
+        var grain = CreateGrain(database.Factory, "project_1:epic_missing");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.Null(result);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_NoLinkedIssues_TransitionsToDone()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.NotNull(result);
+        Assert.Equal("done", result!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task AutoMarkDoneIfReadyAsync_DuplicateCallsOnAlreadyDone_AllReturnDone()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var first = await grain.AutoMarkDoneIfReadyAsync();
+        var second = await grain.AutoMarkDoneIfReadyAsync();
+        var third = await grain.AutoMarkDoneIfReadyAsync();
+
+        Assert.Equal("done", first!.Status);
+        Assert.Equal("done", second!.Status);
+        Assert.Equal("done", third!.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeAsync_PausedEpicWithAllCompleteIssues_TransitionsThroughActiveAndEndsDone()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.ResumeAsync();
+
+        Assert.Equal("done", result.Status);
+        Assert.Null(result.PauseReason);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("done", stored.Status);
+        Assert.Null(stored.PauseReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeAsync_PausedEpicWithIncompleteIssue_EndsActive()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        await SeedLinkAsync(database, "epic_1", "issue_2", 2);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.ResumeAsync();
+
+        Assert.Equal("active", result.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("active", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeAsync_PausedEpicWithCancelledIssueOnly_DoesNotAutoDone()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.ResumeAsync();
+
+        Assert.Equal("active", result.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("active", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeAsync_ActiveEpicIsNoOpAndStaysActive()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var result = await grain.ResumeAsync();
+
+        Assert.Equal("active", result.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task SetStatusAsync_Done_StillThrowsOnTerminalOrPausedEpic_RegressionCheck()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "done");
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task SetStatusAsync_Done_StillThrowsOnPausedEpic_RegressionCheck()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task SetStatusAsync_Done_StillThrowsOnUnreadyEpic_RegressionCheck()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, "epic_1", "issue_1", 1);
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => grain.SetStatusAsync("done"));
+    }
+
+    private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
+        new(factory, null!)
+        {
+            GrainKeyForTest = grainKey,
+        };
+
+    private static async Task SeedEpicAsync(
+        TestDatabase database,
+        string projectId = "project_1",
+        string epicId = "epic_1",
+        int number = 1,
+        string status = "active",
+        string? pauseReason = null)
+    {
+        await using var db = database.CreateDbContext();
+        db.Epics.Add(new EpicRow
+        {
+            Id = epicId,
+            ProjectId = projectId,
+            Number = number,
+            Title = $"Epic {epicId}",
+            Description = "",
+            Priority = "p2",
+            Status = status,
+            PauseReason = pauseReason,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedIssueAsync(
+        TestDatabase database,
+        string projectId,
+        string epicId,
+        string issueId,
+        int issueNumber,
+        Mohist.Server.Issue.Domain.IssueStatus status)
+    {
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
+            Title = $"Issue {issueNumber}",
+            Status = status,
+        };
+        var json = IssueStore.Serialize(issue);
+        await using var db = database.CreateDbContext();
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issueId,
+            ProjectId = projectId,
+            Number = issueNumber,
+            State = json,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SeedLinkAsync(TestDatabase database, string epicId, string issueId, int issueNumber)
+    {
+        await using var db = database.CreateDbContext();
+        db.EpicIssues.Add(new EpicIssueRow
+        {
+            EpicId = epicId,
+            ProjectId = "project_1",
+            IssueId = issueId,
+            IssueNumber = issueNumber,
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static TestDatabase CreateDatabase()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        using (var db = factory.CreateDbContext())
+            db.Database.Migrate();
+        return new TestDatabase(connection, factory);
+    }
+
+    private sealed class TestDatabase : IAsyncDisposable
+    {
+        private readonly SqliteConnection _connection;
+
+        public TestDatabase(SqliteConnection connection, TestDbContextFactory factory)
+        {
+            _connection = connection;
+            Factory = factory;
+        }
+
+        public TestDbContextFactory Factory { get; }
+
+        public MohistDbContext CreateDbContext() => Factory.CreateDbContext();
+
+        public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
+    }
+
+    private sealed class TestDbContextFactory : IDbContextFactory<MohistDbContext>
+    {
+        public TestDbContextFactory(DbContextOptions<MohistDbContext> options)
+        {
+            Options = options;
+        }
+
+        public DbContextOptions<MohistDbContext> Options { get; }
+
+        public MohistDbContext CreateDbContext() => new(Options);
+    }
+}

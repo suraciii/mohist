@@ -21,7 +21,9 @@ public class EpicGrain : Grain, IEpicGrain
         _grains = grains;
     }
 
-    private string GrainKey => this.GetPrimaryKeyString();
+    internal string GrainKeyForTest { get; set; } = string.Empty;
+
+    private string GrainKey => string.IsNullOrEmpty(GrainKeyForTest) ? this.GetPrimaryKeyString() : GrainKeyForTest;
 
     public async Task<EpicDto> CreateAsync(string projectId, string title, string? description, string? priority)
     {
@@ -145,12 +147,18 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
+        var wasPaused = domain.Status == EpicStatusEnum.Paused;
         var now = DateTimeOffset.UtcNow;
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
         domain.ClearPendingEvents();
+
+        if (wasPaused)
+        {
+            return await TryAutoMarkDoneAsync(db, projectId, epicId, row);
+        }
         return ToDto(row);
     }
 
@@ -208,6 +216,43 @@ public class EpicGrain : Grain, IEpicGrain
         var domain = Materialize(row, links);
         var now = DateTimeOffset.UtcNow;
         domain.Update(title, description, priority, now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
+        return ToDto(row);
+    }
+
+    public async Task<EpicDto?> AutoMarkDoneIfReadyAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) return null;
+
+        return await TryAutoMarkDoneAsync(db, projectId, epicId, row);
+    }
+
+    private async Task<EpicDto> TryAutoMarkDoneAsync(MohistDbContext db, string projectId, string epicId, EpicRow row)
+    {
+        if (row.Status is "done" or "closed")
+            return ToDto(row);
+        if (row.Status == "paused")
+            return ToDto(row);
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var undelivered = await ComputeUndeliveredLinkedNumbersAsync(db, projectId, links);
+        if (undelivered.Count > 0)
+            return ToDto(row);
+
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.MarkDone(undelivered, now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
