@@ -19,6 +19,8 @@
 - `MohistDbFixture` overrides several services after `ConfigureMohistServices` via `RemoveAll<...>` + `AddSingleton` — this pattern continues to work unchanged because scanning sits underneath those overrides.
 - `AddMohistServerCore(EmptyConfig())` is safe to call from a unit test even though it runs the full pipeline: `BuildServiceProvider()` is lazy, so no DB connection / hosted service / `IHttpClientFactory` is opened unless the test actually resolves a service that needs them. Use this in the "production entry" test to exercise the real `ConfigureMohistServices` path.
 - `ServiceCollection.Last(d => d.ServiceType == T)` is the right way to assert which lifetime "wins" when an explicit hand-written registration follows the scan; `Single` would throw because both descriptors remain in the collection.
+- **MohistDbFixture.Services does not expose IServiceCollection.** Once `BuildServiceProvider()` is called inside `InitializeAsync`, the original collection is gone — the fixture only exposes `IServiceProvider`. For descriptor-level assertions use a fresh `new ServiceCollection()` + `AddMohistServerCore(...)`; for resolution-level assertions use `_fixture.Services.CreateScope().GetService<T>()`.
+- **A migrated service may depend transitively on services the fixture doesn't host.** e.g. `AgentSessionResolver` needs `IGrainFactory` (Orleans silo — fixture has none) and several Scoped services transitively need `ConfigService` which needs `IConfiguration`. The fixture adds `IConfiguration`/`ILogging`/`IEnvironmentVariableProvider` itself, so resolution works there, but a bare `AddMohistServerCore(EmptyConfig())` test provider does NOT include those — only inspect descriptors, don't resolve, unless the test sets up the same services the fixture sets up.
 
 ## Decisions made in T-001
 
@@ -34,3 +36,23 @@
 - `ConfigureMohistServices` calls `AddMohistConventionalServices` as its first line, before every other registration.
 - 5 new tests in `Specs/Foundation/ConventionalRegistrationSpecs.cs` (all passing) — three of them map 1:1 onto the acceptance criteria's bullet points; the other two (singleton lifetime + Scoped-vs-Scoped cross-scope identity) are extra defence for the lifetime mapping.
 - `npm test` (server): 2024 passed, 10 skipped, 0 failed. `npm run build` (Mohist.sln): succeeded, 0 warnings, 0 errors.
+
+## Decisions made in T-002
+
+- Migration domain: split per the task description. T-002 = core Issue/Agent/Epic/Project/Label/Sessions; T-003 = Workflow; T-004 = Runner/System/Artifact. Serialise across `MohistServiceRegistration.cs` so each task's diff is conflict-free.
+- Marker goes on the concrete class declaration: `public class X : IScopedService` (or `ISingletonService`). One marker per service — no service in T-002 implements both, so the "fail-loud at review" rule from T-001 stays informal and we don't add a runtime check.
+- The fixture's resolution semantics must remain identical to the pre-migration state. Because the fixture is the same `ConfigureMohistServices` entry point that production uses (per `Codebase Patterns`), adding the marker + removing the hand-written line is by construction equivalent — same descriptor, same lifetime, same implementation type.
+
+## T-002 outcome
+
+- 14 core domain services migrated:
+  - Singleton: `ProjectQuerier`, `ProjectRefResolver`, `IssueRepositoryResolver`, `SystemLabelDefinitions` — all marked `ISingletonService`.
+  - Scoped: `IssueIdentityResolver`, `IssueQuerier`, `AgentQuerier`, `EpicQuerier`, `LabelCatalogService`, `IssueWorkflowProfileRegistry`, `IssueTemplateRegistry`, `AgentSessionQuery`, `AgentSessionQuerier`, `AgentSessionResolver` — all marked `IScopedService`.
+- 14 corresponding `services.AddScoped/AddSingleton<T>()` lines removed from `MohistServiceRegistration.ConfigureMohistServices`. Interface mappings (e.g. `IStateStore<Issue>→IssueStore`, `IAgentSessionStore→AgentSessionStore`) and factory registrations left untouched as required.
+- Unused `using` directives in `MohistServiceRegistration.cs` cleaned up (`Mohist.Server.Epic.Grains`, `Mohist.Server.Project.Services`, `Mohist.Server.Agent.Services`, `Mohist.Server.Issue.Services.WorkflowProfiles`, `Mohist.Server.Issue.Services.IssueTemplates`, `Mohist.Server.Sessions.Services`, `Mohist.Server.Workflow.Services.Sessions`, `Mohist.Server.Label.Services`, `Mohist.Server.Workflow.Domain.Run`, `Mohist.Server.Infrastructure.Data.Workflow.Prompts`, etc.). The `using Mohist.Server.Infrastructure.Data;` was re-added because `IStateStore<>` lives there and the interface mappings still need it.
+- 1 new test file `Specs/Foundation/MigratedDomainServicesRegistrationSpecs.cs` with 41 cases driven by `Theory`/`MemberData` over the 14 services:
+  - **Production-entry descriptor assertion**: for each service, asserts the only descriptor is `ServiceType == ImplementationType == T` with the expected lifetime, and that the last descriptor agrees. Catches "forgot the marker" / "added marker but kept the hand-written line and the lifetime flipped".
+  - **Fixture-resolution + cross-scope identity**: resolves each service from `MohistDbFixture` via `CreateScope().GetService<T>()` and asserts Singleton-vs-Scoped cross-scope behaviour (`Assert.Same` for Singleton, `Assert.NotSame` for Scoped). `AgentSessionResolver` is excluded because it needs `IGrainFactory` (no silo in this fixture — use `WorkflowGrainFixture`).
+  - **Fixture-vs-production agreement**: for each service, asserts the descriptor-level expectation AND resolves from the fixture when possible to confirm type identity. Covers the acceptance criterion "MohistDbFixture 与生产对已迁移服务的解析结果一致".
+- `dotnet build Mohist.sln`: succeeded, 0 warnings, 0 errors.
+- `npm test` (server): 2065 passed, 10 skipped, 0 failed (T-001 baseline 2024 → 2065 = +41 new cases).

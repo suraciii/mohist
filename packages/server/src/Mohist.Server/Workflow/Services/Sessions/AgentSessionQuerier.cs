@@ -1,13 +1,13 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.Issue.Services;
-using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 
@@ -22,7 +22,7 @@ namespace Mohist.Server.Workflow.Services.Sessions;
 /// refers to a session and the run is the aggregate root that contains that task.
 /// No ownership relationship exists.
 /// </remarks>
-public class AgentSessionQuerier
+public class AgentSessionQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;

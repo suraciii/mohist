@@ -1,6 +1,8 @@
+using Mohist.Server.Infrastructure.Hosting;
+
 namespace Mohist.Server.Label.Services;
 
-public class SystemLabelDefinitions
+public class SystemLabelDefinitions : ISingletonService
 {
     public IReadOnlyList<LabelDefinition> All { get; }
 

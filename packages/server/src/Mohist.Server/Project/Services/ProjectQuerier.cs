@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Workflow.Domain;
@@ -8,7 +9,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.Project.Services;
 
-public class ProjectQuerier
+public class ProjectQuerier : ISingletonService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
