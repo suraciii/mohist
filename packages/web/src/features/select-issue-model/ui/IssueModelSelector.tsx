@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
-import { useAvailableModelIds, useOpencodeModel } from '../../../entities/settings'
+import { useAvailableModelIds, useModelVariants, useOpencodeModel } from '../../../entities/settings'
 import { getIssueWorkflowVariables, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
-import { ModelSelect, describeModel } from '../../../shared/ui/ModelSelect'
-import { VariantPicker, resolveVariantAgainstModel } from '../../../shared/ui/VariantPicker'
+import { ModelSelect, ModelVariantChips, describeModel } from '../../../shared/ui/ModelSelect'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
@@ -108,25 +107,54 @@ interface ModelListItemProps {
   modelId: string
   isSelected: boolean
   isHighlighted: boolean
+  modelVariants: Record<string, string[]>
+  activeVariant: string | null
+  variantTestIdBase: string
   onSelect: () => void
+  onSelectVariant: (variant: string) => void
   onMouseEnter: () => void
 }
 
-function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEnter }: ModelListItemProps) {
+function ModelListItem({
+  modelId,
+  isSelected,
+  isHighlighted,
+  modelVariants,
+  activeVariant,
+  variantTestIdBase,
+  onSelect,
+  onSelectVariant,
+  onMouseEnter,
+}: ModelListItemProps) {
   return (
-    <Button
-      variant="ghost"
+    <div
+      role="button"
+      tabIndex={-1}
+      data-model-id={modelId}
       onClick={onSelect}
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
       onMouseEnter={onMouseEnter}
-      className={`w-full flex items-center justify-between px-3 py-2 text-sm h-auto font-normal ${
-        isHighlighted ? 'bg-blue-50 text-blue-700' : isSelected ? 'bg-muted text-foreground' : 'text-foreground/80 hover:bg-muted'
+      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-sm cursor-default ${
+        isHighlighted ? 'bg-blue-50 text-blue-700' : isSelected ? 'bg-muted text-foreground' : 'text-foreground hover:bg-muted'
       }`}
     >
-      <div className="flex flex-col items-start gap-1">
+      <div className="flex min-w-0 flex-col items-start gap-1">
         <span className="font-medium">{modelDisplayName(modelId)}</span>
         <span className="text-xs text-muted-foreground/70">{modelId}</span>
       </div>
-    </Button>
+      <ModelVariantChips
+        modelId={modelId}
+        modelVariants={modelVariants}
+        activeVariant={isSelected ? activeVariant : null}
+        baseTestId={variantTestIdBase}
+        onSelect={(_id, variant) => onSelectVariant(variant ?? '')}
+      />
+    </div>
   )
 }
 
@@ -135,6 +163,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const { projectId } = useProject()
   const { data: availableModels, isLoading, error } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
+  const modelVariantsMap = useModelVariants()
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -177,7 +206,6 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   }, [issueNumber, projectId, currentStageModels])
 
   const allModels: string[] = availableModels?.models ?? []
-  const modelVariantsMap = availableModels?.modelVariants ?? {}
   const recentModelIds = getRecent()
   const recentModels = recentModelIds.filter(id => allModels.includes(id))
 
@@ -206,6 +234,24 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     [issueNumber, projectId, queryClient],
   )
 
+  const handleSelectWithVariant = useCallback(
+    async (modelId: string, variant: string) => {
+      try {
+        if (!projectId) throw new Error('Project is required')
+        await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId, variant }, projectId)
+        setLocalWorkflowModel(modelId)
+        setLocalWorkflowVariant(variant)
+        addRecent(modelId)
+        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+        queryClient.invalidateQueries({ queryKey: ['issues'] })
+        setPopoverOpen(false)
+      } catch (err) {
+        console.error('Failed to update issue model with variant:', err)
+      }
+    },
+    [issueNumber, projectId, queryClient],
+  )
+
   const handleClear = useCallback(
     async () => {
       try {
@@ -218,25 +264,6 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         setPopoverOpen(false)
       } catch (err) {
         console.error('Failed to clear issue model:', err)
-      }
-    },
-    [issueNumber, projectId, queryClient],
-  )
-
-  const handleVariantChange = useCallback(
-    async (variant: string | null) => {
-      try {
-        if (!projectId) throw new Error('Project is required')
-        if (variant) {
-          await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { variant }, projectId)
-        } else {
-          await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { variant: null }, projectId)
-        }
-        setLocalWorkflowVariant(variant)
-        queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-        queryClient.invalidateQueries({ queryKey: ['issues'] })
-      } catch (err) {
-        console.error('Failed to update issue model variant:', err)
       }
     },
     [issueNumber, projectId, queryClient],
@@ -286,14 +313,15 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   )
 
   const handleSetStageVariant = useCallback(
-    async (stage: string, variant: string | null) => {
+    async (stage: string, modelId: string, variant: string | null) => {
       try {
         if (!projectId) throw new Error('Project is required')
         if (variant) {
-          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { variant }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId, variant }, projectId)
         } else {
-          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { variant: null }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: modelId, variant: null }, projectId)
         }
+        setLocalStageModels((prev) => ({ ...prev, [stage]: modelId }))
         setLocalStageVariants((prev) => {
           const next = { ...prev }
           if (variant) next[stage] = variant
@@ -336,7 +364,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const configuredModel = localWorkflowModel ?? currentModel
 
   const resolvedModelId = configuredModel ?? defaultModelId
-  const resolvedVariant = resolveVariantAgainstModel(localWorkflowVariant, configuredModel, modelVariantsMap)
+  const resolvedVariant = localWorkflowVariant
   const currentModelDisplay = resolvedModelId
     ? describeModel(resolvedModelId).name + (resolvedVariant ? ` · ${resolvedVariant}` : '')
     : 'Use default'
@@ -344,151 +372,153 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     ? describeModel(resolvedModelId).fullId + (resolvedVariant ? `:${resolvedVariant}` : '')
     : null
 
-  const availableVariantsForConfigured = configuredModel ? modelVariantsMap[configuredModel] ?? [] : []
-
   return (
     <div className="space-y-1">
       <label className="block text-sm text-muted-foreground">Coder Model</label>
-      <div className="flex items-center gap-2">
-        <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                variant="outline"
-                className={`flex-1 justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
-                  popoverOpen
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : configuredModel
-                    ? 'border-blue-200 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 bg-background text-foreground/80 hover:bg-muted'
-                }`}
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              variant="outline"
+              aria-label="Coder Model"
+              data-testid="issue-coder-model-trigger"
+              className={`w-full justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
+                popoverOpen
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : configuredModel
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 bg-background text-foreground hover:bg-muted'
+              }`}
+            />
+          }
+        >
+          {currentModelFullId ? (
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-0 text-left leading-tight">
+              <span className="w-full truncate font-medium">{currentModelDisplay}</span>
+              <span className="w-full truncate text-xs font-normal opacity-80" title={currentModelFullId}>
+                {currentModelFullId}
+              </span>
+            </div>
+          ) : (
+            <span className="truncate">{currentModelDisplay}</span>
+          )}
+          <ChevronDownIcon />
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-0" align="end">
+          <div className="p-2">
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                <SearchIcon />
+              </div>
+              <Input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search models..."
+                className="w-full pl-9"
+                autoFocus
               />
-            }
-          >
-            {currentModelFullId ? (
-              <div className="flex min-w-0 flex-1 flex-col items-start gap-0 text-left leading-tight">
-                <span className="w-full truncate font-medium">{currentModelDisplay}</span>
-                <span className="w-full truncate text-xs font-normal opacity-80" title={currentModelFullId}>
-                  {currentModelFullId}
-                </span>
+            </div>
+          </div>
+
+          <div ref={listRef} className="max-h-80 overflow-y-auto border-t">
+            {isLoading && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
+                Loading models...
               </div>
-            ) : (
-              <span className="truncate">{currentModelDisplay}</span>
             )}
-            <ChevronDownIcon />
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="end">
-            <div className="p-2">
-              <div className="relative">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                  <SearchIcon />
-                </div>
-                <Input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Search models..."
-                  className="w-full pl-9"
-                  autoFocus
-                />
+
+            {error && !isLoading && (
+              <div className="px-3 py-6 text-center text-sm text-red-500">
+                Failed to load models: {(error as Error).message}
               </div>
-            </div>
+            )}
 
-            <div ref={listRef} className="max-h-80 overflow-y-auto border-t">
-              {isLoading && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
-                  Loading models...
+            {!isLoading && !error && configuredModel && !searchQuery.trim() && (
+              <div>
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
+                  Override
                 </div>
-              )}
+                <Button
+                  variant="ghost"
+                  onClick={handleClear}
+                  className="w-full justify-start px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 h-auto font-normal"
+                >
+                  <span className="font-medium">Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}</span>
+                </Button>
+                <div className="border-t my-1" />
+              </div>
+            )}
 
-              {error && !isLoading && (
-                <div className="px-3 py-6 text-center text-sm text-red-500">
-                  Failed to load models: {(error as Error).message}
+            {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
+              <div>
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
+                  Recent
                 </div>
-              )}
-
-              {!isLoading && !error && configuredModel && !searchQuery.trim() && (
-                <div>
-                  <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
-                    Override
-                  </div>
-                  <Button
-                    variant="ghost"
-                    onClick={handleClear}
-                    className="w-full justify-start px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 h-auto font-normal"
-                  >
-                    <span className="font-medium">Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}</span>
-                  </Button>
-                  <div className="border-t my-1" />
-                </div>
-              )}
-
-              {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
-                <div>
-                  <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
-                    Recent
-                  </div>
-                  {recentModels.map((modelId, i) => (
-                    <ModelListItem
-                      key={modelId}
-                      modelId={modelId}
-                      isSelected={modelId === configuredModel}
-                      isHighlighted={i === highlightedIndex}
-                      onSelect={() => handleSelect(modelId)}
-                      onMouseEnter={() => setHighlightedIndex(i)}
-                    />
-                  ))}
-                  <div className="border-t my-1" />
-                </div>
-              )}
-
-              {!isLoading && !error && displayedModels.length === 0 && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
-                  No models found
-                </div>
-              )}
-
-              {!isLoading && !error && !searchQuery.trim() &&
-                allModels.map((modelId, i) => (
+                {recentModels.map((modelId, i) => (
                   <ModelListItem
                     key={modelId}
                     modelId={modelId}
                     isSelected={modelId === configuredModel}
                     isHighlighted={i === highlightedIndex}
+                    modelVariants={modelVariantsMap}
+                    activeVariant={localWorkflowVariant}
+                    variantTestIdBase={`issue-coder-model-variant-${modelId}`}
                     onSelect={() => handleSelect(modelId)}
+                    onSelectVariant={(variant) => handleSelectWithVariant(modelId, variant)}
                     onMouseEnter={() => setHighlightedIndex(i)}
                   />
                 ))}
+                <div className="border-t my-1" />
+              </div>
+            )}
 
-              {!isLoading && !error && searchQuery.trim() &&
-                displayedModels.map((modelId, i) => (
-                  <ModelListItem
-                    key={modelId}
-                    modelId={modelId}
-                    isSelected={modelId === configuredModel}
-                    isHighlighted={i === highlightedIndex}
-                    onSelect={() => handleSelect(modelId)}
-                    onMouseEnter={() => setHighlightedIndex(i)}
-                  />
-                ))}
-            </div>
+            {!isLoading && !error && displayedModels.length === 0 && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
+                No models found
+              </div>
+            )}
 
-            <div className="border-t p-2 text-xs text-muted-foreground/70 text-center">
-              Use ↑↓ to navigate, Enter to select, Esc to close
-            </div>
-          </PopoverContent>
-        </Popover>
-        <VariantPicker
-          id="issue-coder-model-variant"
-          modelId={configuredModel ?? null}
-          modelVariants={availableVariantsForConfigured}
-          value={configuredModel ? resolvedVariant : null}
-          onChange={configuredModel ? handleVariantChange : () => undefined}
-          aria-label="Issue coder model reasoning variant"
-        />
-      </div>
+            {!isLoading && !error && !searchQuery.trim() &&
+              allModels.map((modelId, i) => (
+                <ModelListItem
+                  key={modelId}
+                  modelId={modelId}
+                  isSelected={modelId === configuredModel}
+                  isHighlighted={i === highlightedIndex}
+                  modelVariants={modelVariantsMap}
+                  activeVariant={localWorkflowVariant}
+                  variantTestIdBase={`issue-coder-model-variant-${modelId}`}
+                  onSelect={() => handleSelect(modelId)}
+                  onSelectVariant={(variant) => handleSelectWithVariant(modelId, variant)}
+                  onMouseEnter={() => setHighlightedIndex(i)}
+                />
+              ))}
+
+            {!isLoading && !error && searchQuery.trim() &&
+              displayedModels.map((modelId, i) => (
+                <ModelListItem
+                  key={modelId}
+                  modelId={modelId}
+                  isSelected={modelId === configuredModel}
+                  isHighlighted={i === highlightedIndex}
+                  modelVariants={modelVariantsMap}
+                  activeVariant={localWorkflowVariant}
+                  variantTestIdBase={`issue-coder-model-variant-${modelId}`}
+                  onSelect={() => handleSelect(modelId)}
+                  onSelectVariant={(variant) => handleSelectWithVariant(modelId, variant)}
+                  onMouseEnter={() => setHighlightedIndex(i)}
+                />
+              ))}
+          </div>
+
+          <div className="border-t p-2 text-xs text-muted-foreground/70 text-center">
+            Use ↑↓ to navigate, Enter to select, Esc to close
+          </div>
+        </PopoverContent>
+      </Popover>
       {configuredModel && (
         <p className="text-xs text-muted-foreground/70">
           Override active. Falls back to default when cleared.
@@ -512,13 +542,13 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           <div className="mt-3 space-y-2 pl-5">
             {ISSUE_STAGES.map((stage) => {
               const stageModel = localStageModels[stage] ?? null
-              const stageVariants = stageModel ? modelVariantsMap[stageModel] ?? [] : []
-              const stageVariant = resolveVariantAgainstModel(localStageVariants[stage], stageModel, modelVariantsMap)
+              const stageVariant = localStageVariants[stage] ?? null
               return (
                 <div key={stage} className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground w-16 capitalize shrink-0">{stage}</span>
-                  <div className="flex-1 flex items-center gap-1">
+                  <div className="flex-1">
                     <ModelSelect
+                      id={`issue-stage-model-${stage}`}
                       value={stageModel}
                       placeholder="Default"
                       models={allModels}
@@ -526,14 +556,9 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                       onClear={() => handleClearStageModel(stage)}
                       allowClear={!!stageModel}
                       size="compact"
-                    />
-                    <VariantPicker
-                      id={`issue-stage-model-variant-${stage}`}
-                      modelId={stageModel}
-                      modelVariants={stageVariants}
-                      value={stageVariant}
-                      onChange={stageModel ? (variant) => handleSetStageVariant(stage, variant) : undefined}
-                      aria-label={`${stage} stage reasoning variant`}
+                      modelVariants={modelVariantsMap}
+                      valueVariant={stageVariant}
+                      onChangeModelVariant={(modelId, variant) => handleSetStageVariant(stage, modelId, variant)}
                     />
                   </div>
                 </div>

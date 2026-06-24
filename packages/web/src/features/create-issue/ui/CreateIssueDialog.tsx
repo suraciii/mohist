@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
@@ -9,11 +9,6 @@ import {
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/shared/ui/components/popover'
 import { createIssue, extractAttachmentIds } from '../../../entities/issue'
 import { LabelEditor } from '../../../entities/issue/lib/label-editor'
 import type { LabelMap } from '../../../entities/issue/model/labels'
@@ -23,7 +18,7 @@ import { composeIssueTemplateBody, useIssueTemplate, useIssueTemplates } from '.
 import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
 import { parseIssueFrontmatter } from '../lib/frontmatter'
-import { VariantPicker } from '../../../shared/ui/VariantPicker'
+import { ModelSelect } from '../../../shared/ui/ModelSelect'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
 const RISKS = ['low', 'medium', 'high']
@@ -31,38 +26,6 @@ const RISKS = ['low', 'medium', 'high']
 interface Props {
   open: boolean
   onClose: () => void
-}
-
-function SearchIcon() {
-  return (
-    <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 20 20" fill="currentColor">
-      <path
-        fillRule="evenodd"
-        d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-        clipRule="evenodd"
-      />
-    </svg>
-  )
-}
-
-function ChevronDownIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-      <path
-        fillRule="evenodd"
-        d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-        clipRule="evenodd"
-      />
-    </svg>
-  )
-}
-
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-    </svg>
-  )
 }
 
 function ModelPresetSelect({
@@ -78,137 +41,35 @@ function ModelPresetSelect({
   onVariantChange: (variant: string | null) => void
   onClear: () => void
 }) {
-  const { data: availableModels, isLoading } = useAvailableModelIds()
-  const [search, setSearch] = useState('')
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const [popoverOpen, setPopoverOpen] = useState(false)
-  const searchRef = useRef<HTMLInputElement>(null)
-
+  const { data: availableModels } = useAvailableModelIds()
   const allModels: string[] = availableModels?.models ?? []
   const modelVariantsMap = availableModels?.modelVariants ?? {}
   const availableVariants = value ? modelVariantsMap[value] ?? [] : []
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return allModels
-    const q = search.toLowerCase()
-    return allModels.filter(id => id.toLowerCase().includes(q) || (id.split('/').pop() || '').toLowerCase().includes(q))
-  }, [allModels, search])
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setHighlightedIndex(i => Math.min(i + 1, filtered.length - 1))
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setHighlightedIndex(i => Math.max(i - 1, 0))
-      } else if (e.key === 'Enter') {
-        e.preventDefault()
-        const m = filtered[highlightedIndex]
-        if (m) {
-          onChange(m)
-          onVariantChange(null)
-          setPopoverOpen(false)
-        }
-      }
-    },
-    [filtered, highlightedIndex, onChange, onVariantChange],
-  )
-
-  const displayText = value
-    ? (value.split('/').pop() || value)
-    : 'Use default'
+  const resolvedVariant = variant && availableVariants.includes(variant) ? variant : null
 
   return (
-    <div className="flex items-center gap-2">
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverTrigger data-testid="create-issue-model-trigger">
-          <Button
-            variant="outline"
-            className={`flex-1 inline-flex items-center justify-between gap-1.5 text-sm font-medium min-h-[44px] md:min-h-0 ${
-              value
-                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                : ''
-            }`}
-          >
-            <span className="truncate">{displayText}</span>
-            <ChevronDownIcon />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-72 p-0" align="end">
-          <div className="p-2">
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                <SearchIcon />
-              </div>
-              <Input
-                ref={searchRef}
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Search models..."
-                className="pl-9"
-                autoFocus
-              />
-            </div>
-          </div>
-          <div className="max-h-60 overflow-y-auto border-t">
-            {isLoading && (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">Loading...</div>
-            )}
-            {!isLoading && filtered.length === 0 && (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No models found</div>
-            )}
-            {!isLoading && filtered.map((modelId, i) => (
-              <Button
-                key={modelId}
-                variant="ghost"
-                onClick={() => {
-                  onChange(modelId)
-                  onVariantChange(null)
-                  setPopoverOpen(false)
-                }}
-                onMouseEnter={() => setHighlightedIndex(i)}
-                className={`w-full justify-between rounded-none h-auto px-3 py-1.5 ${
-                  i === highlightedIndex
-                    ? 'bg-blue-50 text-blue-700'
-                    : modelId === value
-                      ? 'bg-muted text-foreground'
-                      : 'text-foreground hover:bg-muted'
-                }`}
-              >
-                <div className="flex flex-col items-start">
-                  <span className="font-medium">{modelId.split('/').pop() || modelId}</span>
-                  <span className="text-xs text-muted-foreground">{modelId}</span>
-                </div>
-              </Button>
-            ))}
-          </div>
-        </PopoverContent>
-      </Popover>
-      <VariantPicker
-        id="create-issue-model-variant"
-        modelId={value}
-        modelVariants={availableVariants}
-        value={variant && availableVariants.includes(variant) ? variant : null}
-        onChange={onVariantChange}
-        aria-label="Coder model reasoning variant"
+    <div>
+      <ModelSelect
+        id="create-issue-model-trigger"
+        value={value}
+        placeholder="Use default"
+        models={allModels}
+        onChange={(modelId) => {
+          onChange(modelId)
+          onVariantChange(null)
+        }}
+        onClear={() => {
+          onClear()
+          onVariantChange(null)
+        }}
+        allowClear={!!value}
+        modelVariants={modelVariantsMap}
+        valueVariant={resolvedVariant}
+        onChangeModelVariant={(modelId, chipVariant) => {
+          onChange(modelId)
+          onVariantChange(chipVariant)
+        }}
       />
-      {value && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            onClear()
-            onVariantChange(null)
-          }}
-          className="text-muted-foreground hover:text-red-500 hover:bg-red-50"
-          title="Clear"
-        >
-          <XIcon className="h-4 w-4" />
-        </Button>
-      )}
     </div>
   )
 }

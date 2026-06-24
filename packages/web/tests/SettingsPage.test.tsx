@@ -192,7 +192,7 @@ describe('SettingsPage', () => {
       expect(screen.queryByText(/Mohist does not configure AI providers/i)).not.toBeInTheDocument()
     })
 
-    it('renders the default model variant picker with the stored variant when the model reports variants', () => {
+    it('renders the default model trigger with the stored variant suffix when the model reports variants', () => {
       ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
         data: {
           models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
@@ -209,12 +209,13 @@ describe('SettingsPage', () => {
 
       renderWithQueryClient(<SettingsPage />)
 
-      const trigger = screen.getByTestId('settings-default-model-variant-trigger')
+      expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
+      const trigger = document.getElementById('settings-default-model') as HTMLElement
       expect(trigger).toBeInTheDocument()
-      expect(trigger).toHaveTextContent('high')
+      expect(trigger.textContent).toContain('high')
     })
 
-    it('hides the default model variant picker when the model is not in the variants map', () => {
+    it('does not show a variant suffix on the default model trigger when the model is not in the variants map', () => {
       ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
         data: {
           models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
@@ -232,6 +233,8 @@ describe('SettingsPage', () => {
       renderWithQueryClient(<SettingsPage />)
 
       expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
+      const trigger = document.getElementById('settings-default-model') as HTMLElement
+      expect(trigger.textContent).not.toContain('high')
     })
   })
 
