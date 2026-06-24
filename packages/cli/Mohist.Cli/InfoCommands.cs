@@ -20,6 +20,7 @@ internal static class InfoCommands
         info.Options.Add(verboseOption);
         info.Options.Add(jsonOption);
         var collector = provider.GetRequiredService<InfoCollector>();
+        var renderer = provider.GetRequiredService<InfoRenderer>();
 
         info.SetAction(ctx =>
         {
@@ -29,12 +30,12 @@ internal static class InfoCommands
             var writer = ctx.InvocationConfiguration.Output;
             if (json)
             {
-                collector.RenderJson(writer, result);
+                renderer.RenderJson(writer, result);
                 return 0;
             }
-            collector.RenderDefault(writer, result);
+            renderer.RenderDefault(writer, result);
             if (verbose && result.Verbose is not null)
-                collector.RenderVerbose(writer, result.Verbose);
+                renderer.RenderVerbose(writer, result.Verbose);
             return 0;
         });
 

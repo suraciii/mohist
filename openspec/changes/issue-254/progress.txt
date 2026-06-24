@@ -47,3 +47,57 @@
 - `packages/cli/Mohist.Cli/TableRenderer.Runners.cs` (33 行)
 - `packages/cli/Mohist.Cli/TableRenderer.Epics.cs` (113 行)
 - `packages/cli/Mohist.Cli/TableRenderer.Entities.cs` (120 行)
+
+## T-002 — InfoCollector 分离采集、渲染与 systemd 解析
+
+### Codebase Patterns
+
+- **3 个独立类型替代 1 个 god class**：每个类型有清晰单一变更原因。`SystemdUnitParser`（无实例静态，承接所有 systemd 解析 + 单元字段记录 + sentinel 常量）、`InfoRenderer`（仅 `TextWriter` + `InfoResult`/`InfoVerbose`，承接 `RenderDefault/RenderVerbose/RenderJson` + 所有 `Build*Json`/`Build*Line`）、`InfoCollector`（瘦身到 1014 行，仅采集 + 路径/进程启发式私有静态 + `AttachConnectivity`）。
+- **`BuildStatusFromProperties` 取 `IFileSystem` 参数**：原方法在 fallback 路径需要读 `/proc/{pid}/stat`。提取到静态类后调用方传 `_fileSystem` 即可，签名仍纯。
+- **`SystemdUnitFields` 记录随 `ParseSystemdUnit` 一起搬**：collector 引用方式变为 `new SystemdUnitParser.SystemdUnitFields(...)`。`SystemdUnitParser.SystemdUnitFields` 是限定路径——partial-style。
+- **`AttachConnectivity` 留在 collector**：它在 `CollectAsync` 期间把 connectivity 字段挂到 runner 记录上——属采集期装配而非渲染，决定保持归属。
+- **现有 server 测试需要更新类引用**：提取后 `InfoCollector.RenderJson` 等已不存在。直接迁移引用（`InfoCollector.BuildCliLine` → `InfoRenderer.BuildCliLine`、`InfoCollector.ParseSystemdShow` → `SystemdUnitParser.ParseSystemdShow`、sentinel 常量 `Unknown/NotRunning/NotInstalled/NotAGitRepo` 从 InfoCollector 移到 SystemdUnitParser）。
+- **测试 DI 注册需要补 `InfoRenderer`**：`MohistCliCommands.RunAsync`（CLI 测试入口）与 12 处 server 测试 `services.AddSingleton<InfoCollector>()` 之后都加 `services.AddSingleton<InfoRenderer>()`，否则 `InfoCommands.Build` 在 `GetRequiredService<InfoRenderer>` 时抛异常。
+
+### Decisions
+
+- **SystemdUnitParser 静态类 + `internal` 构造签名（无）**：满足"无实例字段/构造器"。`TryGetUptimeFromProc` 需要 `IFileSystem` 是**参数**而非字段，仍然纯。
+- **InfoRenderer 依赖面最小化**：只取 `TextWriter` + `InfoResult`/`InfoVerbose`。渲染时调用的 sentinel 常量通过 `SystemdUnitParser.NotRunning` 等限定访问（不引入新依赖）。
+- **未触碰 `InfoResult.cs` 数据形状**：所有 record 字段不变，外部测试构造仍兼容。
+- **未补 `AttachConnectivity` 单元测试**：它依赖 `InfoService` 记录形态不变，server 测试已通过 `Collect_*` 端到端守护其行为；纯函数提取收益低。
+- **未给 `ServiceReadinessProbe` 提取相关工作**：T-002 不涉及 update 模块。
+- **新增 internal 单测覆盖关键纯函数**：`SystemdUnitParserSpecs`（24 个 case，覆盖 Parse/TryParse/Format/Build 关键路径）+ `InfoRendererSpecs`（8 个 case，覆盖 RenderDefault/RenderJson/BuildCliLine/BuildServiceLine/BuildJsonObject）。
+
+### Gotchas
+
+- InfoCollector 从 1690 行缩到 1014 行（-676）。`InfoRenderer` 402 行（Render + 13 个 BuildJson + 5 个 BuildLine + WriteIndentedList）。`SystemdUnitParser` 298 行（11 个 Parse/TryParse/Format/Build 静态方法 + SystemdUnitFields 记录 + 7 个常量）。
+- `BuildSourceFromPropertiesAsync` 内部仍构造 `new SystemdUnitParser.SystemdUnitFields(...)`（私有方法，限定引用 OK）。
+- `GetServiceInfoAsync` / `TryGetRunnerUnitEnvironmentAsync` 等采集方法全部调用 `SystemdUnitParser.*` 而非自身方法——属机械替换。
+- sentinel 常量迁移后 `InfoCollector` 不再持有 `NotRunning/NotInstalled/NotAGitRepo/Unknown`，仅保留 `ServerOk/ServerUnreachable/PlatformNoticeMessage/TimeoutSentinel`（采集期常量，非渲染常量）。
+- `InfoCollector.ServerUnit/RunnerUnit` 两个常量保留以兼容潜在外部引用（值为 `SystemdUnitParser.ServerUnit/RunnerUnit` 的别名）。测试中显式用 `SystemdUnitParser.NotInstalled` 等替换旧 `InfoCollector.NotInstalled` 引用。
+
+### Verification
+
+- `dotnet build Mohist.sln`：0 warning / 0 error
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests`：**130/130 pass**（基线 98 + 新增 32）
+  - `SystemdUnitParserSpecs` 新增 24 个 ✓（ParseSystemdShow/Value/Unit/Environment、TokenizeEnvironmentAssignments、TryParseSystemdTimestamp、TryParseUptimeToSeconds、FormatUptime、ParseStartTimeFromProcStat、BuildStatusFromProperties）
+  - `InfoRendererSpecs` 新增 8 个 ✓（RenderDefault/RenderJson 默认+verbose、BuildCliLine、BuildServiceLine、BuildJsonObject）
+- `dotnet test Mohist.sln` 全部 2019 pass + 10 skip（0 失败；与 T-001 基线 2117 的差异为本次新增 32 个 cli 单测净覆盖）
+- `rg 'public void Render|BuildJsonObject|RenderDefault|RenderVerbose|RenderJson' packages/cli/Mohist.Cli/InfoCollector.cs` → 0 命中
+- `rg 'IFileSystem|ICommandExecutor|IEnvironmentVariableProvider|MohistCliApi|SkillAssetService' packages/cli/Mohist.Cli/InfoRenderer.cs` → 0 命中（依赖面仅 TextWriter + InfoResult/InfoVerbose）
+- `rg 'collector\.Render' packages/cli/Mohist.Cli/` → 0 命中（InfoCommands 已切到 renderer.Render*）
+- 现有命令级 spec（98 cli + 80 CliInfo server）全部不变通过——输出/参数/退出码逐字节一致
+
+### Files
+
+- `packages/cli/Mohist.Cli/SystemdUnitParser.cs`（298 行，新增静态类）
+- `packages/cli/Mohist.Cli/InfoRenderer.cs`（402 行，新增）
+- `packages/cli/Mohist.Cli/InfoCollector.cs`（1014 行，原 1690 行 -676）
+- `packages/cli/Mohist.Cli/InfoCommands.cs`（44 行，改动：从 DI 取 InfoRenderer）
+- `packages/cli/Mohist.Cli/Program.cs`（40 行，新增 1 行 AddSingleton<InfoRenderer>）
+- `packages/cli/Mohist.Cli/MohistCliCommands.cs`（201 行，新增 1 行 AddSingleton<InfoRenderer> 用于 RunAsync 测试入口）
+- `packages/cli/tests/Mohist.Cli.Tests/SystemdUnitParserSpecs.cs`（新增 24 个 internal 单测）
+- `packages/cli/tests/Mohist.Cli.Tests/InfoRendererSpecs.cs`（新增 8 个 internal 单测）
+- `packages/server/tests/Mohist.Server.Tests/Specs/CliInfo/*`（3 个文件，类引用迁移）
+- `packages/server/tests/Mohist.Server.Tests/Specs/Api/*`、`Specs/Skills/*`（10 个文件，各 +1 行 AddSingleton<InfoRenderer>）
+

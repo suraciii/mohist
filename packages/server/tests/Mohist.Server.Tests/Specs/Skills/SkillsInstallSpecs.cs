@@ -317,6 +317,7 @@ public sealed class SkillsInstallSpecs
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(assets ?? BuildDefaultAssetService());
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
         services.AddSingleton<SkillInstallService>(_ => new SkillInstallService(
             _.GetRequiredService<SkillAssetService>(),
             _.GetRequiredService<IFileSystem>(),

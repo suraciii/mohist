@@ -681,7 +681,8 @@ public class InfoCollectorVerboseSpecs
             DiskUsage: new InfoVerboseDiskUsage([new InfoVerboseDiskCategory("projects", "10M", 3)], Resolved: true));
 
         var writer = new StringWriter();
-        collector.RenderVerbose(writer, verbose);
+        var renderer = new InfoRenderer();
+        renderer.RenderVerbose(writer, verbose);
         var text = writer.ToString();
 
         Assert.Contains("Skills:", text);
@@ -712,7 +713,8 @@ public class InfoCollectorVerboseSpecs
             DiskUsage: new InfoVerboseDiskUsage([], Resolved: true));
 
         var writer = new StringWriter();
-        collector.RenderVerbose(writer, verbose);
+        var renderer = new InfoRenderer();
+        renderer.RenderVerbose(writer, verbose);
         var text = writer.ToString();
 
         Assert.Contains("<unknown>", text);
@@ -727,7 +729,7 @@ public class InfoCollectorVerboseSpecs
             Environment=KEY1=value1 KEY2=value2 KEY3="quoted value with spaces" PATH=/usr/bin
             """;
 
-        var result = InfoCollector.ParseSystemdEnvironment(output);
+        var result = SystemdUnitParser.ParseSystemdEnvironment(output);
 
         Assert.Equal("value1", result["KEY1"]);
         Assert.Equal("value2", result["KEY2"]);
@@ -746,7 +748,7 @@ public class InfoCollectorVerboseSpecs
             Environment=FOO=bar
             """;
 
-        var result = InfoCollector.ParseSystemdEnvironment(output);
+        var result = SystemdUnitParser.ParseSystemdEnvironment(output);
 
         Assert.Single(result);
         Assert.Equal("bar", result["FOO"]);
@@ -757,8 +759,8 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildOriginUrl_NoUrlAndNotGitRepo_ReturnsUnknown()
     {
-        var result = InfoCollector.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: false));
-        Assert.Equal(InfoCollector.Unknown, result);
+        var result = InfoRenderer.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: false));
+        Assert.Equal(SystemdUnitParser.Unknown, result);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -766,8 +768,8 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildOriginUrl_NoUrlButIsGitRepo_ReturnsNotAGitRepo()
     {
-        var result = InfoCollector.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: true));
-        Assert.Equal(InfoCollector.NotAGitRepo, result);
+        var result = InfoRenderer.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: true));
+        Assert.Equal(SystemdUnitParser.NotAGitRepo, result);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -775,7 +777,7 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildSkillLines_OrdersByName()
     {
-        var lines = InfoCollector.BuildSkillLines(new InfoVerboseSkills(
+        var lines = InfoRenderer.BuildSkillLines(new InfoVerboseSkills(
         [
             new("zeta", "/path/zeta"),
             new("alpha", "/path/alpha"),
@@ -791,7 +793,7 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildEnvVarLines_FormatsNameEqualsValue()
     {
-        var lines = InfoCollector.BuildEnvVarLines([
+        var lines = InfoRenderer.BuildEnvVarLines([
             new("B", "2"),
             new("A", "1"),
         ]).ToArray();
@@ -806,7 +808,7 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildDiskCategoryLines_FormatsSizeAndFileCount()
     {
-        var lines = InfoCollector.BuildDiskCategoryLines([
+        var lines = InfoRenderer.BuildDiskCategoryLines([
             new("logs", "2M", 4),
             new("projects", "10M", null),
             new("worktrees", null, null),

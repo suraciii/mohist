@@ -48,6 +48,7 @@ public sealed class SkillsCommandRegistrationSpecs
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();

@@ -1,21 +1,15 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
 internal sealed class InfoCollector
 {
-    internal const string ServerUnit = "mohist.service";
-    internal const string RunnerUnit = "mohist-runner.service";
+    internal const string ServerUnit = SystemdUnitParser.ServerUnit;
+    internal const string RunnerUnit = SystemdUnitParser.RunnerUnit;
 
-    internal const string NotRunning = "<not running>";
-    internal const string NotInstalled = "<not installed>";
-    internal const string NotAGitRepo = "<not a git repo>";
-    internal const string Unknown = "<unknown>";
     internal const string ServerOk = "server ok";
     internal const string ServerUnreachable = "server unreachable";
     internal const string PlatformNoticeMessage =
@@ -24,8 +18,7 @@ internal sealed class InfoCollector
 
     private static readonly TimeSpan CollectorTimeout = TimeSpan.FromSeconds(2);
 
-    private const string ShowProperties =
-        "ActiveState,MainPID,ExecMainStartTimestamp,FragmentPath,WorkingDirectory,ExecStart,Environment";
+    private const string ShowProperties = SystemdUnitParser.ShowProperties;
 
     private readonly IFileSystem _fileSystem;
     private readonly ICommandExecutor _commandExecutor;
@@ -100,8 +93,8 @@ internal sealed class InfoCollector
         bool systemdAvailable = IsSystemdAvailable();
 
         var cliTask = SafeAsync(GetCliAsync);
-        var serverTask = SafeAsync(() => GetServiceInfoAsync(ServerUnit, systemdAvailable));
-        var runnerTask = SafeAsync(() => GetServiceInfoAsync(RunnerUnit, systemdAvailable));
+        var serverTask = SafeAsync(() => GetServiceInfoAsync(SystemdUnitParser.ServerUnit, systemdAvailable));
+        var runnerTask = SafeAsync(() => GetServiceInfoAsync(SystemdUnitParser.RunnerUnit, systemdAvailable));
         var projectTask = SafeAsync(GetProjectAsync);
         var dataDirTask = SafeAsync(GetDataDirAsync);
 
@@ -178,323 +171,6 @@ internal sealed class InfoCollector
             DiskUsage: await diskTask);
     }
 
-    public void RenderDefault(TextWriter writer, InfoResult result)
-    {
-        writer.WriteLine(BuildCliLine(result.Cli));
-        writer.WriteLine(BuildServiceLine("Server", result.Server, includeSource: true));
-        writer.WriteLine(BuildSourceLine("  source", result.Server.Source));
-
-        writer.WriteLine(BuildServiceLine("Runner", result.Runner, includeSource: true));
-        writer.WriteLine(BuildSourceLine("  source", result.Runner.Source));
-
-        writer.WriteLine(BuildProjectLine(result.Project));
-        writer.WriteLine(BuildDataDirLine(result.DataDir));
-        if (result.PlatformNotice is not null)
-            writer.WriteLine(result.PlatformNotice);
-    }
-
-    public void RenderVerbose(TextWriter writer, InfoVerbose verbose)
-    {
-        writer.WriteLine();
-        writer.WriteLine("Skills:");
-        WriteIndentedList(writer, BuildSkillLines(verbose.Skills), indent: 2);
-
-        writer.WriteLine("Git remote:");
-        writer.WriteLine($"  origin: {BuildOriginUrl(verbose.GitRemote)}");
-
-        writer.WriteLine("Opencode runtime:");
-        writer.WriteLine($"  command: {verbose.OpencodeRuntime.Command ?? Unknown}");
-        writer.WriteLine($"  version: {verbose.OpencodeRuntime.Version ?? Unknown}");
-        writer.WriteLine($"  models:  {(verbose.OpencodeRuntime.ModelCount?.ToString() ?? Unknown)}");
-
-        writer.WriteLine("Environment variables:");
-        WriteIndentedList(writer, BuildEnvVarLines(verbose.EnvVars), indent: 2);
-
-        writer.WriteLine("OS / Runtime:");
-        writer.WriteLine($"  os:      {verbose.OsRuntime.Os ?? Unknown}");
-        writer.WriteLine($"  arch:    {verbose.OsRuntime.Architecture ?? Unknown}");
-        writer.WriteLine($"  dotnet:  {verbose.OsRuntime.DotnetVersion ?? Unknown}");
-        writer.WriteLine($"  node:    {verbose.OsRuntime.NodeVersion ?? Unknown}");
-
-        writer.WriteLine("Runner capacity:");
-        writer.WriteLine($"  active:  {verbose.Capacity.ActiveWorkflows?.ToString() ?? Unknown}");
-        writer.WriteLine($"  max:     {verbose.Capacity.MaxConcurrentWorkflows?.ToString() ?? Unknown}");
-
-        writer.WriteLine("Disk usage breakdown:");
-        WriteIndentedList(writer, BuildDiskCategoryLines(verbose.DiskUsage.Categories), indent: 2);
-    }
-
-    private static readonly JsonSerializerOptions CompactJsonOptions = new()
-    {
-        WriteIndented = false,
-    };
-
-    public void RenderJson(TextWriter writer, InfoResult result)
-    {
-        var root = BuildJsonObject(result);
-        writer.WriteLine(root.ToJsonString(CompactJsonOptions));
-    }
-
-    internal static JsonObject BuildJsonObject(InfoResult result)
-    {
-        var root = new JsonObject
-        {
-            ["cli"] = BuildCliJson(result.Cli),
-            ["server"] = BuildServiceJson(result.Server),
-            ["runner"] = BuildServiceJson(result.Runner),
-            ["project"] = result.Project is null ? null : BuildProjectJson(result.Project),
-            ["dataDir"] = BuildDataDirJson(result.DataDir),
-            ["platformNotice"] = result.PlatformNotice,
-        };
-
-        if (result.Verbose is { } verbose)
-        {
-            root["skills"] = BuildSkillsJson(verbose.Skills);
-            root["gitRemote"] = BuildGitRemoteJson(verbose.GitRemote);
-            root["opencodeRuntime"] = BuildOpencodeJson(verbose.OpencodeRuntime);
-            root["envVars"] = BuildEnvVarsJson(verbose.EnvVars);
-            root["osRuntime"] = BuildOsRuntimeJson(verbose.OsRuntime);
-            root["capacity"] = BuildCapacityJson(verbose.Capacity);
-            root["diskUsage"] = BuildDiskUsageJson(verbose.DiskUsage);
-        }
-
-        return root;
-    }
-
-    private static JsonObject BuildCliJson(InfoCli cli)
-    {
-        return new JsonObject
-        {
-            ["version"] = cli.Version ?? Unknown,
-            ["binaryPath"] = cli.BinaryPath ?? Unknown,
-            ["buildDate"] = cli.BuildDate ?? Unknown,
-        };
-    }
-
-    private static JsonObject BuildServiceJson(InfoService service)
-    {
-        return new JsonObject
-        {
-            ["status"] = BuildServiceStatusJson(service.Status),
-            ["source"] = BuildSourceJson(service.Source),
-        };
-    }
-
-    private static JsonObject BuildServiceStatusJson(InfoServiceStatus? status)
-    {
-        if (status is null)
-            return new JsonObject
-            {
-                ["state"] = Unknown,
-                ["pid"] = null,
-                ["uptime"] = Unknown,
-                ["uptimeSeconds"] = null,
-                ["connectivity"] = null,
-            };
-        return new JsonObject
-        {
-            ["state"] = status.State ?? Unknown,
-            ["pid"] = NormalizePid(status.Pid),
-            ["uptime"] = status.Uptime ?? Unknown,
-            ["uptimeSeconds"] = status.UptimeSeconds,
-            ["connectivity"] = status.Connectivity,
-        };
-    }
-
-    private static int? NormalizePid(int? pid)
-    {
-        if (pid is null) return null;
-        return pid.Value > 0 ? pid : null;
-    }
-
-    private static JsonObject? BuildSourceJson(InfoSource? source)
-    {
-        if (source is null)
-            return null;
-        string commitShort;
-        string kind;
-        switch (source.Kind)
-        {
-            case InfoSourceKind.Resolved:
-                commitShort = source.CommitShort ?? Unknown;
-                kind = "resolved";
-                break;
-            case InfoSourceKind.NotGitRepo:
-                commitShort = NotAGitRepo;
-                kind = "notGitRepo";
-                break;
-            default:
-                commitShort = Unknown;
-                kind = "unknown";
-                break;
-        }
-        return new JsonObject
-        {
-            ["path"] = source.Path ?? Unknown,
-            ["commitShort"] = commitShort,
-            ["commitSubject"] = source.CommitSubject,
-            ["kind"] = kind,
-        };
-    }
-
-    private static JsonObject BuildProjectJson(InfoProject project)
-    {
-        return new JsonObject
-        {
-            ["id"] = project.Id,
-            ["name"] = project.Name ?? Unknown,
-            ["issueCount"] = project.IssueCount,
-            ["activeIssueCount"] = project.ActiveIssueCount,
-        };
-    }
-
-    private static JsonObject BuildDataDirJson(InfoDataDir dataDir)
-    {
-        return new JsonObject
-        {
-            ["path"] = dataDir.Path,
-            ["size"] = dataDir.Size ?? Unknown,
-        };
-    }
-
-    private static JsonArray BuildSkillsJson(InfoVerboseSkills skills)
-    {
-        var arr = new JsonArray();
-        foreach (var skill in skills.Skills.OrderBy(s => s.Name, StringComparer.Ordinal))
-        {
-            arr.Add(new JsonObject
-            {
-                ["name"] = skill.Name,
-                ["installPath"] = skill.InstallPath ?? Unknown,
-            });
-        }
-        return arr;
-    }
-
-    private static JsonObject BuildGitRemoteJson(InfoVerboseGitRemote gitRemote)
-    {
-        return new JsonObject
-        {
-            ["originUrl"] = gitRemote.OriginUrl,
-            ["isGitRepo"] = gitRemote.IsGitRepo,
-        };
-    }
-
-    private static JsonObject BuildOpencodeJson(InfoVerboseOpencodeRuntime runtime)
-    {
-        return new JsonObject
-        {
-            ["command"] = runtime.Command ?? Unknown,
-            ["version"] = runtime.Version ?? Unknown,
-            ["modelCount"] = runtime.ModelCount,
-            ["resolved"] = runtime.Resolved,
-        };
-    }
-
-    private static JsonArray BuildEnvVarsJson(IReadOnlyList<InfoVerboseEnvVar> envVars)
-    {
-        var arr = new JsonArray();
-        foreach (var env in envVars.OrderBy(e => e.Name, StringComparer.Ordinal))
-        {
-            arr.Add(new JsonObject
-            {
-                ["name"] = env.Name,
-                ["value"] = env.Value ?? Unknown,
-            });
-        }
-        return arr;
-    }
-
-    private static JsonObject BuildOsRuntimeJson(InfoVerboseOsRuntime osRuntime)
-    {
-        return new JsonObject
-        {
-            ["os"] = osRuntime.Os ?? Unknown,
-            ["architecture"] = osRuntime.Architecture ?? Unknown,
-            ["dotnetVersion"] = osRuntime.DotnetVersion ?? Unknown,
-            ["nodeVersion"] = osRuntime.NodeVersion ?? Unknown,
-        };
-    }
-
-    private static JsonObject BuildCapacityJson(InfoVerboseCapacity capacity)
-    {
-        return new JsonObject
-        {
-            ["activeWorkflows"] = capacity.ActiveWorkflows,
-            ["maxConcurrentWorkflows"] = capacity.MaxConcurrentWorkflows,
-        };
-    }
-
-    private static JsonArray BuildDiskUsageJson(InfoVerboseDiskUsage diskUsage)
-    {
-        var arr = new JsonArray();
-        foreach (var category in diskUsage.Categories.OrderBy(c => c.Name, StringComparer.Ordinal))
-        {
-            arr.Add(new JsonObject
-            {
-                ["name"] = category.Name,
-                ["size"] = category.Size ?? Unknown,
-                ["fileCount"] = category.FileCount,
-            });
-        }
-        return arr;
-    }
-
-    private static void WriteIndentedList(TextWriter writer, IEnumerable<string> lines, int indent)
-    {
-        var prefix = new string(' ', indent);
-        var hadAny = false;
-        foreach (var line in lines)
-        {
-            writer.WriteLine(prefix + line);
-            hadAny = true;
-        }
-        if (!hadAny)
-            writer.WriteLine(prefix + $"<{Unknown}>");
-    }
-
-    internal static IEnumerable<string> BuildSkillLines(InfoVerboseSkills skills)
-    {
-        if (skills.Skills.Count == 0)
-            return [];
-        return skills.Skills
-            .OrderBy(s => s.Name, StringComparer.Ordinal)
-            .Select(s => string.IsNullOrWhiteSpace(s.InstallPath)
-                ? s.Name
-                : $"{s.Name}  ({s.InstallPath})");
-    }
-
-    internal static string BuildOriginUrl(InfoVerboseGitRemote gitRemote)
-    {
-        if (gitRemote.OriginUrl is { } url)
-            return url;
-        return gitRemote.IsGitRepo ? NotAGitRepo : Unknown;
-    }
-
-    internal static IEnumerable<string> BuildEnvVarLines(IReadOnlyList<InfoVerboseEnvVar> envVars)
-    {
-        if (envVars.Count == 0)
-            return [];
-        return envVars
-            .OrderBy(e => e.Name, StringComparer.Ordinal)
-            .Select(e => e.Value is null ? $"{e.Name}=" : $"{e.Name}={e.Value}");
-    }
-
-    internal static IEnumerable<string> BuildDiskCategoryLines(IReadOnlyList<InfoVerboseDiskCategory> categories)
-    {
-        if (categories.Count == 0)
-            return [];
-        return categories
-            .OrderBy(c => c.Name, StringComparer.Ordinal)
-            .Select(c =>
-            {
-                var fileCountSuffix = c.FileCount is { } fc ? $"  ({fc} files)" : string.Empty;
-                return c.Size is null
-                    ? $"{c.Name}{fileCountSuffix}"
-                    : $"{c.Name}  {c.Size}{fileCountSuffix}";
-            });
-    }
-
     private static InfoService AttachConnectivity(InfoService runner, string? connectivity)
     {
         if (string.IsNullOrEmpty(connectivity))
@@ -511,81 +187,6 @@ internal sealed class InfoCollector
                 Connectivity = connectivity,
             },
         };
-    }
-
-    internal static string BuildCliLine(InfoCli cli)
-    {
-        var version = cli.Version ?? Unknown;
-        if (!string.IsNullOrEmpty(cli.Version) && !cli.Version.StartsWith('v'))
-            version = "v" + version;
-        var path = cli.BinaryPath ?? Unknown;
-        if (!string.IsNullOrWhiteSpace(cli.BuildDate))
-            return $"CLI          {version}  {path}  (built {cli.BuildDate})";
-        return $"CLI          {version}  {path}";
-    }
-
-    internal static string BuildServiceLine(string label, InfoService service, bool includeSource)
-    {
-        var status = service.Status;
-        if (status is null)
-            return $"{label,-12}<unknown>";
-
-        var state = status.State ?? NotRunning;
-        var rest = string.Empty;
-        if (string.Equals(state, "active", StringComparison.OrdinalIgnoreCase))
-        {
-            var pid = status.Pid is { } pidValue ? $"PID {pidValue}" : "<no pid>";
-            var uptime = status.Uptime ?? "<no uptime>";
-            rest = $"  {pid}  up {uptime}";
-        }
-        else if (string.Equals(state, "inactive", StringComparison.OrdinalIgnoreCase))
-        {
-            state = NotRunning;
-        }
-        else if (string.Equals(state, "failed", StringComparison.OrdinalIgnoreCase))
-        {
-            state = "failed";
-        }
-        else if (string.Equals(state, NotInstalled, StringComparison.OrdinalIgnoreCase))
-        {
-            state = NotInstalled;
-        }
-        var suffix = !string.IsNullOrEmpty(status.Connectivity) ? $" → {status.Connectivity}" : string.Empty;
-        return $"{label,-12}{state}{rest}{suffix}";
-    }
-
-    internal static string BuildSourceLine(string prefix, InfoSource? source)
-    {
-        if (source is null)
-            return $"{prefix,-12}{Unknown}  {Unknown}";
-
-        var path = source.Path ?? Unknown;
-        if (source.CommitShort is null)
-            return $"{prefix,-12}{path}  {NotAGitRepo}";
-
-        var subject = source.CommitSubject;
-        var sha = source.CommitShort;
-        if (string.IsNullOrWhiteSpace(subject))
-            return $"{prefix,-12}{path}  @ {sha}";
-        return $"{prefix,-12}{path}  @ {sha}  ({subject})";
-    }
-
-    internal static string BuildProjectLine(InfoProject? project)
-    {
-        if (project is null || string.IsNullOrWhiteSpace(project.Name))
-            return "Project      <no project>";
-        var total = project.IssueCount ?? 0;
-        var active = project.ActiveIssueCount ?? 0;
-        return $"Project      {project.Name}  ({total} issues, {active} active)";
-    }
-
-    internal static string BuildDataDirLine(InfoDataDir dir)
-    {
-        if (string.IsNullOrWhiteSpace(dir.Path))
-            return "Data dir     <unknown>";
-        if (string.IsNullOrWhiteSpace(dir.Size))
-            return $"Data dir     {dir.Path}  ({Unknown})";
-        return $"Data dir     {dir.Path}  ({dir.Size})";
     }
 
     internal async Task<InfoVerboseSkills> GetSkillsVerboseAsync()
@@ -772,14 +373,14 @@ internal sealed class InfoCollector
                 _commandExecutor.ExecuteAsync("systemctl", [
                     "--user",
                     "show",
-                    RunnerUnit,
+                    SystemdUnitParser.RunnerUnit,
                     "-p",
                     "Environment",
                 ], cancellationToken: ct),
                 ct);
             if (exit != 0)
                 return null;
-            return ParseSystemdEnvironment(stdout);
+            return SystemdUnitParser.ParseSystemdEnvironment(stdout);
         }
         catch
         {
@@ -949,71 +550,6 @@ internal sealed class InfoCollector
     private static bool IsWatchedEnvVar(string name) =>
     WatchedEnvVarNames.Contains(name, StringComparer.Ordinal);
 
-    internal static Dictionary<string, string> ParseSystemdEnvironment(string output)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var raw in output.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-            if (!line.StartsWith("Environment=", StringComparison.Ordinal))
-                continue;
-            var payload = line["Environment=".Length..];
-            foreach (var pair in TokenizeEnvironmentAssignments(payload))
-            {
-                var eq = pair.IndexOf('=');
-                if (eq <= 0)
-                    continue;
-                var key = pair[..eq].Trim();
-                var value = pair[(eq + 1)..].Trim();
-                if (key.Length == 0)
-                    continue;
-                if (map.TryGetValue(key, out var existing))
-                    map[key] = existing + " " + value;
-                else
-                    map[key] = value;
-            }
-        }
-        return map;
-    }
-
-    private static IEnumerable<string> TokenizeEnvironmentAssignments(string value)
-    {
-        var current = new StringBuilder();
-        var inSingle = false;
-        var inDouble = false;
-        var depth = 0;
-        foreach (var c in value)
-        {
-            if (c == '\'' && !inDouble) inSingle = !inSingle;
-            else if (c == '"' && !inSingle)
-            {
-                if (inDouble)
-                {
-                    inDouble = false;
-                    continue;
-                }
-                inDouble = true;
-                continue;
-            }
-            else if (c == '(' && !inSingle && !inDouble) depth++;
-            else if (c == ')' && !inSingle && !inDouble && depth > 0) depth--;
-            else if (c == ' ' && !inSingle && !inDouble && depth == 0)
-            {
-                if (current.Length > 0)
-                {
-                    yield return current.ToString();
-                    current.Clear();
-                }
-                continue;
-            }
-            current.Append(c);
-        }
-        if (current.Length > 0)
-            yield return current.ToString();
-    }
-
     internal async Task<InfoCli> GetCliAsync()
     {
         try
@@ -1056,58 +592,22 @@ internal sealed class InfoCollector
                     "show",
                     unitName,
                     "-p",
-                    ShowProperties,
+                    SystemdUnitParser.ShowProperties,
                 ], cancellationToken: cts.Token),
                 cts.Token);
 
             if (exit != 0)
-                return new InfoService(new InfoServiceStatus(NotInstalled, null, null, null, null), null);
+                return new InfoService(new InfoServiceStatus(SystemdUnitParser.NotInstalled, null, null, null, null), null);
 
-            var properties = ParseSystemdShow(stdout);
-            var status = BuildStatusFromProperties(properties);
+            var properties = SystemdUnitParser.ParseSystemdShow(stdout);
+            var status = SystemdUnitParser.BuildStatusFromProperties(properties, _fileSystem);
             var source = await BuildSourceFromPropertiesAsync(properties);
             return new InfoService(status, source);
         }
         catch
         {
-            return new InfoService(new InfoServiceStatus(NotInstalled, null, null, null, null), null);
+            return new InfoService(new InfoServiceStatus(SystemdUnitParser.NotInstalled, null, null, null, null), null);
         }
-    }
-
-    private InfoServiceStatus? BuildStatusFromProperties(Dictionary<string, string> properties)
-    {
-        if (!properties.TryGetValue("ActiveState", out var state) || string.IsNullOrWhiteSpace(state))
-            return null;
-
-        int? pid = null;
-        if (properties.TryGetValue("MainPID", out var pidText)
-            && int.TryParse(pidText.Trim(), out var parsed)
-            && parsed > 0)
-        {
-            pid = parsed;
-        }
-
-        string? uptime = null;
-        long? uptimeSeconds = null;
-        if (properties.TryGetValue("ExecMainStartTimestamp", out var startText)
-            && !string.IsNullOrWhiteSpace(startText)
-            && TryParseSystemdTimestamp(startText, out var started))
-        {
-            var delta = DateTimeOffset.UtcNow - started;
-            if (delta > TimeSpan.Zero)
-            {
-                uptime = FormatUptime(delta);
-                uptimeSeconds = (long)delta.TotalSeconds;
-            }
-        }
-        else if (pid is { } pidValue)
-        {
-            uptime = TryGetUptimeFromProc(pidValue);
-            if (uptime is not null && TryParseUptimeToSeconds(uptime, out var secs))
-                uptimeSeconds = secs;
-        }
-
-        return new InfoServiceStatus(state, pid, uptime, uptimeSeconds, null);
     }
 
     private async Task<InfoSource?> BuildSourceFromPropertiesAsync(Dictionary<string, string> properties)
@@ -1116,13 +616,13 @@ internal sealed class InfoCollector
         var execStart = properties.TryGetValue("ExecStart", out var es) ? es : null;
         var fragmentPath = properties.TryGetValue("FragmentPath", out var fp) ? fp : null;
 
-        var resolved = ResolveSourcePath(new SystemdUnitFields(workingDirectory, execStart));
+        var resolved = ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(workingDirectory, execStart));
         if (string.IsNullOrWhiteSpace(resolved))
         {
             if (!string.IsNullOrWhiteSpace(fragmentPath) && _fileSystem.Exists(fragmentPath))
             {
                 var content = await _fileSystem.ReadAllTextAsync(fragmentPath);
-                var unit = ParseSystemdUnit(content);
+                var unit = SystemdUnitParser.ParseSystemdUnit(content);
                 resolved = ResolveSourcePath(unit);
             }
         }
@@ -1178,7 +678,7 @@ internal sealed class InfoCollector
 
             var path = Path.Combine(home, ".mohist");
             if (!_fileSystem.DirectoryExists(path))
-                return new InfoDataDir(path, Unknown);
+                return new InfoDataDir(path, SystemdUnitParser.Unknown);
 
             var size = await ComputeDiskUsageAsync(path, cts.Token);
             return new InfoDataDir(path, size);
@@ -1317,181 +817,7 @@ internal sealed class InfoCollector
         }
     }
 
-    private string? TryGetUptimeFromProc(int pid)
-    {
-        try
-        {
-            if (!OperatingSystem.IsLinux())
-                return null;
-            var statPath = $"/proc/{pid}/stat";
-            if (!_fileSystem.Exists(statPath))
-                return null;
-            var stat = _fileSystem.ReadAllText(statPath);
-            var startTimeTicks = ParseStartTimeFromProcStat(stat);
-            if (startTimeTicks is null)
-                return null;
-
-            var uptimeFile = "/proc/uptime";
-            if (!_fileSystem.Exists(uptimeFile))
-                return null;
-            var uptimeText = _fileSystem.ReadAllText(uptimeFile).Split(' ').FirstOrDefault();
-            if (uptimeText is null || !double.TryParse(uptimeText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var uptimeSeconds))
-                return null;
-            var startSecondsAgo = uptimeSeconds - startTimeTicks.Value / (double)System.Diagnostics.Stopwatch.Frequency;
-            if (startSecondsAgo < 0)
-                startSecondsAgo = 0;
-            return FormatUptime(TimeSpan.FromSeconds(startSecondsAgo));
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static long? ParseStartTimeFromProcStat(string stat)
-    {
-        var lastParen = stat.LastIndexOf(')');
-        if (lastParen < 0)
-            return null;
-        var afterCmd = stat.IndexOf(' ', lastParen + 1);
-        if (afterCmd < 0)
-            return null;
-        var fields = stat[(afterCmd + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length < 20)
-            return null;
-        var startTimeText = fields[19];
-        return long.TryParse(startTimeText, out var startTime) ? startTime : null;
-    }
-
-    internal static string FormatUptime(TimeSpan uptime)
-    {
-        if (uptime < TimeSpan.Zero) uptime = TimeSpan.Zero;
-        if (uptime.TotalDays >= 1)
-            return $"{(int)uptime.TotalDays}d{uptime.Hours}h";
-        if (uptime.TotalHours >= 1)
-            return $"{(int)uptime.TotalHours}h{uptime.Minutes}m";
-        if (uptime.TotalMinutes >= 1)
-            return $"{(int)uptime.TotalMinutes}m";
-        return $"{(int)uptime.TotalSeconds}s";
-    }
-
-    internal static bool TryParseUptimeToSeconds(string text, out long seconds)
-    {
-        seconds = 0;
-        if (string.IsNullOrWhiteSpace(text))
-            return false;
-        var match = System.Text.RegularExpressions.Regex.Match(
-            text,
-            @"^(?:(?<d>\d+)d)?(?:(?<h>\d+)h)?(?:(?<m>\d+)m)?(?:(?<s>\d+)s)?$");
-        if (!match.Success || (!match.Groups["d"].Success && !match.Groups["h"].Success
-            && !match.Groups["m"].Success && !match.Groups["s"].Success))
-            return false;
-        long d = match.Groups["d"].Success ? long.Parse(match.Groups["d"].Value) : 0;
-        long h = match.Groups["h"].Success ? long.Parse(match.Groups["h"].Value) : 0;
-        long m = match.Groups["m"].Success ? long.Parse(match.Groups["m"].Value) : 0;
-        long s = match.Groups["s"].Success ? long.Parse(match.Groups["s"].Value) : 0;
-        seconds = d * 86_400 + h * 3_600 + m * 60 + s;
-        return true;
-    }
-
-    internal static bool TryParseSystemdTimestamp(string value, out DateTimeOffset result)
-    {
-        value = value.Trim();
-        if (string.IsNullOrEmpty(value))
-        {
-            result = default;
-            return false;
-        }
-        var normalized = NormalizeTimestampForParsing(value);
-        var formats = new[]
-        {
-            "ddd MMM d HH:mm:ss yyyy zzz",
-            "ddd MMM  d HH:mm:ss yyyy zzz",
-            "ddd MMM d HH:mm:ss yyyy",
-            "ddd MMM  d HH:mm:ss yyyy",
-            "ddd yyyy-MM-dd HH:mm:ss zzz",
-            "ddd yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd HH:mm:ss zzz",
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-ddTHH:mm:ss zzz",
-            "yyyy-MM-ddTHH:mm:ss",
-        };
-        if (DateTimeOffset.TryParseExact(normalized, formats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out result))
-            return true;
-        if (DateTimeOffset.TryParse(normalized, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out result))
-            return true;
-        result = default;
-        return false;
-    }
-
-    private static readonly System.Text.RegularExpressions.Regex TimestampRegex =
-        new(@"^(?<dow>[A-Za-z]{3,9}\s+)?(?<date>\d{4}-\d{2}-\d{2})(?:\s+(?<time>\d{2}:\d{2}:\d{2}))?(?:\s+(?<tz>\S+))?$",
-            System.Text.RegularExpressions.RegexOptions.Compiled);
-
-    private static string NormalizeTimestampForParsing(string value)
-    {
-        var match = TimestampRegex.Match(value);
-        if (!match.Success)
-            return value;
-        var datePart = match.Groups["date"].Value;
-        var timePart = match.Groups["time"].Success ? match.Groups["time"].Value : "00:00:00";
-        var tzPart = match.Groups["tz"].Success ? match.Groups["tz"].Value : "UTC";
-        if (string.Equals(tzPart, "UTC", StringComparison.OrdinalIgnoreCase))
-            tzPart = "+00:00";
-        else if (tzPart == "Z")
-            tzPart = "+00:00";
-        if (datePart.Length == 0)
-            return value;
-        return $"{datePart} {timePart} {tzPart}";
-    }
-
-    internal static Dictionary<string, string> ParseSystemdShow(string output)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var raw in output.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-            var eq = line.IndexOf('=');
-            if (eq < 0)
-                continue;
-            var key = line[..eq].Trim();
-            var value = line[(eq + 1)..].Trim();
-            map[key] = value;
-        }
-        return map;
-    }
-
-    internal static string? ParseSystemdValue(string output, string key)
-    {
-        var map = ParseSystemdShow(output);
-        return map.TryGetValue(key, out var v) ? v : null;
-    }
-
-    internal static SystemdUnitFields ParseSystemdUnit(string content)
-    {
-        string? workingDir = null;
-        string? execStart = null;
-        foreach (var raw in content.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#') || line.StartsWith('['))
-                continue;
-            var eq = line.IndexOf('=');
-            if (eq < 0)
-                continue;
-            var key = line[..eq].Trim();
-            var value = line[(eq + 1)..].Trim();
-            if (string.Equals(key, "WorkingDirectory", StringComparison.Ordinal))
-                workingDir = value;
-            else if (string.Equals(key, "ExecStart", StringComparison.Ordinal))
-                execStart = value;
-        }
-        return new SystemdUnitFields(workingDir, execStart);
-    }
-
-    internal static string? ResolveSourcePath(SystemdUnitFields unit)
+    internal static string? ResolveSourcePath(SystemdUnitParser.SystemdUnitFields unit)
     {
         if (!string.IsNullOrWhiteSpace(unit.WorkingDirectory))
             return unit.WorkingDirectory;
@@ -1684,5 +1010,3 @@ internal sealed class InfoCollector
         }
     }
 }
-
-internal sealed record SystemdUnitFields(string? WorkingDirectory, string? ExecStart);

@@ -16,7 +16,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_Default_ProducesValidSingleLineJson()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
 
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
@@ -31,7 +31,7 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var text = writer.ToString();
         var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -46,7 +46,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_Default_TopLevelKeysAreStable()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), new InfoSource("/r", "abc", "msg")),
@@ -56,7 +56,7 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         Assert.NotNull(node);
@@ -73,7 +73,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_Default_ServerIncludesNestedStatusSourceGitObjects()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(
@@ -85,7 +85,7 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var server = node!["server"] as JsonObject;
@@ -111,7 +111,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_ServiceNotRunning_StatusShowsNotRunningAndPidNull()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(
@@ -123,13 +123,13 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var status = node!["server"]!["status"] as JsonObject;
         Assert.Equal("inactive", (string?)status!["state"]);
         Assert.Null((int?)status["pid"]);
-        Assert.Equal(InfoCollector.Unknown, (string?)status["uptime"]);
+        Assert.Equal(SystemdUnitParser.Unknown, (string?)status["uptime"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -137,21 +137,21 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_ServiceNotInstalled_StateShowsNotInstalledSentinel()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
-            Server: new InfoService(new InfoServiceStatus(InfoCollector.NotInstalled, null, null, null, null), null),
+            Server: new InfoService(new InfoServiceStatus(SystemdUnitParser.NotInstalled, null, null, null, null), null),
             Runner: new InfoService(null, null),
             Project: null,
             DataDir: new InfoDataDir("/d", null),
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var status = node!["server"]!["status"] as JsonObject;
-        Assert.Equal(InfoCollector.NotInstalled, (string?)status!["state"]);
+        Assert.Equal(SystemdUnitParser.NotInstalled, (string?)status!["state"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -159,7 +159,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_ServiceStatusNull_UsesUnknownSentinelAndNullPid()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(null, null),
@@ -169,13 +169,13 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var status = node!["server"]!["status"] as JsonObject;
-        Assert.Equal(InfoCollector.Unknown, (string?)status!["state"]);
+        Assert.Equal(SystemdUnitParser.Unknown, (string?)status!["state"]);
         Assert.Null((int?)status["pid"]);
-        Assert.Equal(InfoCollector.Unknown, (string?)status["uptime"]);
+        Assert.Equal(SystemdUnitParser.Unknown, (string?)status["uptime"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -183,7 +183,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_SourceMissing_RendersAsNull()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), null),
@@ -193,7 +193,7 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         Assert.Null(node!["server"]!["source"]);
@@ -204,7 +204,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_ProjectMissing_RendersAsNull()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), null),
@@ -214,7 +214,7 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         Assert.Null(node!["project"]);
@@ -225,7 +225,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_SourceNotGitRepo_RendersCommitShortAsNotAGitRepoSentinel()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(
@@ -237,12 +237,12 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var source = node!["server"]!["source"] as JsonObject;
         Assert.Equal("/repo", (string?)source!["path"]);
-        Assert.Equal(InfoCollector.NotAGitRepo, (string?)source["commitShort"]);
+        Assert.Equal(SystemdUnitParser.NotAGitRepo, (string?)source["commitShort"]);
         Assert.Null((string?)source["commitSubject"]);
     }
 
@@ -251,7 +251,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_DataDirSizeMissing_RendersUnknownSentinel()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), null),
@@ -261,12 +261,12 @@ public class InfoCollectorJsonSpecs
             PlatformNotice: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var dataDir = node!["dataDir"] as JsonObject;
         Assert.Equal("/home/.mohist", (string?)dataDir!["path"]);
-        Assert.Equal(InfoCollector.Unknown, (string?)dataDir["size"]);
+        Assert.Equal(SystemdUnitParser.Unknown, (string?)dataDir["size"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -274,7 +274,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_Verbose_IncludesAllVerboseSections()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var verbose = new InfoVerbose(
             Skills: new InfoVerboseSkills(
             [
@@ -307,7 +307,7 @@ public class InfoCollectorJsonSpecs
             Verbose: verbose);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         Assert.NotNull(node);
@@ -357,7 +357,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_NoVerbose_DoesNotIncludeVerboseSections()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), null),
@@ -368,7 +368,7 @@ public class InfoCollectorJsonSpecs
             Verbose: null);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var keys = node!.Select(kv => kv.Key).ToHashSet();
@@ -386,7 +386,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_VerboseSkills_MissingInstallPath_RendersUnknown()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var verbose = new InfoVerbose(
             Skills: new InfoVerboseSkills([new("mohist", null)], Resolved: true),
             GitRemote: new InfoVerboseGitRemote(null, IsGitRepo: false),
@@ -406,13 +406,13 @@ public class InfoCollectorJsonSpecs
             Verbose: verbose);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var skills = node!["skills"] as JsonArray;
         var skill = skills![0] as JsonObject;
         Assert.Equal("mohist", (string?)skill!["name"]);
-        Assert.Equal(InfoCollector.Unknown, (string?)skill["installPath"]);
+        Assert.Equal(SystemdUnitParser.Unknown, (string?)skill["installPath"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -420,7 +420,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void RenderJson_VerboseDiskCategorySizeMissing_RendersUnknown()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var verbose = new InfoVerbose(
             Skills: new InfoVerboseSkills([], Resolved: true),
             GitRemote: new InfoVerboseGitRemote(null, IsGitRepo: false),
@@ -440,12 +440,12 @@ public class InfoCollectorJsonSpecs
             Verbose: verbose);
 
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        renderer.RenderJson(writer, result);
 
         var node = JsonNode.Parse(writer.ToString()) as JsonObject;
         var disk = node!["diskUsage"] as JsonArray;
         var cat = disk![0] as JsonObject;
-        Assert.Equal(InfoCollector.Unknown, (string?)cat!["size"]);
+        Assert.Equal(SystemdUnitParser.Unknown, (string?)cat!["size"]);
         Assert.Null((int?)cat["fileCount"]);
     }
 
@@ -454,7 +454,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void BuildJsonObject_AllSectionsHaveExpectedFields()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(
@@ -467,7 +467,7 @@ public class InfoCollectorJsonSpecs
             DataDir: new InfoDataDir("/home/.mohist", "412 MB"),
             PlatformNotice: null);
 
-        var root = InfoCollector.BuildJsonObject(result);
+        var root = InfoRenderer.BuildJsonObject(result);
 
         var cli = root["cli"] as JsonObject;
         Assert.Equal("1.0.0", (string?)cli!["version"]);
@@ -491,7 +491,7 @@ public class InfoCollectorJsonSpecs
     [Fact]
     public void BuildJsonObject_RunnerStatus_StateStaysCleanWithConnectivityAsSeparateField()
     {
-        var collector = BuildCollector();
+        var (collector, renderer) = BuildCollector();
         var result = new InfoResult(
             Cli: new InfoCli("1.0.0", "/usr/bin/mo"),
             Server: new InfoService(new InfoServiceStatus("active", 1, "1m"), null),
@@ -502,7 +502,7 @@ public class InfoCollectorJsonSpecs
             DataDir: new InfoDataDir("/d", "1M"),
             PlatformNotice: null);
 
-        var root = InfoCollector.BuildJsonObject(result);
+        var root = InfoRenderer.BuildJsonObject(result);
         var runnerStatus = root["runner"]!["status"] as JsonObject;
 
         Assert.Equal("active", (string?)runnerStatus!["state"]);
@@ -569,7 +569,8 @@ public class InfoCollectorJsonSpecs
 
         var result = await collector.CollectAsync();
         var writer = new StringWriter();
-        collector.RenderJson(writer, result);
+        var renderer = new InfoRenderer();
+        renderer.RenderJson(writer, result);
 
         var text = writer.ToString();
         var node = JsonNode.Parse(text) as JsonObject;
@@ -599,6 +600,8 @@ public class InfoCollectorJsonSpecs
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
+        services.AddSingleton<InfoRenderer>();
         var provider = services.BuildServiceProvider();
 
         var root = MohistCliCommands.Build(api, provider);
@@ -607,7 +610,7 @@ public class InfoCollectorJsonSpecs
         Assert.Contains("--json", help, StringComparison.Ordinal);
     }
 
-    private static InfoCollector BuildCollector()
+    private static (InfoCollector collector, InfoRenderer renderer) BuildCollector()
     {
         var api = new MohistCliApi(
             new HttpClient(),
@@ -615,7 +618,7 @@ public class InfoCollectorJsonSpecs
             TextWriter.Null,
             new FakeFileSystem(),
             new NoopCommandExecutor());
-        return new InfoCollector(new FakeFileSystem(), new NoopCommandExecutor(), api, new MockEnvironmentVariableProvider());
+        return (new InfoCollector(new FakeFileSystem(), new NoopCommandExecutor(), api, new MockEnvironmentVariableProvider()), new InfoRenderer());
     }
 
     private static MohistCliApi BuildApi(IFileSystem fs, ICommandExecutor commands, HttpStatusCode status, string body)
