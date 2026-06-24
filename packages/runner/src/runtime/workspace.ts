@@ -326,7 +326,12 @@ export class WorkspaceManager {
         await replaceCache("is corrupt")
         return
       }
-      const fetch = await runCommand("git", ["-C", cachePath, "fetch", "origin"], ".", signal)
+      const fetch = await runCommand(
+        "git",
+        ["-C", cachePath, "fetch", "origin", `+refs/heads/${baseBranch}:refs/heads/${baseBranch}`],
+        ".",
+        signal,
+      )
       if (fetch.exitCode !== 0) {
         if (await isCacheCorrupt(cachePath, baseBranch, signal)) await replaceCache("is corrupt")
         return
@@ -389,7 +394,7 @@ export class WorkspaceManager {
       return
     }
 
-    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-b", runBranch], workspacePath, signal)
+    const create = await runCommand("git", ["-C", workspacePath, "checkout", "-b", runBranch, baseBranch], workspacePath, signal)
     if (create.exitCode !== 0) throw new Error(`git checkout -b ${runBranch} failed: ${create.stderr || create.stdout}`)
     // reset --hard origin/<baseBranch> only if the initial checkout landed on
     // a stale local branch; otherwise stay on the freshly-created branch.

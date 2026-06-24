@@ -25,6 +25,7 @@ export type Scenario =
   | "resolved-model"
   | "config-option-update"
   | "usage-update"
+  | "usage-only"
   | "prompt-usage"
   | "compaction"
   | "expectation-repair"
@@ -173,6 +174,11 @@ export class FakeAcpAgent {
           return { stopReason: "end_turn" }
         }
         if (self.scenario === "usage-update") {
+          await self.connection.sessionUpdate(textUpdate(params.sessionId, "tracked usage"))
+          await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "usage_update", size: 200000, used: 15000, cost: { amount: 0.0012, currency: "USD" } } } as never)
+          return { stopReason: "end_turn" }
+        }
+        if (self.scenario === "usage-only") {
           await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "usage_update", size: 200000, used: 15000, cost: { amount: 0.0012, currency: "USD" } } } as never)
           return { stopReason: "end_turn" }
         }

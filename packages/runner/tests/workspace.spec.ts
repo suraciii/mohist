@@ -70,6 +70,31 @@ describe("WorkspaceManager", () => {
     expect(workspace.branch).toBe("mohist/run-wr-1")
   })
 
+  it("CacheFetchUpdatesBaseBranchBeforeCreatingNewRunBranch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const repo = await createRepo(root, "repo")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const first = await manager.materialize(work("wr-old", "issue-old", repo), signal)
+    expect(await readFile(join(first.path, "README.md"), "utf8")).toBe("base\n")
+
+    await writeFile(join(repo, "README.md"), "latest\n")
+    await git(repo, "add", "README.md")
+    await git(repo, "commit", "-m", "latest")
+    const expectedHead = (await runCommand("git", ["-C", repo, "rev-parse", "master"], ".", signal)).stdout.trim()
+
+    const second = await manager.materialize(work("wr-new", "issue-new", repo), signal)
+
+    expect(second.path).toBe(first.path)
+    expect(await readFile(join(second.path, "README.md"), "utf8")).toBe("latest\n")
+    const runHead = (await runCommand("git", ["-C", second.path, "rev-parse", "mohist/run-wr-new"], ".", signal)).stdout.trim()
+    const localBase = (await runCommand("git", ["-C", second.path, "rev-parse", "master"], ".", signal)).stdout.trim()
+    expect(runHead).toBe(expectedHead)
+    expect(localBase).toBe(expectedHead)
+  })
+
   it("ExistingWorkspaceWithSameMarker_IsReused", async () => {
     const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
     const repo = await createRepo(root, "repo")
