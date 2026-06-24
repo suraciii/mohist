@@ -80,6 +80,22 @@ public sealed partial class Issue
         if (changed && !labelsChanged) Touch(now);
     }
 
+    /// <summary>
+    /// Replace the issue-level workflow profile selection. <c>null</c>
+    /// clears the selection so reads fall back to project/system default.
+    /// Caller is responsible for validating that <paramref name="profileId"/>
+    /// (when non-null) refers to a known workflow profile; the aggregate
+    /// only stores the value.
+    /// </summary>
+    public void ReplaceWorkflowProfile(string? profileId, DateTime? now = null)
+    {
+        var next = NormalizeOptional(profileId);
+        if (string.Equals(_workflowProfileId, next, StringComparison.Ordinal)) return;
+        _workflowProfileId = next;
+        Touch(now);
+        RecordEvent(new IssueWorkflowProfileChanged(_workflowProfileId));
+    }
+
     public void SetDraft(bool isDraft, DateTime? now = null)
     {
         if (_status == IssueStatus.InProgress || _status == IssueStatus.Done || _status == IssueStatus.Cancelled)

@@ -147,7 +147,13 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Contains("custom-issue-workflow", savedYaml);
         Assert.Contains("custom-task", savedYaml);
         Assert.Equal("custom", savedData.GetProperty("updateMode").GetString());
-        Assert.Equal("custom-issue-workflow", savedData.GetProperty("profileId").GetString());
+        // The PUT /workflow-profile/template path is an advanced override and
+        // does NOT rewrite the issue-level selection. The unified profileId
+        // therefore stays at the inherited default for an issue with no
+        // selection; the override is surfaced via updateMode/hasCustomTemplate
+        // and (after issue-workflow-profile consistency) the same profileId
+        // every other read surface reports.
+        Assert.Equal("mohist/default", savedData.GetProperty("profileId").GetString());
 
         var projectProfilesResponse = await _client.GetAsync("/api/workflow-templates/system");
         var projectProfilesJson = await projectProfilesResponse.Content.ReadFromJsonAsync<JsonElement>();
