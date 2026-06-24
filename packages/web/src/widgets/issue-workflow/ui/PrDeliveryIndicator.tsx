@@ -72,14 +72,20 @@ export function findMergedPullRequestDeliveryMetadata(
   timeline: WorkflowTimeline | null | undefined,
 ): PrDeliveryMetadata | null {
   if (!timeline) return null
+  let lastDeliveryMetadata: PrDeliveryMetadata | null = null
+  let mergedMetadata: PrDeliveryMetadata | null = null
   for (const stage of timeline.stages) {
     for (const task of stage.tasks) {
       if (!isCompletedMergedPullRequestDeliveryTask(task)) continue
       const metadata = extractPrDeliveryMetadata(task.output)
-      if (metadata) return metadata
+      if (!metadata) continue
+      lastDeliveryMetadata = metadata
+      if (task.uses === 'mohist/merge-pull-request') {
+        mergedMetadata = metadata
+      }
     }
   }
-  return null
+  return mergedMetadata ?? lastDeliveryMetadata
 }
 
 export function findPublishViaPrMetadata(
@@ -95,7 +101,8 @@ export function isCompletedPullRequestDeliveryTask(task: WorkflowTimelineTask): 
 export function isCompletedMergedPullRequestDeliveryTask(task: WorkflowTimelineTask): boolean {
   return task.status === 'completed' && (
     task.uses === 'mohist/publish-via-pr' ||
-    task.uses === 'mohist/merge-pull-request'
+    task.uses === 'mohist/merge-pull-request' ||
+    task.uses === 'mohist/create-pull-request'
   )
 }
 
