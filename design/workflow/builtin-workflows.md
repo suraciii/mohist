@@ -47,7 +47,7 @@ integrate：
 语义：
 
 - `integrate:rebase` fetch 最新 base，解决冲突，并把工作分支 squash 成一个 commit。
-- squash commit message 为 `Complete issue #N`。
+- squash commit message 由 `messageFrom: issue.title` 指示 `mohist/rebase` 在运行时通过 `mo issue show` 读取 issue title。
 - `integrate:push` fast-forward 推送到 base branch。
 - GitHub 上不产生 PR 记录。
 
@@ -66,17 +66,21 @@ integrate：
 ```yaml
 - integrate:spec-sync       # mohist/acp-agent
 - integrate:archive-change  # mohist/archive-change
-- integrate:publish         # mohist/publish-via-pr
+- integrate:open-pr         # mohist/create-pull-request
+- integrate:merge-pr        # mohist/merge-pull-request
 ```
 
 语义：
 
 - 正常路径不预先 rebase。
-- `integrate:publish` force-with-lease 推送同一个 `workspace.branch`。
+- `integrate:open-pr` force-with-lease 推送同一个 `workspace.branch`。
 - 如果同 head/base 已有 open PR，则复用并更新该 PR。
 - 如果没有 open PR，则创建 PR。
+- PR title/body 由 `titleFrom: issue.title` 和 `bodyFrom: issue.body` 指示 `mohist/create-pull-request` 在运行时通过 `mo issue show` 读取；workflow 也可用 literal `title` / `body` 显式覆盖。
+- `integrate:open-pr` 只把稳定 PR 身份投影到 run profile：`vars.github.pr.number` 和 `vars.github.pr.url`。
 - GitHub PR mergeability 是集成裁判；只有 GitHub 返回不可合并、base 已移动、branch out-of-date 等失败时，才进入 recovery rebase。
-- PR 由 `gh pr merge --squash` 合并。
+- `integrate:merge-pr` 读取 `vars.github.pr.number`，由 `gh pr merge --squash` 合并。
+- merge 语义是把当前 workflow branch 合入 base branch；不要求 expected head SHA 或 `--match-head-commit`。
 - PR merge 成功并确认 `state=MERGED` 后，workflow 完成。
 
 前置条件：
@@ -104,12 +108,12 @@ integrate：
 
 典型恢复：
 
-- `output.failureKind: base-moved` → 插入 `mohist/rebase`，再插入 `mohist/publish-via-pr`。
-- `output.failureKind: config-error` → 阻塞 human 修 runner 环境。
-- `output.failureKind: protection-conflict` → 阻塞 human 调整 GitHub 配置或 workflow。
-- `output.failureKind: pr-state-conflict` → 阻塞 human；系统不擅自新开替代 PR。
+- `output.errorCode: base-moved` → 插入 `mohist/rebase`，再插入 `mohist/create-pull-request` 和 `mohist/merge-pull-request`。
+- `output.errorCode: config-error` → 阻塞 human 修 runner 环境。
+- `output.errorCode: protection-conflict` → 阻塞 human 调整 GitHub 配置或 workflow。
+- `output.errorCode: pr-state-conflict` → 阻塞 human；系统不擅自新开替代 PR。
 
-恢复 task 使用同一个 workflow workspace。`recover:publish` 继续推送同一个 `workspace.branch`，因此 GitHub 会更新并复用同一个 open PR；如果 mergeability 仍失败，则保留普通 task failure，等待人工处理或下一次 retry。
+恢复 task 使用同一个 workflow workspace。`recover:open-pr` 继续推送同一个 `workspace.branch`，因此 GitHub 会更新并复用同一个 open PR；如果 mergeability 仍失败，则保留普通 task failure，等待人工处理或下一次 retry。
 
 ## Selection
 

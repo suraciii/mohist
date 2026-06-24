@@ -48,14 +48,14 @@ Action 可以返回文本 output，也可以返回 JSON object output。需要�
 
 ```json
 {
-  "failureKind": "base-moved",
-  "failureMessage": "Pull request is not mergeable because the base branch moved",
+  "errorCode": "base-moved",
+  "message": "Pull request is not mergeable because the base branch moved",
   "prNumber": 42,
   "prUrl": "https://github.com/acme/repo/pull/42"
 }
 ```
 
-`failureKind` / `errorCode` 这类字段是 action 自己定义的接口，不是平台枚举。profile 作者引用的是该 action 的 output 接口。
+`errorCode` 这类字段是 action 自己定义的接口，不是平台枚举。profile 作者引用的是该 action 的 output 接口。
 
 非 JSON object output 在字段路径匹配里等价于无字段。
 
@@ -120,8 +120,8 @@ vars.change.url
 
 推荐：
 
-- 用 `failureKind` / `errorCode` 表达可编排错误码。
-- 用 `failureMessage` / `message` 表达人读说明。
+- 用 `errorCode` 表达可编排错误码。
+- 用 `message` 表达人读说明。
 - 额外上下文字段由 action 自己定义，例如 `prNumber`、`prUrl`、`mergeCommitSha`。
 
 避免：
@@ -137,19 +137,31 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
 目标语义：
 
 ```yaml
-- id: integrate:publish
-  title: Publish GitHub PR
-  uses: mohist/publish-via-pr
+- id: integrate:open-pr
+  title: Open or update GitHub PR
+  uses: mohist/create-pull-request
   with:
     source: ${{ workspace.branch }}
     target: ${{ repository.baseBranch }}
     remote: origin
-    message: "Complete issue #${{ issue.number }}"
+    titleFrom: issue.title
+    bodyFrom: issue.body
+  setVars:
+    github.pr.number: output.prNumber
+    github.pr.url: output.prUrl
+
+- id: integrate:merge-pr
+  title: Merge GitHub PR
+  uses: mohist/merge-pull-request
+  with:
+    prNumber: ${{ vars.github.pr.number }}
+    method: squash
+    subjectFrom: issue.title
   onFailure:
     limit: 1
     cases:
       - when:
-          output.failureKind: base-moved
+          output.errorCode: base-moved
         tasks:
           - id: recover:rebase
             title: Rebase after base moved
@@ -162,14 +174,25 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
                 title: Resolve rebase conflicts
                 with:
                   description: Resolve rebase conflicts, stage resolved files, and continue the rebase.
-          - id: recover:publish
-            title: Publish GitHub PR
-            uses: mohist/publish-via-pr
+          - id: recover:open-pr
+            title: Update GitHub PR
+            uses: mohist/create-pull-request
             with:
               source: ${{ workspace.branch }}
               target: ${{ repository.baseBranch }}
               remote: origin
-              message: "Complete issue #${{ issue.number }}"
+              titleFrom: issue.title
+              bodyFrom: issue.body
+            setVars:
+              github.pr.number: output.prNumber
+              github.pr.url: output.prUrl
+          - id: recover:merge-pr
+            title: Merge GitHub PR
+            uses: mohist/merge-pull-request
+            with:
+              prNumber: ${{ vars.github.pr.number }}
+              method: squash
+              subjectFrom: issue.title
 ```
 
 执行规则：
@@ -184,4 +207,5 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
 - `onFailure` 是 workflow profile 对 action output 接口的编排，不是 action 内部重试。
 - 恢复 task 与普通 task 一样由 runner 执行。
 - rebase、push、PR merge 等副作用仍在 runner action 内执行。
+- `titleFrom`、`bodyFrom`、`subjectFrom`、`messageFrom` 这类 `issue.title` / `issue.body` 输入不是 workflow metadata。runner action 在运行时通过 `mo issue show <number> --project-id <projectId> --output json` 获取 issue title/body。
 - Workflow domain 只保存 output 并做通用 JSON path 匹配，不理解 error code 的业务含义。

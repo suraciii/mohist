@@ -18,7 +18,7 @@ describe("mohist default workflow profile", () => {
     expect(integrate).toContain("uses: mohist/rebase")
     expect(integrate).toContain("remote: origin")
     expect(integrate).toContain("squash: true")
-    expect(integrate).toContain("message: \"Complete issue #${{ issue.number }}\"")
+    expect(integrate).toContain("messageFrom: issue.title")
     expect(integrate).toContain("id: integrate:push")
     expect(integrate).toContain("uses: mohist/push")
     expect(integrate).toContain("source: ${{ workspace.branch }}")
