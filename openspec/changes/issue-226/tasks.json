@@ -6,7 +6,7 @@
       "id": "T-001",
       "title": "搭建约定式 DI 注册基础设施（Scrutor + 标记接口 + 扫描入口）",
       "spec": "specs/service-registration/spec.md#约定式自动注册",
-      "description": "在 packages/server/src/MohistServer 引入 Scrutor NuGet 包；在 Infrastructure.Hosting 命名空间新增空标记接口 IScopedService、ISingletonService；新增 ServiceCollectionExtensions.AddMohistConventionalServices 扩展，扫描 server 程序集，将实现 IScopedService 的类型 AsSelf() 以 Scoped 注册、实现 ISingletonService 的以 Singleton 注册；在 ConfigureMohistServices 最顶部（先于一切手写注册）调用该扩展，使手写注册凭借 MS DI 后注册者生效语义覆盖扫描。",
+      "description": "在 packages/server/src/Mohist.Server 引入 Scrutor NuGet 包；在 Infrastructure.Hosting 命名空间新增空标记接口 IScopedService、ISingletonService；新增 ServiceCollectionExtensions.AddMohistConventionalServices 扩展，扫描 server 程序集，将实现 IScopedService 的类型 AsSelf() 以 Scoped 注册、实现 ISingletonService 的以 Singleton 注册；在 ConfigureMohistServices 最顶部（先于一切手写注册）调用该扩展，使手写注册凭借 MS DI 后注册者生效语义覆盖扫描。",
       "acceptanceCriteria": [
         "Scrutor NuGet 包已加入 packages/server/src/Mohist.Server 的项目引用，dotnet build Mohist.sln 通过",
         "IScopedService、ISingletonService 空标记接口存在于 Mohist.Server.Infrastructure.Hosting 命名空间",
@@ -41,7 +41,7 @@
       "priority": 2,
       "mode": "AFK",
       "type": "MIGRATE",
-      "output": "14 个核心域服务标记接口化 + ConfigureMohistServiceRegistration.cs 对应手写行删除 + 迁移回归测试",
+      "output": "14 个核心域服务标记接口化 + MohistServiceRegistration.cs 对应手写行删除 + 迁移回归测试",
       "dependsOn": ["T-001"],
       "passes": false,
       "notes": "与 T-003/T-004 均编辑 MohistServiceRegistration.cs，故串行执行以避免冲突。"
