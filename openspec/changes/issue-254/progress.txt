@@ -1,0 +1,49 @@
+## T-001 — TableRenderer 按实体域 partial 拆分
+
+### Codebase Patterns
+
+- **Partial 拆分模式**：用 `sealed partial class` + 多文件按域聚簇是此处正确工具。理由已记在 `TableRenderer.cs` 顶部注释。判断标准：单一职责 + 多个并列 peer case + 共享基础设施 + 无分歧依赖。提取协作类会迫使基础设施复制或反向依赖核心。
+- **C# 副作用**：C# partial class 的所有 partial 文件在编译期合并。LSP 工具在缺其他 partial 时会报"未定义"误报——这是预期现象，不是问题。`dotnet build` 才是真正的编译验证。
+- **TreatWarningsAsErrors 当 lint**：所有 partial 文件需 `using System.Text.Json.Nodes;`（即使不用 JsonNode 类型），因为 `_out` 走的是 TextWriter 但 dispatch 走 JsonNode。每个 partial 都重复 using 比共享 `global using` 更安全（更显式，无隐式依赖）。
+- **命令级 spec 守护 byte-level 输出**：所有 `Render*` 表格输出由 7 个 `Cli*CommandSpecs` 文件的字符串断言守护。拆 partial 时只要方法体 byte-for-byte 不动，spec 必绿——已用 `diff` 严格对比验证（Issues / Entities / Epics / Runners 全部 PASS）。
+- **每个 partial 顶部不需要 partial 关键字**（只有类声明加 `partial`），但**每个 partial 都要重复 `using`**、namespace、类声明。
+
+### Decisions
+
+- **Runners.cs 单独成簇**：`RenderRepoList` 体积虽小，但属 runner/repo 域（不是 Project/Agent/Session 这些"瘦小 peer"）。design.md 决策 2 明确指出"若过小可在 review 时合入 Entities"——本次保持 design 决策以维持任务范围。
+- **FormatIssueState/FormatLabels 放在 Issues 簇**：仅在 Issues 渲染分支被使用（IssueList/IssueShow），属 Issues 域的内部辅助。
+- **核心 partial 顶部加注释**（5 行）：解释 partial 是正确工具的判断依据，让后续维护者不会误读为"拆 god class 反模式"。
+- **未触碰 `MohistCliApi.cs`**：仅使用 `MohistCliApi.TableShape` enum。`RenderTableAsync` 内部 `new TableRenderer(_out, activeProjectId)` 不变。
+
+### Gotchas
+
+- 原文件 852 行包括 8 个 `using`/namespace/decl 等开销，拆分后总行数 889（+37）。多出来的 37 行是 4 个新文件的 namespace/using/`sealed partial class` 头——必要开销。
+- 核心 partial 文件 153 行里只有 11 行代码 + 顶部注释 + 头部；其余是 `WriteTable`（7 行）+ 4 个 `AsArray/StringOf/BoolOf/NumberOf/Truncate`（约 35 行）+ Render dispatch（63 行）。
+- `Truncate` 的 `softCap - 1` 行使用了 `…` 字符（U+2026），与原文件一致——未替换。
+- 静态方法 `FormatIssueState` 标记为 `internal static`（与原文件一致）。它在 Issues 簇内被 2 个 `Render*` 方法调用，不跨 partial。
+- `MohistCliApi.TableShape` 是 `MohistCliApi` 嵌套枚举，partial 文件中只能通过完全限定名 `MohistCliApi.TableShape` 引用（与原文件一致）。
+
+### Verification
+
+- `dotnet build Mohist.sln`：0 warning / 0 error
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests`：**98/98 pass**（与基线一致）
+  - `CliEpicCommandSpecs.EpicList_EmptyProject_PrintsNoEpicsState` ✓
+  - `CliIssueTemplateCommandSpecs.TemplateList_EmptyArray_RendersNoTemplatesMessage` ✓
+  - `CliLabelCatalogSpecs.LabelList_Json_ContainsFullData` ✓
+  - `CliProjectCommandSpecs.ProjectList_DisplaysNamesAndCurrentMarkerWithoutPaths` ✓
+  - `CliAgentCommandSpecs.*` 全部 ✓
+  - `CliRepositoryCommandSpecs.*` 全部 ✓
+  - `CliIssueLabelSpecs.*` 全部 ✓
+- `dotnet test Mohist.sln` 全部 2117 测试通过，0 失败
+- scc 复杂度：core partial = 18（远低于前五阈值 86），Issues = 80，Entities = 9，Epics = 13，Runners = 1
+- `rg 'private void Render(Project|Issue|Epic|Agent|Repo|Feedback|Workflow|Delivery|Session|Label|IssueTemplate)' packages/cli/Mohist.Cli/TableRenderer.cs` → 0 命中（核心 partial 无实体 Render 方法）
+- 所有 partial 共享 `internal sealed partial class TableRenderer`，核心 partial 唯一定义 `_out`/`_activeProjectId`/`TitleSoftCap`/`IdSoftCap`/`BodySoftCap`/ctor，无复制
+- 不变量：拆分前后方法体 byte-for-byte 一致（用 `diff` 对 4 个 partial 验证）
+
+### Files
+
+- `packages/cli/Mohist.Cli/TableRenderer.cs` (core partial, 153 行)
+- `packages/cli/Mohist.Cli/TableRenderer.Issues.cs` (470 行)
+- `packages/cli/Mohist.Cli/TableRenderer.Runners.cs` (33 行)
+- `packages/cli/Mohist.Cli/TableRenderer.Epics.cs` (113 行)
+- `packages/cli/Mohist.Cli/TableRenderer.Entities.cs` (120 行)
