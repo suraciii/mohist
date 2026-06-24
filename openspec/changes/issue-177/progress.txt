@@ -42,3 +42,22 @@
   - missing `projectid` extension → no-op without error
   - subscription attribute assertion (`com.mohist.issue.work-completed`)
 - `dotnet build` clean (0 warnings, 0 errors); `dotnet test` 2575/2575 passed (8 new specs + 2567 prior). Architecture rules pass: handler outside `Epic.*` slice avoids the Services↔Grains cycle.
+
+## T-003 outcome
+
+- Added `Mohist.Server.Events.Hosting.EpicReconciliationService` (`BackgroundService`, namespace top-level alongside `Events/Subscriptions/EpicAutoDoneHandler`). Mirrors `IssueWorkflowReconciliationService` exactly: `static TimeSpan ReconciliationPeriod = TimeSpan.FromDays(1)` (test-tunable), initial `Task.Delay(ReconciliationPeriod)` then `while (!stoppingToken.IsCancellationRequested)` loop with `try/catch+LogError` per sweep and `try/catch+LogWarning` per-grain so a single bad epic doesn't poison the loop. Plus a public `ReconcileOnceAsync(ct)` test seam that skips the timer.
+- Sweep candidate set: `db.Epics.AsNoTracking().Where(e => e.Status == "active").Select(new { ProjectId, Id }).Take(500)` — uses the existing `(ProjectId, Status, CreatedAt)` index on `EpicRow` (`MohistDbContext.cs:211`). Only active epics are walked; terminal (`done`/`closed`) and `paused` are excluded at the SQL layer (no grain call wasted).
+- Per candidate: `_grains.GetGrain<IEpicGrain>($"{projectId}:{epicId}").AutoMarkDoneIfReadyAsync()`. The grain's `TryAutoMarkDoneAsync` (T-001) handles the rest: terminal/paused = no-op, active+undelivered>0 = no-op, active+undelivered==0 = `MarkDone` + persist. The sweeper deliberately does **not** duplicate the readiness computation — single source of truth via `IEpicGrain.AutoMarkDoneIfReadyAsync`.
+- Cadence host: piggybacked on the same pattern as `IssueWorkflowReconciliationService` (daily hosted service, registered via `services.AddHostedService<EpicReconciliationService>()` in `MohistServiceRegistration.cs` next to the issue reconciliation). No new timer/reminder infra introduced; this answers design.md's Open Question on D5 cadence.
+- Placement rationale: live **top-level** under `Mohist.Server/Events/Hosting/` (not `Epic/Hosting/`) because `ArchitectureRules.FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` rejects anything other than Domain/Grains/Services under feature roots, and `Epic/Services/` would form a Services→Grains cycle (Grains already depends on Services). Mirrors T-002's handler placement — Epic-touching cross-cutting infra sits outside the Epic slice, only references `IEpicGrain` via Orleans `IGrainFactory`.
+- Tests: 8 new Fake-based specs in `packages/server/tests/Mohist.Server.Tests/Specs/Events/Epic/EpicReconciliationServiceSpecs.cs` using the same SQLite-in-memory + `Migrate()` + real `EpicGrain` via fake `IGrainFactory` pattern from `EpicAutoDoneHandlerSpecs`:
+  - missed-event recovery → active+all-done epic transitions to `done` via the sweep
+  - paused epic excluded (candidate query filters out → grain never invoked)
+  - terminal epics excluded (done/closed never invoked)
+  - active+incomplete issue stays active, grain invoked but no-ops (undelivered > 0)
+  - active+cancelled-only stays active (cancelled not counted as complete by grain)
+  - repeated `ReconcileOnceAsync` calls are idempotent (candidate set shrinks once epic transitions → second/third runs don't even invoke the grain)
+  - no active epics → no grain invocations
+  - multi-epic fan-out: ready epics go done, unready epic stays active, all 3 candidates invoked
+- `dotnet build` clean (0 warnings, 0 errors); `dotnet test` 2583/2583 passed (8 new specs + 2575 prior, 10 pre-existing skips unchanged). Architecture rules pass: `DomainInternalLayers_ShouldBeFreeOfCycles` for Epic stays clean, `FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices` not violated (file is under `Events/Hosting/`, not `Epic/*`).
+- All T-003 acceptance criteria satisfied: (1) ready-but-active epic → done via sweep; (2) paused + terminal skipped (both SQL-layer exclusion); (3) idempotent (AutoMarkDoneIfReadyAsync short-circuits terminal/paused, and active epics naturally leave the candidate set once transitioned); (4) Fake-based tests cover all three named scenarios + extras; (5) build clean, no DB schema or config change.
