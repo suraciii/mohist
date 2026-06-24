@@ -208,6 +208,10 @@ export class WorkspaceManager {
       return { action: "materialize", workspacePath }
     }
     const onDiskMarker = await readMarker(workspacePath)
+    const expectedMarker = issueWorkspaceMarker(variables)
+    if (isSameIssueDifferentRun(onDiskMarker, expectedMarker)) {
+      return { action: "materialize", workspacePath, marker: onDiskMarker ?? undefined }
+    }
     return { action: "verify", workspacePath, marker: onDiskMarker ?? undefined }
   }
 
@@ -458,6 +462,13 @@ function markerMatches(actual: Partial<IssueWorkspaceMarker>, expected: IssueWor
   return actual.issueId === expected.issueId
     && actual.issueNumber === expected.issueNumber
     && actual.workflowRunId === expected.workflowRunId
+}
+
+function isSameIssueDifferentRun(actual: Partial<IssueWorkspaceMarker> | null, expected: IssueWorkspaceMarker): boolean {
+  if (!actual) return false
+  return actual.issueId === expected.issueId
+    && actual.issueNumber === expected.issueNumber
+    && actual.workflowRunId !== expected.workflowRunId
 }
 
 function formatIdentity(marker: Partial<IssueWorkspaceMarker> | IssueWorkspaceMarker): string {
