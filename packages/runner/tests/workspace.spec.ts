@@ -1047,7 +1047,12 @@ function work(workflowRunId: string, issueId: string, gitUrl: string) {
 }
 
 async function git(cwd: string, ...args: string[]) {
-  const result = await runCommand("git", args, cwd, new AbortController().signal)
+  const result = await runCommand("git", args, cwd, new AbortController().signal, {
+    GIT_AUTHOR_NAME: "Mohist Test",
+    GIT_AUTHOR_EMAIL: "mohist-test@example.com",
+    GIT_COMMITTER_NAME: "Mohist Test",
+    GIT_COMMITTER_EMAIL: "mohist-test@example.com",
+  })
   if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout)
   return result
 }
