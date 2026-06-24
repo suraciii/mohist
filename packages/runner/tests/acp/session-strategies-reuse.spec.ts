@@ -1,14 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { acpAgentAction, setAcpProcessFactoryForTest } from "../../src/actions/acp-agent.js"
-import {
-  PromptLoaderRegistry,
-  setPromptLoaderRegistryForTest,
-  type PromptLoader,
-  type PromptLoaderContext,
-} from "../../src/core/prompt.js"
+import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
 import {
   contextWithOverrides,
   createFixture,
