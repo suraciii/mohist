@@ -24,3 +24,21 @@
 - Tests: 16 new Fake-based unit specs in `packages/server/tests/Mohist.Server.Tests/Specs/Epic/Grain/EpicAutoDoneSpecs.cs` covering all six acceptance criteria plus regression checks for manual `SetStatusAsync("done")` error paths.
 - Two existing API specs in `EpicApiSpecs` (`Resume_FromPaused_ReturnsActiveStatusAndClearsReason`, `ResumeRoute_AcceptsEpicNumber`) updated to seed a linked open issue so the resumed epic stays `active` (without the issue, the empty epic auto-dones on resume, matching manual `SetStatusAsync("done")` semantics on an empty epic).
 - `dotnet build` clean (0 warnings, 0 errors); `dotnet test` 2567/2567 passed.
+
+## T-002 outcome
+
+- Added `EpicQuerier.GetEpicIdForIssueAsync(projectId, issueId)` — reverse `issueId → epicId` lookup using the existing `IX_EpicIssues_ProjectId_IssueId` index (defined in `MohistDbContext.cs` for `EpicIssueRow`). Returns `null` when the issue is not linked to any epic so the handler can no-op.
+- Added `Mohist.Server.Events.Subscriptions.EpicAutoDoneHandler` (`[Subscription(Type = "com.mohist.issue.work-completed")]`, typed `ICloudEventHandler<IssueWorkCompleted>`). The handler reads `projectid` / `issueid` from the CloudEvent extensions (already published by `IssueGrain.PublishIssueEventsAsync`), resolves the owning epic via the querier, and invokes `IEpicGrain.AutoMarkDoneIfReadyAsync()` on the `$"{projectId}:{epicId}"` grain. Duplicates/out-of-order events are absorbed by the grain's T-001 idempotency.
+- Handler placement under `Mohist.Server/Events/Subscriptions/` (top-level alongside `Events/Hub/EventBridge.cs`) — *not* under `Epic/Services/`. Putting it in `Epic/Services` would create a `Services → Grains` cycle (handler uses `IEpicGrain` from `Epic.Grains`) and trigger `DomainInternalLayers_ShouldBeFreeOfCycles`. Top-level placement keeps the Epic slice cycle-free and treats event-bus subscriptions as cross-cutting infrastructure that happens to call into Epic (mirrors how `EventBridge` lives outside any feature folder).
+- `EpicQuerier` constructor accepts `IssueQuerier` as `null!` in unit tests when only `GetEpicIdForIssueAsync` is exercised (the method doesn't touch `_issuesQuery`); production DI wires it normally.
+- Handler failures are caught + logged at warning level (no rethrow) so a single bad event doesn't poison the in-memory bus; reconciliation sweep (T-003) is the safety net for missed events.
+- Tests: 8 new Fake-based specs in `packages/server/tests/Mohist.Server.Tests/Specs/Events/Epic/EpicAutoDoneHandlerSpecs.cs`:
+  - last-issue-completes → done (real EpicGrain via fake `IGrainFactory`, end-to-end via DB assertion)
+  - unlinked issue → no-op (querier returns null, grain never invoked)
+  - partial completion → no-op (epic stays active, grain invoked)
+  - duplicate events → converge to done (3 calls recorded, single state transition)
+  - paused epic unchanged on event (grain invoked, no auto-done)
+  - full bus dispatch via `InMemoryEventBus.PublishAsync` typed subscription path
+  - missing `projectid` extension → no-op without error
+  - subscription attribute assertion (`com.mohist.issue.work-completed`)
+- `dotnet build` clean (0 warnings, 0 errors); `dotnet test` 2575/2575 passed (8 new specs + 2567 prior). Architecture rules pass: handler outside `Epic.*` slice avoids the Services↔Grains cycle.
