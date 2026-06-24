@@ -119,10 +119,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run is null)
         {
             var metadata = input?.Metadata;
-            var projectId = metadata?.Annotations?.GetValueOrDefault("projectId") ?? GetProjectId();
-            var issueId = metadata?.Annotations?.GetValueOrDefault("issueId") ?? GetIssueId();
-            var effectiveDefinition = await LoadEffectiveDefinitionAsync(projectId, issueId);
-            _run = WorkflowRun.Create(GrainKey, effectiveDefinition, metadata ?? BuildRunMetadata(null));
+            var projectId = metadata?.Annotations?.GetValueOrDefault("projectId");
+            var issueId = metadata?.Annotations?.GetValueOrDefault("issueId");
+            var structure = await _profileManager.LoadStructureAsync(GrainKey, projectId, issueId);
+            _run = WorkflowRun.Create(GrainKey, structure, metadata ?? BuildRunMetadata(null));
             _run.Workspace = input?.Workspace;
         }
 
@@ -130,15 +130,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
-    }
-
-    private async Task<WorkflowDefinition> LoadEffectiveDefinitionAsync(
-        string? projectId = null,
-        string? issueId = null)
-    {
-        var template = await _profileManager.LoadTemplateAsync(GrainKey, projectId, issueId);
-        return template.Structure
-            ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no effective workflow template");
     }
 
     public async Task ResumeAsync()
@@ -201,7 +192,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         EnsureRun();
         var stage = _run.CurrentStage();
-        var config = (await LoadEffectiveDefinitionAsync()).Approval?.Feedback?.Task;
+        var approval = await _profileManager.LoadApprovalConfigAsync(GrainKey);
+        var config = approval?.Feedback?.Task;
         var feedbackTask = config is null
             ? WorkflowRunExtensions.BuildDefaultFeedbackTask(stage.Id)
             : WorkflowRunExtensions.ResolveFeedbackTask(config, stage.Id);
@@ -605,9 +597,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<string?> GetSequentialLockResourceAsync(string stage)
     {
-        var definition = await LoadEffectiveDefinitionAsync();
-        var stageDef = definition.Stages.Find(s => s.Stage == stage);
-        if (stageDef?.LockBehavior is null) return null;
+        var stageDef = await _profileManager.LoadStageSpecsAsync(GrainKey, stage);
+        if (stageDef.LockBehavior is null) return null;
         if (!string.Equals(stageDef.LockBehavior, "sequential", StringComparison.OrdinalIgnoreCase))
             return null;
         return stageDef.Resources?.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
@@ -626,9 +617,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         switch (work.WorkType)
         {
             case "stage-init":
-                var definition = await LoadEffectiveDefinitionAsync();
-                var stageDef = definition.Stages.Find(s => s.Stage == work.Stage)
-                    ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{work.Stage}'");
+                var stageDef = await _profileManager.LoadStageSpecsAsync(GrainKey, work.Stage);
                 var events = _run!.InitializeStage(stageDef.Tasks, stageDef.Checks);
                 if (events.Count > 0)
                     await CommitAsync(events);
@@ -1013,8 +1002,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return [];
 
         var stage = _run!.CurrentStageId!;
-        var definition = await LoadEffectiveDefinitionAsync();
-        var stageDef = definition.Stages.Find(s => s.Stage == stage);
+        var stageDef = await _profileManager.LoadStageSpecsAsync(GrainKey, stage);
         var actions = new List<CheckResultAction>(checkResults.Count);
 
         foreach (var cr in checkResults)
@@ -1068,8 +1056,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (failure?.Reason != FailureReason.CheckUnrepaired || string.IsNullOrWhiteSpace(failure.CheckName))
             return null;
 
-        var definition = await LoadEffectiveDefinitionAsync();
-        var stageDef = definition.Stages.Find(s => s.Stage == failure.Stage);
+        var stageDef = await _profileManager.LoadStageSpecsAsync(GrainKey, failure.Stage);
         var repairTasks = ResolveRepairTasks(stageDef, failure.CheckName, enforceLimit: false);
         if (repairTasks is null)
             return null;

@@ -35,6 +35,42 @@ public static partial class WorkflowRunExtensions
                 Stages = stages,
             };
         }
+
+        /// <summary>
+        /// Create overload that takes the narrow <see cref="WorkflowStructure"/>
+        /// projection exposed by <c>WorkflowProfileManager.LoadStructureAsync</c>.
+        /// The grain uses this so it never has to touch a full
+        /// <see cref="WorkflowDefinition"/>; tasks, checks, and lock behavior
+        /// are pulled in only when a stage actually initializes via
+        /// <c>LoadStageSpecsAsync</c>.
+        /// </summary>
+        public static WorkflowRun Create(
+            string id,
+            WorkflowStructure structure,
+            WorkflowRunMetadata? metadata = null)
+        {
+            if (structure.Stages.Count == 0)
+                throw new InvalidOperationException("WorkflowStructure requires at least one stage");
+
+            var stages = structure.Stages
+                .Select(s => new StageRun
+                {
+                    Id = s.Stage,
+                    Attempt = 1,
+                    RequiresApproval = s.RequiresApproval,
+                    Status = StageRunStatus.Pending
+                })
+                .ToList();
+
+            return new WorkflowRun
+            {
+                Id = id,
+                Metadata = metadata ?? new WorkflowRunMetadata(null, DateTimeOffset.UtcNow),
+                Status = WorkflowRunStatus.Pending,
+                CurrentStageId = stages[0].Id,
+                Stages = stages,
+            };
+        }
     }
 
     extension(WorkflowRun run)

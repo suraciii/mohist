@@ -1,0 +1,60 @@
+## Codebase Patterns
+
+- `WorkflowProfileManager.LoadTemplateAsync(runId, projectId?, issueId?)` returns `ResolvedTemplate` (template id + `WorkflowDefinition` structure + embedded variables). The cascade is `issue-custom → issue-ref → project-default → system-default`.
+- `WorkflowRun.Create` takes a `WorkflowDefinition` and only uses `definition.Stages` (stage id + `RequiresApproval`) to build `StageRun` instances.
+- `WorkflowRun.NextWork()` returns `StageInit` if `current.Initialized` is false; otherwise returns the next pending task or pending checks. So `PrepareWorkAsync("stage-init")` is the entry point that pulls stage specs and calls `_run.InitializeStage(tasks, checks)`.
+- Stage `InitializeStage` calls `Advance()` which auto-skips empty stages (no tasks, no checks), emits `StageStarted` for the next stage, etc.
+- `ResolveRunContextAsync(db, runId)` reads `WorkflowRuns` table to get project/issue context. For `StartAsync` the run is NOT yet persisted, so the grain must pass `projectId`/`issueId` explicitly via `input.Metadata.Annotations`.
+- `WorkflowRun` is loaded fresh from `_runStore.LoadAsync(GrainKey)` in `OnActivateAsync`. So between `StartAsync` and subsequent `PollWorkAsync`, the run IS persisted and `ResolveRunContextAsync` finds it.
+- The narrow APIs deliberately accept optional `projectId`/`issueId` parameters (forwarded to `LoadTemplateAsync`) so `StartAsync` can resolve before the run row exists, but `ProcessCheckResultAsync` / `TryScheduleRequestedCheckRepairAsync` / `PrepareWorkAsync("stage-init")` / `GetSequentialLockResourceAsync` / `RequestChangesAsync` rely on the run being persisted (no explicit context needed).
+- Orleans serialization surrogates live in `Grains/Surrogates/`. The `WorkflowDefinitionSurrogate` was removed because the grain no longer holds `WorkflowDefinition`. Per-stage surrogates (`StageDefinition`, `TaskDefinition`, `CheckDefinition`, `TaskFailureAction`, `TaskFailureCase`, `CheckFailureAction`, `CheckFailureRepair`) remain because those types are still passed into grain methods (`InitializeStage`, `AddTasksAsync`, `BindArtifactUploadsAsync`).
+- Test pattern for `WorkflowProfileManager`: SQLite + EF Core + `WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager)`. Seed via `IssueWorkflowProfile` / `ProjectWorkflowProfile` / `ProjectWorkflowTemplates` tables + a `WorkflowRuns` row + an `Issues` row carrying the runId in its state.
+- `WorkflowDefinitionSurrogate` removal is safe because `WorkflowDefinition` is only persisted via System.Text.Json (`IssueWorkflowProfile.Template` JSON column), never over Orleans.
+
+## T-001 Notes (WorkflowProfileManager narrow APIs + grain zero WorkflowDefinition references)
+
+### Implementation
+
+- New domain projection: `WorkflowStructure(Id, Stages: List<StageStructure>)` and `StageStructure(Stage, RequiresApproval)`, defined in `Domain/Definition/WorkflowDefinition.cs` next to `WorkflowDefinition`. `WorkflowDefinition.ToStructure()` does the projection.
+- `WorkflowRun.Create(id, WorkflowStructure, metadata?)` overload added in `Domain/Run/WorkflowRun.Lifecycle.cs`. Both overloads share the same `StageRun`-building logic; existing `WorkflowDefinition`-based `Create` keeps all domain tests working.
+- Three new methods on `WorkflowProfileManager`:
+  - `LoadStageSpecsAsync(runId, stageId, projectId?, issueId?)` → `StageDefinition`
+  - `LoadStructureAsync(runId, projectId?, issueId?)` → `WorkflowStructure`
+  - `LoadApprovalConfigAsync(runId)` → `ApprovalConfig?`
+  All three re-call `LoadTemplateAsync` so the cascade runs fresh on every call (hot reload). `LoadTemplateAsync(runId)` resolves context from the persisted `WorkflowRuns` row via `ResolveRunContextAsync`; `LoadStructureAsync` / `LoadStageSpecsAsync` accept explicit `projectId`/`issueId` for the `StartAsync` path that runs before the run is persisted.
+- Grain refactor: all six over-fetch points switched to the narrow APIs:
+  - `StartAsync` → `LoadStructureAsync(projectId, issueId)` from `input.Metadata.Annotations`
+  - `RequestChangesAsync` → `LoadApprovalConfigAsync`
+  - `PrepareWorkAsync("stage-init")` → `LoadStageSpecsAsync`
+  - `GetSequentialLockResourceAsync` → `LoadStageSpecsAsync`
+  - `ProcessCheckResultAsync` → `LoadStageSpecsAsync`
+  - `TryScheduleRequestedCheckRepairAsync` → `LoadStageSpecsAsync`
+- `WorkflowGrain.LoadEffectiveDefinitionAsync` deleted. `WorkflowGrain` has zero `WorkflowDefinition` references after this (verified via grep).
+- `Grains/Surrogates/WorkflowDefinitionSurrogates.cs`: removed `WorkflowDefinitionSurrogate` and `ApprovalConfigSurrogate` (and their converters). Kept the per-stage surrogates since `StageDefinition`/`TaskDefinition`/`CheckDefinition` still cross grain boundaries.
+
+### Gotchas
+
+- **Context resolution timing**: `LoadStructureAsync` and `LoadStageSpecsAsync` accept optional `projectId`/`issueId` because `StartAsync` runs before the `WorkflowRuns` row exists. The grain already had the projectId/issueId in `input.Metadata.Annotations`, so passing them through preserved the original behavior. Without this, the cascade would fall through to the system default and tests like `HappyPathSpecs` would lose their project-level templates.
+- **Per-stage surrogates stay**: removing `WorkflowDefinitionSurrogate` was the natural consequence of zero grain references. But `StageDefinition`/`TaskDefinition`/`CheckDefinition` are still passed into `InitializeStage`/`AddTasksAsync`/`BindArtifactUploadsAsync`, so the per-stage surrogates are still required for Orleans cross-grain serialization.
+- **`WorkflowStructure` is NOT Orleans-serialized**: it's only used inside the grain's `StartAsync` → `_run = WorkflowRun.Create(GrainKey, structure, ...)`. The structure projection lives entirely within the grain's address space; `WorkflowRun` is persisted via System.Text.Json (existing path).
+- **WorkflowRun.Lifecycle.cs duplicate code**: the two `Create` overloads share their bodies almost verbatim. Kept them parallel for clarity rather than introducing a private helper that would obscure the difference between "create from full definition" (used by domain tests) and "create from narrow projection" (used by the grain).
+
+### Test coverage
+
+- 9 new unit tests in `WorkflowProfileManagerSpecs`:
+  - `LoadStageSpecsAsync_ReturnsTasksAndChecksForStage_FromProjectTemplate` (basic projection)
+  - `LoadStageSpecsAsync_HonorsIssueCustomTemplate_PerStage` (cascade priority)
+  - `LoadStageSpecsAsync_RerunsCascadeBetweenCalls_HotReloadsProfileEdits` (hot reload)
+  - `LoadStageSpecsAsync_ThrowsWhenStageMissing` (error path)
+  - `LoadStructureAsync_ReturnsStageSequenceAndApprovalFlags_WithoutTasks` (no tasks/checks in structure)
+  - `LoadStructureAsync_HonorsExplicitContextAtCreateTime_BeforeRunPersisted` (the StartAsync path)
+  - `LoadStructureAsync_FallsBackToSystemDefault_WhenContextMissing` (cascade fallback)
+  - `LoadApprovalConfigAsync_ReturnsConfiguredFeedbackTask_WhenDefined`
+  - `LoadApprovalConfigAsync_ReturnsNull_WhenNoApprovalConfig`
+- Full server suite: 2596 passed, 10 skipped, 0 failed (was 2587 before; +9 new narrow API tests).
+- Workflow subset: 690 passed, 6 skipped, 0 failed (was 681 before).
+
+### Open items for follow-up tasks
+
+- T-002 (stage-init eager + `StageInit` variant deletion): the new `LoadStageSpecsAsync` is the per-stage-init entry point the spec needs. After T-002 the `case "stage-init"` branch in `PrepareWorkAsync` will be deleted entirely; `LoadStageSpecsAsync` will be called from the new `InitializeFreshStagesAsync` step in `CommitAsync` instead.
+- T-003 (work item protocol): the new `WorkflowStructure` projection is what gets surfaced to the runner-side translator in T-003's runner-side translation step. The grain no longer holds `WorkflowDefinition` so this stage's clean-up is done.
