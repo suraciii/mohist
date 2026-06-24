@@ -31,6 +31,26 @@ describe("WorkspaceManager", () => {
     expect(marker).toMatchObject({ issueId: "issue-old", issueNumber: 9, workflowRunId: "wr-old" })
   })
 
+  it("SameIssueRestartingWorkflow_NewRunMaterializesFreshWorkspaceInsteadOfIdentityMismatch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const repo = await createRepo(root, "repo")
+
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const first = await manager.ensure(work("wr-old", "issue-same", repo), signal)
+    await writeFile(join(first.path, "stale.txt"), "old run data\n")
+
+    const second = await manager.ensure(work("wr-new", "issue-same", repo), signal)
+
+    expect(second.path).toBe(first.path)
+    expect(exists(join(second.path, "stale.txt"))).toBe(false)
+    expect(second.branch).toBe("mohist/run-wr-new")
+    const marker = JSON.parse(await readFile(join(second.path, ".mohist", "workspace.json"), "utf8"))
+    expect(marker).toMatchObject({ issueId: "issue-same", issueNumber: 9, workflowRunId: "wr-new" })
+  })
+
   it("NewIssueReusingNumber_ExplicitMaterializeRemovesStaleWorkspaceBeforeCreatingFreshWorkspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
     const repo = await createRepo(root, "repo")
