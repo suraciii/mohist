@@ -1,6 +1,8 @@
+using Mohist.Server.Infrastructure.Hosting;
+
 namespace Mohist.Server.SystemInfo;
 
-public sealed class SystemInfoService
+public sealed class SystemInfoService : ISingletonService
 {
     public const string HomeEnvironmentVariable = "HOME";
 

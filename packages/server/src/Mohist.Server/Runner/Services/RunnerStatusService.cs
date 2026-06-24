@@ -1,9 +1,10 @@
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
 
 namespace Mohist.Server.Runner.Services;
 
-public class RunnerStatusService
+public class RunnerStatusService : IScopedService
 {
     private readonly IGrainFactory _grainFactory;
     private readonly RunnerConnectionTracker _connectionTracker;

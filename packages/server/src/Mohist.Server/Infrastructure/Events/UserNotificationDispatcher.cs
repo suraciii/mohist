@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using CloudNative.CloudEvents;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Infrastructure.Events;
 
@@ -35,7 +36,7 @@ namespace Mohist.Server.Infrastructure.Events;
 /// is a thin cache, not a replacement for that pattern.
 /// </para>
 /// </summary>
-public sealed class ConnectionSubscriptionRegistry
+public sealed class ConnectionSubscriptionRegistry : ISingletonService
 {
     /// <summary>
     /// connectionId → set of event types the connection wants. A

@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Agent.Grains;
@@ -15,7 +14,6 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -69,21 +67,16 @@ public static class MohistServiceRegistration
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
-        services.AddSingleton<ConnectionSubscriptionRegistry>();
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddHostedService<IssueWorkflowReconciliationService>();
         services.AddHostedService<AttachmentCleanupService>();
-        services.AddSingleton<ConfigService>();
-        services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
-        services.AddSingleton<SystemdInstallDetector>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
-        services.AddSingleton<SystemInfoService>();
         services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();
         services.AddSingleton<ISystemUpdateCommandRunner, ProcessSystemUpdateCommandRunner>();
         services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>
@@ -94,14 +87,10 @@ public static class MohistServiceRegistration
             client.BaseAddress = new Uri(serverUrl);
             client.Timeout = TimeSpan.FromSeconds(5);
         });
-        services.AddSingleton<SystemUpdateService>();
         services.AddSingleton<IWorkflowArtifactStorage, FileSystemWorkflowArtifactStorage>();
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
         services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
-        services.AddScoped<AttachmentService>();
-        services.AddScoped<WorkflowArtifactUploadService>();
-        services.AddScoped<AgentJobArtifactUploadService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
@@ -123,15 +112,13 @@ public static class MohistServiceRegistration
         services.AddSingleton<TraceQuerier>();
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
-        services.AddSingleton<RunnerConnectionTracker>();
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
-        services.AddScoped<RunnerStatusService>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
         services.AddScoped<RunnerDefinitionStore>();
-        services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options);
+        services.AddSignalR();
 
         return services;
     }
