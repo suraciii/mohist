@@ -62,13 +62,13 @@ Action 可以返回文本 output，也可以返回 JSON object output。需要�
 成功 task 的 JSON object output 应自动成为 task-local output。后续 task 可以通过 task id 读取，不需要 workflow profile 重新声明 action 的 output 字段：
 
 ```yaml
-- id: integrate:open-pr
-  uses: mohist/create-pull-request
+- id: discover-change
+  uses: example/discover-change
 
-- id: integrate:merge-pr
-  uses: mohist/merge-pull-request
+- id: consume-change
+  uses: example/consume-change
   with:
-    prNumber: ${{ tasks.integrate:open-pr.outputs.prNumber }}
+    changeId: ${{ tasks.discover-change.outputs.changeId }}
 ```
 
 `tasks.<taskId>.outputs.*` 表示某个 task 的 action output。它适合直接 task-to-task wiring。
@@ -80,36 +80,30 @@ Action output 和 workflow variables 是两种机制。Action output 是 action 
 task 可以用 `setVars` 把 action output 的部分字段写入 workflow runtime profile：
 
 ```yaml
-- id: integrate:open-pr
-  title: Open or update GitHub PR
-  uses: mohist/create-pull-request
+- id: discover-change
+  title: Discover change metadata
+  uses: example/discover-change
   with:
-    source: ${{ workspace.branch }}
-    target: ${{ repository.baseBranch }}
-    remote: origin
-    title: "Complete issue #${{ issue.number }}"
+    path: ${{ openspecChangeDir }}
   setVars:
-    github.pr.number: output.prNumber
-    github.pr.url: output.prUrl
-    github.pr.headSha: output.headSha
+    change.id: output.changeId
+    change.url: output.changeUrl
 ```
 
 `setVars` 的左侧是 runtime profile `vars` 下的目标路径，右侧是当前 action output 的 JSON path。上例 patch：
 
 ```yaml
-vars.github.pr.number
-vars.github.pr.url
-vars.github.pr.headSha
+vars.change.id
+vars.change.url
 ```
 
 后续 task 不直接读取 runtime profile，而是读取 profile layers merge 后的 effective `vars`：
 
 ```yaml
-- id: integrate:merge-pr
-  uses: mohist/merge-pull-request
+- id: consume-change
+  uses: example/consume-change
   with:
-    prNumber: ${{ vars.github.pr.number }}
-    expectedHeadSha: ${{ vars.github.pr.headSha }}
+    changeId: ${{ vars.change.id }}
 ```
 
 规则：
@@ -143,13 +137,14 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
 目标语义：
 
 ```yaml
-- id: integrate:merge-pr
-  title: Merge GitHub PR
-  uses: mohist/merge-pull-request
+- id: integrate:publish
+  title: Publish GitHub PR
+  uses: mohist/publish-via-pr
   with:
-    prNumber: ${{ vars.github.pr.number }}
-    method: squash
-    expectedHeadSha: ${{ vars.github.pr.headSha }}
+    source: ${{ workspace.branch }}
+    target: ${{ repository.baseBranch }}
+    remote: origin
+    message: "Complete issue #${{ issue.number }}"
   onFailure:
     limit: 2
     cases:
@@ -167,25 +162,14 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
                 title: Resolve rebase conflicts
                 with:
                   description: Resolve rebase conflicts, stage resolved files, and continue the rebase.
-          - id: recover:open-pr
-            title: Update GitHub PR
-            uses: mohist/create-pull-request
+          - id: recover:publish
+            title: Publish GitHub PR
+            uses: mohist/publish-via-pr
             with:
               source: ${{ workspace.branch }}
               target: ${{ repository.baseBranch }}
               remote: origin
-              title: "Complete issue #${{ issue.number }}"
-            setVars:
-              github.pr.number: output.prNumber
-              github.pr.url: output.prUrl
-              github.pr.headSha: output.headSha
-          - id: recover:merge-pr
-            title: Merge GitHub PR
-            uses: mohist/merge-pull-request
-            with:
-              prNumber: ${{ vars.github.pr.number }}
-              method: squash
-              expectedHeadSha: ${{ vars.github.pr.headSha }}
+              message: "Complete issue #${{ issue.number }}"
 ```
 
 执行规则：
