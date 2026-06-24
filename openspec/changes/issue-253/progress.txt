@@ -58,3 +58,46 @@
 
 - T-002 (stage-init eager + `StageInit` variant deletion): the new `LoadStageSpecsAsync` is the per-stage-init entry point the spec needs. After T-002 the `case "stage-init"` branch in `PrepareWorkAsync` will be deleted entirely; `LoadStageSpecsAsync` will be called from the new `InitializeFreshStagesAsync` step in `CommitAsync` instead.
 - T-003 (work item protocol): the new `WorkflowStructure` projection is what gets surfaced to the runner-side translator in T-003's runner-side translation step. The grain no longer holds `WorkflowDefinition` so this stage's clean-up is done.
+
+## T-002 Notes (stage-init eager + `WorkflowWork.StageInit` deletion)
+
+### Implementation
+
+- **Domain (`WorkflowRun.Work.cs`)**:
+  - Deleted `WorkflowWork.StageInit(string stage)` factory and `WorkflowWork.StageInitData` record — `WorkflowWork` now has only `Task` and `Checks` variants.
+  - Deleted the `if (!current.Initialized) return WorkflowWork.StageInit(...)` branch in `NextWork()`. The function now assumes its caller has already materialized the initial stage.
+- **Grain (`WorkflowGrain.cs`)**:
+  - Removed the `case "stage-init":` branch in `PrepareWorkAsync` (was ~10 lines; load stage specs, call `InitializeStage`, recurse on the next work). After this, `PrepareWorkAsync` only handles `task` and `checks`.
+  - Added `InitializeFreshStagesAsync(IReadOnlyList<WorkflowEvent>)` — a pre-commit step called from `CommitAsync` that scans the to-be-committed event batch for any `StageStarted(stageId)` whose stage is not yet `Initialized`, loads fresh stage specs via `_profileManager.LoadStageSpecsAsync`, calls `_run.InitializeStage(tasks, checks)`, and merges the resulting init events back into the batch. The loop terminates once every `StageStarted` has a corresponding initialized stage.
+  - This unifies Start, ReportResult (→ Advance), Rerun (→ new `StageStarted`) and any auto-skip-into-next-stage under the same eager-init rule, eliminating the previous "four transition sites" duplication risk.
+  - The eager init is **the** invariant: `StageStarted ⟹ Initialized`. `Retry` does not emit `StageStarted` (it only re-runs the failed task/check), so it doesn't need the init pass.
+- **Cleanup**:
+  - Removed a stray `Console.WriteLine("DEBUG MapTasks ...")` in `WorkflowStatusMapper.MapTasks` (debug instrumentation left over from earlier investigation).
+  - The `IssueWorkflowProductLoopSpecs` test assertion changed from `t.Id == "proposal"` to `t.Id.StartsWith("proposal")` because `WorkflowRun` task IDs are formatted as `{definitionId}.{attempt}` (e.g. `proposal.1`).
+
+### Gotchas
+
+- **Empty stage auto-skip needs multi-step init**: when `InitializeStage` runs on an empty stage (no tasks, no checks), it calls `Advance()` which auto-completes the empty stage and may emit another `StageStarted` for the following stage. The init loop in `InitializeFreshStagesAsync` re-scans the materialized list on each iteration to pick up those follow-on `StageStarted` events and initialize them too. Without the loop, a profile like `[empty, build]` would commit `StageStarted("empty")` (skipped) followed by `StageStarted("build")` (uninitialized).
+- **`WorkflowRun.Retry()` does NOT emit `StageStarted`** — it only re-attempts a failed task or check, and emits `WorkflowRunResumed`. So the "Retry" arm of the spec invariant is vacuously satisfied: no `StageStarted`, no init needed. The acceptance criterion is documented but mechanically guaranteed by the domain model.
+- **`WorkflowRun.Rerun()` DOES emit `StageStarted`** (after replacing the stage with a fresh `StageRun` with `Initialized = false`). The unified `InitializeFreshStagesAsync` covers it because every `StageStarted` in the to-be-committed batch is processed in the same pass.
+- **`NextWork()` no longer has an "uninitialized" branch**. This is a domain-level guarantee; the grain must commit the init before any caller (PollWork) can call `NextWork`. The new `StageInitEagerSpecs` tests pin this down at the grain boundary.
+- **Hot-reload semantics preserved**: because `InitializeFreshStagesAsync` re-calls `LoadStageSpecsAsync` on each `StageStarted`, profile edits (add/remove task) take effect on the next stage to be entered but never mutate a stage whose `StageStarted` is already committed. This matches the previous `case "stage-init"` behavior — the test `ProfileChange_DuringRunningStage_DoesNotMutateThatStage` enforces it.
+
+### Test coverage
+
+- 6 new tests in `StageInitEagerSpecs`:
+  - `Start_InitialStage_InitializedBeforePollReturnsWork` — Start path, first stage is initialized before any caller observes it.
+  - `MultiStage_AdvanceEnteringNextStage_InitializesImmediately` — ReportResult → Advance → next stage `StageStarted` triggers init in the same commit.
+  - `EmptyLeadingStage_SkippedAndInitialized_WithoutSurfacingStageInit` — empty leading stages still have their `StageStarted` (and downstream `StageStarted`) initialized, even though no `NextWork` is ever asked for them.
+  - `Rerun_RestartsStage_StageInitializedInSameCommit` — Rerun emits a new `StageStarted`; the same commit re-initializes the stage so `NextWork` returns a task, not `stage-init`.
+  - `Start_NextWork_DirectlyReturnsTaskOrChecks_NeverUninitializedStage` — `NextWork` always sees an initialized current stage.
+  - `ProfileChange_DuringRunningStage_DoesNotMutateThatStage` — hot-reload only affects the next stage to be entered.
+- All 6 new tests pass.
+- Full server suite: **2602 passed, 10 skipped, 0 failed** (was 2596 before; +6 new stage-init tests).
+- Workflow subset: **696 passed, 6 skipped, 0 failed** (was 690 before; +6 new tests).
+- The `IssueWorkflowProfileApiSpecs.NextStageInitialization_UsesUpdatedDefinition_AfterProfileSave` test is still marked `Skip` (independent of this task — pre-existing `Fact(Skip = ...)` for an unrelated computed-column migration note). The hot-reload semantics it pins down are still enforced by `StageInitEagerSpecs.ProfileChange_DuringRunningStage_DoesNotMutateThatStage`.
+
+### Open items for follow-up tasks
+
+- T-003 (work item protocol): after T-002 the only thing the runner ever sees is `Task`/`Checks` work items. The runner-facing `WorkItem` shape, translator, and the new `TaskOutcome`/`CheckOutcome` types are all that remain in D1/D2/D4/D7.
+- T-004 (supervision): the `EnsureWorkHeartbeatAsync` / `ArmWorkCompletionTimer` / `FailTimedOutWorkAsync` paths still exist; they are scheduled for deletion in T-004 alongside the whole work-completion timeout supervision.

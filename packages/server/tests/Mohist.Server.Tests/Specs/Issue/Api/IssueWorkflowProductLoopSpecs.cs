@@ -61,7 +61,7 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         Assert.Contains(startEvents, e => e.Type == "com.mohist.workflow.run.started");
 
         var initialStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
-        Assert.Contains(initialStatus.Workflow!.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
+        Assert.Contains(initialStatus.Workflow!.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id.StartsWith("proposal")));
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
 
