@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Hosting.TestTypes;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -26,7 +25,7 @@ public class ConventionalRegistrationSpecs
     public void ScopedMarker_RegistersAsSelfWithScopedLifetime_AndIsResolvable()
     {
         var services = new ServiceCollection();
-        services.AddMohistConventionalServices();
+        services.AddMohistConventionalServices(typeof(ConventionalScopedProbe).Assembly);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -49,7 +48,7 @@ public class ConventionalRegistrationSpecs
     public void SingletonMarker_RegistersAsSelfWithSingletonLifetime_AndIsResolvable()
     {
         var services = new ServiceCollection();
-        services.AddMohistConventionalServices();
+        services.AddMohistConventionalServices(typeof(ConventionalSingletonProbe).Assembly);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -70,7 +69,7 @@ public class ConventionalRegistrationSpecs
     public void ScannedTypes_AreResolvableThroughProductionAndFixtureRegistrationEntries()
     {
         var productionServices = new ServiceCollection();
-        productionServices.AddMohistServerCore(EmptyConfig());
+        productionServices.AddMohistConventionalServices(typeof(ConventionalScopedProbe).Assembly);
         using var productionProvider = productionServices.BuildServiceProvider();
 
         using (var scope = productionProvider.CreateScope())
@@ -79,9 +78,23 @@ public class ConventionalRegistrationSpecs
             Assert.NotNull(fromProd);
         }
 
-        using var fixtureScope = _fixture.Services.CreateScope();
+        var fixtureServices = new ServiceCollection();
+        fixtureServices.AddMohistConventionalServices(typeof(ConventionalScopedProbe).Assembly);
+        using var fixtureProvider = fixtureServices.BuildServiceProvider();
+        using var fixtureScope = fixtureProvider.CreateScope();
         var fromFixture = fixtureScope.ServiceProvider.GetService<ConventionalScopedProbe>();
         Assert.NotNull(fromFixture);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void TestProbeTypes_AreNotRegisteredThroughProductionEntry()
+    {
+        var services = new ServiceCollection();
+        services.AddMohistServerCore(EmptyConfig());
+
+        Assert.DoesNotContain(services, d => d.ServiceType.Namespace == typeof(ConventionalScopedProbe).Namespace);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -90,7 +103,7 @@ public class ConventionalRegistrationSpecs
     public void TypesWithoutAnyMarkerInterface_AreNotAutoRegistered()
     {
         var services = new ServiceCollection();
-        services.AddMohistConventionalServices();
+        services.AddMohistConventionalServices(typeof(UnmarkedProbe).Assembly);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -108,7 +121,7 @@ public class ConventionalRegistrationSpecs
         const int replacementMarker = 4242;
 
         var services = new ServiceCollection();
-        services.AddMohistConventionalServices();
+        services.AddMohistConventionalServices(typeof(ConventionalOverrideProbe).Assembly);
         services.AddSingleton(new ConventionalOverrideProbe { Marker = replacementMarker });
 
         using var provider = services.BuildServiceProvider();

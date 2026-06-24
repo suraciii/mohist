@@ -29,6 +29,7 @@ public class MigratedWorkflowServicesRegistrationSpecs
         yield return new object[] { typeof(WorkflowActivityQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(WorkflowQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(WorkflowProfileManager), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowRunProfileManager), ServiceLifetime.Scoped };
         yield return new object[] { typeof(WorkflowDispatchBuilder), ServiceLifetime.Scoped };
         yield return new object[] { typeof(ProjectWorkflowProfileManager), ServiceLifetime.Scoped };
         yield return new object[] { typeof(IssueWorkflowProfileManager), ServiceLifetime.Scoped };

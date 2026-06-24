@@ -1,3 +1,4 @@
+using System.Reflection;
 using Scrutor;
 
 namespace Mohist.Server.Infrastructure.Hosting;
@@ -24,11 +25,12 @@ public static class ServiceCollectionExtensions
     /// without throwing on duplicate registration.
     /// </remarks>
     public static IServiceCollection AddMohistConventionalServices(this IServiceCollection services)
-    {
-        var assembly = typeof(MohistServiceRegistration).Assembly;
+        => services.AddMohistConventionalServices(typeof(MohistServiceRegistration).Assembly);
 
+    internal static IServiceCollection AddMohistConventionalServices(this IServiceCollection services, params Assembly[] assemblies)
+    {
         services.Scan(scan => scan
-            .FromAssemblies(assembly)
+            .FromAssemblies(assemblies)
             .AddClasses(classes => classes.AssignableTo<IScopedService>())
                 .AsSelf()
                 .WithScopedLifetime()
