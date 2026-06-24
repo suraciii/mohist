@@ -53,7 +53,11 @@ function setupResizeObserver() {
 }
 
 function teardownResizeObserver() {
-  delete (globalThis as { ResizeObserver?: ResizeObserverCtor }).ResizeObserver
+  // jsdom provides `ResizeObserver` as a non-configurable property in
+  // recent versions, so `delete globalThis.ResizeObserver` throws
+  // `TypeError: Cannot delete property 'ResizeObserver'`. Assigning
+  // `undefined` is the supported way to restore the test isolation.
+  ;(globalThis as { ResizeObserver?: ResizeObserverCtor }).ResizeObserver = undefined
 }
 
 describe('MarkdownReader barrel export', () => {

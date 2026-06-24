@@ -98,7 +98,7 @@ export class WorkExecutor {
   async execute(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== "agent-job") {
-      const precheck = await this.verifyBoundWorkspace(work, signal)
+      const precheck = await this.ensureBoundWorkspace(work, signal)
       if (precheck.kind === "failure") return precheck.result
       resolvedWorkspace = precheck.workspace
     } else {
@@ -109,8 +109,13 @@ export class WorkExecutor {
     return await this.executeOne(work, resolvedWorkspace, signal)
   }
 
-  private async verifyBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async ensureBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
+      // Use `ensure` (not `verify`) so the first dispatch materializes
+      // the workspace once per workflow run via `planResolution`; every
+      // later dispatch falls through to `verify` for the once-per-run
+      // contract (issue #181). This is the start-boundary precheck
+      // referenced by `executor-branch-stability.spec.ts`.
       const info = await this.workspaceManager.ensure(work, signal)
       return { kind: "ok", workspace: infoToResolved(info) }
     } catch (error) {

@@ -209,7 +209,7 @@ beforeEach(() => {
 
 afterEach(() => {
   queryClient.clear()
-  delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
+  ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = undefined
   vi.unstubAllGlobals()
 })
 
