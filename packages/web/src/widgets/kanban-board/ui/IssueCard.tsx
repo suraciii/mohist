@@ -269,6 +269,16 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             #{issue.number}
           </span>
           <PriorityChip priority={issue.priority} />
+          {issue.workflowProfileId && (
+            <span
+              data-testid="issue-card-workflow-profile"
+              data-workflow-profile={issue.workflowProfileId}
+              className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-700"
+              title={`Workflow profile: ${issue.workflowProfileId}`}
+            >
+              {issue.workflowProfileId}
+            </span>
+          )}
           {isDraft && <DraftPill />}
           {showWorkflowStagePill && <WorkflowStagePill issue={issue} />}
           <WorkflowStageProgressIndicator progress={issue.workflowStageProgress} />

@@ -334,3 +334,144 @@
   `{success:false, error:"Cannot change workflow profile ...", code:"workflow_profile_locked"}`:
   asserts non-zero exit code, that the server error text is on stderr,
   and that the error code is also surfaced.
+
+## Task T-005 — Web UI surfaces all read the unified fact; detail page gets a change control
+
+- New widget `WorkflowProfileControl` at
+  `packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.tsx`
+  mounts on the issue detail right rail (between LatestArtifactsPanel
+  and the existing Configuration card). It renders:
+    1. the effective profile id (from the issue read model — falls back
+       to `useIssueWorkflowProfileYaml().profileId`, then to
+       `mohist/default`);
+    2. a select listing every entry from `useWorkflowProfiles()` plus
+       any pending unknown value;
+    3. an explanatory `data-testid="issue-workflow-profile-locked-reason"`
+       message when the issue has started;
+    4. an inline error display
+       (`data-testid="issue-workflow-profile-error"`) on PATCH failure.
+  Mutation: `useUpdateIssueWorkflowProfile` (new hook in
+  `packages/web/src/entities/issue/api/queries.ts`) calls
+  `updateIssue(issueNumber, { workflowProfileId }, projectId)` — the
+  PATCH contract's raw-presence-aware semantics handle the
+  absent/null/value cases uniformly (T-002). On success, all relevant
+  query keys get invalidated (`['issues']`, `['issues', n]`,
+  `['issues', n, projectId]`, `['issues', n, projectId, 'workflow-profile-yaml']`),
+  so the workflow-profile page, the detail page, and the issue list all
+  refresh together.
+- The `updateIssue` client signature was widened to take an
+  `UpdateIssueOptions` object so the new `workflowProfileId?: string | null`
+  field is typed and discoverable; existing callers compile unchanged.
+- `IssueWorkflowProfileEditor` already read the profile from
+  `useIssueWorkflowProfileYaml(issueNumber).profileId`. Per D6, the
+  server's `BuildIssueWorkflowProfileResponseAsync` already projects
+  `info.WorkflowProfileId` (the resolved value from T-001's resolver),
+  so this widget was correct without edits. The custom-YAML editor
+  path remains structurally separate from the profile selection
+  (`PUT /workflow-profile/template` overrides the runtime definition
+  but never rewrites `issue.WorkflowProfileId`).
+- `IssueCard` (the kanban-board card used by the issues list) now
+  renders a `data-testid="issue-card-workflow-profile"` chip whenever
+  the read model carries a non-null `workflowProfileId`. No chip when
+  the issue has no selection — the inherited default is still visible
+  on the detail page and workflow-profile page. All three surfaces
+  (list, detail, workflow-profile page) now project from the same
+  `IssueInfo.WorkflowProfileId`, satisfying the "issue detail,
+  workflow-profile page, and issue list all display the same effective
+  profile" acceptance criterion.
+
+## Gotchas
+
+- The detail page test file at `tests/IssueDetailPage.test.tsx` had a
+  test ("labels active run YAML as runtime output, not workflow
+  profile configuration") that asserted
+  `queryByText(/Workflow Definition/i)` was absent. My first pass at
+  the `WorkflowProfileControl` body copy ("Determines which workflow
+  definition runs when this issue is started.") matched that regex
+  even though the test's intent was to ensure no duplicate
+  `Workflow Definition` heading existed alongside the workflow-profile
+  reference card. Reworded the body copy to "Decides which workflow
+  template runs when this issue is started." — preserves the intent
+  without tripping the guardrail. Worth keeping in mind: any new
+  workflow-profile UI on the detail page must avoid "Workflow
+  Definition" as a substring in body copy.
+- `useUpdateIssueWorkflowProfile` invalidates
+  `['issues', n, projectId, 'workflow-profile-yaml']` on success so
+  the workflow-profile page refreshes without a manual refetch. It
+  also invalidates `['issues', n]` (no project scope) and
+  `['issues', n, projectId]` because TanStack treats project-suffixed
+  and unsuffixed keys as separate caches — without both, the detail
+  page's `useIssue` could lag behind the change.
+- The custom-YAML editor (`IssueWorkflowProfileEditor`) is still
+  reachable from the detail page as before. It is intentionally
+  separate from the new `WorkflowProfileControl` change control so
+  advanced custom-YAML editing is not conflated with the
+  single-source-of-truth selection. The control surfaces
+  `data.hasCustomTemplate` in a helper sentence when an override is
+  active at runtime — a UI-only hint; it does NOT touch the
+  selection.
+
+## New regression coverage
+
+`WorkflowProfileControl` (Unit):
+- `renders the effective profile id from the issue read model` —
+  asserts the chip text and `data-effective-profile` attribute.
+- `falls back to mohist/default when no issue-level selection and no
+  workflow-profile response` — no `workflowProfileId` on the issue,
+  no workflow-profile yaml data ⇒ `mohist/default`.
+- `falls back to the workflow-profile endpoint profile id when the
+  read model omits it` — when the issue has no `workflowProfileId`,
+  the workflow-profile yaml endpoint's `profileId` wins; matches the
+  unified-fact behavior.
+- `sends a PATCH with the new profile id when a backlog issue changes
+  profile` — selects `mohist/pr`, asserts `mutateAsync` is called with
+  `{ issueNumber: 14, workflowProfileId: 'mohist/pr' }`.
+- `disables the selector and shows a clear reason when the issue has
+  started` — `status: 'in_progress'` + `workflowRunId: 'wr-1'` ⇒
+  select is disabled, lock reason text is visible.
+- `does not call update when the issue has started and the user
+  cannot trigger a change` — guards against accidental dispatch.
+- `surfaces the server error text and keeps the prior profile id when
+  the PATCH fails on a started issue` — backend-style 409 rejection
+  surfaced via the inline error slot, prior profile value retained.
+
+`tests/IssueDetailPage.test.tsx > IssueDetailPage workflow profile
+integration` (added cases on top of existing suite):
+- `displays the issue-level workflow profile on the detail page from
+  the read model` — verifies the `data-effective-profile` attribute
+  carries the read-model value.
+- `disables the profile change selector and explains why on a started
+  issue` — covers the spec's "started issue blocks profile change in
+  Web UI" requirement end-to-end.
+- `sends the new profile id to the PATCH endpoint when the user
+  changes profile on a backlog issue` — verifies the round-trip from
+  the detail-page select through `useUpdateIssueWorkflowProfile` to
+  the PATCH body.
+- `surfaces the server error and keeps the previous profile when
+  PATCH is rejected` — reuses the server's existing
+  `workflow_profile_locked` rejection to assert the Web surfaces the
+  message and doesn't lose the prior selection.
+- `renders the inherited default when neither the read model nor the
+  workflow-profile response carry a selection` — covers the
+  "create without selection inherits default" scenario.
+
+`tests/CreateIssueDialog.test.tsx > CreateIssueDialog recommendation
+override and acceptance`:
+- `omits the workflowProfileId key when no profile is chosen and no
+  frontmatter recommendation is present` — payload has no
+  `workflowProfileId` key (matches T-004 CLI semantics).
+- `sends workflowProfileId=mohist/pr when the user explicitly selects
+  it` — the user-facing create-dialog "Selecting mohist/pr in the
+  create dialog results in the created issue detail displaying
+  mohist/pr" criterion.
+- (new `describe` block) `CreateIssueDialog -> issue detail workflow
+  profile display round-trip`:
+    - `reflects the chosen profile on the resulting issue detail read
+      model` — end-to-end that the mocked POST response carries the
+      chosen `workflowProfileId`, proving the create→detail agreement.
+
+`IssueCard - workflow profile chip` (added 2 tests):
+- `renders the workflow profile chip when the read model carries a
+  selection` — `mohist/pr` shows as a chip with the right data attr.
+- `does not render a profile chip when the issue has no selection` —
+  null profile ⇒ no chip.

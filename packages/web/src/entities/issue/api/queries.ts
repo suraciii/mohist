@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import type { ApprovalFeedback, IssueWorkflowProfileYamlResponse } from '../model/types'
+import type { ApprovalFeedback, Issue, IssueWorkflowProfileYamlResponse } from '../model/types'
 import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams } from './client'
-import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssueWorkflowProfileYaml } from './client'
+import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
   const { projectId } = useProject()
@@ -161,6 +161,21 @@ export function useUpdateIssueWorkflowProfileYaml() {
       updateIssueWorkflowProfileYaml(issueNumber, yaml, projectId!),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
+    },
+  })
+}
+
+export function useUpdateIssueWorkflowProfile() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<Issue, Error, { issueNumber: number; workflowProfileId: string | null }>({
+    mutationFn: ({ issueNumber, workflowProfileId }) =>
+      updateIssue(issueNumber, { workflowProfileId }, projectId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId] })
+      queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId, 'workflow-profile-yaml'] })
     },
   })
 }

@@ -182,3 +182,22 @@ describe('IssueCard - no legacy startEligibility fields rendered', () => {
     expect(screen.queryAllByTestId('issue-card').length).toBeGreaterThanOrEqual(3)
   })
 })
+
+describe('IssueCard - workflow profile chip', () => {
+  it('renders the workflow profile chip when the read model carries a selection', () => {
+    const issue = makeIssue({ workflowProfileId: 'mohist/pr' })
+    renderCard(issue)
+
+    const chip = screen.getByTestId('issue-card-workflow-profile')
+    expect(chip).toBeInTheDocument()
+    expect(chip).toHaveTextContent('mohist/pr')
+    expect(chip.dataset.workflowProfile).toBe('mohist/pr')
+  })
+
+  it('does not render a profile chip when the issue has no selection', () => {
+    const issue = makeIssue({ workflowProfileId: null })
+    renderCard(issue)
+
+    expect(screen.queryByTestId('issue-card-workflow-profile')).not.toBeInTheDocument()
+  })
+})
