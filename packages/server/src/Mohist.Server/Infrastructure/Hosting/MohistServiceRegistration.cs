@@ -117,7 +117,11 @@ public static class MohistServiceRegistration
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
         services.AddScoped<RunnerDefinitionStore>();
-        services.AddSignalR();
+        services.AddSignalR()
+            .AddJsonProtocol(options =>
+            {
+                options.PayloadSerializerOptions = JSON.Options;
+            });
 
         return services;
     }
