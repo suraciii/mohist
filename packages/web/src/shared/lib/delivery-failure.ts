@@ -210,7 +210,7 @@ function extractFailureKindCandidate(value: unknown): unknown {
   }
   if (typeof value === 'object') {
     const record = value as Record<string, unknown>
-    const direct = record.failureKind ?? record.FailureKind
+    const direct = record.failureKind ?? record.FailureKind ?? record.errorCode ?? record.ErrorCode
     if (isDeliveryFailureKind(direct)) return direct
     if (isDeliveryFailureKind(record.kind)) {
       const kind = record.kind as string

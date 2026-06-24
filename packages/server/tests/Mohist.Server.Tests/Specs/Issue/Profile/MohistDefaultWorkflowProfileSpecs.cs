@@ -866,21 +866,24 @@ public class MohistDefaultWorkflowProfileSpecs
         stages:
           - stage: integrate
             tasks:
-              - id: integrate:publish
-                title: Publish changes
-                uses: mohist/publish-via-pr
+              - id: integrate:merge-pr
+                title: Merge GitHub PR
+                uses: mohist/merge-pull-request
                 onFailure:
                   limit: 1
                   cases:
                     - when:
-                        output.failureKind: base-moved
+                        output.errorCode: base-moved
                       tasks:
                         - id: recover:rebase
                           title: Rebase after base moved
                           uses: mohist/rebase
-                        - id: recover:publish
-                          title: Publish changes
-                          uses: mohist/publish-via-pr
+                        - id: recover:open-pr
+                          title: Open or update GitHub PR
+                          uses: mohist/create-pull-request
+                        - id: recover:merge-pr
+                          title: Merge GitHub PR
+                          uses: mohist/merge-pull-request
             checks: []
         """);
 
@@ -891,10 +894,10 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.NotNull(onFailure);
         Assert.Equal(1, onFailure!.Limit);
         var failureCase = Assert.Single(onFailure.Cases);
-        Assert.Equal("base-moved", failureCase.When["output.failureKind"]!.Value.GetString());
-        Assert.Equal(new[] { "recover:rebase", "recover:publish" }, failureCase.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal("base-moved", failureCase.When["output.errorCode"]!.Value.GetString());
+        Assert.Equal(new[] { "recover:rebase", "recover:open-pr", "recover:merge-pr" }, failureCase.Tasks.Select(t => t.Id).ToArray());
         Assert.Contains("onFailure:", yaml);
-        Assert.Contains("output.failureKind: base-moved", yaml);
+        Assert.Contains("output.errorCode: base-moved", yaml);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

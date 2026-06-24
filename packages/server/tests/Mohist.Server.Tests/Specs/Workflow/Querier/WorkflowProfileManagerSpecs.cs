@@ -519,6 +519,29 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public void ExpandTaskWith_ResolvesVarsPrefixedNestedWholeTemplatePath()
+    {
+        var resolved = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                github = new { pr = new { number = 42, url = "https://github.com/example/repo/pull/42" } }
+            })));
+
+        var taskWith = new Dictionary<string, JsonElement?>
+        {
+            ["prNumber"] = JsonSerializer.SerializeToElement("${{ vars.github.pr.number }}"),
+            ["prUrl"] = JsonSerializer.SerializeToElement("${{ vars.github.pr.url }}"),
+        };
+
+        var result = WorkflowProfileManager.ExpandTaskWith(resolved, taskWith);
+
+        Assert.Equal(42, result!["prNumber"]!.Value.GetInt32());
+        Assert.Equal("https://github.com/example/repo/pull/42", result!["prUrl"]!.Value.GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public void ExpandTaskWith_PreservesUnresolvedWholeTemplateString()
     {
         var resolved = new VariableBundle(

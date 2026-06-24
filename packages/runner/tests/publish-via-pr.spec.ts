@@ -23,6 +23,7 @@ type CommandResult = { exitCode: number; stdout: string; stderr: string }
 type GitResponse = { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }
 
 const WORKSPACE_PATH = "/workspace"
+const PROJECT_PATH = "/project"
 
 afterEach(() => {
   setPublishViaPrGitRunnerForTest(null)
@@ -78,8 +79,8 @@ function installGit(respond: (workDir: string, args: string[]) => GitResponse | 
   setPublishViaPrGitRunnerForTest(respond)
 }
 
-function installGh(respond: (command: string, args: string[]) => CommandResult | Promise<CommandResult>) {
-  setPublishViaPrGhRunnerForTest(async (cmd, args, _cwd, _signal) => await respond(cmd, args))
+function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
+  setPublishViaPrGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
 }
 
 function installMoIssueShow(title = "PR delivery", body = "Implement the PR delivery workflow") {
@@ -198,6 +199,71 @@ describe("mohist/publish-via-pr action", () => {
       "gh-pr-merge",
       "gh-pr-view-confirm",
     ])
+  })
+
+  it("ProjectPathDiffers_UsesBoundWorkspacePath", async () => {
+    const gitCalls: Array<{ workDir: string; command: string }> = []
+    const ghCalls: Array<{ cwd: string; command: string }> = []
+
+    installGit((workDir, args) => {
+      const command = args.join(" ")
+      gitCalls.push({ workDir, command })
+      switch (command) {
+        case "fetch origin master":
+          return ok("")
+        case "rev-parse origin/master":
+          return ok("base-sha-1\n")
+        case "push --force-with-lease origin mohist/run-wr-pr-1":
+          return ok("")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+    installGh((cmd, args, cwd) => {
+      const command = [cmd, ...args].join(" ")
+      ghCalls.push({ cwd, command })
+      switch (command) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr list --head mohist/run-wr-pr-1 --base master --state open --json number,url":
+          return ghOk("[]\n")
+        case "gh pr create --head mohist/run-wr-pr-1 --base master --title PR delivery --body Implement the PR delivery workflow":
+          return ghOk("https://github.com/example/repo/pull/42\n")
+        case "gh pr view 42 --json state,mergeCommit,url,number":
+          return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
+        case "gh pr merge 42 --squash --subject PR delivery --body ":
+          return ghOk("Merged pull request #42\n")
+        case "gh pr view 42 --json state,mergeCommit,url":
+          return ghOk(JSON.stringify({ state: "MERGED", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
+        default:
+          return ghFail(`unexpected gh call: ${command}`)
+      }
+    })
+
+    const result = await publishViaPrAction(context({
+      source: "mohist/run-wr-pr-1",
+      target: "master",
+      remote: "origin",
+      title: "PR delivery",
+      body: "Implement the PR delivery workflow",
+    }, { project: { path: PROJECT_PATH } }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(gitCalls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
+    expect(ghCalls.map((call) => call.cwd)).toEqual([
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+      WORKSPACE_PATH,
+    ])
+    expect(gitCalls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
+    expect(ghCalls.some((call) => call.cwd === PROJECT_PATH)).toBe(false)
+    expect(output.mergeCommitSha).toBe("merge-sha-1")
   })
 
   it("missing gh CLI fails fast with config-error and performs no remote mutation", async () => {

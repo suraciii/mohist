@@ -425,6 +425,24 @@ public class IssueCliTableRendererSpecs
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_ExtractsErrorCode()
+    {
+        var output = JsonNode.Parse("""
+        {
+          "kind": "merge-pull-request",
+          "status": "failed",
+          "errorCode": "base-moved"
+        }
+        """);
+
+        var resolved = DeliveryFailureGuidance.ResolveFailureKind(output);
+
+        Assert.Equal(DeliveryFailureGuidance.BaseMoved, resolved);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void DeliveryFailureGuidance_ResolveFailureKindFromOutput_ExtractsBranchInvariantViolationKind()
