@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -16,7 +17,7 @@ namespace Mohist.Server.Workflow.Services;
 /// Template resolution never depends on a workflow-run profile snapshot:
 /// issue custom > issue referenced template > project default > system default.
 /// </summary>
-public class WorkflowProfileManager
+public class WorkflowProfileManager : IScopedService
 {
     private static readonly Regex WholeTemplateTokenRegex = new(
         @"^\s*\$\{\{\s*(?<path>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$",

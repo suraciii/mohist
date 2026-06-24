@@ -1,9 +1,10 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Workflow.Services.Prompts;
 
-public sealed class PromptTemplateEngine
+public sealed class PromptTemplateEngine : ISingletonService
 {
     public const int MaxPasses = 5;
 

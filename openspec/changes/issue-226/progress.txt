@@ -56,3 +56,26 @@
   - **Fixture-vs-production agreement**: for each service, asserts the descriptor-level expectation AND resolves from the fixture when possible to confirm type identity. Covers the acceptance criterion "MohistDbFixture 与生产对已迁移服务的解析结果一致".
 - `dotnet build Mohist.sln`: succeeded, 0 warnings, 0 errors.
 - `npm test` (server): 2065 passed, 10 skipped, 0 failed (T-001 baseline 2024 → 2065 = +41 new cases).
+
+## Decisions made in T-003
+
+- Same pattern as T-002: marker goes on the concrete class declaration. None of the 8 Workflow services implement both markers, so the "fail-loud at review" rule from T-001 remains informal.
+- `WorkflowDispatchBuilder` lives in `Mohist.Server.Workflow.Grains` namespace (next to the `IWorkflowGrain` / `WorkflowGrain` types it builds dispatches for), unlike its six siblings in `Mohist.Server.Workflow.Services` — that asymmetry pre-dated T-003 and is preserved. The marker is added in its existing namespace.
+- `WorkflowSessionHealthService` is a `sealed` class with a **primary constructor** (C# 12). The marker goes on the primary-constructor declaration: `public sealed class WorkflowSessionHealthService(...) : IScopedService`. The `WorkflowDispatchBuilder` primary constructor is treated the same way.
+- `WorkflowSessionHealthService` depends on `IGrainFactory` (Orleans) at construction time, so `MohistDbFixture` (no silo) cannot resolve it — same situation as `AgentSessionResolver` from T-002. Skip it in the `ResolvableThroughDbFixture` data set; cover it with descriptor-only assertions + production-vs-fixture agreement (descriptor level only, not resolution).
+- Workflow domain interface mappings (`IWorkflowRunStore→WorkflowRunStore`, `IPromptLoader→FilePromptLoader`, `IEventStore→EventStore`, `IWorkflowBacklogDirectory→InMemoryWorkflowBacklogDirectory`) stay hand-written and unchanged — the task explicitly excludes them from this batch.
+
+## T-003 outcome
+
+- 8 Workflow domain services migrated:
+  - Singleton: `PromptTemplateEngine` — marked `ISingletonService`.
+  - Scoped: `WorkflowSessionHealthService`, `WorkflowActivityQuerier`, `WorkflowQuerier`, `WorkflowProfileManager`, `WorkflowDispatchBuilder`, `ProjectWorkflowProfileManager`, `IssueWorkflowProfileManager` — all marked `IScopedService`.
+- 8 corresponding `services.AddScoped/AddSingleton<T>()` lines removed from `MohistServiceRegistration.ConfigureMohistServices` (one `AddSingleton<PromptTemplateEngine>` + seven `AddScoped<...>`). Interface mappings (`IWorkflowRunStore`, `IPromptLoader`, `IEventStore`, `IWorkflowBacklogDirectory`) and factory registrations left untouched as required.
+- Unused `using Mohist.Server.Workflow.Services;` removed from `MohistServiceRegistration.cs` (all 7 services that needed it are now marker-discovered). `Mohist.Server.Workflow.Grains`, `Mohist.Server.Workflow.Services.Prompts`, `Mohist.Server.Workflow.Services.Artifacts` are still imported because of `IssueWorkflowReconciliationService` / `InMemoryWorkflowBacklogDirectory` / `IPromptLoader` / `FilePromptLoader` / `WorkflowArtifactBindService` / `WorkflowArtifactQuerier`.
+- 1 new test file `Specs/Foundation/MigratedWorkflowServicesRegistrationSpecs.cs` with 23 cases driven by `Theory`/`MemberData` over the 8 services:
+  - **Production-entry descriptor assertion** (8 cases): identical shape to T-002's first test method. Each service has exactly one descriptor where `ServiceType == ImplementationType == T`, lifetime matches, and the last descriptor agrees.
+  - **Fixture-resolution + cross-scope identity** (7 cases — `WorkflowSessionHealthService` excluded because it needs `IGrainFactory`): same shape as T-002's second test method.
+  - **Fixture-vs-production agreement** (8 cases): same shape as T-002's third test method. `WorkflowSessionHealthService` is short-circuited at the descriptor level (production-vs-fixture agreement on the registration shape) without a fixture resolution.
+- `dotnet build Mohist.sln`: succeeded, 0 warnings, 0 errors.
+- `npm test` (server): 2088 passed, 10 skipped, 0 failed (T-002 baseline 2065 → 2088 = +23 new cases; the 8 services × 3 methods = 24, minus 1 because `WorkflowSessionHealthService` is excluded from the resolution test data set). 467 Workflow SUT tests pass independently. T-001 (5) + T-002 (41) + T-003 (23) = 69 conventional-registration cases all green.
+

@@ -5,10 +5,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Workflow.Services;
 
-public class WorkflowActivityQuerier
+public class WorkflowActivityQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowQuerier;
