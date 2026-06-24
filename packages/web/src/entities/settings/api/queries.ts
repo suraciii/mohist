@@ -94,6 +94,11 @@ export function useAvailableModelIds() {
   })
 }
 
+export function useModelVariants() {
+  const { data } = useAvailableModelIds()
+  return data?.modelVariants ?? {}
+}
+
 export function useOpencodeRuntime() {
   return useQuery<{ mode: string; command: string; model: string | null; note: string }, Error>({
     queryKey: ['opencode-runtime'],

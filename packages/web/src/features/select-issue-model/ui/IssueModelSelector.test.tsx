@@ -8,6 +8,7 @@ import { IssueModelSelector } from './IssueModelSelector'
 const mocks = vi.hoisted(() => ({
   useAvailableModelIds: vi.fn(),
   useOpencodeModel: vi.fn(),
+  useModelVariants: vi.fn(() => ({})),
   useProject: vi.fn(() => ({ projectId: 'proj_test' })),
   getIssueWorkflowVariables: vi.fn(),
   patchIssueWorkflowDefinitionVar: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('../../../entities/settings', async (importOriginal) => {
     ...actual,
     useAvailableModelIds: () => mocks.useAvailableModelIds(),
     useOpencodeModel: () => mocks.useOpencodeModel(),
+    useModelVariants: () => mocks.useModelVariants(),
   }
 })
 
@@ -72,49 +74,22 @@ function openAdvanced() {
   fireEvent.click(screen.getByRole('button', { name: /Per-stage overrides/i }))
 }
 
-describe('IssueModelSelector variant picker', () => {
-  it('hides the issue-level variant picker when no model is configured', () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: { models: ['anthropic/claude', 'openai/gpt-4'], modelVariants: { 'anthropic/claude': ['low', 'high'] } },
-      isLoading: false,
-      error: null,
-    })
-    renderSelector()
-
-    expect(screen.queryByTestId('issue-coder-model-variant-variant-trigger')).not.toBeInTheDocument()
-  })
-
-  it('does not offer an issue-level variant picker for an inherited default model', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: { models: ['anthropic/claude'], modelVariants: { 'anthropic/claude': ['low', 'high'] } },
-      isLoading: false,
-      error: null,
-    })
-    mocks.useOpencodeModel.mockReturnValue({ data: { model: 'anthropic/claude', variant: null } })
-    renderSelector()
-
-    await waitFor(() => {
-      expect(screen.getByText('claude')).toBeInTheDocument()
-    })
-    expect(screen.queryByTestId('issue-coder-model-variant-variant-trigger')).not.toBeInTheDocument()
-    expect(mocks.patchIssueWorkflowDefinitionVar).not.toHaveBeenCalled()
-  })
-
-  it('hides the issue-level variant picker when the configured model has no variants', () => {
+describe('IssueModelSelector default-model variant chips', () => {
+  it('renders no variant chips for a model that has no variants', () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: { models: ['openai/gpt-4'], modelVariants: {} },
       isLoading: false,
       error: null,
     })
+    mocks.useModelVariants.mockReturnValue({})
     mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: { agent: { model: 'openai/gpt-4' } }, stages: {} })
     renderSelector({ currentModel: 'openai/gpt-4' })
 
-    return waitFor(() => {
-      expect(screen.queryByTestId('issue-coder-model-variant-variant-trigger')).not.toBeInTheDocument()
-    })
+    expect(screen.queryByTestId('issue-coder-model-variant-openai/gpt-4-low')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('issue-coder-model-variant-openai/gpt-4-high')).not.toBeInTheDocument()
   })
 
-  it('renders the issue-level variant picker only with the configured model variants', async () => {
+  it('renders inline variant chips for variant-capable models in the bespoke default popover', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude', 'openai/gpt-4'],
@@ -123,18 +98,22 @@ describe('IssueModelSelector variant picker', () => {
       isLoading: false,
       error: null,
     })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
     mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: { agent: { model: 'anthropic/claude' } }, stages: {} })
     renderSelector({ currentModel: 'anthropic/claude' })
 
-    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-variant-variant-trigger'))
-    expect(trigger).toBeInTheDocument()
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
     fireEvent.click(trigger)
-    const list = await waitFor(() => screen.getByRole('listbox'))
-    const opts = Array.from(list.querySelectorAll('[role="option"]')).map((el) => el.textContent?.trim())
-    expect(opts).toEqual(['Default', 'low', 'medium', 'high'])
+
+    await waitFor(() => {
+      expect(screen.getByTestId('issue-coder-model-variant-anthropic/claude-low')).toBeInTheDocument()
+      expect(screen.getByTestId('issue-coder-model-variant-anthropic/claude-medium')).toBeInTheDocument()
+      expect(screen.getByTestId('issue-coder-model-variant-anthropic/claude-high')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('issue-coder-model-variant-openai/gpt-4-low')).not.toBeInTheDocument()
   })
 
-  it('shows the stored issue-level variant as selected when supported', async () => {
+  it('renders no standalone variant dropdown next to the default model selector', () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude'],
@@ -143,44 +122,138 @@ describe('IssueModelSelector variant picker', () => {
       isLoading: false,
       error: null,
     })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: { agent: { model: 'anthropic/claude' } }, stages: {} })
+    renderSelector({ currentModel: 'anthropic/claude' })
+
+    expect(screen.queryByTestId('issue-coder-model-variant-variant-trigger')).not.toBeInTheDocument()
+  })
+
+  it('selects model+variant through the issue API when a default-model chip is clicked', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude', 'openai/gpt-4'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: { agent: { model: 'anthropic/claude' } }, stages: {} })
+    renderSelector({ currentModel: 'anthropic/claude' })
+
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
+    fireEvent.click(trigger)
+
+    const mediumChip = await waitFor(() => screen.getByTestId('issue-coder-model-variant-anthropic/claude-medium'))
+    fireEvent.click(mediumChip)
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'agent',
+        { type: 'opencode', model: 'anthropic/claude', variant: 'medium' },
+        'proj_test',
+      )
+    })
+  })
+
+  it('selects the default variant (no variant) when the model body is clicked', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude', 'openai/gpt-4'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: { agent: { model: 'anthropic/claude', variant: 'high' } },
+      stages: {},
+    })
+    renderSelector({ currentModel: 'anthropic/claude' })
+
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
+    fireEvent.click(trigger)
+
+    const claudeRow = await waitFor(() => document.querySelector('[data-model-id="anthropic/claude"]') as HTMLElement)
+    fireEvent.pointerDown(claudeRow)
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'agent',
+        { type: 'opencode', model: 'anthropic/claude' },
+        'proj_test',
+      )
+    })
+  })
+
+  it('highlights the active variant chip for the currently selected default model', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
     mocks.getIssueWorkflowVariables.mockResolvedValue({
       vars: { agent: { model: 'anthropic/claude', variant: 'medium' } },
       stages: {},
     })
     renderSelector({ currentModel: 'anthropic/claude' })
 
-    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-variant-variant-trigger'))
-    expect(trigger).toHaveTextContent('medium')
+    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-trigger'))
+    fireEvent.click(trigger)
+
+    const activeChip = await waitFor(() => screen.getByTestId('issue-coder-model-variant-anthropic/claude-medium'))
+    expect(activeChip.getAttribute('data-variant-active')).toBe('true')
+    const lowChip = screen.getByTestId('issue-coder-model-variant-anthropic/claude-low')
+    expect(lowChip.getAttribute('data-variant-active')).toBe('false')
   })
+})
 
-  it('drops an unsupported stored variant from the picker label', async () => {
-    mocks.useAvailableModelIds.mockReturnValue({
-      data: {
-        models: ['anthropic/claude'],
-        modelVariants: { 'anthropic/claude': ['low', 'high'] },
-      },
-      isLoading: false,
-      error: null,
-    })
-    mocks.getIssueWorkflowVariables.mockResolvedValue({
-      vars: { agent: { model: 'anthropic/claude', variant: 'ultra' } },
-      stages: {},
-    })
-    renderSelector({ currentModel: 'anthropic/claude' })
-
-    const trigger = await waitFor(() => screen.getByTestId('issue-coder-model-variant-variant-trigger'))
-    expect(trigger).toHaveTextContent('Variant')
-  })
-
-  it('shows the per-stage variant picker only for stages whose model has variants', async () => {
+describe('IssueModelSelector per-stage variant chips', () => {
+  it('renders compact variant chips for stages whose model has variants', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude', 'openai/gpt-4'],
-        modelVariants: { 'anthropic/claude': ['low', 'high'], 'openai/gpt-4': [] },
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
       },
       isLoading: false,
       error: null,
     })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: { build: { vars: { agent: { model: 'anthropic/claude' } } } },
+    })
+    renderSelector({ currentStageModels: { build: 'anthropic/claude' } })
+
+    openAdvanced()
+    const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
+    fireEvent.click(buildTrigger)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-low')).toBeInTheDocument()
+      expect(screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-medium')).toBeInTheDocument()
+      expect(screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high')).toBeInTheDocument()
+    })
+  })
+
+  it('does not render per-stage chips for stages whose model has no variants', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude', 'openai/gpt-4'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
     mocks.getIssueWorkflowVariables.mockResolvedValue({
       vars: {},
       stages: {
@@ -188,17 +261,19 @@ describe('IssueModelSelector variant picker', () => {
         check: { vars: { agent: { model: 'openai/gpt-4' } } },
       },
     })
-
     renderSelector({ currentStageModels: { build: 'anthropic/claude', check: 'openai/gpt-4' } })
 
     openAdvanced()
+    const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
+    fireEvent.click(buildTrigger)
+
     await waitFor(() => {
-      expect(screen.getByTestId('issue-stage-model-variant-build-variant-trigger')).toBeInTheDocument()
+      expect(screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high')).toBeInTheDocument()
     })
-    expect(screen.queryByTestId('issue-stage-model-variant-check-variant-trigger')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('issue-stage-model-check-row-openai/gpt-4-variant-low')).not.toBeInTheDocument()
   })
 
-  it('shows the stored per-stage variant as selected when supported', async () => {
+  it('persists the selected per-stage variant through the issue API when a chip is clicked', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude'],
@@ -207,17 +282,87 @@ describe('IssueModelSelector variant picker', () => {
       isLoading: false,
       error: null,
     })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
     mocks.getIssueWorkflowVariables.mockResolvedValue({
       vars: {},
-      stages: {
-        build: { vars: { agent: { model: 'anthropic/claude', variant: 'high' } } },
-      },
+      stages: { build: { vars: { agent: { model: 'anthropic/claude' } } } },
     })
-
     renderSelector({ currentStageModels: { build: 'anthropic/claude' } })
 
     openAdvanced()
-    const trigger = await waitFor(() => screen.getByTestId('issue-stage-model-variant-build-variant-trigger'))
-    expect(trigger).toHaveTextContent('high')
+    const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
+    fireEvent.click(buildTrigger)
+
+    const highChip = await waitFor(() => screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'))
+    fireEvent.click(highChip)
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledTimes(1)
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'build',
+        'agent',
+        { type: 'opencode', model: 'anthropic/claude', variant: 'high' },
+        'proj_test',
+      )
+    })
+  })
+
+  it('persists model and variant when a chip is clicked on an empty per-stage row', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({ vars: {}, stages: {} })
+    renderSelector()
+
+    openAdvanced()
+    const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
+    fireEvent.click(buildTrigger)
+
+    const highChip = await waitFor(() => screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'))
+    fireEvent.click(highChip)
+
+    await waitFor(() => {
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledTimes(1)
+      expect(mocks.patchIssueWorkflowStageDefinitionVar).toHaveBeenCalledWith(
+        42,
+        'build',
+        'agent',
+        { type: 'opencode', model: 'anthropic/claude', variant: 'high' },
+        'proj_test',
+      )
+    })
+  })
+
+  it('highlights the active per-stage variant chip', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.useModelVariants.mockReturnValue({ 'anthropic/claude': ['low', 'medium', 'high'] })
+    mocks.getIssueWorkflowVariables.mockResolvedValue({
+      vars: {},
+      stages: { build: { vars: { agent: { model: 'anthropic/claude', variant: 'high' } } } },
+    })
+    renderSelector({ currentStageModels: { build: 'anthropic/claude' } })
+
+    openAdvanced()
+    const buildTrigger = await waitFor(() => document.getElementById('issue-stage-model-build') as HTMLElement)
+    fireEvent.click(buildTrigger)
+
+    const activeChip = await waitFor(() => screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-high'))
+    expect(activeChip.getAttribute('data-variant-active')).toBe('true')
+    const lowChip = screen.getByTestId('issue-stage-model-build-row-anthropic/claude-variant-low')
+    expect(lowChip.getAttribute('data-variant-active')).toBe('false')
   })
 })

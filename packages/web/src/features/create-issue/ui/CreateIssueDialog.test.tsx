@@ -258,13 +258,19 @@ describe('CreateIssueDialog template selector', () => {
   })
 })
 
-describe('CreateIssueDialog model + variant picker', () => {
+describe('CreateIssueDialog model + variant chips', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
   })
 
-  it('hides the variant picker when no model is selected', () => {
+  function modelTrigger() {
+    const trigger = document.getElementById('create-issue-model-trigger')
+    if (!trigger) throw new Error('model trigger not found')
+    return trigger
+  }
+
+  it('does not render a standalone variant picker anywhere', () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: { models: ['anthropic/claude'], modelVariants: { 'anthropic/claude': ['low', 'high'] } },
       isLoading: false,
@@ -274,7 +280,7 @@ describe('CreateIssueDialog model + variant picker', () => {
     expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
   })
 
-  it('renders only the selected model variants in the picker', async () => {
+  it('renders inline variant chips on a variant-capable model row', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude', 'openai/gpt-4'],
@@ -283,20 +289,23 @@ describe('CreateIssueDialog model + variant picker', () => {
       isLoading: false,
       error: null,
     })
+    const user = userEvent.setup()
     renderDialog()
 
-    fireEvent.click(screen.getByTestId('create-issue-model-trigger'))
-    const modelButton = await screen.findByText('claude', { selector: 'span' })
-    fireEvent.click(modelButton.closest('button')!)
+    await user.click(modelTrigger())
 
-    const variantTrigger = await screen.findByTestId('create-issue-model-variant-variant-trigger')
-    fireEvent.click(variantTrigger)
-    const list = await screen.findByRole('listbox')
-    const options = Array.from(list.querySelectorAll('[role="option"]')).map((el) => el.textContent?.trim())
-    expect(options).toEqual(['Default', 'low', 'medium', 'high'])
+    for (const variant of ['low', 'medium', 'high']) {
+      const chip = document.querySelector(
+        `[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-${variant}"]`,
+      )
+      expect(chip).toBeInTheDocument()
+    }
+    expect(
+      document.querySelector(`[data-testid="create-issue-model-trigger-row-openai/gpt-4-variant-low"]`),
+    ).toBeNull()
   })
 
-  it('sends modelVariant alongside model on create when the picker has a value', async () => {
+  it('sends modelVariant alongside model on create when a chip is clicked', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
         models: ['anthropic/claude'],
@@ -311,13 +320,12 @@ describe('CreateIssueDialog model + variant picker', () => {
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
 
-    await user.click(screen.getByTestId('create-issue-model-trigger'))
-    const modelButton = await screen.findByText('claude', { selector: 'span' })
-    await user.click(modelButton.closest('button')!)
+    await user.click(modelTrigger())
 
-    const variantTrigger = await screen.findByTestId('create-issue-model-variant-variant-trigger')
-    await user.click(variantTrigger)
-    await user.click(await screen.findByRole('option', { name: 'high' }))
+    const highChip = await screen.findByTestId(
+      'create-issue-model-trigger-row-anthropic/claude-variant-high',
+    )
+    await user.click(highChip)
 
     await user.click(screen.getByRole('button', { name: 'Create' }))
 
@@ -328,21 +336,123 @@ describe('CreateIssueDialog model + variant picker', () => {
     }))
   })
 
-  it('hides the variant picker when the selected model reports no variants', async () => {
+  it('does not transiently clear the variant when a chip is clicked', async () => {
     mocks.useAvailableModelIds.mockReturnValue({
       data: {
-        models: ['anthropic/claude', 'openai/gpt-4'],
-        modelVariants: { 'openai/gpt-4': [] },
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'high'] },
       },
       isLoading: false,
       error: null,
     })
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    const user = userEvent.setup()
     renderDialog()
 
-    fireEvent.click(screen.getByTestId('create-issue-model-trigger'))
-    const modelButton = await screen.findByText('gpt-4', { selector: 'span' })
-    fireEvent.click(modelButton.closest('button')!)
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
+    await user.click(modelTrigger())
+    await user.click(await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high'))
 
-    expect(screen.queryByTestId('create-issue-model-variant-variant-trigger')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue.mock.calls[0][0]).toMatchObject({
+      model: 'anthropic/claude',
+      modelVariant: 'high',
+    })
+  })
+
+  it('does not include modelVariant when a model body click selects the default variant', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    const user = userEvent.setup()
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Templated' } })
+
+    await user.click(modelTrigger())
+
+    const modelRow = await screen.findByText('claude', { selector: 'span' })
+    const rowEl = modelRow.closest('[data-model-id]') as HTMLElement
+    expect(rowEl.getAttribute('data-model-id')).toBe('anthropic/claude')
+    await user.click(rowEl)
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'anthropic/claude',
+    }))
+    expect(mocks.createIssue.mock.calls[0][0]).not.toHaveProperty('modelVariant')
+  })
+
+  it('highlights the active variant chip on the selected row', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'medium', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    const user = userEvent.setup()
+    renderDialog()
+
+    await user.click(modelTrigger())
+
+    const mediumChip = await screen.findByTestId(
+      'create-issue-model-trigger-row-anthropic/claude-variant-medium',
+    )
+    await user.click(mediumChip)
+
+    await user.click(modelTrigger())
+
+    const active = document.querySelector(
+      '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-medium"][data-variant-active="true"]',
+    )
+    expect(active).toBeInTheDocument()
+    expect(
+      document.querySelector(
+        '[data-testid="create-issue-model-trigger-row-anthropic/claude-variant-low"][data-variant-active="true"]',
+      ),
+    ).toBeNull()
+  })
+
+  it('uses shared keyboard navigation to select a variant chip', async () => {
+    mocks.useAvailableModelIds.mockReturnValue({
+      data: {
+        models: ['anthropic/claude'],
+        modelVariants: { 'anthropic/claude': ['low', 'high'] },
+      },
+      isLoading: false,
+      error: null,
+    })
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
+    const user = userEvent.setup()
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Keyboard' } })
+    await user.click(modelTrigger())
+
+    const search = await screen.findByPlaceholderText('Search models...')
+    fireEvent.keyDown(search, { key: 'ArrowRight' })
+    const lowChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-low')
+    await waitFor(() => expect(lowChip).toHaveFocus())
+    fireEvent.keyDown(lowChip, { key: 'ArrowRight' })
+    const highChip = await screen.findByTestId('create-issue-model-trigger-row-anthropic/claude-variant-high')
+    await waitFor(() => expect(highChip).toHaveFocus())
+    fireEvent.keyDown(highChip, { key: 'Enter' })
+
+    await user.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'anthropic/claude',
+      modelVariant: 'high',
+    })))
   })
 })
