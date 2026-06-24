@@ -111,7 +111,16 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
     const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("failure")
-    expect(result.message).toContain("without any session activity")
+    expect(result.message).toContain("without any prompt work activity")
+  })
+
+  it("PromptCompletesWithUsageOnly_ActionFailsInsteadOfReportingEmptySuccess", async () => {
+    const fixture = createFixture("usage-only")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("without any prompt work activity")
   })
 
   it("ExpectedArtifactMissing_AgentIsAskedToRepairArtifactBeforeTaskFails", async () => {
@@ -186,7 +195,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
       }, undefined, { workDir }))
 
       expect(result.status).toBe("failure")
-      expect(result.message).toContain("without any session activity")
+      expect(result.message).toContain("without any prompt work activity")
       expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(2)
     } finally {
       await rm(workDir, { recursive: true, force: true })

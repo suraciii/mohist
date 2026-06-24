@@ -230,7 +230,7 @@ export function createSharedPromptRunner(options: {
     if (promptResult !== "completed") {
       return { completed: false, error: promptResult.error, providerError: promptResult.providerError, failureCategory: promptResult.failureReason, activityCount, workActivityCount, usageText }
     }
-    const activityFailure = validatePromptActivity(activityCount)
+    const activityFailure = validatePromptActivity(workActivityCount)
     if (activityFailure) return { completed: false, error: activityFailure, activityCount, workActivityCount, usageText }
     return { completed: true, activityCount, workActivityCount, usageText }
   }
@@ -512,8 +512,8 @@ export async function runEphemeralWorkflowAgentSession(context: ActionContext, p
   }
 }
 
-export function validatePromptActivity(activityCount: number) {
-  return activityCount > 0 ? undefined : "ACP agent prompt completed without any session activity"
+export function validatePromptActivity(workActivityCount: number) {
+  return workActivityCount > 0 ? undefined : "ACP agent prompt completed without any prompt work activity"
 }
 
 export function truncateAgentText(text: string) {
