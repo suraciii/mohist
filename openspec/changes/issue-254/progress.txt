@@ -256,6 +256,3 @@
 - `packages/cli/Mohist.Cli/MohistCliCommands.Update.Stages.cs` (276 行，新增 partial：6 个 *StageAsync + RunStageMachineAsync + RunRecoveryStageAsync)
 - `packages/cli/Mohist.Cli/MohistCliCommands.Update.Finalize.cs` (86 行，新增 partial：FinalizeAsync + ShouldPostOutcome + FinalizeExitCode)
 - `packages/cli/Mohist.Cli/MohistCliCommands.Update.Outcome.cs` (87 行，新增 partial：PostCliOutcomeAsync + ResolveOutcomeStatus)
-
-
-

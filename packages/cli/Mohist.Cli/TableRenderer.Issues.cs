@@ -307,4 +307,3 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"  {line}");
     }
 }
-
