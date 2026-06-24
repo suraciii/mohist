@@ -76,7 +76,7 @@ Each step ends with `npm run typecheck -w packages/web` and `npm run test:run -w
 
 ## Risks / Trade-offs
 
-- **[Render regression from relocated diff calculation]** -> The three diff functions are pure; add direct unit tests in `diff-builder.test.ts` asserting `FileBlock[]` output for representative edit/patch inputs before/after the move. Existing component tests guard the rendered diff views.
+- **[Render regression from relocated diff calculation]** -> The three diff functions are pure; add direct unit tests in `diff-builder.test.ts` asserting `FileBlock[]` output for representative edit/patch inputs before/after the move. Note: **no render/component tests currently exist** for the tool/diff views (only `useSessionTranscript.test.tsx` covers this widget), so T-003 captures a render-test baseline before the split and the diff-builder unit tests guard the calc itself.
 - **[Import cycles when splitting tool-views]** -> Enforce layering: `model/*` never imports `ui/*`; `ui/tool-views/*` import from `model/*` (types + `diff-builder`) only, never from `AssistantParts.tsx`. The `ui/index.ts` barrel already exists as the aggregation point.
 - **[Over-fragmentation / too many tiny files]** -> Family-grouped files (D3) rather than one-per-component; merge any sub-20-line helper into `shared.tsx`.
 - **[Test churn masking regressions]** -> Keep `useSessionTranscript.test.tsx` asserting through the hook unchanged; new direct tests for `transcript-state` and `diff-builder` are net-additive coverage, not replacements.
