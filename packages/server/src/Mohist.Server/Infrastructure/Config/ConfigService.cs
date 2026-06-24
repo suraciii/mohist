@@ -1,12 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Infrastructure.Config;
 
-public class ConfigService
+public class ConfigService : ISingletonService
 {
     private readonly IConfiguration _configuration;
     private readonly IEnvironmentVariableProvider _environment;

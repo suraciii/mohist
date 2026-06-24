@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 
@@ -80,7 +81,7 @@ public sealed record IssueRepositoryResolution(
         new(null, problem);
 }
 
-public class IssueRepositoryResolver
+public class IssueRepositoryResolver : ISingletonService
 {
     public IssueRepositoryResolution Resolve(ProjectInfo? project, string? repositoryRef)
     {

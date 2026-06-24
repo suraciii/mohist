@@ -1,36 +1,22 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Agent.Grains;
-using Mohist.Server.Epic.Grains;
-using Mohist.Server.Epic.Services;
-using Mohist.Server.Project.Services;
+using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
-using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.Issue.Services.IssueTemplates;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SystemInfo;
-using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Workflow.Services.Prompts;
-using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Label.Services;
@@ -60,6 +46,8 @@ public static class MohistServiceRegistration
     /// </remarks>
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddMohistConventionalServices();
+
         var connectionString = ResolveSqliteConnectionString(configuration);
 
         services.AddMohistOpenTelemetry(configuration);
@@ -74,48 +62,20 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
-        services.AddSingleton<ProjectQuerier>();
-        services.AddSingleton<ProjectRefResolver>();
-        services.AddSingleton<IssueRepositoryResolver>();
-        services.AddScoped<IssueIdentityResolver>();
-        services.AddScoped<IssueQuerier>();
-        services.AddScoped<AgentQuerier>();
-        services.AddScoped<EpicQuerier>();
-        services.AddSingleton<SystemLabelDefinitions>();
-        services.AddScoped<LabelCatalogService>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
-        services.AddSingleton<PromptTemplateEngine>();
-        services.AddScoped<IssueWorkflowProfileRegistry>();
-        services.AddScoped<IssueTemplateRegistry>();
         services.AddScoped<IEventStore, EventStore>();
-        services.AddScoped<AgentSessionQuery>();
-        services.AddScoped<WorkflowSessionHealthService>();
-        services.AddScoped<AgentSessionQuerier>();
-        services.AddScoped<AgentSessionResolver>();
-        services.AddScoped<WorkflowActivityQuerier>();
-        services.AddScoped<WorkflowQuerier>();
-        services.AddScoped<WorkflowProfileManager>();
-        services.AddScoped<WorkflowDispatchBuilder>();
-        services.AddScoped<ProjectWorkflowProfileManager>();
-        services.AddScoped<IssueWorkflowProfileManager>();
-        services.AddScoped<WorkflowRunProfileManager>();
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
-        services.AddSingleton<ConnectionSubscriptionRegistry>();
         services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddHostedService<IssueWorkflowReconciliationService>();
         services.AddHostedService<AttachmentCleanupService>();
-        services.AddSingleton<ConfigService>();
-        services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
-        services.AddSingleton<SystemdInstallDetector>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
-        services.AddSingleton<SystemInfoService>();
         services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();
         services.AddSingleton<ISystemUpdateCommandRunner, ProcessSystemUpdateCommandRunner>();
         services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>
@@ -126,14 +86,10 @@ public static class MohistServiceRegistration
             client.BaseAddress = new Uri(serverUrl);
             client.Timeout = TimeSpan.FromSeconds(5);
         });
-        services.AddSingleton<SystemUpdateService>();
         services.AddSingleton<IWorkflowArtifactStorage, FileSystemWorkflowArtifactStorage>();
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
         services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
-        services.AddScoped<AttachmentService>();
-        services.AddScoped<WorkflowArtifactUploadService>();
-        services.AddScoped<AgentJobArtifactUploadService>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
@@ -155,15 +111,13 @@ public static class MohistServiceRegistration
         services.AddSingleton<TraceQuerier>();
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
-        services.AddSingleton<RunnerConnectionTracker>();
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
-        services.AddScoped<RunnerStatusService>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
         services.AddScoped<RunnerDefinitionStore>();
-        services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions = JSON.Options);
+        services.AddSignalR();
 
         return services;
     }

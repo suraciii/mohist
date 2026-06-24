@@ -1,11 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Workflow.Services;
 
-public class WorkflowRunProfileManager
+public class WorkflowRunProfileManager : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 

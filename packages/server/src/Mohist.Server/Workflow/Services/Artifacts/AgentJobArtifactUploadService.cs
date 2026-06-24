@@ -2,12 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Workflow.Services.Artifacts;
 
-public sealed class AgentJobArtifactUploadService
+public sealed class AgentJobArtifactUploadService : IScopedService
 {
     private readonly WorkflowArtifactUploadService _uploadService;
 

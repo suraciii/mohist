@@ -1,3 +1,5 @@
+using Mohist.Server.Infrastructure.Hosting;
+
 namespace Mohist.Server.SystemInfo;
 
 public interface IFileSystem
@@ -14,7 +16,7 @@ public sealed record InstallDetectionResult(
     string? SourcePath,
     string? Reason);
 
-public sealed class SystemdInstallDetector
+public sealed class SystemdInstallDetector : ISingletonService
 {
     private const string ServerUnitName = "mohist.service";
     private const string RunnerUnitName = "mohist-runner.service";

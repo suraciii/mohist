@@ -1,12 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
-public class IssueWorkflowProfileRegistry
+public class IssueWorkflowProfileRegistry : IScopedService
 {
     private readonly Dictionary<string, IIssueWorkflowProfile> _profiles;
 

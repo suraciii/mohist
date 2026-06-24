@@ -2,10 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
 
-public class AgentQuerier
+public class AgentQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 

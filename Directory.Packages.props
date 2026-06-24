@@ -33,5 +33,6 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.15.1-beta.1" />
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0-preview.3.25172.1" />
+    <PackageVersion Include="Scrutor" Version="7.0.0" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Workflow.Services.Sessions;
 
@@ -12,7 +13,7 @@ public enum AgentSessionQueryOrder
     CreatedDescending,
 }
 
-public sealed class AgentSessionQuery
+public sealed class AgentSessionQuery : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 

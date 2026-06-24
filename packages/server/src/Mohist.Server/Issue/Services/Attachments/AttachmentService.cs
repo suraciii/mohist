@@ -5,13 +5,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Issue.Services.Attachments;
 
-public sealed class AttachmentService
+public sealed class AttachmentService : IScopedService
 {
     public const string OwnerKindIssue = "issue";
     public const string OwnerKindComment = "comment";

@@ -1,8 +1,9 @@
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Sessions.Services;
 
-public sealed class AgentSessionResolver
+public sealed class AgentSessionResolver : IScopedService
 {
     private readonly AgentSessionQuery _query;
     private readonly IGrainFactory _grains;

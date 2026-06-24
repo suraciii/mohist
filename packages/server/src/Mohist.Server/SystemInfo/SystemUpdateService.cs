@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.SystemInfo;
 
@@ -323,7 +324,7 @@ public sealed class HttpSystemReadinessProbe : ISystemReadinessProbe
     }
 }
 
-public sealed class SystemUpdateService
+public sealed class SystemUpdateService : ISingletonService
 {
     public const string HomeEnvironmentVariable = "HOME";
 

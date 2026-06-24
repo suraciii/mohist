@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Runner.Services.SignalR;
 
-public class RunnerConnectionTracker
+public class RunnerConnectionTracker : ISingletonService
 {
     private readonly ConcurrentDictionary<string, string> _connections = new();
 

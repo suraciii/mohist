@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Storage;
 using Orleans;
@@ -35,7 +36,7 @@ namespace Mohist.Server.Workflow.Services.Artifacts;
 /// conflict and leaves the original content untouched.
 /// </para>
 /// </remarks>
-public sealed class WorkflowArtifactUploadService
+public sealed class WorkflowArtifactUploadService : IScopedService
 {
     /// <summary>
     /// Default TTL for a pending upload. Rows past expiry are eligible

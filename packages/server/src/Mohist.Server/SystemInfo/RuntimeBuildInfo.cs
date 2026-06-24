@@ -1,4 +1,5 @@
 using System.Reflection;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.SystemInfo;
 
@@ -9,7 +10,7 @@ public interface IRuntimeBuildInfo
     DateTimeOffset StartedAt { get; }
 }
 
-public sealed class RuntimeBuildInfo : IRuntimeBuildInfo
+public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
 {
     public const string GitHashEnvironmentVariable = "MOHIST_GIT_HASH";
 
