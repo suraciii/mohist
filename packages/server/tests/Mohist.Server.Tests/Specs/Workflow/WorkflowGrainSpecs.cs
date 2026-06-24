@@ -50,9 +50,17 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
+        var registry = new Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfileRegistry(promptLoader, factory);
         return new WorkflowQuerier(
             factory,
-            new Mohist.Server.Workflow.Services.WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), WorkflowGrainTestHelpers.CreateEmptyConfigService(), new Mohist.Server.Workflow.Services.WorkflowRunProfileManager(factory)),
+            new Mohist.Server.Workflow.Services.WorkflowProfileManager(
+                factory,
+                promptLoader,
+                new PromptTemplateEngine(),
+                WorkflowGrainTestHelpers.CreateEmptyConfigService(),
+                new Mohist.Server.Workflow.Services.WorkflowRunProfileManager(factory),
+                new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry)),
             new WorkflowArtifactQuerier(factory));
     }
 

@@ -131,3 +131,105 @@
   `Mohist.Server.Infrastructure.Data.Project.ProjectRow`).
   `dotnet build` is clean — the LSP is stale. Left untouched
   (out of scope for T-002).
+
+## Task T-003 — startup honors effective profile; endpoint already in agreement
+
+- `WorkflowProfileManager.LoadTemplateAsync` now takes a new constructor
+  dependency `EffectiveWorkflowProfileResolver` and uses it to resolve the
+  effective profile id (issue selection → project default → mohist/default)
+  in the final fallback. Previously the fallback hardcoded `mohist/default`,
+  so an issue whose effective profile was `mohist/pr` would still start
+  the default workflow definition. The advanced override chain (issue
+  custom YAML → issue SourceTemplateId → project DefaultTemplateId) is
+  unchanged — overrides still take precedence when present.
+- Removed the project-default auto-seed in `IssueGrain.StartWorkflowAsync`
+  (`SetDefaultTemplateAsync(projectContext.Id, "mohist/default")` when the
+  project's `DefaultTemplateId` was empty). Without it, a freshly started
+  issue with an explicit `mohist/pr` selection no longer has the project's
+  default template silently shadow the issue's profile. The
+  `EffectiveWorkflowProfileResolver` fallback in `LoadTemplateAsync`
+  handles the no-project-default case correctly (returns the system
+  default).
+- `IssueGrain.StartWorkflowAsync` now resolves the effective profile for
+  the **prompt merge** step too. Previously it hardcoded
+  `_profiles.Get(IssueWorkflowProfiles.DefaultId)` which meant a PR issue
+  inherited default prompts even though the run used the PR definition.
+  The cast was widened from `MohistDefaultIssueWorkflowProfile` to the
+  shared `MohistIssueWorkflowProfileBase` since both default and PR
+  profiles expose `GetMergedPromptsAsync`.
+- `BuildIssueWorkflowProfileResponseAsync` (D6) was already correct
+  post-T-001: `profileId` is sourced from `info.WorkflowProfileId`, which
+  the `IssueQuerier` instance `ToInfo` overload projects through
+  `_effectiveProfileResolver.Resolve`. No edit required.
+- Test setup changes: `WorkflowProfileManager` constructor gained a
+  required `EffectiveWorkflowProfileResolver` dependency. Updated three
+  manual instantiation sites
+  (`WorkflowGrainSpecs.GetQuerier`, `WorkflowGrainTestHelpers.GetQuerier`,
+  `WorkflowProfileManagerSpecs` constructor) to pass the resolver via
+  `IssueWorkflowProfileRegistry`. Also added
+  `siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>()`
+  to `GrainTestConfig.ConfigureSilo` because the grain silo does not call
+  `ConfigureMohistServices` (and therefore does not pick up the scanned
+  registration automatically).
+- Test seed helper (`WorkflowProfileManagerSpecs.SeedAsync` /
+  `SeedRunContext`) now optionally accepts `issueWorkflowProfileId` so
+  callers can simulate a serialized issue whose `WorkflowProfileId` is
+  non-null. Added `Title = "Seeded issue"` so `IssueStore.Deserialize`
+  can satisfy the required `title` property on `Domain.Issue`.
+
+## Gotchas
+
+- The project-default fallback in `LoadTemplateAsync` (step 3) **still
+  wins over the effective-profile fallback** (step 4) when the project's
+  `DefaultTemplateId` is a known system profile (e.g. `mohist/default`).
+  This is intentional: project-default is treated as a template
+  override. The fix only changes behavior when no override AND no
+  project default apply — i.e. when the effective profile is the only
+  remaining source of truth. Removing the auto-seed was necessary
+  because it was creating that false project default on every fresh
+  project start.
+- The `WorkflowProfileManager` constructor's new dependency is required;
+  any future caller that wires DI by hand (tests, harnesses) MUST pass
+  `EffectiveWorkflowProfileResolver`. The fixture-based suites that go
+  through `MohistIntegrationFixture` / `MohistDbFixture` pick it up via
+  `AddMohistConventionalServices` automatically.
+- `WorkflowProfileManager.ResolveEffectiveProfileIdAsync` reads the
+  issue's stored `WorkflowProfileId` by deserializing the issue state
+  JSON via `IssueStore.Deserialize`. This means a typo / corrupt state
+  surfaces as a deserialization error rather than a silent default — the
+  pre-existing seed tests needed the `title` field added to satisfy the
+  required property on `Domain.Issue`.
+
+## New regression coverage
+
+`WorkflowProfileManagerSpecs` (unit, Service speed):
+- `LoadTemplate_IssuePrProfile_NoOverrides_UsesPrSystemTemplate`
+  — assert PR workflow definition returned, integrate stage uses
+  `integrate:open-pr` not `integrate:rebase`.
+- `LoadTemplate_IssueDefaultProfile_NoOverrides_UsesDefaultSystemTemplate`
+  — assert default workflow definition returned, integrate stage uses
+  `integrate:rebase` not `integrate:open-pr`.
+- `LoadTemplate_IssuePrProfile_ProjectDefaultIsDifferent_SystemFallsBackToIssueProfile`
+  — verifies the precedence comment: project default still wins when it
+  is a known system template.
+- `LoadTemplate_IssuePrProfile_CustomYamlOverride_TakesPrecedence`
+  — verifies the custom YAML override beats the effective profile.
+
+`IssueWorkflowProfileApiConsistencySpecs` (Integration):
+- `StartWorkflow_WithPrProfile_UsesPrSystemTemplate` — POSTs an issue
+  with `mohist/pr`, starts the workflow, fetches
+  `/api/workflow-runs/{wrId}/yaml`, asserts `integrate:open-pr` and
+  `mohist/create-pull-request` are present and `integrate:rebase` is
+  not.
+- `StartWorkflow_WithDefaultProfile_UsesDefaultSystemTemplate` — same
+  with `mohist/default`, asserts `integrate:rebase` and `mohist/rebase`
+  are present and `integrate:open-pr` is not.
+- `WorkflowProfileEndpoint_AgreesWithEffectiveProfile_ForPrIssue` —
+  `GET /api/issues/:n`, the list endpoint, and
+  `/workflow-profile` all report `mohist/pr`; `hasCustomTemplate` is
+  false.
+- `StartWorkflow_WithCustomYamlOverride_TakesPrecedenceOverPrProfile` —
+  PUTs a custom YAML via `/workflow-profile/template` on a PR-profile
+  issue, starts the workflow, asserts the running definition matches
+  the override while the displayed profile id remains `mohist/pr` and
+  `hasCustomTemplate` / `templateSource` correctly surface the override.

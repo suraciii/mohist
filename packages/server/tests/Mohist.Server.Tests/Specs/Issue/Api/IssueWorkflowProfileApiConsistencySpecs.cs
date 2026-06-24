@@ -323,6 +323,166 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         Assert.Equal("PLAN_PROMPT_BODY", prompts["plan"]);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkflow_WithPrProfile_UsesPrSystemTemplate()
+    {
+        var project = await CreateProjectAsync("wfp-start-pr");
+
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new
+            {
+                title = "PR startup",
+                projectId = project.Id,
+                workflowProfileId = "mohist/pr",
+                isDraft = false,
+            });
+
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
+            project.Id, "wfp-start-pr", RepositoryBaseBranch: "main"));
+        _startedProjectId = project.Id;
+        _startedIssueNumber = issue.Number;
+
+        var yamlResponse = await _client.GetAsync($"/api/workflow-runs/{wrId}/yaml");
+        Assert.Equal(HttpStatusCode.OK, yamlResponse.StatusCode);
+        var yamlBody = await yamlResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var yaml = yamlBody.GetProperty("data").GetProperty("yaml").GetString();
+
+        Assert.NotNull(yaml);
+        Assert.Contains("integrate:open-pr", yaml!, StringComparison.Ordinal);
+        Assert.Contains("mohist/create-pull-request", yaml!, StringComparison.Ordinal);
+        Assert.DoesNotContain("integrate:rebase", yaml!, StringComparison.Ordinal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkflow_WithDefaultProfile_UsesDefaultSystemTemplate()
+    {
+        var project = await CreateProjectAsync("wfp-start-default");
+
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new
+            {
+                title = "Default startup",
+                projectId = project.Id,
+                workflowProfileId = "mohist/default",
+                isDraft = false,
+            });
+
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
+            project.Id, "wfp-start-default", RepositoryBaseBranch: "main"));
+        _startedProjectId = project.Id;
+        _startedIssueNumber = issue.Number;
+
+        var yamlResponse = await _client.GetAsync($"/api/workflow-runs/{wrId}/yaml");
+        Assert.Equal(HttpStatusCode.OK, yamlResponse.StatusCode);
+        var yamlBody = await yamlResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var yaml = yamlBody.GetProperty("data").GetProperty("yaml").GetString();
+
+        Assert.NotNull(yaml);
+        Assert.Contains("integrate:rebase", yaml!, StringComparison.Ordinal);
+        Assert.Contains("mohist/rebase", yaml!, StringComparison.Ordinal);
+        Assert.DoesNotContain("integrate:open-pr", yaml!, StringComparison.Ordinal);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task WorkflowProfileEndpoint_AgreesWithEffectiveProfile_ForPrIssue()
+    {
+        var project = await CreateProjectAsync("wfp-endpoint-pr-agree");
+
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new
+            {
+                title = "Endpoint agreement",
+                projectId = project.Id,
+                workflowProfileId = "mohist/pr",
+            });
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        var listed = await _client.GetDataAsync<IssueDto[]>($"/api/projects/{project.Id}/issues?all=true");
+        var listItem = Assert.Single(listed, i => i.Id == issue.Id);
+        var profileResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        var profileData = (await profileResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        // GET /api/issues/:n, the list endpoint, and the workflow-profile
+        // endpoint MUST all report the same effective profile id.
+        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
+        Assert.Equal("mohist/pr", listItem.WorkflowProfileId);
+        Assert.Equal("mohist/pr", profileData.GetProperty("profileId").GetString());
+
+        // hasCustomTemplate is false — the issue has no advanced override;
+        // the displayed selection IS the effective profile.
+        Assert.False(profileData.GetProperty("hasCustomTemplate").GetBoolean());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task StartWorkflow_WithCustomYamlOverride_TakesPrecedenceOverPrProfile()
+    {
+        var project = await CreateProjectAsync("wfp-start-override");
+
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new
+            {
+                title = "Override startup",
+                projectId = project.Id,
+                workflowProfileId = "mohist/pr",
+                isDraft = false,
+            });
+
+        var customYaml = """
+            id: advanced-override
+            stages:
+              - stage: only-stage
+                tasks:
+                  - id: only-task
+                    title: Custom override task
+                    uses: spec/task
+                    with:
+                      prompt: Custom override prompt
+                checks: []
+            """;
+        using var putResponse = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template",
+            new { yaml = customYaml });
+        Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
+
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
+            project.Id, "wfp-start-override", RepositoryBaseBranch: "main"));
+        _startedProjectId = project.Id;
+        _startedIssueNumber = issue.Number;
+
+        var yamlResponse = await _client.GetAsync($"/api/workflow-runs/{wrId}/yaml");
+        var yamlBody = await yamlResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var yaml = yamlBody.GetProperty("data").GetProperty("yaml").GetString();
+        Assert.NotNull(yaml);
+        Assert.Contains("advanced-override", yaml!, StringComparison.Ordinal);
+        Assert.Contains("only-task", yaml!, StringComparison.Ordinal);
+
+        // The displayed selection is still the PR profile — the override
+        // does NOT rewrite the displayed profile id; it is surfaced via
+        // HasCustomTemplate / TemplateSource instead.
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
+        var profileResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        var profileData = (await profileResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("mohist/pr", profileData.GetProperty("profileId").GetString());
+        Assert.True(profileData.GetProperty("hasCustomTemplate").GetBoolean());
+        Assert.Equal("custom", profileData.GetProperty("templateSource").GetString());
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string prefix)
     {
         var project = await _client.PostDataAsync<ProjectDto>(

@@ -146,15 +146,31 @@ public class IssueGrain : Grain, IIssueGrain
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
         var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
 
-        if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
-            await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
+        // The startup template resolution honors the issue's effective
+        // workflow profile (issue selection → project default → system
+        // default) and only the explicit advanced overrides (issue custom
+        // YAML, project template reference) take precedence. Auto-seeding the
+        // project default here would shadow an explicit issue-level profile
+        // selection (e.g. mohist/pr would lose to a freshly auto-seeded
+        // mohist/default), so the resolver's own fallback handles projects
+        // without a configured default.
 
         var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id);
         var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.DefaultId).Definition;
 
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
-        var mergedPrompts = defaultProfile is MohistDefaultIssueWorkflowProfile mohistDefaultProfile
-            ? await mohistDefaultProfile.GetMergedPromptsAsync(issue.ProjectId)
+        // Resolve the effective profile (issue selection → project default →
+        // system default) so prompts are merged from the same profile that
+        // drives the workflow definition. Previously this hardcoded the
+        // mohist/default profile, which meant a mohist/pr issue would inherit
+        // default prompts even though the run used the PR definition.
+        var projectDefaultTemplateId = await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id);
+        var effectiveProfileId = EffectiveWorkflowProfileResolver.ResolveCore(
+            issue.WorkflowProfileId,
+            projectDefaultTemplateId,
+            _profiles.Exists);
+        var effectiveProfile = _profiles.Get(effectiveProfileId);
+        var mergedPrompts = effectiveProfile is MohistIssueWorkflowProfileBase mohistProfile
+            ? await mohistProfile.GetMergedPromptsAsync(issue.ProjectId)
             : new Dictionary<string, string>(StringComparer.Ordinal);
 
         await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);

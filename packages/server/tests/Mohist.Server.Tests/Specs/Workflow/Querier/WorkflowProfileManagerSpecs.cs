@@ -28,7 +28,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         var factory = new TestDbContextFactory(_options);
         var runProfileManager = new WorkflowRunProfileManager(factory);
-        _manager = new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager);
+        var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
+        var registry = new Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfileRegistry(promptLoader, factory);
+        _manager = new WorkflowProfileManager(
+            factory,
+            promptLoader,
+            new PromptTemplateEngine(),
+            WorkflowGrainTestHelpers.CreateEmptyConfigService(),
+            runProfileManager,
+            new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry));
 
         using var initDb = new MohistDbContext(_options);
         initDb.Database.EnsureCreated();
@@ -140,6 +148,94 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(result.Structure);
         Assert.Contains("system-template:mohist/default", result.Id ?? "");
         Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_IssuePrProfile_NoOverrides_UsesPrSystemTemplate()
+    {
+        var runId = "wr_issue_pr";
+        await SeedAsync(projectId: "proj-issue-pr", issueId: "issue_pr", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/pr");
+
+        var result = await _manager.LoadTemplateAsync(runId);
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/pr", result.Id ?? "");
+        var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:open-pr");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_IssueDefaultProfile_NoOverrides_UsesDefaultSystemTemplate()
+    {
+        var runId = "wr_issue_default";
+        await SeedAsync(projectId: "proj-issue-default", issueId: "issue_default", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/default");
+
+        var result = await _manager.LoadTemplateAsync(runId);
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:open-pr");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_IssuePrProfile_ProjectDefaultIsDifferent_SystemFallsBackToIssueProfile()
+    {
+        // Project default points at mohist/default. Issue has explicit
+        // mohist/pr selection. Neither issue-level override (Template /
+        // SourceTemplateId) is present. The resolution order is:
+        //   1. issue custom YAML  → none
+        //   2. issue SourceTemplateId → none
+        //   3. project DefaultTemplateId → mohist/default
+        // Step 3 wins here because the project's default template is a known
+        // system template (mohist/default). The new effective-profile
+        // fallback only fires when no override AND no project default apply.
+        var runId = "wr_issue_pr_proj_default";
+        await SeedAsync(projectId: "proj-issue-pr-proj-default", issueId: "issue_pr_proj", runId: runId,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: "mohist/default",
+            issueWorkflowProfileId: "mohist/pr");
+
+        var result = await _manager.LoadTemplateAsync(runId);
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadTemplate_IssuePrProfile_CustomYamlOverride_TakesPrecedence()
+    {
+        var runId = "wr_issue_pr_custom";
+        await SeedAsync(projectId: "proj-pr-custom", issueId: "issue_pr_custom", runId: runId,
+            issueTemplateJson: SerializeDefinition("custom-override", stageCount: 1),
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: null,
+            issueWorkflowProfileId: "mohist/pr");
+
+        var result = await _manager.LoadTemplateAsync(runId);
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("issue-custom", result.Id ?? "");
+        Assert.Single(result.Structure.Stages);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -579,10 +675,11 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string? issueTemplateJson,
         string? issueSourceTemplateId = null,
         string? projectDefaultTemplateId = null,
-        string? projectTemplateJson = null)
+        string? projectTemplateJson = null,
+        string? issueWorkflowProfileId = null)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId);
+        SeedRunContext(db, projectId, issueId, runId, issueWorkflowProfileId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -693,7 +790,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         MohistDbContext db,
         string projectId,
         string issueId,
-        string runId)
+        string runId,
+        string? issueWorkflowProfileId = null)
     {
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
@@ -718,7 +816,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 Id = issueId,
                 ProjectId = projectId,
                 Number = 1,
+                Title = "Seeded issue",
+                Priority = "p2",
                 WorkflowRunId = runId,
+                WorkflowProfileId = issueWorkflowProfileId,
             }),
         });
     }

@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -15,8 +17,15 @@ namespace Mohist.Server.Workflow.Services;
 
 /// <summary>
 /// Workflow template/variables/prompts resolution entrypoint.
-/// Template resolution never depends on a workflow-run profile snapshot:
-/// issue custom > issue referenced template > project default > system default.
+///
+/// Template resolution precedence (highest first):
+///   1. Issue custom YAML (issue_workflow_profile.Template)
+///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
+///   3. Project default template (project_workflow_profile.DefaultTemplateId)
+///   4. Issue's effective workflow profile (issue.WorkflowProfileId →
+///      project default → mohist/default), resolved through the centralized
+///      <see cref="EffectiveWorkflowProfileResolver"/> so the running
+///      workflow agrees with the profile id projected by every read surface.
 /// </summary>
 public class WorkflowProfileManager : IScopedService
 {
@@ -29,19 +38,22 @@ public class WorkflowProfileManager : IScopedService
     private readonly PromptTemplateEngine _engine;
     private readonly ConfigService _configService;
     private readonly WorkflowRunProfileManager _runProfileManager;
+    private readonly EffectiveWorkflowProfileResolver _effectiveProfileResolver;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
         PromptTemplateEngine engine,
         ConfigService configService,
-        WorkflowRunProfileManager runProfileManager)
+        WorkflowRunProfileManager runProfileManager,
+        EffectiveWorkflowProfileResolver effectiveProfileResolver)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
         _engine = engine;
         _configService = configService;
         _runProfileManager = runProfileManager;
+        _effectiveProfileResolver = effectiveProfileResolver;
     }
 
     public async Task<ResolvedTemplate> LoadTemplateAsync(
@@ -85,9 +97,40 @@ public class WorkflowProfileManager : IScopedService
             }
         }
 
+        var effectiveProfileId = await ResolveEffectiveProfileIdAsync(db, context);
+        var effectiveDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(effectiveProfileId);
+        if (effectiveDefinition is not null)
+        {
+            return ResolvedTemplate.FromDefinition(
+                $"system-template:{effectiveProfileId}",
+                effectiveDefinition);
+        }
+
         return ResolvedTemplate.FromDefinition(
             $"system-template:{IssueWorkflowProfiles.DefaultId}",
             ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId));
+    }
+
+    private async Task<string> ResolveEffectiveProfileIdAsync(MohistDbContext db, RunContext context)
+    {
+        string? issueSelection = null;
+        if (!string.IsNullOrWhiteSpace(context.IssueId))
+        {
+            var row = await db.Issues.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.IssueId == context.IssueId);
+            var issue = row is null ? null : IssueStore.Deserialize(row.State);
+            issueSelection = issue?.WorkflowProfileId;
+        }
+
+        string? projectDefaultId = null;
+        if (!string.IsNullOrWhiteSpace(context.ProjectId))
+        {
+            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
+            projectDefaultId = projectProfile?.DefaultTemplateId;
+        }
+
+        return _effectiveProfileResolver.Resolve(issueSelection, projectDefaultId);
     }
 
     private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
