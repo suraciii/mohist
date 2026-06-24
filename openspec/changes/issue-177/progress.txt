@@ -1,0 +1,26 @@
+## Codebase Patterns
+
+- Epic grain uses a `{projectId}:{epicId}` key format parsed via `GrainKey.Split(':')`. The Orleans `Grain` base class can be instantiated directly in unit tests with a `GrainKeyForTest` property pattern (mirrors `AgentGrain.GrainKeyForTest` in `packages/server/src/Mohist.Server/Agent/Grains/AgentGrain.cs:21`).
+- For unit testing EpicGrain without Orleans silo: instantiate directly with `new EpicGrain(factory, null!) { GrainKeyForTest = "project_1:epic_1" }`, seed `EpicRow`/`EpicIssueRow`/`IssueRow` directly into in-memory SQLite (Migrate, not EnsureCreated, because the schema has computed columns for `IssueRow.ProjectId`/`Number`/`WorkflowRunId` based on `json_extract`).
+- Test database: SQLite `:memory:` + `db.Database.Migrate()` + `TestDbContextFactory` wrapping `DbContextOptions<MohistDbContext>`. See `packages/server/tests/Mohist.Server.Tests/Specs/Agent/Grain/AgentGrainSpecs.cs:203-241`.
+- For seeding an Issue into `IssueRow.State` use `IssueStore.Serialize(issue)` (`packages/server/src/Mohist.Server/Infrastructure/Data/Issue/IssueStore.cs:93`). After the migrate creates the schema, computed `ProjectId`/`Number` columns are populated automatically from JSON.
+- C# name collision: `Mohist.Server.Issue.Domain` is a namespace AND contains a class `Issue`. Importing both `Mohist.Server.Issue.Domain` and `Mohist.Server.Infrastructure.Data.Issue` breaks `new Issue { ... }` — the compiler picks the namespace. Workaround: use fully-qualified `new Mohist.Server.Issue.Domain.Issue { ... }` and `Mohist.Server.Issue.Domain.IssueStatus.Done` in test code.
+- Empty-epic quirk: an epic with no linked issues satisfies `undelivered.Count == 0` (the existing manual `SetStatusAsync("done")` behavior), so `AutoMarkDoneIfReadyAsync` (and resume re-evaluation) on an empty epic transitions to `done`. This is consistent with manual Mark Done, but two existing API specs (`Resume_FromPaused_ReturnsActiveStatusAndClearsReason`, `ResumeRoute_AcceptsEpicNumber`) assumed an empty epic stays `active` on resume — they need a linked backlog issue to exercise the non-ready path.
+- `ResumeAsync` re-eval must gate on `wasPaused` (the prior `domain.Status == EpicStatus.Paused` snapshot before the transition), otherwise calling `ResumeAsync` on an already-active epic would still invoke the auto-done check, which is harmless but wasted work and subtly changes the contract. The current `domain.Resume()` is itself a no-op on non-paused, so checking before the call is the right hook.
+- `TryAutoMarkDoneAsync` swallows terminal/paused and "undelivered not empty" as no-ops, returning the current DTO. Only on `active` + `undelivered.Count == 0` does it call `domain.MarkDone(...)` (the same domain method the manual path uses, preserving throw semantics on the manual route).
+
+## Gotchas
+
+- `IConfiguration`/`ILogger` and grain deps not used by the methods under test must be passed as `null!` (the grain's `OnActivateAsync` is not called in unit tests because the `Grain` base methods aren't invoked).
+- The grain's `Materialize` + `MapToRow` pipeline requires the `EpicRow` to be tracked (no `AsNoTracking` on the load) so that the in-place status update is persisted by `SaveChangesAsync()`. `TryAutoMarkDoneAsync` reuses the tracked row passed in by the caller.
+- The grain reads the issue rows by `Number` using a computed column on `IssueRow`. The seed helper must call `IssueStore.Serialize` so the computed columns (`ProjectId`, `Number`, `WorkflowRunId`) resolve from the JSON, otherwise the grain's `BuildLinkedIssueDtosAsync` returns an empty list and the epic auto-dones on any seeded data.
+
+## T-001 outcome
+
+- Added `IEpicGrain.AutoMarkDoneIfReadyAsync()` (idempotent: terminal/paused = no-op return DTO; active + ready = MarkDone + persist; active + unready = no-op stay active).
+- Updated `EpicGrain.ResumeAsync` to re-evaluate readiness in-turn after a successful paused→active transition via a private `TryAutoMarkDoneAsync` helper.
+- Added `EpicGrain.GrainKeyForTest` internal hook (mirroring `AgentGrain`) so the grain can be instantiated with a stub key in unit tests.
+- Did NOT change `Epic.MarkDone` throw semantics, the manual `SetStatusAsync("done")` path, or the readiness definition (still `undelivered.Count == 0` via `ComputeUndeliveredLinkedNumbersAsync`).
+- Tests: 16 new Fake-based unit specs in `packages/server/tests/Mohist.Server.Tests/Specs/Epic/Grain/EpicAutoDoneSpecs.cs` covering all six acceptance criteria plus regression checks for manual `SetStatusAsync("done")` error paths.
+- Two existing API specs in `EpicApiSpecs` (`Resume_FromPaused_ReturnsActiveStatusAndClearsReason`, `ResumeRoute_AcceptsEpicNumber`) updated to seed a linked open issue so the resumed epic stays `active` (without the issue, the empty epic auto-dones on resume, matching manual `SetStatusAsync("done")` semantics on an empty epic).
+- `dotnet build` clean (0 warnings, 0 errors); `dotnet test` 2567/2567 passed.
