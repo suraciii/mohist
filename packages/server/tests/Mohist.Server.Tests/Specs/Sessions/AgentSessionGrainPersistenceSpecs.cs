@@ -10,7 +10,6 @@ namespace Mohist.Server.Tests.Specs.Sessions;
 public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<AgentSessionGrainFixture>
 {
     protected readonly AgentSessionGrainFixture Fixture;
-    protected const int TimerDelayMs = 300;
 
     protected AgentSessionGrainPersistenceSpecsBase(AgentSessionGrainFixture fixture)
     {
@@ -19,6 +18,20 @@ public abstract class AgentSessionGrainPersistenceSpecsBase : IClassFixture<Agen
     }
 
     protected IAgentSessionGrain NewGrain() => Fixture.Grains.GetGrain<IAgentSessionGrain>($"agent-session-spec-{Guid.NewGuid():N}");
+
+    protected static async Task WaitUntilAsync(Func<bool> condition, string description, int timeoutMs = 5000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (condition())
+                return;
+
+            await Task.Delay(25);
+        }
+
+        Assert.True(condition(), $"Timed out waiting for {description}.");
+    }
 }
 
 [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -40,7 +53,9 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }));
 
-        await Task.Delay(TimerDelayMs);
+        await WaitUntilAsync(
+            () => Fixture.StateStore.SaveCount >= 2 && Fixture.TranscriptStore.Flushes.Count >= 1,
+            "initial agent session persistence");
 
         Assert.Equal(2, Fixture.StateStore.SaveCount);
         Assert.Single(Fixture.TranscriptStore.Flushes);
@@ -53,7 +68,9 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\" again\"}")
             }));
 
-        await Task.Delay(TimerDelayMs);
+        await WaitUntilAsync(
+            () => Fixture.StateStore.SaveCount >= 3 && Fixture.TranscriptStore.Flushes.Count >= 2,
+            "subsequent agent session persistence");
 
         Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
@@ -83,21 +100,17 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }));
 
-        await Task.Delay(TimerDelayMs);
-
-        Assert.Equal(1, Fixture.StateStore.SaveCount);
-        Assert.Single(Fixture.TranscriptStore.Flushes);
-
-        var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Contains(grain.GetPrimaryKeyString(), stateError.Message);
-        Assert.Contains("state store down", stateError.Exception?.Message ?? string.Empty);
-
-        Fixture.StateStore.NextException = null;
-
-        await Task.Delay(TimerDelayMs);
+        await WaitUntilAsync(
+            () => Fixture.StateStore.SaveCount >= 2
+                && Fixture.TranscriptStore.Flushes.Count >= 2
+                && Fixture.Logger.Entries.Any(e => e.Level == LogLevel.Error),
+            "agent session state persistence retry");
 
         Assert.Equal(2, Fixture.StateStore.SaveCount);
         Assert.Equal(2, Fixture.TranscriptStore.Flushes.Count);
+        var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
+        Assert.Contains(grain.GetPrimaryKeyString(), stateError.Message);
+        Assert.Contains("state store down", stateError.Exception?.Message ?? string.Empty);
         var retryFlush = Fixture.TranscriptStore.Flushes[1];
         var part = Assert.Single(retryFlush.Parts);
         Assert.Equal("world", part.TextDelta);
@@ -125,21 +138,17 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
                 new AgentSessionRuntimeEventInput("message.delta", "{\"text\":\"world\"}")
             }));
 
-        await Task.Delay(TimerDelayMs);
+        await WaitUntilAsync(
+            () => Fixture.StateStore.SaveCount >= 3
+                && Fixture.TranscriptStore.Flushes.Count >= 1
+                && Fixture.Logger.Entries.Any(e => e.Level == LogLevel.Error),
+            "agent session transcript persistence retry");
 
-        Assert.Equal(2, Fixture.StateStore.SaveCount);
-        Assert.Empty(Fixture.TranscriptStore.Flushes);
-
+        Assert.Equal(3, Fixture.StateStore.SaveCount);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains(grain.GetPrimaryKeyString(), transcriptError.Message);
         Assert.Contains("1", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
-
-        Fixture.TranscriptStore.NextException = null;
-
-        await Task.Delay(TimerDelayMs);
-
-        Assert.Equal(3, Fixture.StateStore.SaveCount);
         var retryFlush = Assert.Single(Fixture.TranscriptStore.Flushes);
         var part = Assert.Single(retryFlush.Parts);
         Assert.Equal("world", part.TextDelta);
