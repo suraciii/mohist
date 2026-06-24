@@ -258,10 +258,91 @@ public class PathContractRegressionSpecs
             $"/api/workflow-runs/{workflowRunId}/variables/effective");
         Assert.Equal(System.Net.HttpStatusCode.OK, varsResponse.StatusCode);
         var varsJson = JsonDocument.Parse(await varsResponse.Content.ReadAsStringAsync()).RootElement;
-        var variablesString = varsJson.GetProperty("data").GetProperty("variables").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(variablesString), "expected effective workflow variables");
-        var variables = JsonDocument.Parse(variablesString).RootElement;
+        var variables = varsJson.GetProperty("data");
         AssertDispatchVariablesHaveWorkspaceContract(variables);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task WorkflowRunProfileVariables_AreReadWrittenAsVariableBundle()
+    {
+        var workflowRunId = $"wr_api_{Guid.NewGuid():N}";
+
+        using var putResponse = await _client.PutAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",
+            new { vars = new { github = new { pr = new { number = 10 } }, source = "put" } });
+        Assert.Equal(System.Net.HttpStatusCode.OK, putResponse.StatusCode);
+
+        using var patchResponse = await _client.PatchAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",
+            new { vars = new { github = new { pr = new { url = "https://example.test/pr/10" } } } });
+        Assert.Equal(System.Net.HttpStatusCode.OK, patchResponse.StatusCode);
+
+        using var variablesResponse = await _client.GetAsync(
+            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables");
+        Assert.Equal(System.Net.HttpStatusCode.OK, variablesResponse.StatusCode);
+        var variablesJson = JsonDocument.Parse(await variablesResponse.Content.ReadAsStringAsync()).RootElement;
+        var vars = variablesJson.GetProperty("data").GetProperty("vars");
+        var pr = vars.GetProperty("github").GetProperty("pr");
+        Assert.Equal(10, pr.GetProperty("number").GetInt32());
+        Assert.Equal("https://example.test/pr/10", pr.GetProperty("url").GetString());
+
+        using var profileResponse = await _client.GetAsync(
+            $"/api/workflow-runs/{workflowRunId}/workflow-profile");
+        Assert.Equal(System.Net.HttpStatusCode.OK, profileResponse.StatusCode);
+        var profileJson = JsonDocument.Parse(await profileResponse.Content.ReadAsStringAsync()).RootElement;
+        var profileData = profileJson.GetProperty("data");
+        Assert.Equal(workflowRunId, profileData.GetProperty("workflowRunId").GetString());
+        Assert.Equal("put", profileData.GetProperty("variables").GetProperty("vars").GetProperty("source").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task WorkflowEffectiveVariableKeyPath_ReturnsValueOrJsonNull()
+    {
+        var workflowRunId = $"wr_keypath_{Guid.NewGuid():N}";
+
+        using var putResponse = await _client.PutAsJsonAsync(
+            $"/api/workflow-runs/{workflowRunId}/workflow-profile/variables",
+            new
+            {
+                vars = new
+                {
+                    github = new { pr = new { number = 10 } },
+                    agent = new { model = "base-model" },
+                },
+                stages = new
+                {
+                    build = new
+                    {
+                        vars = new
+                        {
+                            agent = new { model = "build-model" },
+                        },
+                    },
+                },
+            });
+        Assert.Equal(System.Net.HttpStatusCode.OK, putResponse.StatusCode);
+
+        using var baseResponse = await _client.GetAsync(
+            $"/api/workflow-runs/{workflowRunId}/variables/effective/agent.model");
+        Assert.Equal(System.Net.HttpStatusCode.OK, baseResponse.StatusCode);
+        var baseJson = JsonDocument.Parse(await baseResponse.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("base-model", baseJson.GetProperty("data").GetString());
+
+        using var stageResponse = await _client.GetAsync(
+            $"/api/workflow-runs/{workflowRunId}/variables/effective/agent.model?stage=build");
+        Assert.Equal(System.Net.HttpStatusCode.OK, stageResponse.StatusCode);
+        var stageJson = JsonDocument.Parse(await stageResponse.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("build-model", stageJson.GetProperty("data").GetString());
+
+        using var missingResponse = await _client.GetAsync(
+            $"/api/workflow-runs/{workflowRunId}/variables/effective/github.pr.url");
+        Assert.Equal(System.Net.HttpStatusCode.OK, missingResponse.StatusCode);
+        var missingJson = JsonDocument.Parse(await missingResponse.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(JsonValueKind.Null, missingJson.GetProperty("data").ValueKind);
     }
 
     private static void AssertProjectHasNoLocalPathFields(JsonElement project)

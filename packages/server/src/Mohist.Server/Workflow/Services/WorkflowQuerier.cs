@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
@@ -107,30 +108,15 @@ public class WorkflowQuerier : IScopedService
         return run?.Workspace;
     }
 
-    public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)
+    public async Task<JsonElement> GetEffectiveVariablesAsync(string workflowRunId, string? stage = null)
     {
-        var bundle = await _profileManager.LoadVariablesAsync(workflowRunId);
-        if (!bundle.Vars.HasValue && bundle.Stages is null)
-            return null;
+        return await _profileManager.ResolveEffectiveVariablesAsync(workflowRunId, stage);
+    }
 
-        var varsJson = bundle.Vars.HasValue
-            ? JsonSerializer.Serialize(bundle.Vars.Value, JSON.Options)
-            : "{}";
-
-        Dictionary<string, Dictionary<string, string>>? stageMap = null;
-        if (bundle.Stages is not null)
-        {
-            stageMap = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
-            foreach (var (stage, stageVars) in bundle.Stages)
-            {
-                if (!stageVars.Vars.HasValue) continue;
-                var stageVarsJson = JsonSerializer.Serialize(stageVars.Vars.Value, JSON.Options);
-                var inner = JsonSerializer.Deserialize<Dictionary<string, string>>(stageVarsJson, JSON.Options);
-                if (inner is not null) stageMap[stage] = inner;
-            }
-        }
-
-        return new WorkflowVariablesView(varsJson, stageMap);
+    public async Task<JsonElement> GetEffectiveVariableAsync(string workflowRunId, string keyPath, string? stage = null)
+    {
+        var variables = await GetEffectiveVariablesAsync(workflowRunId, stage);
+        return VariableBundle.GetByKeyPath(variables, keyPath);
     }
 
     public async Task<string?> GetDefinitionYamlAsync(string workflowRunId)
@@ -167,5 +153,4 @@ public class WorkflowQuerier : IScopedService
         return run?.HasIncompleteTaskById(id) ?? false;
     }
 
-    private sealed record VariablesDto(string Json, Dictionary<string, Dictionary<string, string>>? StageVariables);
 }

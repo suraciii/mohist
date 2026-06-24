@@ -145,12 +145,16 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_ReturnsEmpty_WhenNoProfileVariablesExist()
+    public async Task ResolveLayeredVariables_ReturnsEmpty_WhenNoProfileVariablesExist()
     {
         var runId = "wr_vars01";
-        await SeedRunOnlyAsync("proj5", "issue_5", runId);
+        await SeedAsync(
+            projectId: "proj5",
+            issueId: "issue_5",
+            runId: runId,
+            issueTemplateJson: SerializeDefinition("empty-vars-template"));
 
-        var result = await _manager.LoadVariablesAsync(runId);
+        var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
         Assert.False(result.Vars.HasValue);
         Assert.Null(result.Stages);
@@ -159,7 +163,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_MergesProjectDefaultsWithIssueOverrides()
+    public async Task ResolveLayeredVariables_MergesProjectDefaultsWithIssueOverrides()
     {
         var runId = "wr_direct01";
         var proj = new VariableBundle(
@@ -171,7 +175,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         await SeedAllLayersAsync("proj6", "issue_6", runId, proj, issue);
 
-        var result = await _manager.LoadVariablesAsync(runId);
+        var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -184,7 +188,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_ProjectEditsAffectExistingIssueWhenNotOverridden()
+    public async Task ResolveLayeredVariables_ProjectEditsAffectExistingIssueWhenNotOverridden()
     {
         // Project-level workflow variables are live defaults. Existing issues
         // inherit updated project model settings unless the issue profile
@@ -209,7 +213,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var result = await _manager.LoadVariablesAsync(runId);
+        var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -221,7 +225,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_IssueModelOverrideWinsOverProjectModel()
+    public async Task ResolveLayeredVariables_IssueModelOverrideWinsOverProjectModel()
     {
         var runId = "wr_override01";
         var proj = new VariableBundle(
@@ -233,7 +237,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         await SeedAllLayersAsync("proj_override", "issue_override", runId, proj, issue);
 
-        var result = await _manager.LoadVariablesAsync(runId);
+        var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
@@ -245,7 +249,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_ProjectStageModelAppliesWhenIssueOnlyHasContext()
+    public async Task ResolveEffectiveVariables_ProjectStageModelAppliesWhenIssueOnlyHasContext()
     {
         var runId = "wr_project_stage01";
         var project = new VariableBundle(
@@ -269,21 +273,19 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         await SeedAllLayersAsync("proj_project_stage", "issue_project_stage", runId, project, issue);
 
-        var result = await _manager.LoadVariablesAsync(runId);
+        var result = await _manager.ResolveEffectiveVariablesAsync(runId, "check");
 
-        Assert.NotNull(result.Stages);
-        Assert.True(result.Stages!.TryGetValue("check", out var checkStage));
-        Assert.NotNull(checkStage.Vars);
-        using var doc = JsonDocument.Parse(checkStage.Vars.Value.GetRawText());
-        var agent = doc.RootElement.GetProperty("agent");
+        Assert.Equal(JsonValueKind.Object, result.ValueKind);
+        var agent = result.GetProperty("agent");
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
         Assert.Equal("openai/gpt-5.5", agent.GetProperty("model").GetString());
+        Assert.Equal(122, result.GetProperty("issue").GetProperty("number").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadVariables_ReadsIssueStagesDirectly_ForStageDispatch()
+    public async Task ResolveEffectiveVariables_ReadsIssueStageAndFallsBackToTopLevel()
     {
         // Per-stage variables are read directly from the issue's Stages
         // map. Runtime dispatch falls back from
@@ -306,19 +308,109 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         await SeedIssueOnlyAsync("proj_stage", "issue_stage", runId, issue);
 
-        var result = await _manager.LoadVariablesAsync(runId);
+        var result = await _manager.ResolveEffectiveVariablesAsync(runId, "build");
 
-        Assert.NotNull(result.Stages);
-        Assert.True(result.Stages!.TryGetValue("build", out var buildStage));
-        Assert.NotNull(buildStage.Vars);
-        using var stageDoc = JsonDocument.Parse(buildStage.Vars.Value.GetRawText());
         Assert.Equal("anthropic/claude-sonnet-4-6",
-            stageDoc.RootElement.GetProperty("agent").GetProperty("model").GetString());
+            result.GetProperty("agent").GetProperty("model").GetString());
+
+        var topLevelResult = await _manager.ResolveEffectiveVariablesAsync(runId, null);
+        Assert.Equal("minimax-coding-plan/MiniMax-M3",
+            topLevelResult.GetProperty("agent").GetProperty("model").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task ResolveLayeredVariables_MergesTemplateProjectIssueAndRuntimeLayers()
+    {
+        var runId = "wr_effective01";
+        var templateJson = SerializeDefinition(
+            "effective-template",
+            variables: new Dictionary<string, JsonElement?>
+            {
+                ["source"] = JsonSerializer.SerializeToElement("template"),
+                ["agent"] = JsonSerializer.SerializeToElement(new { model = "template-model", type = "template-agent" }),
+                ["github"] = JsonSerializer.SerializeToElement(new { pr = new { number = 1 } }),
+            });
+        var project = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                source = "project",
+                agent = new { model = "project-model" },
+            })));
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                source = "issue",
+            })));
+        var runtime = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                source = "runtime",
+                github = new { pr = new { number = 249, url = "https://example.test/pr/249" } },
+            })));
+
+        await SeedAllLayersAsync("proj_effective", "issue_effective", runId, project, issue,
+            issueTemplateJson: templateJson,
+            runtime: runtime);
+
+        var result = await _manager.ResolveLayeredVariablesAsync(runId);
 
         Assert.NotNull(result.Vars);
-        using var varsDoc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        Assert.Equal("minimax-coding-plan/MiniMax-M3",
-            varsDoc.RootElement.GetProperty("agent").GetProperty("model").GetString());
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var root = doc.RootElement;
+        Assert.Equal("runtime", root.GetProperty("source").GetString());
+        Assert.Equal("project-model", root.GetProperty("agent").GetProperty("model").GetString());
+        Assert.Equal("template-agent", root.GetProperty("agent").GetProperty("type").GetString());
+        var pr = root.GetProperty("github").GetProperty("pr");
+        Assert.Equal(249, pr.GetProperty("number").GetInt32());
+        Assert.Equal("https://example.test/pr/249", pr.GetProperty("url").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task ResolveEffectiveVariables_ReturnsRunnerVarsForStage()
+    {
+        var runId = "wr_effective_stage01";
+        var templateJson = SerializeDefinition(
+            "effective-stage-template",
+            variables: new Dictionary<string, JsonElement?>
+            {
+                ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "template-model" }),
+            });
+        var project = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                agent = new { model = "project-model" },
+            })),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["build"] = new(JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+                {
+                    agent = new { model = "build-model" },
+                    stageOnly = true,
+                })))
+            });
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+            {
+                issueOnly = true,
+            })));
+
+        await SeedAllLayersAsync("proj_effective_stage", "issue_effective_stage", runId, project, issue,
+            issueTemplateJson: templateJson);
+
+        var result = await _manager.ResolveEffectiveVariablesAsync(runId, "build");
+
+        Assert.Equal(JsonValueKind.Object, result.ValueKind);
+        Assert.False(result.TryGetProperty("vars", out _));
+        Assert.False(result.TryGetProperty("stages", out _));
+        Assert.True(result.GetProperty("stageOnly").GetBoolean());
+        Assert.True(result.GetProperty("issueOnly").GetBoolean());
+        var agent = result.GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("build-model", agent.GetProperty("model").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -444,12 +536,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     // --- helpers ---
 
-    private static string SerializeDefinition(string id, int stageCount)
+    private static string SerializeDefinition(
+        string id,
+        int stageCount = 1,
+        Dictionary<string, JsonElement?>? variables = null)
     {
         var stages = new List<StageDefinition>();
         for (var i = 0; i < stageCount; i++)
             stages.Add(new StageDefinition($"stage-{i}", [], []));
-        var def = new WorkflowDefinition(id, stages);
+        var def = new WorkflowDefinition(id, stages, Variables: variables);
         return JsonSerializer.Serialize(def, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -525,7 +620,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task SeedAllLayersAsync(
         string projectId, string issueId, string runId,
-        VariableBundle project, VariableBundle issue)
+        VariableBundle project,
+        VariableBundle issue,
+        string? issueTemplateJson = null,
+        VariableBundle? runtime = null)
     {
         await using var db = new MohistDbContext(_options);
         SeedRunContext(db, projectId, issueId, runId);
@@ -538,8 +636,17 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
             IssueId = issueId,
+            Template = issueTemplateJson,
             Variables = issue.ToJson(),
         });
+        if (runtime is not null)
+        {
+            db.WorkflowRunProfiles.Add(new WorkflowRunProfileRow
+            {
+                WorkflowRunId = runId,
+                Variables = runtime.ToJson(),
+            });
+        }
 
         await db.SaveChangesAsync();
     }

@@ -1019,10 +1019,8 @@ public class IssueRepositoryResolutionRegressionSpecs
     {
         using var scope = _services.CreateScope();
         var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
-        var snapshot = await query.GetVariablesAsync(workflowRunId);
-        Assert.NotNull(snapshot);
-        Assert.False(string.IsNullOrWhiteSpace(snapshot!.Variables));
-        return JsonDocument.Parse(snapshot.Variables);
+        var snapshot = await query.GetEffectiveVariablesAsync(workflowRunId);
+        return JsonDocument.Parse(snapshot.GetRawText());
     }
 
     private async Task<Mohist.Server.Workflow.Domain.Run.WorkflowRun?> LoadWorkflowRunAsync(string workflowRunId)

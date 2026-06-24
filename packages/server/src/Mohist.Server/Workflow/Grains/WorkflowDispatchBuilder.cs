@@ -85,10 +85,10 @@ public sealed class WorkflowDispatchBuilder(
     private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
         BuildPayloadAsync(WorkDispatchRequest req, string workId, int attempt, string workflowRunId, WorkflowRun run)
     {
-        var resolved = await profileManager.ResolveEffectiveVariablesAsync(workflowRunId);
+        var resolved = await profileManager.ResolveLayeredVariablesAsync(workflowRunId);
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        var effectiveVarsJson = WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, req.Stage)
+        var effectiveVarsJson = resolved.ResolveStageVars(req.Stage)
             ?? JSON.DeserializeElement("{}");
 
         if (effectiveVarsJson.ValueKind == JsonValueKind.Object)

@@ -222,6 +222,49 @@ public class VariableBundleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
+    public void GetByKeyPath_ReturnsNestedValue()
+    {
+        var root = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+        {
+            agent = new { model = "openai/gpt-5" },
+        }));
+
+        var result = VariableBundle.GetByKeyPath(root, "agent.model");
+
+        Assert.Equal(JsonValueKind.String, result.ValueKind);
+        Assert.Equal("openai/gpt-5", result.GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void GetByKeyPath_MissingKey_ReturnsJsonNull()
+    {
+        var root = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
+        {
+            agent = new { model = "openai/gpt-5" },
+        }));
+
+        var result = VariableBundle.GetByKeyPath(root, "agent.variant");
+
+        Assert.Equal(JsonValueKind.Null, result.ValueKind);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void GetByKeyPath_NullValue_ReturnsJsonNull()
+    {
+        var root = JsonSerializer.Deserialize<JsonElement>("""{ "agent": { "model": null } }""");
+
+        var result = VariableBundle.GetByKeyPath(root, "agent.model");
+
+        Assert.Equal(JsonValueKind.Null, result.ValueKind);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
     public void FromJson_EmptyString_ReturnsEmpty()
     {
         var result = VariableBundle.FromJson("");

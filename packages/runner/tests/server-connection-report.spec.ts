@@ -52,3 +52,30 @@ describe("ServerConnection.report", () => {
     expect(body.cleanupAttempts).toBeNull()
   })
 })
+
+describe("ServerConnection.patchRunVars", () => {
+  it("patchesWorkflowRunProfileVariablesWithVariableBundleShape", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "{}" }))
+    const connection = new ServerConnection(options())
+
+    await connection.patchRunVars(
+      "wf-1",
+      { github: { pr: { number: 249 } } },
+      new AbortController().signal,
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("http://localhost:3456/api/workflow-runs/wf-1/workflow-profile/variables")
+    expect(init.method).toBe("PATCH")
+    expect(JSON.parse(init.body as string)).toEqual({
+      vars: {
+        github: {
+          pr: {
+            number: 249,
+          },
+        },
+      },
+    })
+  })
+})

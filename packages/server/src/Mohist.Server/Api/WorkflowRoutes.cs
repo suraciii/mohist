@@ -20,18 +20,19 @@ public static class WorkflowRoutes
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/variables/effective", async (
             string workflowRunId,
-            WorkflowQuerier reader,
-            WorkflowProfileManager profileManager) =>
+            string? stage,
+            WorkflowQuerier reader) =>
         {
-            var snapshot = await reader.GetVariablesAsync(workflowRunId);
-            var merged = await profileManager.LoadVariablesAsync(workflowRunId);
-            return ApiResults.Ok(new
-            {
-                workflowRunId,
-                variables = snapshot?.Variables,
-                stageVariables = snapshot?.StageVariables,
-                profileVariables = merged,
-            });
+            return ApiResults.Ok(await reader.GetEffectiveVariablesAsync(workflowRunId, stage));
+        });
+
+        app.MapGet("/api/workflow-runs/{workflowRunId}/variables/effective/{*keyPath}", async (
+            string workflowRunId,
+            string keyPath,
+            string? stage,
+            WorkflowQuerier reader) =>
+        {
+            return ApiResults.Ok(await reader.GetEffectiveVariableAsync(workflowRunId, keyPath, stage));
         });
 
         app.MapPost("/api/workflow-runs/{workflowRunId}/tasks", async (
@@ -76,13 +77,35 @@ public static class WorkflowRoutes
             return ApiResults.Ok(new { result.WorkflowRunId, result.Stage, result.AddedCount });
         });
 
+        app.MapGet("/api/workflow-runs/{workflowRunId}/workflow-profile", async (
+            string workflowRunId,
+            WorkflowRunProfileManager runProfileManager) =>
+        {
+            var variables = await runProfileManager.GetVariablesAsync(workflowRunId);
+            return ApiResults.Ok(new { workflowRunId, variables });
+        });
+
+        app.MapGet("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
+            string workflowRunId,
+            WorkflowRunProfileManager runProfileManager) =>
+        {
+            return ApiResults.Ok(await runProfileManager.GetVariablesAsync(workflowRunId));
+        });
+
+        app.MapPut("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
+            string workflowRunId,
+            VariableBundle bundle,
+            WorkflowRunProfileManager runProfileManager) =>
+        {
+            return ApiResults.Ok(await runProfileManager.SetVariablesAsync(workflowRunId, bundle));
+        });
+
         app.MapPatch("/api/workflow-runs/{workflowRunId}/workflow-profile/variables", async (
             string workflowRunId,
             VariableBundle patch,
             WorkflowRunProfileManager runProfileManager) =>
         {
-            var merged = await runProfileManager.PatchVariablesAsync(workflowRunId, patch);
-            return ApiResults.Ok(new { workflowRunId, variables = merged });
+            return ApiResults.Ok(await runProfileManager.PatchVariablesAsync(workflowRunId, patch));
         });
 
         return app;
