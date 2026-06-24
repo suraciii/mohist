@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:ci": "vitest run",
     "test:e2e": "playwright test -c playwright.config.ts",
     "test:a11y": "vitest run tests/settings-a11y.test.tsx && playwright install --with-deps chromium && playwright test -c playwright.a11y.config.ts"
   },

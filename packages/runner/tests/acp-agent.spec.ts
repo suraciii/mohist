@@ -110,7 +110,7 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
 
     expect(result.status).toBe("failure")
-    expect(result.message).toContain("without any session activity")
+    expect(result.message).toContain("without any prompt work activity")
   })
 
   it("ExpectedArtifactMissing_AgentIsAskedToRepairArtifactBeforeTaskFails", async () => {
@@ -185,7 +185,7 @@ describe("mohist/acp-agent", () => {
       }, undefined, { workDir }))
 
       expect(result.status).toBe("failure")
-      expect(result.message).toContain("without any session activity")
+      expect(result.message).toContain("without any prompt work activity")
       expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(2)
     } finally {
       await rm(workDir, { recursive: true, force: true })
@@ -1349,6 +1349,7 @@ class FakeAcpAgent {
           return { stopReason: "end_turn" }
         }
         if (self.scenario === "usage-update") {
+          await self.connection.sessionUpdate(textUpdate(params.sessionId, "tracked usage"))
           await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "usage_update", size: 200000, used: 15000, cost: { amount: 0.0012, currency: "USD" } } } as never)
           return { stopReason: "end_turn" }
         }
