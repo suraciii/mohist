@@ -290,17 +290,6 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
-      - id: integrate:rebase
-        title: Rebase branch
-        uses: mohist/rebase
-        with:
-          baseBranch: ${{ repository.baseBranch }}
-          remote: origin
-          squash: false
-          conflictResolver:
-            title: Resolve rebase conflicts
-            with:
-              description: "Resolve rebase conflicts, stage resolved files, and continue until the rebase completes."
       - id: integrate:publish
         title: Publish changes
         uses: mohist/publish-via-pr
@@ -309,6 +298,31 @@ stages:
           target: ${{ repository.baseBranch }}
           remote: origin
           message: "Complete issue #${{ issue.number }}"
+        onFailure:
+          limit: 1
+          cases:
+            - when:
+                output.failureKind: base-moved
+              tasks:
+                - id: recover:rebase
+                  title: Rebase after base moved
+                  uses: mohist/rebase
+                  with:
+                    baseBranch: ${{ repository.baseBranch }}
+                    remote: origin
+                    squash: false
+                    conflictResolver:
+                      title: Resolve rebase conflicts
+                      with:
+                        description: "Resolve rebase conflicts, stage resolved files, and continue until the rebase completes."
+                - id: recover:publish
+                  title: Publish changes
+                  uses: mohist/publish-via-pr
+                  with:
+                    source: ${{ workspace.branch }}
+                    target: ${{ repository.baseBranch }}
+                    remote: origin
+                    message: "Complete issue #${{ issue.number }}"
     checks:
       - name: health
         title: Health

@@ -15,7 +15,12 @@ public sealed record TaskDefinition(
     string? Uses = null,
     Dictionary<string, JsonElement?>? With = null,
     TaskArtifactCapture? Artifacts = null,
-    Dictionary<string, string>? SetVars = null);
+    Dictionary<string, string>? SetVars = null,
+    TaskFailureAction? OnFailure = null);
+
+public sealed record TaskFailureAction(int Limit, List<TaskFailureCase> Cases);
+
+public sealed record TaskFailureCase(Dictionary<string, JsonElement?> When, List<TaskDefinition> Tasks);
 
 public sealed record CheckFailureRepair(int Limit, TaskDefinition Task, TaskDefinition? VerifyTask = null);
 

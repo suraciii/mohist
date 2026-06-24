@@ -18,19 +18,29 @@ public static class PromptReferenceScanner
         foreach (var stage in definition.Stages)
         {
             foreach (var task in stage.Tasks)
-                ScanWith(task.With, keys);
+                ScanTask(task, keys);
 
             foreach (var check in stage.Checks)
             {
                 ScanWith(check.With, keys);
                 if (check.OnFailure?.Repair is { } repair)
                 {
-                    ScanWith(repair.Task.With, keys);
-                    ScanWith(repair.VerifyTask?.With, keys);
+                    ScanTask(repair.Task, keys);
+                    if (repair.VerifyTask is not null)
+                        ScanTask(repair.VerifyTask, keys);
                 }
             }
         }
         return keys;
+    }
+
+    private static void ScanTask(TaskDefinition task, HashSet<string> keys)
+    {
+        ScanWith(task.With, keys);
+        if (task.OnFailure is null) return;
+        foreach (var failureCase in task.OnFailure.Cases)
+            foreach (var recoveryTask in failureCase.Tasks)
+                ScanTask(recoveryTask, keys);
     }
 
     private static void ScanWith(Dictionary<string, JsonElement?>? with, HashSet<string> keys)

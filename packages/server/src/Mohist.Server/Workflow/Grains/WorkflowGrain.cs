@@ -946,10 +946,76 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         else
         {
             if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(result.Output);
-            events.AddRange(run.FailTask(new TaskResult("failed", result.Message)));
+            var taskResult = new TaskResult("failed", result.Message);
+            var recoveryTasks = currentStage is not null
+                ? ResolveTaskFailureRecovery(currentStage, currentTask)
+                : null;
+            events.AddRange(recoveryTasks is { Count: > 0 }
+                ? run.RecoverTaskFailure(taskResult, recoveryTasks)
+                : run.FailTask(taskResult));
         }
 
         return events;
+    }
+
+    private static IReadOnlyList<TaskDefinition>? ResolveTaskFailureRecovery(StageRun stage, TaskRun? task)
+    {
+        if (task?.OnFailure is not { } onFailure)
+            return null;
+
+        var failedAttempts = stage.Tasks.Count(t =>
+            string.Equals(t.DefinitionId, task.DefinitionId, StringComparison.Ordinal)
+            && t.Status == TaskRunStatus.Failed);
+        if (failedAttempts >= onFailure.Limit)
+            return null;
+
+        foreach (var failureCase in onFailure.Cases)
+        {
+            if (MatchesTaskFailureCase(task.Output, failureCase.When))
+                return failureCase.Tasks;
+        }
+
+        return null;
+    }
+
+    private static bool MatchesTaskFailureCase(JsonElement? output, Dictionary<string, JsonElement?> when)
+    {
+        if (when.Count == 0) return false;
+        foreach (var (path, expected) in when)
+        {
+            if (!TryResolveFailurePath(output, path, out var actual))
+                return false;
+            if (expected.HasValue && !JsonElementEquals(actual, expected.Value))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryResolveFailurePath(JsonElement? output, string path, out JsonElement value)
+    {
+        value = default;
+        var segments = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0 || !string.Equals(segments[0], "output", StringComparison.Ordinal))
+            return false;
+        if (!output.HasValue || output.Value.ValueKind is not JsonValueKind.Object)
+            return false;
+
+        value = output.Value;
+        foreach (var segment in segments.Skip(1))
+        {
+            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segment, out value))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool JsonElementEquals(JsonElement actual, JsonElement expected)
+    {
+        if (actual.ValueKind == JsonValueKind.String && expected.ValueKind == JsonValueKind.String)
+            return string.Equals(actual.GetString(), expected.GetString(), StringComparison.Ordinal);
+        return string.Equals(actual.GetRawText(), expected.GetRawText(), StringComparison.Ordinal);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>?> BindArtifactUploadsAsync(

@@ -205,7 +205,7 @@ public class MohistPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void PrWorkflowDefinition_IntegrateStage_DiffersOnlyInPublishAction()
+    public void PrWorkflowDefinition_IntegrateStage_PublishesDirectlyWithBaseMovedRecovery()
     {
         var pr = MohistWorkflow.PrWorkflowDefinition;
         var def = MohistWorkflow.Definition;
@@ -213,7 +213,7 @@ public class MohistPrIssueWorkflowProfileSpecs
         var prIntegrate = pr.Stages.Single(s => s.Stage == "integrate");
         var defIntegrate = def.Stages.Single(s => s.Stage == "integrate");
 
-        var orderedIds = new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:publish" };
+        var orderedIds = new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:publish" };
         Assert.Equal(orderedIds, prIntegrate.Tasks.Select(t => t.Id).ToArray());
         Assert.Equal(new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push" }, defIntegrate.Tasks.Select(t => t.Id).ToArray());
 
@@ -225,14 +225,9 @@ public class MohistPrIssueWorkflowProfileSpecs
         var defArchiveChange = defIntegrate.Tasks.Single(t => t.Id == "integrate:archive-change");
         AssertTaskWithMapsMatchExcept(archiveChange, defArchiveChange);
 
-        var prRebase = prIntegrate.Tasks.Single(t => t.Id == "integrate:rebase");
         var defRebase = defIntegrate.Tasks.Single(t => t.Id == "integrate:rebase");
-        Assert.Equal("mohist/rebase", prRebase.Uses);
         Assert.Equal("mohist/rebase", defRebase.Uses);
-        Assert.Equal(ReadBoolWith(prRebase, "squash"), false);
         Assert.Equal(ReadBoolWith(defRebase, "squash"), true);
-        Assert.False(HasWithKey(prRebase, "message"));
-        Assert.True(HasWithKey(defRebase, "message"));
 
         var prPublish = prIntegrate.Tasks.Single(t => t.Id == "integrate:publish");
         var defPush = defIntegrate.Tasks.Single(t => t.Id == "integrate:push");
@@ -241,11 +236,15 @@ public class MohistPrIssueWorkflowProfileSpecs
         Assert.Equal(ReadStringWith(prPublish, "source"), ReadStringWith(defPush, "source"));
         Assert.Equal(ReadStringWith(prPublish, "target"), ReadStringWith(defPush, "target"));
         Assert.Equal(ReadStringWith(prPublish, "remote"), ReadStringWith(defPush, "remote"));
-    }
 
-    private static bool HasWithKey(Mohist.Server.Workflow.Domain.Definition.TaskDefinition task, string key)
-    {
-        return task.With != null && task.With.ContainsKey(key) && task.With[key] != null;
+        var onFailure = prPublish.OnFailure;
+        Assert.NotNull(onFailure);
+        Assert.Equal(1, onFailure!.Limit);
+        var failureCase = Assert.Single(onFailure.Cases);
+        Assert.Equal("base-moved", failureCase.When["output.failureKind"]!.Value.GetString());
+        Assert.Equal(new[] { "recover:rebase", "recover:publish" }, failureCase.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal("mohist/rebase", failureCase.Tasks[0].Uses);
+        Assert.Equal("mohist/publish-via-pr", failureCase.Tasks[1].Uses);
     }
 
     private static bool? ReadBoolWith(Mohist.Server.Workflow.Domain.Definition.TaskDefinition task, string key)
@@ -338,26 +337,8 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "                    - <promise>done</promise>\n" +
                 "                    - <promise>unfinished</promise>"
             ),
-            // Integrate-stage rebase: PR does not local-squash (squash happens at
-            // GitHub merge time) and has no `message:` (subject is set by gh).
-            (
-                "        title: Rebase branch\n" +
-                "        uses: mohist/rebase\n" +
-                "        with:\n" +
-                "          baseBranch: ${{ repository.baseBranch }}\n" +
-                "          remote: origin\n" +
-                "          squash: false\n" +
-                "          conflictResolver:",
-                "        title: Rebase and squash branch\n" +
-                "        uses: mohist/rebase\n" +
-                "        with:\n" +
-                "          baseBranch: ${{ repository.baseBranch }}\n" +
-                "          remote: origin\n" +
-                "          squash: true\n" +
-                "          message: \"Complete issue #${{ issue.number }}\"\n" +
-                "          conflictResolver:"
-            ),
-            // Delivery: default uses mohist/push (FF); PR uses mohist/publish-via-pr.
+            // Delivery: default rebases+squashes then pushes; PR publishes
+            // directly and only schedules rebase as base-moved recovery.
             (
                 "      - id: integrate:publish\n" +
                 "        title: Publish changes\n" +
@@ -366,7 +347,44 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "          source: ${{ workspace.branch }}\n" +
                 "          target: ${{ repository.baseBranch }}\n" +
                 "          remote: origin\n" +
-                "          message: \"Complete issue #${{ issue.number }}\"",
+                "          message: \"Complete issue #${{ issue.number }}\"\n" +
+                "        onFailure:\n" +
+                "          limit: 1\n" +
+                "          cases:\n" +
+                "            - when:\n" +
+                "                output.failureKind: base-moved\n" +
+                "              tasks:\n" +
+                "                - id: recover:rebase\n" +
+                "                  title: Rebase after base moved\n" +
+                "                  uses: mohist/rebase\n" +
+                "                  with:\n" +
+                "                    baseBranch: ${{ repository.baseBranch }}\n" +
+                "                    remote: origin\n" +
+                "                    squash: false\n" +
+                "                    conflictResolver:\n" +
+                "                      title: Resolve rebase conflicts\n" +
+                "                      with:\n" +
+                "                        description: \"Resolve rebase conflicts, stage resolved files, and continue until the rebase completes.\"\n" +
+                "                - id: recover:publish\n" +
+                "                  title: Publish changes\n" +
+                "                  uses: mohist/publish-via-pr\n" +
+                "                  with:\n" +
+                "                    source: ${{ workspace.branch }}\n" +
+                "                    target: ${{ repository.baseBranch }}\n" +
+                "                    remote: origin\n" +
+                "                    message: \"Complete issue #${{ issue.number }}\"",
+                "      - id: integrate:rebase\n" +
+                "        title: Rebase and squash branch\n" +
+                "        uses: mohist/rebase\n" +
+                "        with:\n" +
+                "          baseBranch: ${{ repository.baseBranch }}\n" +
+                "          remote: origin\n" +
+                "          squash: true\n" +
+                "          message: \"Complete issue #${{ issue.number }}\"\n" +
+                "          conflictResolver:\n" +
+                "            title: Resolve rebase conflicts\n" +
+                "            with:\n" +
+                "              description: \"Resolve rebase conflicts, stage resolved files, and continue until the rebase completes.\"\n" +
                 "      - id: integrate:push\n" +
                 "        title: Push changes\n" +
                 "        uses: mohist/push\n" +

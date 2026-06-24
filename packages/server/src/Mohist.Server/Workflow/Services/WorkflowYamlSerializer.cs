@@ -95,8 +95,39 @@ public static class WorkflowYamlSerializer
 
         var artifacts = ParseTaskArtifacts(map);
         var setVars = ParseTaskSetVars(map, id);
+        var onFailure = ParseTaskFailureAction(map, id);
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars);
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars, onFailure);
+    }
+
+    private static TaskFailureAction? ParseTaskFailureAction(Dictionary<string, object?> taskMap, string taskId)
+    {
+        var onFailure = OptionalMap(taskMap, "onFailure");
+        if (onFailure is null) return null;
+
+        var limit = Int(onFailure, "limit");
+        if (limit <= 0)
+            throw new InvalidOperationException($"Workflow task '{taskId}' onFailure.limit must be greater than 0");
+
+        var cases = new List<TaskFailureCase>();
+        foreach (var caseValue in List(onFailure, "cases"))
+        {
+            var caseMap = Map(caseValue, "onFailure case");
+            var when = JsonElementMap(OptionalMap(caseMap, "when"));
+            if (when is null || when.Count == 0)
+                throw new InvalidOperationException($"Workflow task '{taskId}' onFailure case requires when");
+
+            var tasks = List(caseMap, "tasks").Select(ToTask).ToList();
+            if (tasks.Count == 0)
+                throw new InvalidOperationException($"Workflow task '{taskId}' onFailure case requires at least one task");
+
+            cases.Add(new TaskFailureCase(when, tasks));
+        }
+
+        if (cases.Count == 0)
+            throw new InvalidOperationException($"Workflow task '{taskId}' onFailure requires at least one case");
+
+        return new TaskFailureAction(limit, cases);
     }
 
     private static Dictionary<string, string>? ParseTaskSetVars(Dictionary<string, object?> taskMap, string taskId)
@@ -280,7 +311,22 @@ public static class WorkflowYamlSerializer
         AddWith(map, task.With);
         AddArtifacts(map, task.Artifacts);
         AddSetVars(map, task.SetVars);
+        AddTaskFailureAction(map, task.OnFailure);
         return map;
+    }
+
+    private static void AddTaskFailureAction(Dictionary<string, object?> map, TaskFailureAction? onFailure)
+    {
+        if (onFailure is null) return;
+        map["onFailure"] = new Dictionary<string, object?>
+        {
+            ["limit"] = onFailure.Limit,
+            ["cases"] = onFailure.Cases.Select(c => (object?)new Dictionary<string, object?>
+            {
+                ["when"] = ObjectMap(c.When),
+                ["tasks"] = c.Tasks.Select(ToTaskMap).ToList(),
+            }).ToList(),
+        };
     }
 
     private static void AddSetVars(Dictionary<string, object?> map, Dictionary<string, string>? setVars)

@@ -521,6 +521,60 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task FailedTask_WithMatchingOnFailure_InsertsRecoveryTasks()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [
+                new TaskDefinition(
+                    "integrate:publish",
+                    "Publish changes",
+                    "mohist/publish-via-pr",
+                    OnFailure: new TaskFailureAction(
+                        1,
+                        [
+                            new TaskFailureCase(
+                                new Dictionary<string, JsonElement?>
+                                {
+                                    ["output.failureKind"] = JsonSerializer.SerializeToElement("base-moved")
+                                },
+                                [
+                                    new TaskDefinition("recover:rebase", "Rebase after base moved", "mohist/rebase"),
+                                    new TaskDefinition("recover:publish", "Publish changes", "mohist/publish-via-pr")
+                                ])
+                        ]))
+            ],
+            checks: []));
+
+        var (publish, publishRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("integrate:publish.", publish.WorkId);
+        await ReportAsync(publishRunnerId, publish.WorkId, new WorkResult("failed", "base moved", Output: """
+        {
+          "kind": "publish-via-pr",
+          "status": "failed",
+          "failureKind": "base-moved"
+        }
+        """));
+
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
+        Assert.Equal("Running", status);
+
+        var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("recover:rebase.", rebase.WorkId);
+        Assert.Equal("mohist/rebase", rebase.Uses);
+        await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
+
+        var (recoverPublish, recoverPublishRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("recover:publish.", recoverPublish.WorkId);
+        Assert.Equal("mohist/publish-via-pr", recoverPublish.Uses);
+        await ReportAsync(recoverPublishRunnerId, recoverPublish.WorkId, "completed");
+
+        status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
+        Assert.Equal("Completed", status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task LoadTaskFails_WorkflowFails()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
