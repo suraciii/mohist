@@ -130,6 +130,59 @@ vars.change.url
 - 不要求所有 action 都返回同一组错误码或字段名。
 - 不让 engine 理解 `base-moved`、`config-error` 等具体含义。
 
+## GitHub PR Actions
+
+`mohist/create-pull-request` 和 `mohist/merge-pull-request` 都是普通
+workflow task action。PR 相关副作用必须显式出现在 task graph 里，不通过
+stage hook 或隐藏的 stage boundary side effect 执行。
+
+边界：
+
+- `create-pull-request` 负责推送 workflow branch，并创建或更新同 head/base 的 PR。
+- `create-pull-request` 输出稳定 PR 身份，profile 可用 `setVars` 投影
+  `vars.github.pr.number` / `vars.github.pr.url`。
+- `merge-pull-request` 负责把 PR 合入 base branch。
+- `merge-pull-request` 在真正 merge 前必须先等待 GitHub PR checks。
+- PR checks 是 merge action 的内部前置条件，不建模成 stage-level check。
+
+`merge-pull-request` 的目标流程：
+
+```text
+resolve PR
+  -> inspect PR state
+  -> wait PR checks
+       pending: keep waiting
+       passed/skipped: continue
+       failed/cancelled/action_required: fail task
+  -> gh pr merge --squash
+  -> confirm state=MERGED
+```
+
+这样保持现有 workflow 架构：
+
+- task 做事。
+- checks 验证 stage。
+- action 内部验证 action 自己的完成条件。
+- PR merge 成功才表示集成完成。
+
+PR checks 失败时，`merge-pull-request` 返回 action-owned JSON failure，例如：
+
+```json
+{
+  "kind": "merge-pull-request",
+  "status": "failed",
+  "errorCode": "pr-checks-failed",
+  "message": "PR #42 checks failed: build failed",
+  "prNumber": 42,
+  "prUrl": "https://github.com/acme/repo/pull/42"
+}
+```
+
+`pr-checks-failed` 当前不触发 auto-fix recovery。workflow 保留普通 task
+failure，由用户介入修复后 retry/rerun。后续如果要自动修 PR checks，应通过
+profile 对 `output.errorCode: pr-checks-failed` 声明显式 recovery task，而不是让
+workflow engine 理解 GitHub checks。
+
 ## Failure Recovery
 
 task 可以声明失败恢复规则。规则只读取当前失败 task 的 output，不判断 action type，不判断 task id。
@@ -206,6 +259,6 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
 
 - `onFailure` 是 workflow profile 对 action output 接口的编排，不是 action 内部重试。
 - 恢复 task 与普通 task 一样由 runner 执行。
-- rebase、push、PR merge 等副作用仍在 runner action 内执行。
+- rebase、push、PR checks wait、PR merge 等副作用仍在 runner action 内执行。
 - `titleFrom`、`bodyFrom`、`subjectFrom`、`messageFrom` 这类 `issue.title` / `issue.body` 输入不是 workflow metadata。runner action 在运行时通过 `mo issue show <number> --project-id <projectId> --output json` 获取 issue title/body。
 - Workflow domain 只保存 output 并做通用 JSON path 匹配，不理解 error code 的业务含义。

@@ -79,8 +79,18 @@ PR title/body 不从 workflow metadata 读取。profile 通过 `titleFrom: issue
 
 - `create-pull-request` 负责推送 workflow branch、创建/复用 PR，并通过 `titleFrom` / `bodyFrom` 在运行时读取 issue title/body 作为 PR title/body。
 - `create-pull-request` 只把稳定 PR 身份写入 workflow runtime variables：`vars.github.pr.number` 和 `vars.github.pr.url`。
-- `merge-pull-request` 读取 `vars.github.pr.number` 合并 PR；合并语义是把当前 workflow branch 合入 base branch，不要求 head SHA 锁。
+- `merge-pull-request` 读取 `vars.github.pr.number`，在真正 merge 前等待 GitHub PR checks；pending 时继续等待，passed/skipped 后 merge，failed/cancelled/action_required 时以 `errorCode: pr-checks-failed` 失败。
+- `merge-pull-request` 的合并语义是把当前 workflow branch 合入 base branch，不要求 head SHA 锁。
 - recovery 重新执行 `rebase -> create-pull-request -> merge-pull-request`，复用同一个 workflow branch 和 open PR。
+
+PR checks 属于 `merge-pull-request` action 的内部前置条件，不是 stage-level
+check。checks 失败时当前不自动修复，workflow 保留普通 task failure，由用户介入后
+retry/rerun。后续如果要自动修 PR checks，应在 profile 里对
+`output.errorCode: pr-checks-failed` 声明显式 recovery task。
+
+下一步的 PR-first 目标是让 PR 在 workflow 早期通过普通 task 创建，并在需要把
+stage 结果推到 GitHub 时，把 update PR 作为该 stage 的收尾 task。这个设计仍沿用
+stage、tasks、checks 架构，不引入隐藏 stage hook 或 stage boundary side effect。
 
 ## 关键字段
 
