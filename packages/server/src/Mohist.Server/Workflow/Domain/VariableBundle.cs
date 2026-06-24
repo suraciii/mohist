@@ -99,6 +99,47 @@ public sealed record VariableBundle(
     }
 
     /// <summary>
+    /// Resolve the object that action templates see as `vars` for one stage.
+    /// Stage variables override top-level variables. Null-valued keys are
+    /// normalized away before persistence, so effective resolution treats
+    /// only the stored object shape as input.
+    /// </summary>
+    public JsonElement? ResolveStageVars(string? stage)
+    {
+        if (!Vars.HasValue && Stages is null) return null;
+
+        var effective = Vars.HasValue && Vars.Value.ValueKind == JsonValueKind.Object
+            ? Vars.Value
+            : JSON.DeserializeElement("{}");
+
+        if (Stages is not null
+            && !string.IsNullOrWhiteSpace(stage)
+            && Stages.TryGetValue(stage, out var stageVars)
+            && stageVars.Vars.HasValue
+            && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
+        {
+            effective = DeepMerge(effective, stageVars.Vars.Value) ?? stageVars.Vars.Value.Clone();
+        }
+
+        return effective;
+    }
+
+    public static JsonElement GetByKeyPath(JsonElement? root, string? keyPath)
+    {
+        if (!root.HasValue || string.IsNullOrWhiteSpace(keyPath))
+            return JSON.DeserializeElement("null");
+
+        var current = root.Value;
+        foreach (var segment in keyPath.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+                return JSON.DeserializeElement("null");
+        }
+
+        return current.Clone();
+    }
+
+    /// <summary>
     /// Deep merge 两个 JsonElement (期望都是 object)。
     /// 后者覆盖前者同名 key; 嵌套对象递归合并。
     /// 非 object 类型时后者直接替换。

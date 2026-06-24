@@ -1056,9 +1056,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<JsonElement?> ResolveBindVariablesAsync()
     {
-        var resolved = await _profileManager.ResolveEffectiveVariablesAsync(GrainKey);
+        var resolved = await _profileManager.ResolveLayeredVariablesAsync(GrainKey);
 
-        return WorkflowDispatchHelpers.ResolveEffectiveStageVars(resolved, _run?.CurrentStageId);
+        return resolved.ResolveStageVars(_run?.CurrentStageId);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>> ProcessCheckResultAsync(WorkResult result)

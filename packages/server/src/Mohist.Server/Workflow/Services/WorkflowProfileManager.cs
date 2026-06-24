@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
@@ -89,7 +90,7 @@ public class WorkflowProfileManager : IScopedService
             ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId));
     }
 
-    public async Task<VariableBundle> LoadVariablesAsync(string runId)
+    private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {
         // Resolution merges four live layers, lowest priority first:
         //   1. global config.jsonc bundle (ConfigService.GetVariables)
@@ -105,12 +106,19 @@ public class WorkflowProfileManager : IScopedService
         return VariableBundle.MergeAll(global, project, issue, run);
     }
 
-    public async Task<VariableBundle> ResolveEffectiveVariablesAsync(string runId)
+    internal async Task<VariableBundle> ResolveLayeredVariablesAsync(string runId)
     {
         var template = await LoadTemplateAsync(runId);
-        var independent = await LoadVariablesAsync(runId);
+        var independent = await ResolveConfiguredVariablesAsync(runId);
         var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
         return VariableBundle.Patch(embedded, independent);
+    }
+
+    public async Task<JsonElement> ResolveEffectiveVariablesAsync(string runId, string? stage)
+    {
+        var layered = await ResolveLayeredVariablesAsync(runId);
+        return layered.ResolveStageVars(stage)
+            ?? JSON.DeserializeElement("{}");
     }
 
     private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)

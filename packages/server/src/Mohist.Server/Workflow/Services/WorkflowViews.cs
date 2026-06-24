@@ -123,8 +123,3 @@ public sealed record ApprovalStatusView(
     string? Result,
     string RequestedAt,
     string? RespondedAt);
-
-[GenerateSerializer]
-public sealed record WorkflowVariablesView(
-    string Variables,
-    Dictionary<string, Dictionary<string, string>>? StageVariables = null);

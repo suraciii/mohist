@@ -9,69 +9,6 @@ namespace Mohist.Server.Workflow.Grains;
 
 internal static class WorkflowDispatchHelpers
 {
-    internal static JsonElement? ResolveEffectiveStageVars(VariableBundle resolved, string? stage)
-    {
-        if (!resolved.Vars.HasValue && resolved.Stages is null) return null;
-
-        var effective = resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object
-            ? resolved.Vars.Value
-            : JSON.DeserializeElement("{}");
-
-        if (resolved.Stages is not null
-            && !string.IsNullOrWhiteSpace(stage)
-            && resolved.Stages.TryGetValue(stage, out var stageVars)
-            && stageVars.Vars.HasValue
-            && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
-        {
-            var stageOverlay = JSON.DeserializeElement(JSON.Serialize(stageVars.Vars.Value));
-            effective = DeepMergeSkippingNulls(effective, stageOverlay) ?? stageOverlay;
-        }
-
-        return effective;
-    }
-
-    internal static JsonElement? DeepMergeSkippingNulls(JsonElement? @base, JsonElement? overlay)
-    {
-        if (!overlay.HasValue) return @base;
-        if (overlay.Value.ValueKind == JsonValueKind.Null) return @base;
-        if (!@base.HasValue) return overlay.Value.Clone();
-
-        if (@base.Value.ValueKind != JsonValueKind.Object)
-            return overlay.Value.Clone();
-        if (overlay.Value.ValueKind != JsonValueKind.Object)
-            return overlay.Value.Clone();
-
-        using var baseDoc = JsonDocument.Parse(@base.Value.GetRawText());
-        using var overlayDoc = JsonDocument.Parse(overlay.Value.GetRawText());
-        var merged = MergeObjectsSkippingNulls(baseDoc.RootElement, overlayDoc.RootElement);
-        return JSON.DeserializeElement(JSON.Serialize(merged));
-    }
-
-    internal static Dictionary<string, object?> MergeObjectsSkippingNulls(JsonElement @base, JsonElement overlay)
-    {
-        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var property in @base.EnumerateObject())
-            result[property.Name] = JsonElementToObject(property.Value);
-
-        foreach (var property in overlay.EnumerateObject())
-        {
-            if (property.Value.ValueKind == JsonValueKind.Null)
-                continue;
-
-            if (property.Value.ValueKind == JsonValueKind.Object
-                && @base.TryGetProperty(property.Name, out var existing)
-                && existing.ValueKind == JsonValueKind.Object)
-            {
-                result[property.Name] = MergeObjectsSkippingNulls(existing, property.Value);
-                continue;
-            }
-
-            result[property.Name] = JsonElementToObject(property.Value);
-        }
-
-        return result;
-    }
-
     internal static object? JsonElementToObject(JsonElement element) => element.ValueKind switch
     {
         JsonValueKind.Object => element.EnumerateObject().ToDictionary(p => p.Name, p => JsonElementToObject(p.Value), StringComparer.Ordinal),

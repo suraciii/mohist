@@ -76,29 +76,132 @@ run profile 不属于 `WorkflowRun` aggregate state。`WorkflowRun` 通过 `Work
 
 ## 合并
 
-```
-低 ──────────────────────────────────────────────────────▶ 高
-template embedded (YAML variables:) + global vars + project vars + issue vars + run vars + dispatch context
+variables 合并分三段。template 先按覆盖/回退规则选出一个当前 template，
+profile variables 独立合并，再由 profile variables 覆盖当前 template variables；
+只有指定 stage 时才叠加 stage variables。
+
+```text
+CurrentTemplateVariables
+
+issue custom template variables?
+        |
+        | if not set
+        v
+issue source template variables?
+        |
+        | if not set
+        v
+project default template variables?
+        |
+        | if not set
+        v
+system default template variables
+        |
+        v
++--------------------------+
+| CurrentTemplateVariables |
++--------------------------+
+
+No deep merge happens in the template lane. A lower-priority template is used
+only when the higher-priority template is not configured.
 ```
 
-deepMerge：对象递归，后者覆盖同名 key。
+```text
+ProfileVariables
+
+global profile variables
+        |
+        v
+project profile variables
+        |
+        v
+issue profile variables
+        |
+        v
+run profile variables
+        |
+        v
++------------------+
+| ProfileVariables |
++------------------+
+```
+
+```text
+WorkflowEffectiveVariables
+
+CurrentTemplateVariables
+        |
+        v
++-----------------------------------------------+
+| deep merge                                    |
+| base    = CurrentTemplateVariables            |
+| overlay = ProfileVariables                    |
+| conflict: ProfileVariables wins               |
++-----------------------------------------------+
+        ^
+        |
+ProfileVariables
+        |
+        v
++----------------------------+
+| WorkflowEffectiveVariables |
++----------------------------+
+```
+
+```text
+WorkflowStageEffectiveVariables
+
+WorkflowEffectiveVariables.vars
+        |
+        v
++-----------------------------------------------+
+| deep merge                                    |
+| base    = WorkflowEffectiveVariables.vars     |
+| overlay = WorkflowEffectiveVariables          |
+|           .stages[stage].vars                 |
+| conflict: stage variables wins                |
++-----------------------------------------------+
+        ^
+        |
+WorkflowEffectiveVariables.stages[stage].vars
+        |
+        v
++---------------------------------+
+| WorkflowStageEffectiveVariables |
++---------------------------------+
+```
+
+deepMerge：对象递归，后者覆盖同名 key。effective variables 解析不定义 `null`
+覆盖语义；variables 存储层应忽略值为 `null` 的 key。
 
 ## 加载
 
-```
+```text
 LoadTemplate(runId):                          adapter, live
   issue.Template?           → parsed (自定义)
   issue.SourceTemplateId    → project_templates
   project.DefaultTemplateId → project_templates
   else                      → mohist/default (应用配置层)
 
-LoadVariables(runId):                         adapter, live, layered deepMerge
+ResolveCurrentTemplateVariables(runId):       adapter, live, fallback selection
+  issue custom template vars?
+  else issue source template vars?
+  else project default template vars?
+  else system default template vars
+
+ResolveProfileVariables(runId):               adapter, live, layered deepMerge
   global config > project vars > issue vars > run vars
 
+ResolveWorkflowEffectiveVariables(runId):
+  deepMerge(ResolveCurrentTemplateVariables, ResolveProfileVariables)
+
+ResolveWorkflowStageEffectiveVariables(runId, stage):
+  deepMerge(ResolveWorkflowEffectiveVariables.vars, ResolveWorkflowEffectiveVariables.stages[stage].vars)
+
 grain dispatch (纯计算):
-  resolved = deepMerge(template.embedded, LoadVariables)
-  payload  = resolved + dispatch context(workflow/stage/work/issue/workspace/tasks)
-  with     = Workflow.Domain.ExpandTaskWith(resolved, task.With)
+  vars    = ResolveWorkflowStageEffectiveVariables(runId, stage)
+  payload = vars + { vars } + dispatch context(workflow/stage/work/issue/workspace/tasks)
+  with    = Workflow.Domain.ExpandTaskWith(vars, task.With)
 ```
 
 `dispatch context` 不是 profile variables。它只在 dispatch payload 中存在，例如 `workflow.runId`、`stage.name`、`work.id`、`issue.number`、`workspace.branch`、`tasks.*.outputs.*`。
@@ -139,18 +242,39 @@ setVars:
 - 只 patch `workflow_run_profile.Variables`。
 - 不写回 project profile 或 issue profile。
 - 不修改 `WorkflowRun` 执行状态。
-- 读取后续 task variables 时通过 `LoadVariables(runId)` 统一合并生效。
+- 读取后续 task variables 时通过 `ResolveWorkflowStageEffectiveVariables(runId, stage)` 统一合并生效。
 
 `setVars` 是 task 执行的一部分，由 runner 执行。server 通过 dispatch payload 将 `setVars` 映射下发给 runner。runner 在 action 成功后，从 output 按源路径提取变量，通过 `PATCH /api/workflow-runs/{id}/workflow-profile/variables` 写入 run profile，然后才 report task 完成。setVars 失败（路径缺失或 API 错误）导致 task failed。server 不参与 setVars 的路径遍历或提取。
 
 task output context 和 run profile 分离：
 
 - `task.Output`（`JsonElement?`）：action 产出的完整 JSON object，归属 `TaskRun` 执行状态。dispatch context 中通过 `tasks.<taskId>.outputs.*` 访问。
-- `vars.*`：来自 profile variables，包含 project/issue/run 三层变量。
+- `vars.*`：来自 `WorkflowStageEffectiveVariables`，是 `WorkflowEffectiveVariables.vars` 再合并当前 stage overrides 后的实际执行变量。
+
+## Read API
+
+```text
+GET /workflow-runs/:id/variables/effective
+  returns WorkflowEffectiveVariables.vars
+  does not read current stage
+  does not merge WorkflowEffectiveVariables.stages[*].vars
+
+GET /workflow-runs/:id/variables/effective?stage=build
+  returns WorkflowStageEffectiveVariables
+  merges WorkflowEffectiveVariables.vars with WorkflowEffectiveVariables.stages["build"].vars
+
+GET /workflow-runs/:id/variables/effective/:keyPath
+  returns the value at keyPath from WorkflowEffectiveVariables.vars
+  returns null when keyPath is missing
+
+GET /workflow-runs/:id/variables/effective/:keyPath?stage=build
+  returns the value at keyPath from WorkflowStageEffectiveVariables
+  returns null when keyPath is missing
+```
 
 ## Write API
 
-```
+```text
 系统模板      GET /workflow-templates/system
 项目模板      /projects/:p/workflow-templates          (GET, POST; /:t GET,PUT,DELETE)
 项目 profile  /projects/:p/workflow-profile            (GET; /default-template PUT,DELETE; /variables GET,PUT,PATCH)

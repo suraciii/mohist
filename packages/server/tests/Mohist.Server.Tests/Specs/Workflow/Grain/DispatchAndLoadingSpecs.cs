@@ -268,12 +268,12 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task StageAgentModelNull_InheritsIssueAgentModelAtDispatch()
+    public async Task StageAgentWithoutModel_InheritsIssueAgentModelAtDispatch()
     {
         // After T-003 the runtime reads the issue layer (T1 snapshot) directly
-        // and does not re-merge the project layer. A stage override that sets
-        // `agent.model` to null falls back to the issue's top-level `agent`,
-        // not to the project or the embedded variable.
+        // and does not re-merge the project layer. A stage override that omits
+        // `agent.model` inherits the issue's top-level `agent`, not the
+        // project or the embedded variable.
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition(
@@ -297,7 +297,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             {
                 ["build"] = new(JsonSerializer.SerializeToElement(new
                 {
-                    agent = new { model = (string?)null }
+                    agent = new { }
                 }))
             }));
 

@@ -251,11 +251,9 @@ public class IssueWorkflowLifecycleSpecs
 
         using var scope = _services.CreateScope();
         var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
-        var snapshot = await query.GetVariablesAsync(wrId);
-        Assert.NotNull(snapshot);
-        Assert.False(string.IsNullOrWhiteSpace(snapshot!.Variables));
+        var snapshot = await query.GetEffectiveVariablesAsync(wrId);
 
-        using var doc = JsonDocument.Parse(snapshot.Variables);
+        using var doc = JsonDocument.Parse(snapshot.GetRawText());
         var root = doc.RootElement;
 
         var project = root.GetProperty("project");
