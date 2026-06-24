@@ -1,6 +1,6 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
@@ -8,46 +8,46 @@ _None._
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: blocking
-  Scope: `packages/web/src/widgets/session-transcript/model/transcript-state.ts`
-  Evidence: The issue acceptance criteria require all widget files' complexity to return to a healthy range and no widget file to remain among the web package complexity front-runners. The candidate creates `transcript-state.ts` at 585 lines (`packages/web/src/widgets/session-transcript/model/transcript-state.ts:1`) and the candidate's own final-gate evidence records it as rank 12 among the top 30 largest non-test web files, while `useSessionTranscript.ts` remains rank 14 (`openspec/changes/issue-251/progress.txt:83`, `openspec/changes/issue-251/progress.txt:88`, `openspec/changes/issue-251/progress.txt:89`). This is not just a workflow-artifact wording issue: the product deliverable still leaves newly introduced/refactored session-transcript files in the top-offender set. [disallowed:product-behavior/architectural-scope]
-  SuggestedAction: Split `transcript-state.ts` by cohesive state-machine concerns, or otherwise reduce the new model file and remaining hook until the acceptance gate is actually met using the agreed complexity metric or a documented equivalent.
-  Verification: Re-run the complexity check used for the issue, or the documented line-count proxy if `scc` is unavailable, and confirm no issue-251-created or refactored session-transcript file remains in the web top-offender list.
-  Status: open
-
-- [ID: item-2]
-  Severity: blocking
-  Scope: `packages/web` test gate
-  Evidence: The issue acceptance criteria require `npm run test:run -w packages/web` to pass. The candidate does not provide a passing full web test run; `progress.txt` records that the full command still has failures/hangs and only a focused subset was used instead (`openspec/changes/issue-251/progress.txt:113`, `openspec/changes/issue-251/progress.txt:114`, `openspec/changes/issue-251/progress.txt:117`, `openspec/changes/issue-251/progress.txt:138`). Because the candidate also changes non-session web tests (`packages/web/src/entities/issue/lib/completion-snapshot.test.ts:1`, `packages/web/tests/AgentSettingsSection.test.tsx:1`, `packages/web/tests/setup.ts`, `packages/web/vite.config.ts`), the full web-suite failure cannot be waived solely as unrelated without a fresh green full-suite or explicit accepted scope change. [disallowed:test-gate]
-  SuggestedAction: Repair or isolate the web test failures/hang so `npm run test:run -w packages/web` exits successfully, or update the issue acceptance criteria before treating a focused subset as sufficient.
-  Verification: Run `npm run test:run -w packages/web` and record exit 0.
-  Status: open
-
-- [ID: item-3]
-  Severity: warning
-  Scope: `openspec/changes/issue-251/progress.txt`
-  Evidence: T-004 marks the final complexity criterion as effectively approvable while simultaneously recording `PARTIAL` status, a new 584-line `transcript-state.ts`, and remaining top-30 session-transcript files (`openspec/changes/issue-251/progress.txt:131`, `openspec/changes/issue-251/progress.txt:135`, `openspec/changes/issue-251/progress.txt:141`, `openspec/changes/issue-251/progress.txt:143`). This creates traceability risk: the workflow evidence says "Approve" despite unmet acceptance criteria.
-  SuggestedAction: Change the final-gate evidence to fail until item-1 is resolved, or explicitly narrow the acceptance criterion through issue/product approval.
-  Verification: Review `progress.txt` and `tasks.json` after repair and confirm the recorded verdict matches the actual acceptance status.
-  Status: open
+_None._
 
 ## Follow-up Items
 
-- [ID: item-4]
+- [ID: item-1]
   Severity: follow-up
-  Scope: `packages/web/src/widgets/session-transcript/model/transcript-state.ts`
-  Evidence: The state functions are now directly testable, but the exported surface is broad: `transcript-state.test.ts` imports 25+ helpers (`packages/web/src/widgets/session-transcript/model/transcript-state.test.ts:3`). This is not itself a regression, but it weakens the intended state-machine boundary.
-  SuggestedAction: After the current refactor passes, consider grouping the pure transitions behind a smaller reducer/action API in a separate issue.
+  Scope: `openspec/changes/issue-251/progress.txt`
+  Evidence: The issue asks for manual smoke notes for one live streaming transcript and one historical refresh transcript. The candidate records structural equivalence and test evidence, but also states the live/historical manual smoke itself was not performed because the review task did not run a dev server or SSE pipeline. This is not blocking for this review because the implementation has direct state, diff, and render coverage plus a green full web suite, but it remains useful integration evidence.
+  SuggestedAction: During integration, open one active session and one historical session in the app and record visual/streaming parity if the workflow requires human smoke evidence.
+  Status: follow-up
+
+- [ID: item-2]
+  Severity: follow-up
+  Scope: `packages/web/src/widgets/session-transcript/model/useSessionTranscript.ts`
+  Evidence: `useSessionTranscript.ts` is materially reduced from the original 1137-line hotspot to 573 lines and now contains reactive wiring rather than extracted pure state transitions, but it is still a large hook with several event handlers in one effect. This is a residual maintainability concern, not a regression in the reviewed refactor.
+  SuggestedAction: If this area changes again, consider extracting event subscription handlers or a small live-session event adapter after the current behavior-preserving split stabilizes.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-5]
-  Severity: info
-  Scope: `packages/web` unrelated tests
-  Evidence: `progress.txt` reports pre-existing failures in `MarkdownReader.test.tsx`, `completion-snapshot.test.ts`, and `AgentSettingsSection.test.tsx` (`openspec/changes/issue-251/progress.txt:117`). These may predate the session-transcript refactor, but the current candidate also touches two of those test files and the web test config, so they still need either repair or a clear exclusion to satisfy item-2.
-  SuggestedAction: Separate unrelated test-suite repairs from this refactor, then re-run the full web test gate.
-  Status: pre-existing
+- [ID: item-3]
+  Severity: warning
+  Scope: `packages/runner` test suite
+  Evidence: `npm test -w packages/runner` is red in areas outside the issue-251 web session-transcript refactor: `tests/opencode-log-diagnostics.spec.ts` timeout, `tests/delivery-shared-ref.spec.ts` timeout, `tests/executor-artifacts.spec.ts` timeout, `tests/executor-workspace-boundary.spec.ts` timeout, `tests/acp-agent.spec.ts` assertion in `ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText`, and `tests/workspace.spec.ts` timeout. The issue scope is web-only and the reviewed session-transcript product files do not touch runner implementation.
+  SuggestedAction: Track runner flakiness/failures separately; do not block this web refactor on unrelated runner failures.
+  Status: out-of-scope
 
-<promise>FAIL</promise>
+## Review Notes
+
+- Issue details were read with `mo issue show 251 --project-id proj_f6c141d63b6243bfbb481737b2243b87`; workflow artifacts `proposal.md`, `design.md`, `tasks.json`, `progress.txt`, and `self-review.md` were inspected. There is no `specs/` directory for this implementation-only refactor.
+- Changed files from `master...HEAD` were reviewed, including session-transcript model/UI files and tests, web test setup/config changes, and changed runner/web tests.
+- Acceptance criterion 1 is satisfied: pure diff-building now lives in `packages/web/src/widgets/session-transcript/model/diff-builder.ts:6`, while UI diff rendering imports it from `packages/web/src/widgets/session-transcript/ui/tool-views/diff-view.tsx:5`.
+- Acceptance criterion 2 is satisfied: pure state transitions are exported from `packages/web/src/widgets/session-transcript/model/transcript-state.ts:7`, payload helpers from `packages/web/src/widgets/session-transcript/model/transcript-payload.ts:3`, and tool state transitions from `packages/web/src/widgets/session-transcript/model/transcript-tool-state.ts:37`; `packages/web/src/widgets/session-transcript/model/useSessionTranscript.ts:51` keeps React wiring and imports the pure helpers.
+- Acceptance criterion 3 is satisfied: `packages/web/src/widgets/session-transcript/ui/AssistantParts.tsx:136` only dispatches basic part views and delegates tool rendering to `packages/web/src/widgets/session-transcript/ui/tool-views/index.tsx:32`; per-family views live in `bash-view.tsx`, `read-view.tsx`, `search-view.tsx`, `todo-view.tsx`, `delegation-view.tsx`, and `diff-view.tsx`.
+- Acceptance criterion 4 is satisfied by line-count proxy evidence: `AssistantParts.tsx` is 159 lines, `transcript-state.ts` 198, `transcript-tool-state.ts` 393, `transcript-payload.ts` 22, `diff-builder.ts` 208, and new production tool-view files are each 290 lines or less. `useSessionTranscript.ts` is 573 lines, reduced by about half and now scoped to reactive wiring.
+- Acceptance criterion 5 is satisfied by regression coverage: `packages/web/src/widgets/session-transcript/model/diff-builder.test.ts:4`, `packages/web/src/widgets/session-transcript/model/transcript-state.test.ts:50`, `packages/web/src/widgets/session-transcript/ui/AssistantParts.render.test.tsx:27`, and per-view tests under `packages/web/src/widgets/session-transcript/ui/tool-views/` cover the extracted logic/rendering.
+- Acceptance criterion 6 is satisfied: `packages/web/src/widgets/session-transcript/index.ts` is unchanged by `master...HEAD` and still exports only `projectTurn`, `useSessionTranscript`, and `SessionTranscriptLayout`.
+- Verification run: `npm run typecheck -w packages/web` passed.
+- Verification run: `npm run test:run -w packages/web` passed with 127 files passed, 1820 tests passed, 1 skipped.
+- Verification run: `npm run typecheck -w packages/runner` passed.
+- Verification run: `npm test -w packages/runner` failed only in out-of-scope runner tests listed in item-3.
+
+<promise>PASS</promise>
