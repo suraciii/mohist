@@ -1,11 +1,18 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Orleans;
+using Orleans.Runtime;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Agent.Api;
@@ -20,7 +27,7 @@ public class AgentJobRoutesSpecs
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -41,7 +48,7 @@ public class AgentJobRoutesSpecs
         Assert.Contains("prompt", payload.GetProperty("error").GetString()!);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
@@ -82,18 +89,28 @@ public class AgentJobRoutesSpecs
     [Fact]
     public async Task PostValidate_NoRunnerAvailable_ReturnsStructuredFailureWithRunnerUnavailableReason()
     {
-        var projectId = $"validation-no-runner-{Guid.NewGuid():N}";
-        var response = await _fixture.Client.PostAsJsonAsync(
-            AgentJobController.ValidatePath,
-            new
-            {
-                prompt = "do the thing without a runner",
-                model = "test/model",
-                workspace = new { path = "/tmp/agent-job-no-runner", projectId },
-            });
+        var grain = new TerminalAgentJobGrain(new AgentJobTerminalResult(
+            AgentJobStatus.Failed,
+            AgentJobFailureReasons.RunnerUnavailable,
+            null,
+            null,
+            AgentJobFailureReasons.RunnerUnavailable,
+            null));
+        var request = AgentJobRouteTestHelpers.JsonRequest(new
+        {
+            prompt = "do the thing without a runner",
+            model = "test/model",
+            workspace = new { path = "/tmp/agent-job-no-runner", projectId = "validation-no-runner-project" },
+        });
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var result = await AgentJobController.HandleValidateAsync(
+            request,
+            new SingleAgentJobGrainFactory(grain),
+            Options.Create(new AgentJobOptions { JobTimeout = TimeSpan.FromSeconds(8) }),
+            TimeProvider.System,
+            CancellationToken.None);
+
+        var payload = await AgentJobRouteTestHelpers.ExecuteJsonResultAsync(result);
         Assert.True(payload.GetProperty("success").GetBoolean());
         var data = payload.GetProperty("data");
         Assert.Equal("failed", data.GetProperty("status").GetString());
@@ -108,42 +125,34 @@ public class AgentJobRoutesSpecs
     [Fact]
     public async Task PostValidate_WhenJobTimesOut_ReturnsStructuredTimeoutResult_NotOpaque500()
     {
-        var projectId = $"validation-timeout-project-{Guid.NewGuid():N}";
-        var runnerId = $"validation-timeout-runner-{Guid.NewGuid():N}";
-
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var grain = new PendingAgentJobGrain();
+        var request = AgentJobRouteTestHelpers.JsonRequest(new
         {
-            capabilities = new[] { "spec/*" },
-            hostname = "validation-timeout-host",
-            projectId,
-            maxWorkflowSlots = 4,
+            prompt = "never reports back",
+            model = "test/model",
+            workspace = new { path = "/tmp/agent-job-timeout", projectId = "validation-timeout-project" },
         });
 
-        try
-        {
-            var response = await _fixture.Client.PostAsJsonAsync(
-                AgentJobController.ValidatePath,
-                new
-                {
-                    prompt = "never reports back",
-                    model = "test/model",
-                    workspace = new { path = "/tmp/agent-job-timeout", projectId },
-                });
+        var responseTask = AgentJobController.HandleValidateAsync(
+            request,
+            new SingleAgentJobGrainFactory(grain),
+            Options.Create(new AgentJobOptions { JobTimeout = TimeSpan.FromSeconds(8) }),
+            time,
+            CancellationToken.None);
 
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.True(payload.GetProperty("success").GetBoolean());
-            var data = payload.GetProperty("data");
-            Assert.Equal("failed", data.GetProperty("status").GetString());
-            var reason = data.GetProperty("failureReason").GetString();
-            Assert.True(
-                reason is AgentJobFailureReasons.ReportTimeout or "timeout",
-                $"Expected timeout-style reason, got '{reason}'");
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
+        await Task.Yield();
+        Assert.False(responseTask.IsCompleted);
+        time.Advance(TimeSpan.FromSeconds(38));
+
+        var result = await responseTask;
+        var payload = await AgentJobRouteTestHelpers.ExecuteJsonResultAsync(result);
+
+        Assert.True(payload.GetProperty("success").GetBoolean());
+        var data = payload.GetProperty("data");
+        Assert.Equal("failed", data.GetProperty("status").GetString());
+        Assert.Equal("timeout", data.GetProperty("failureReason").GetString());
+        Assert.Equal(1, grain.SubmitCount);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -155,6 +164,131 @@ public class AgentJobRoutesSpecs
         using var response = await _fixture.Client.GetAsync("/api/projects");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+}
+
+internal static class AgentJobRouteTestHelpers
+{
+    public static HttpRequest JsonRequest(object body)
+    {
+        var request = new DefaultHttpContext().Request;
+        request.Body = new MemoryStream(Encoding.UTF8.GetBytes(JSON.Serialize(body)));
+        request.ContentLength = request.Body.Length;
+        request.ContentType = "application/json";
+        return request;
+    }
+
+    public static async Task<JsonElement> ExecuteJsonResultAsync(IResult result)
+    {
+        var services = new ServiceCollection()
+            .AddLogging()
+            .Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
+            {
+                o.SerializerOptions.PropertyNamingPolicy = JSON.Options.PropertyNamingPolicy;
+                foreach (var converter in JSON.Options.Converters)
+                {
+                    o.SerializerOptions.Converters.Add(converter);
+                }
+            })
+            .BuildServiceProvider();
+        var context = new DefaultHttpContext();
+        context.RequestServices = services;
+        context.Response.Body = new MemoryStream();
+        await result.ExecuteAsync(context);
+        context.Response.Body.Position = 0;
+        return (await JsonDocument.ParseAsync(context.Response.Body)).RootElement.Clone();
+    }
+}
+
+internal sealed class TerminalAgentJobGrain : IAgentJobGrain
+{
+    private readonly AgentJobTerminalResult _result;
+
+    public TerminalAgentJobGrain(AgentJobTerminalResult result)
+    {
+        _result = result;
+    }
+
+    public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
+    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "already-terminal"));
+    public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_result.Status);
+    public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
+    public Task SubmitAsync(AgentJobInput input) => Task.CompletedTask;
+    public Task CheckTimeoutsAsync() => Task.CompletedTask;
+    public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
+    public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
+}
+
+internal sealed class PendingAgentJobGrain : IAgentJobGrain
+{
+    public int SubmitCount { get; private set; }
+
+    public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
+    public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "not-running"));
+    public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(AgentJobStatus.Pending);
+    public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
+    public Task SubmitAsync(AgentJobInput input)
+    {
+        SubmitCount++;
+        return Task.CompletedTask;
+    }
+    public Task CheckTimeoutsAsync() => Task.CompletedTask;
+    public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(AgentJobStatus.Pending, null, null, null, null, null));
+    public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(AgentJobStatus.Pending, null, null, null));
+}
+
+internal sealed class SingleAgentJobGrainFactory : IGrainFactory
+{
+    private readonly IAgentJobGrain _grain;
+
+    public SingleAgentJobGrainFactory(IAgentJobGrain grain)
+    {
+        _grain = grain;
+    }
+
+    public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithGuidKey => throw new NotSupportedException();
+
+    public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithIntegerKey => throw new NotSupportedException();
+
+    public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithStringKey
+    {
+        if (typeof(TGrainInterface) == typeof(IAgentJobGrain))
+            return (TGrainInterface)_grain;
+        throw new NotSupportedException(typeof(TGrainInterface).FullName);
+    }
+
+    public TGrainInterface GetGrain<TGrainInterface>(Guid primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithGuidCompoundKey => throw new NotSupportedException();
+
+    public TGrainInterface GetGrain<TGrainInterface>(long primaryKey, string keyExtension, string? grainClassNamePrefix = null)
+        where TGrainInterface : IGrainWithIntegerCompoundKey => throw new NotSupportedException();
+
+    public TGrainObserverInterface CreateObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+        where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+
+    public void DeleteObjectReference<TGrainObserverInterface>(IGrainObserver obj)
+        where TGrainObserverInterface : IGrainObserver => throw new NotSupportedException();
+
+    public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey) => throw new NotSupportedException();
+    public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey) => throw new NotSupportedException();
+    public IGrain GetGrain(Type grainInterfaceType, string grainPrimaryKey)
+    {
+        if (grainInterfaceType == typeof(IAgentJobGrain))
+            return _grain;
+        throw new NotSupportedException(grainInterfaceType.FullName);
+    }
+    public IGrain GetGrain(Type grainInterfaceType, Guid grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+    public IGrain GetGrain(Type grainInterfaceType, long grainPrimaryKey, string keyExtension) => throw new NotSupportedException();
+    public TGrainInterface GetGrain<TGrainInterface>(GrainId grainId)
+        where TGrainInterface : IAddressable => throw new NotSupportedException();
+    public IAddressable GetGrain(GrainId grainId) => throw new NotSupportedException();
+    public IAddressable GetGrain(GrainId grainId, GrainInterfaceType interfaceType) => throw new NotSupportedException();
+    public IAddressable GetGrain(Type interfaceType, IdSpan grainKey, string? grainClassNamePrefix = null) => throw new NotSupportedException();
+    public IAddressable GetGrain(Type interfaceType, IdSpan grainKey) => throw new NotSupportedException();
 }
 
 [Collection("MohistIntegration")]

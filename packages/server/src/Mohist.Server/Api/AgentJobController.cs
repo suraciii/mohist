@@ -40,6 +40,7 @@ public static class AgentJobController
         HttpRequest request,
         IGrainFactory grains,
         IOptions<AgentJobOptions> options,
+        TimeProvider timeProvider,
         CancellationToken ct)
     {
         if (request.ContentLength is 0)
@@ -105,7 +106,7 @@ public static class AgentJobController
         AgentJobTerminalResult terminal;
         try
         {
-            terminal = await AwaitTerminalAsync(grain, timeout, ct);
+            terminal = await AwaitTerminalAsync(grain, timeout, timeProvider, ct);
         }
         catch (OperationCanceledException)
             when (!ct.IsCancellationRequested)
@@ -173,12 +174,13 @@ public static class AgentJobController
     private static async Task<AgentJobTerminalResult> AwaitTerminalAsync(
         IAgentJobGrain grain,
         TimeSpan timeout,
+        TimeProvider timeProvider,
         CancellationToken requestCt)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(requestCt);
         linked.CancelAfter(timeout);
 
-        var deadline = DateTimeOffset.UtcNow + timeout;
+        var deadline = timeProvider.GetUtcNow() + timeout;
         var step = TimeSpan.FromMilliseconds(100);
 
         while (true)
@@ -187,7 +189,7 @@ public static class AgentJobController
             if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed)
                 return terminal;
 
-            if (DateTimeOffset.UtcNow + step >= deadline)
+            if (timeProvider.GetUtcNow() + step >= deadline)
             {
                 terminal = await grain.GetTerminalResultAsync();
                 if (terminal.Status is AgentJobStatus.Completed or AgentJobStatus.Failed)
@@ -197,7 +199,7 @@ public static class AgentJobController
 
             try
             {
-                await Task.Delay(step, linked.Token);
+                await Task.Delay(step, timeProvider, linked.Token);
             }
             catch (OperationCanceledException)
             {

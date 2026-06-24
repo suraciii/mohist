@@ -1,4 +1,5 @@
 using Mohist.Server.Tests.Specs.Events;
+using Mohist.Server.Tests.Specs.Agent.Grain;
 using Mohist.Server.Tests.Specs.Workflow;
 using Mohist.Server.Tests.Specs.Workflow.Grain;
 using Xunit;
@@ -18,6 +19,9 @@ public class MohistDbCollection : ICollectionFixture<MohistDbFixture>;
 
 [CollectionDefinition("WorkflowGrain", DisableParallelization = true)]
 public class WorkflowGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
+
+[CollectionDefinition("AgentJobGrain", DisableParallelization = true)]
+public class AgentJobGrainCollection : ICollectionFixture<AgentJobGrainFixture>;
 
 [CollectionDefinition("Backlog", DisableParallelization = true)]
 public class BacklogCollection : ICollectionFixture<BacklogFixture>;

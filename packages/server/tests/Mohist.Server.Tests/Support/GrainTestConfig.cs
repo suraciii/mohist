@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -34,7 +35,8 @@ public static class GrainTestConfig
         ISiloBuilder siloBuilder,
         string connectionString,
         IEventPublisher eventBus,
-        IEventStore eventStore)
+        IEventStore eventStore,
+        FakeTimeProvider? timeProvider = null)
     {
         siloBuilder.UseInMemoryReminderService();
         siloBuilder.AddMemoryGrainStorageAsDefault();
@@ -56,6 +58,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
         siloBuilder.Services.AddSingleton(eventBus);
         siloBuilder.Services.AddSingleton(eventStore);
+        siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         siloBuilder.Services.AddScoped<AgentSessionQuery>();
         siloBuilder.Services.Configure<AgentJobOptions>(opts =>

@@ -36,6 +36,7 @@ public static class MohistSiloRegistration
         silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
         silo.Services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
         silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        silo.Services.AddSingleton(TimeProvider.System);
 
         return silo;
     }

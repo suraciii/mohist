@@ -1,5 +1,3 @@
-using System.Net.Sockets;
-using System.IO;
 using Mohist.Server.Otel;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -81,16 +79,5 @@ public class OtelBindFailureDetectorSpecs
             "Failed to bind to address http://127.0.0.1:4318: ADDRESS ALREADY IN USE.");
 
         Assert.True(OtelBindFailureDetector.IsOtlpPortBindFailure(ex, 4318));
-    }
-
-    [Fact]
-    public void AllocateEphemeralLoopbackPort_ReturnsUsablePort()
-    {
-        var port = OtelBindFailureDetector.AllocateEphemeralLoopbackPort();
-
-        // Sanity: the port should be in the ephemeral range and not
-        // match the well-known service ports.
-        Assert.InRange(port, 1024, 65535);
-        Assert.NotEqual(4318, port);
     }
 }

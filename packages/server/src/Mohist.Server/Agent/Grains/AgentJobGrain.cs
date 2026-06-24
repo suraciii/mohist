@@ -23,6 +23,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private readonly ILogger<AgentJobGrain> _log;
     private readonly AgentJobOptions _options;
     private readonly AgentJobBackoffSchedule _backoff;
+    private readonly TimeProvider _timeProvider;
 
     private AgentJobStatus _status = AgentJobStatus.Pending;
     private string? _runnerId;
@@ -32,15 +33,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private AgentJobInput? _input;
     private DateTimeOffset? _submittedAt;
+    private DateTimeOffset? _runningSince;
     private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
     private TimeSpan _nextDispatchDelay;
     private int _dispatchAttempts;
 
-    public AgentJobGrain(ILogger<AgentJobGrain> log, IOptions<AgentJobOptions> options)
+    public AgentJobGrain(ILogger<AgentJobGrain> log, IOptions<AgentJobOptions> options, TimeProvider timeProvider)
     {
         _log = log;
         _options = options.Value;
+        _timeProvider = timeProvider;
         // The backoff schedule is captured at activation time from the current
         // snapshot of AgentJobOptions. Hot-reload of the configuration section
         // is not applied to an already-active grain; it takes effect on the
@@ -102,6 +105,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _status = AgentJobStatus.Running;
         _runnerId = runnerId;
         _workId = workId;
+        _runningSince = _timeProvider.GetUtcNow();
         ArmJobTimeout();
     }
 
@@ -179,11 +183,31 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             throw new ArgumentException("AgentJobInput.Prompt is required", nameof(input));
 
         _input = input;
-        _submittedAt = DateTimeOffset.UtcNow;
+        _submittedAt = _timeProvider.GetUtcNow();
         _nextDispatchDelay = TimeSpan.Zero;
         _dispatchAttempts = 0;
         _ = TryDispatchAsync();
         return Task.CompletedTask;
+    }
+
+    public async Task CheckTimeoutsAsync()
+    {
+        if (_status == AgentJobStatus.Pending && DispatchRetryBoundExceeded())
+        {
+            await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
+            return;
+        }
+
+        if (_status == AgentJobStatus.Pending)
+        {
+            await TryDispatchAsync();
+            return;
+        }
+
+        if (_status == AgentJobStatus.Running && JobTimeoutExceeded())
+        {
+            await OnJobTimeoutAsync();
+        }
     }
 
     private async Task TryDispatchAsync()
@@ -204,7 +228,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (_status != AgentJobStatus.Pending || _input is null || _submittedAt is null)
             return;
 
-        if (_submittedAt.Value + _backoff.TotalBound < DateTimeOffset.UtcNow)
+        if (DispatchRetryBoundExceeded())
         {
             await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
             return;
@@ -318,7 +342,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (_status != AgentJobStatus.Pending || _input is null || _submittedAt is null)
             return;
 
-        if (_submittedAt.Value + _backoff.TotalBound < DateTimeOffset.UtcNow)
+        if (DispatchRetryBoundExceeded())
         {
             await FailWithReasonAsync(AgentJobFailureReasons.RunnerUnavailable);
             return;
@@ -346,13 +370,28 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task OnJobTimeoutAsync()
     {
-        if (_status != AgentJobStatus.Running)
+        if (_status != AgentJobStatus.Running || !JobTimeoutExceeded())
             return;
 
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to failed",
             Key, _options.JobTimeout);
         await FailWithReasonAsync(AgentJobFailureReasons.ReportTimeout);
+    }
+
+    private bool DispatchRetryBoundExceeded()
+    {
+        return _status == AgentJobStatus.Pending
+            && _submittedAt is not null
+            && _timeProvider.GetUtcNow() >= _submittedAt.Value + _backoff.TotalBound;
+    }
+
+    private bool JobTimeoutExceeded()
+    {
+        return _status == AgentJobStatus.Running
+            && _runningSince is not null
+            && _options.JobTimeout > TimeSpan.Zero
+            && _timeProvider.GetUtcNow() >= _runningSince.Value + _options.JobTimeout;
     }
 
     private Task FailWithReasonAsync(string reason)
@@ -362,6 +401,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         _status = AgentJobStatus.Failed;
         _failureReason = reason;
+        _runningSince = null;
         _terminalResult ??= new AgentJobTerminalResult(
             _status, reason, null, null, reason, null);
         DisposeDispatchTimer();

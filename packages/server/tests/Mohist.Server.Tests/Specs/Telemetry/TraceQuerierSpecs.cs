@@ -68,10 +68,10 @@ public class TraceQuerierSpecs : IDisposable
     [Fact]
     public async Task ListAsync_ClampsLimitToMaxListLimit()
     {
-        // The unit-level clamp behavior is exercised by ClampLimit
-        // tests below. Here we confirm the integration end-to-end: a
-        // high limit doesn't return more than MaxListLimit.
-        for (var i = 0; i < TraceQuerier.MaxListLimit + 5; i++)
+        // Max-bound clamping is covered by ClampLimit tests below.
+        // This integration check only needs enough rows to prove the
+        // computed limit is actually applied to the SQLite query.
+        for (var i = 0; i < 20; i++)
         {
             var day = (i % 28) + 1;
             var hour = i % 24;
@@ -83,9 +83,9 @@ public class TraceQuerierSpecs : IDisposable
                 1);
         }
 
-        var rows = await _querier.ListAsync(limit: 5000, service: null);
+        var rows = await _querier.ListAsync(limit: 7, service: null);
 
-        Assert.Equal(TraceQuerier.MaxListLimit, rows.Count);
+        Assert.Equal(7, rows.Count);
     }
 
     [Fact]

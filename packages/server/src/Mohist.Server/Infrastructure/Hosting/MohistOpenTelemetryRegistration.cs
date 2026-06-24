@@ -46,6 +46,12 @@ public static class MohistOpenTelemetryRegistration
     }
 
     internal static void ConfigureTracing(OpenTelemetryBuilder builder, OtelOptions options)
+        => ConfigureTracing(builder, options, configureExporter: null);
+
+    internal static void ConfigureTracing(
+        OpenTelemetryBuilder builder,
+        OtelOptions options,
+        Action<OtlpExporterOptions>? configureExporter)
     {
         var exportEndpoint = ResolveExportEndpoint(options.Endpoint);
 
@@ -66,6 +72,7 @@ public static class MohistOpenTelemetryRegistration
                 {
                     otlp.Protocol = OtlpExportProtocol.HttpProtobuf;
                     otlp.Endpoint = exportEndpoint;
+                    configureExporter?.Invoke(otlp);
                 });
         });
 
