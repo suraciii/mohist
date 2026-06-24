@@ -68,9 +68,8 @@ workflow_run_profile
 run profile 用于保存 workflow run 过程中产生、且后续 task 需要引用的运行态事实，例如：
 
 ```yaml
-vars.github.pr.number
-vars.github.pr.url
-vars.github.pr.headSha
+vars.change.id
+vars.change.url
 ```
 
 run profile 不属于 `WorkflowRun` aggregate state。`WorkflowRun` 通过 `WorkflowRunId` 关联它，profile service 负责读写。
@@ -130,8 +129,8 @@ task 成功后，action output 可以通过 `setVars` 写入 run profile：
 
 ```yaml
 setVars:
-  github.pr.number: output.prNumber
-  github.pr.url: output.prUrl
+  change.id: output.changeId
+  change.url: output.changeUrl
 ```
 
 写入语义：

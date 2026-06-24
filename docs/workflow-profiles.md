@@ -1,6 +1,6 @@
 # Workflow Profile
 
-Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带一个默认 profile（`mohist/default`）。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
+Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带 `mohist/default` 和 `mohist/pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
 
 ## 默认 Profile
 
@@ -54,6 +54,17 @@ stages:
       - id: merge
         # 合并到 base branch
 ```
+
+## GitHub PR Profile
+
+`mohist/pr` 的目标是使用同样的 plan/build/check 阶段，但 integrate 阶段通过 GitHub PR 交付：
+
+```yaml
+- id: integrate:publish
+  uses: mohist/publish-via-pr
+```
+
+目标语义是正常路径不预先 rebase。Mohist 会推送 workflow branch，打开或复用同 head/base 的 PR，然后通过 GitHub squash merge。只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并时，workflow 才通过 recovery task rebase 后重新 publish。
 
 ## 关键字段
 
