@@ -224,6 +224,37 @@ public class EpicReconciliationServiceSpecs
         Assert.Equal("active", statuses["epic_unready"]);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_ReadyEpicAfterFirstBatch_IsReached()
+    {
+        await using var database = CreateDatabase();
+        for (var i = 0; i < 500; i++)
+        {
+            var epicId = $"epic_unready_{i:D3}";
+            var issueId = $"issue_unready_{i:D3}";
+            await SeedEpicAsync(database, projectId: "project_1", epicId: epicId, status: "active");
+            await SeedIssueAsync(database, projectId: "project_1", issueId: issueId, issueNumber: i + 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+            await SeedLinkAsync(database, epicId: epicId, issueId: issueId, issueNumber: i + 1);
+        }
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_z_ready", status: "active");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_z_ready", issueNumber: 1001, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, epicId: "epic_z_ready", issueId: "issue_z_ready", issueNumber: 1001);
+
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var service = new EpicReconciliationService(
+            database.Factory, grains, NullLogger<EpicReconciliationService>.Instance);
+
+        await service.ReconcileOnceAsync();
+
+        await using var verify = database.CreateDbContext();
+        var ready = await verify.Epics.AsNoTracking().FirstAsync(e => e.Id == "epic_z_ready");
+        Assert.Equal("done", ready.Status);
+        Assert.Equal(501, grains.Calls.Count);
+        Assert.Contains(grains.Calls, call => call.GrainKey == "project_1:epic_z_ready");
+    }
+
     private static async Task SeedEpicAsync(
         TestDatabase database,
         string projectId = "project_1",

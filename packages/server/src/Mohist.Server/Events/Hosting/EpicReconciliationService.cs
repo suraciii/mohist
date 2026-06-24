@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Orleans;
@@ -16,7 +17,7 @@ namespace Mohist.Server.Events.Hosting;
 /// <see cref="IEpicGrain.AutoMarkDoneIfReadyAsync"/>, which is
 /// idempotent and short-circuits terminal/paused epics. The cadence
 /// mirrors <c>IssueWorkflowReconciliationService</c>: runs once a day
-/// by default, tunable for tests via <see cref="ReconciliationPeriod"/>.
+/// by default, tunable through <see cref="EpicReconciliationOptions"/>.
 ///
 /// Lives outside the <c>Epic</c> feature slice to honor the
 /// "feature directories only contain Domain/Grains/Services"
@@ -27,29 +28,30 @@ namespace Mohist.Server.Events.Hosting;
 /// </summary>
 public sealed class EpicReconciliationService : BackgroundService
 {
-    public static TimeSpan ReconciliationPeriod = TimeSpan.FromDays(1);
-
     private const int CandidateBatchSize = 500;
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
     private readonly ILogger<EpicReconciliationService> _log;
+    private readonly TimeSpan _reconciliationPeriod;
 
     public EpicReconciliationService(
         IDbContextFactory<MohistDbContext> dbFactory,
         IGrainFactory grains,
-        ILogger<EpicReconciliationService> log)
+        ILogger<EpicReconciliationService> log,
+        IOptions<EpicReconciliationOptions>? options = null)
     {
         _dbFactory = dbFactory;
         _grains = grains;
         _log = log;
+        _reconciliationPeriod = options?.Value.ReconciliationPeriod ?? EpicReconciliationOptions.DefaultReconciliationPeriod;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            await Task.Delay(ReconciliationPeriod, stoppingToken);
+            await Task.Delay(_reconciliationPeriod, stoppingToken);
         }
         catch (OperationCanceledException) { return; }
 
@@ -66,7 +68,7 @@ public sealed class EpicReconciliationService : BackgroundService
 
             try
             {
-                await Task.Delay(ReconciliationPeriod, stoppingToken);
+                await Task.Delay(_reconciliationPeriod, stoppingToken);
             }
             catch (OperationCanceledException) { return; }
         }
@@ -86,36 +88,56 @@ public sealed class EpicReconciliationService : BackgroundService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
-        // (ProjectId, Status, CreatedAt) index on EpicRow supports this
-        // filter efficiently. We only consider active epics; terminal
-        // and paused epics are intentionally skipped because the grain's
-        // AutoMarkDoneIfReadyAsync would no-op them anyway, and we want
-        // the sweep's candidate set to be a small, focused working set
-        // (active epics that *might* be stuck-pending-done because a
-        // work-completed event was lost).
-        var candidates = await db.Epics.AsNoTracking()
-            .Where(e => e.Status == "active")
-            .Select(e => new { e.ProjectId, e.Id })
-            .Take(CandidateBatchSize)
-            .ToListAsync(ct);
-
-        if (candidates.Count == 0) return;
-
-        _log.LogInformation("Reconciling {Count} active epics", candidates.Count);
-        foreach (var row in candidates)
+        var total = 0;
+        var lastProjectId = string.Empty;
+        var lastEpicId = string.Empty;
+        while (!ct.IsCancellationRequested)
         {
-            if (ct.IsCancellationRequested) break;
-            try
+            // (ProjectId, Status, CreatedAt) index on EpicRow supports the
+            // active filter. Stable keyset paging ensures long-lived unready
+            // epics in early rows cannot starve later ready epics.
+            var candidates = await db.Epics.AsNoTracking()
+                .Where(e => e.Status == "active")
+                .Where(e => string.Compare(e.ProjectId, lastProjectId) > 0
+                    || (e.ProjectId == lastProjectId && string.Compare(e.Id, lastEpicId) > 0))
+                .OrderBy(e => e.ProjectId)
+                .ThenBy(e => e.Id)
+                .Select(e => new { e.ProjectId, e.Id })
+                .Take(CandidateBatchSize)
+                .ToListAsync(ct);
+
+            if (candidates.Count == 0) break;
+            total += candidates.Count;
+
+            foreach (var row in candidates)
             {
-                var grain = _grains.GetGrain<IEpicGrain>($"{row.ProjectId}:{row.Id}");
-                await grain.AutoMarkDoneIfReadyAsync();
+                if (ct.IsCancellationRequested) break;
+                try
+                {
+                    var grain = _grains.GetGrain<IEpicGrain>($"{row.ProjectId}:{row.Id}");
+                    await grain.AutoMarkDoneIfReadyAsync();
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex,
+                        "Failed to reconcile epic {EpicId} in project {ProjectId}",
+                        row.Id, row.ProjectId);
+                }
             }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex,
-                    "Failed to reconcile epic {EpicId} in project {ProjectId}",
-                    row.Id, row.ProjectId);
-            }
+
+            var last = candidates[^1];
+            lastProjectId = last.ProjectId;
+            lastEpicId = last.Id;
         }
+
+        if (total > 0)
+            _log.LogInformation("Reconciled {Count} active epics", total);
     }
+}
+
+public sealed class EpicReconciliationOptions
+{
+    public static readonly TimeSpan DefaultReconciliationPeriod = TimeSpan.FromDays(1);
+
+    public TimeSpan ReconciliationPeriod { get; set; } = DefaultReconciliationPeriod;
 }
