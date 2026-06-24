@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Agent.Grains;
@@ -70,6 +71,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<ITranscriptEventPublisher, SignalRTranscriptEventPublisher>();
         services.AddHostedService<IssueWorkflowReconciliationService>();
         services.AddHostedService<AttachmentCleanupService>();
+        services.AddHostedService<EpicReconciliationService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();

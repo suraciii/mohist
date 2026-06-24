@@ -61,6 +61,16 @@ public class EpicQuerier : IScopedService
         return epic is null ? null : await ToDetailAsync(db, epic);
     }
 
+    public async Task<string?> GetEpicIdForIssueAsync(string projectId, string issueId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(issueId))
+            return null;
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var link = await db.EpicIssues.AsNoTracking()
+            .FirstOrDefaultAsync(l => l.ProjectId == projectId && l.IssueId == issueId);
+        return link?.EpicId;
+    }
+
     private async Task<EpicWithProgressDto> ToWithProgressAsync(MohistDbContext db, EpicRow epic)
     {
         var progress = await BuildProgressAsync(db, epic);
