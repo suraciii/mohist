@@ -213,6 +213,9 @@ internal sealed class TableRenderer
         _out.WriteLine($"project:  {project}");
         _out.WriteLine($"updated:  {Truncate(updatedAt, TitleSoftCap)}");
         _out.WriteLine($"labels:   {labels}");
+        var workflowProfileId = StringOf(data, "workflowProfileId");
+        if (!string.IsNullOrEmpty(workflowProfileId))
+            _out.WriteLine($"profile:  {workflowProfileId}");
         if (!string.IsNullOrEmpty(body))
             _out.WriteLine($"body:     {Truncate(body, BodySoftCap)}");
         _out.WriteLine($"state:    {FormatIssueState(data)}");

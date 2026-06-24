@@ -233,3 +233,104 @@
   issue, starts the workflow, asserts the running definition matches
   the override while the displayed profile id remains `mohist/pr` and
   `hasCustomTemplate` / `templateSource` correctly surface the override.
+
+## Task T-004 — CLI update --workflow-profile + show rendering
+
+- `mo issue update <n> --workflow-profile <id>` now exists. It follows the
+  same three-state semantics the server's PATCH contract already uses
+  for `workflowProfileId`:
+    - flag absent → key omitted from the PATCH body (preserves server-side selection)
+    - flag present with a value → sends `"workflowProfileId": "<id>"`
+    - flag present with an empty/whitespace value → sends `"workflowProfileId": null`
+      (clear the selection; reads fall back to the inherited default)
+  The presence check uses `ctx.GetResult(workflowProfileOpt) is not null`,
+  matching how every other "optional presence-aware" update flag
+  (e.g. `titleProvided`, `priorityProvided`) is detected in
+  `BuildUpdate`. The bound string value is normalized to `null` when
+  empty/whitespace before being placed in the payload.
+- Created an additional `CreateAsync` create-side fix: the create payload
+  used to unconditionally include `"workflowProfileId": <effective>`,
+  which would serialize as `"workflowProfileId": null` even when neither
+  the flag nor the frontmatter said anything. That violated the cli-interface
+  spec scenario "Create issue without workflow profile omits the key".
+  The create payload now only adds the key when the user supplied the
+  flag OR the frontmatter surfaced a `recommended_workflow`. Existing
+  flag-provided / frontmatter-provided behavior is unchanged; the only
+  observable difference is that "no flag, no frontmatter" no longer
+  ships an explicit null in the body.
+- `TableRenderer.RenderIssueShow` now prints `profile: <id>` from the
+  `workflowProfileId` field on the issue read model whenever it is
+  non-empty. With T-001's resolver wired into the read model, this is
+  the effective profile (issue selection → project default → system
+  default). Server emits `workflowProfileId` via standard camelCase JSON
+  serialization of `IssueInfo.WorkflowProfileId` — no `JsonPropertyName`
+  override needed, just a `StringOf(data, "workflowProfileId")` lookup.
+- The existing error path for "started issue cannot change profile"
+  already worked because `PrintPatchAsync` → `PrintResponseAsync` reads
+  the envelope `{success, error, code}` and writes
+  `<error> (<code>)` to stderr with a non-zero exit code on a 409. No
+  CLI-layer changes were needed beyond wiring the flag — the server's
+  `WorkflowProfileLockedException` (T-002) already maps to a 409 with
+  `code: "workflow_profile_locked"`. The tests assert the server message
+  text and the code both appear on stderr and the exit code is non-zero.
+- Default output mode for `mo issue show` is `json`. Tests that assert
+  on the rendered table pass `--output table` to switch to
+  `TableShape.IssueShow` rendering (matches how `mo issue show --help`
+  is exercised elsewhere in the suite).
+
+## Gotchas
+
+- `BuildCreate` always requires a body (existing behavior). Tests that
+  drive the create flow must pass `--body` (or `--body-file` /
+  `--body-stdin`); otherwise the CLI short-circuits with
+  "issue body is required" and never hits the HTTP layer.
+- The CLI server tests in `packages/server/.../IssueCliBodyInputSpecs.cs`
+  use the idiomatic assertion
+  `Assert.Null(body?["workflowProfileId"]?.GetValue<string>())`. That
+  remains true both when the key is absent (returns null via the
+  indexer) and when it is present with a JSON `null` value, so the
+  "omitted key" behavior introduced in T-004 doesn't break them.
+- The server's PATCH `BindAsync` is `string?` (per T-002's
+  `UpdateIssueRequest`); "present-and-null" vs "absent" is read off
+  the `Fields` set, so the CLI sending a literal JSON null vs omitting
+  the key both map to the same three-state semantics on the server.
+  Choosing "send null" for the empty-flag case is fine, but the spec
+  specifically asked the flag-absent path to omit the key — which is
+  what the update and create commands now both do.
+
+## New regression coverage
+
+`CliIssueWorkflowProfileSpecs` (Unit):
+- `IssueCreate_WithWorkflowProfileFlag_SendsWorkflowProfileIdInPostBody`
+  — `--workflow-profile mohist/pr` ⇒ POST body contains
+  `"workflowProfileId": "mohist/pr"`.
+- `IssueCreate_WithoutWorkflowProfileFlag_OmitsWorkflowProfileIdFromPostBody`
+  — no flag, no frontmatter ⇒ POST body does NOT contain a
+  `workflowProfileId` key (was always present before T-004).
+- `IssueShow_RendersEffectiveWorkflowProfile` — `mo issue show 42
+  --output table` displays `profile:  mohist/pr` for a PR issue.
+- `IssueShow_RendersInheritedDefaultWhenNoSelection` — same with
+  `mohist/default` (covers the no-issue-level-selection case resolved
+  via T-001's resolver).
+- `IssueShow_RoundTripsCreateThenShow` — create with the flag, then
+  show, end-to-end on the same fake handler.
+- `IssueUpdate_WithWorkflowProfileFlag_SendsWorkflowProfileIdInPatchBody`
+  — flag sends the value in the PATCH body and PATCH hits the right
+  path.
+- `IssueUpdate_WithoutWorkflowProfileFlag_OmitsWorkflowProfileIdFromPatchBody`
+  — combine with `--title`, assert only the provided keys appear.
+- `IssueUpdate_NoFlags_SendsPatchWithNoOptionalFieldKeys` —
+  `mo issue update 42` ships an empty object; no `workflowProfileId`,
+  no `isDraft`, etc.
+- `IssueUpdate_WorkflowProfileWithOtherFlags_PatchBodyOnlyContainsProvidedFields`
+  — combines `--workflow-profile` with `--priority` and verifies the
+  payload contains both and nothing else.
+- `IssueUpdate_WorkflowProfileRoundTripThroughShow_ReflectsNewValue` —
+  fake handler persists the patched profile id, then `mo issue show
+  --output table` renders the new value (mirrors the user-voice
+  scenario of "create as PR, show it").
+- `IssueUpdate_WorkflowProfileOnStartedIssue_PrintsServerErrorAndExitsNonZero`
+  — fake handler returns a 409 with
+  `{success:false, error:"Cannot change workflow profile ...", code:"workflow_profile_locked"}`:
+  asserts non-zero exit code, that the server error text is on stderr,
+  and that the error code is also surfaced.
