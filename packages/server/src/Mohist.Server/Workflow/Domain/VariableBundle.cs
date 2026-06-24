@@ -160,6 +160,8 @@ public sealed record VariableBundle(
 
         foreach (var property in overlay.Value.EnumerateObject())
         {
+            if (property.Value.ValueKind == JsonValueKind.Null)
+                continue;
             var existing = node[property.Name];
             node[property.Name] = MergeNode(existing, property.Value);
         }
@@ -169,10 +171,17 @@ public sealed record VariableBundle(
 
     private static JsonNode? MergeNode(JsonNode? existing, JsonElement overlay)
     {
+        if (overlay.ValueKind == JsonValueKind.Null)
+            return existing;
+
         if (existing is JsonObject existingObject && overlay.ValueKind == JsonValueKind.Object)
         {
             foreach (var property in overlay.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Null)
+                    continue;
                 existingObject[property.Name] = MergeNode(existingObject[property.Name], property.Value);
+            }
             return existingObject;
         }
 
