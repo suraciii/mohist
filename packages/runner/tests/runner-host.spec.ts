@@ -75,6 +75,27 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
   })),
 }))
 
+const setSessionHandlers = vi.fn()
+const clearSessionHandlers = vi.fn()
+const acpShutdown = vi.fn()
+
+vi.mock("../src/runtime/acp-connection.js", () => ({
+  AcpSessionManager: class {
+    key(_workflowRunId: string, _sessionName: string) { return `${_workflowRunId}:${_sessionName}` }
+    get(_key: string) { return undefined }
+    set() {}
+    has() { return false }
+    delete() {}
+  },
+  createSharedAcpConnection: vi.fn(async () => ({
+    connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
+    processPid: 99999,
+    setSessionHandlers,
+    clearSessionHandlers,
+    shutdown: acpShutdown,
+  })),
+}))
+
 describe("RunnerHost", () => {
   it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
     vi.clearAllMocks()
