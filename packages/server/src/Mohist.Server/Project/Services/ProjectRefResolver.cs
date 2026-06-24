@@ -1,6 +1,8 @@
+using Mohist.Server.Infrastructure.Hosting;
+
 namespace Mohist.Server.Project.Services;
 
-public sealed class ProjectRefResolver
+public sealed class ProjectRefResolver : ISingletonService
 {
     private readonly ProjectQuerier _projects;
 

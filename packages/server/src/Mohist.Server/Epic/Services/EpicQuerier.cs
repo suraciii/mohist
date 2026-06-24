@@ -1,12 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epic.Services;
-using Mohist.Server.Issue.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Issue.Services;
 
 namespace Mohist.Server.Epic.Services;
 
-public class EpicQuerier
+public class EpicQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueQuerier _issuesQuery;

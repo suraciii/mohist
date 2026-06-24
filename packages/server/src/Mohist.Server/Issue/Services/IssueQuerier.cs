@@ -4,6 +4,7 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -17,7 +18,7 @@ using Mohist.Server.Issue.Services.Attachments;
 
 namespace Mohist.Server.Issue.Services;
 
-public class IssueQuerier
+public class IssueQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;

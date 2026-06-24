@@ -1,10 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Issue.Services;
 
-public sealed class IssueIdentityResolver
+public sealed class IssueIdentityResolver : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 

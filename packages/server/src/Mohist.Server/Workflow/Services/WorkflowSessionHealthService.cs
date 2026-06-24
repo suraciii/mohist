@@ -3,6 +3,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services.Sessions;
+using Mohist.Server.Infrastructure.Hosting;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Services;
@@ -10,7 +11,7 @@ namespace Mohist.Server.Workflow.Services;
 public sealed class WorkflowSessionHealthService(
     AgentSessionQuery agentSessionQuery,
     IGrainFactory grainFactory,
-    ILogger<WorkflowSessionHealthService> log)
+    ILogger<WorkflowSessionHealthService> log) : IScopedService
 {
     public async Task CheckAndEnforceAsync(
         string? taskId,

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Artifacts;
@@ -23,7 +24,7 @@ internal sealed record WorkDispatchRequest(
 
 public sealed class WorkflowDispatchBuilder(
     WorkflowProfileManager profileManager,
-    ILogger<WorkflowDispatchBuilder> log)
+    ILogger<WorkflowDispatchBuilder> log) : IScopedService
 {
     internal async Task<WorkDispatch> BuildAsync(
         WorkDispatchRequest req,

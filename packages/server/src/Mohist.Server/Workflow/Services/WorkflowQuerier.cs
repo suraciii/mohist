@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
@@ -10,7 +11,7 @@ using WorkspaceIdentity = Mohist.Server.Workflow.Domain.Run.WorkspaceIdentity;
 
 namespace Mohist.Server.Workflow.Services;
 
-public class WorkflowQuerier
+public class WorkflowQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
     private readonly WorkflowProfileManager _profileManager;

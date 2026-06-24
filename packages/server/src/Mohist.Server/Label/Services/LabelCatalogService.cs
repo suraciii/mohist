@@ -3,10 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Label;
+using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Label.Services;
 
-public class LabelCatalogService
+public class LabelCatalogService : IScopedService
 {
     private static readonly Regex LabelKeyPattern =
         new(@"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);

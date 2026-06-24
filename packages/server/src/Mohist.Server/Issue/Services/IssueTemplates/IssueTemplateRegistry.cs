@@ -3,12 +3,13 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain.IssueTemplate;
 using Mohist.Server.Issue.Services;
 
 namespace Mohist.Server.Issue.Services.IssueTemplates;
 
-public class IssueTemplateRegistry
+public class IssueTemplateRegistry : IScopedService
 {
     private readonly Dictionary<string, IIssueTemplate> _builtins;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;

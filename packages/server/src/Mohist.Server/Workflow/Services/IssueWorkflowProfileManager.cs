@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -15,7 +16,7 @@ namespace Mohist.Server.Workflow.Services;
 ///   Template:          自定义 YAML 字符串 (Template 设置, SourceTemplateId 清空)
 ///   两个都 null:       清空 issue 级模板 (继承项目默认)
 /// </summary>
-public class IssueWorkflowProfileManager
+public class IssueWorkflowProfileManager : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
