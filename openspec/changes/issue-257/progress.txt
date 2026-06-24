@@ -1,0 +1,133 @@
+# Issue 257 — progress log
+
+## Codebase Patterns
+
+- `IIssueGrain.CreateAsync` signature is a positional parameter bag (no
+  DTO record). Adding a new optional arg is the established way to grow
+  it; the new arg goes at the end with a default value so existing
+  callers (notably the in-test `CreateIssueAsync` helpers) compile
+  unchanged.
+- The PATCH contract in this codebase is a "raw-presence-aware
+  three-state" model. `UpdateIssueRequest.BindAsync` re-parses the
+  request body into a `JsonElement` and stores the field set in
+  `Fields` (and re-exposes the raw element in `Raw`). The grain's
+  `UpdateFullAsync` then reads `PresentFields` to decide between
+  three options per field: absent (leave alone), present-and-null
+  (clear), present-and-value (replace). For workflow profile id this
+  maps directly to: absent = preserve, null = clear to inherit
+  default, value = replace. Any new PATCH-able field on
+  `UpdateIssueData` should follow the same pattern.
+- The grain is the only place that mutates the issue aggregate; the
+  route handler does **not** call the aggregate's transition methods
+  directly. The PATCH route must validate "known profile id" (POST
+  does the same) but should let the grain enforce the
+  started-issue-immutable rule and surface it via a dedicated
+  exception so the route layer can map to a stable error code.
+- Errors that mean "started-issue cannot change execution template"
+  are mapped by the existing pattern of
+  `ApiResults.Conflict(message, code)`; the route layer should keep
+  using `Conflict` for the 409 to stay aligned with the existing
+  draft-immutable conflict path (`InvalidOperationException` from the
+  grain → `ApiResults.Conflict`).
+- The IssueWorkflowProfileRegistry lives in
+  `Mohist.Server.Issue.Services.WorkflowProfiles` and is registered
+  as `IScopedService`. Route handlers can take it as a parameter;
+  the grain already injects it via constructor. Both layers can use
+  it for existence checks.
+- The unified workflow-profile effective resolution lives in
+  `EffectiveWorkflowProfileResolver` (issue → project default →
+  system default) and is consulted by `IssueQuerier.ToInfo` (the
+  static overloads still hardcode `mohist/default`; the instance
+  overload using the resolver is what the read paths go through).
+  PATCH/CREATE never call the resolver — they only persist the
+  selection; resolution happens at read time.
+
+## Task T-002 — wire create/persist + PATCH update + started-issue guard
+
+- Extended `IIssueGrain.CreateAsync` and `IssueGrain.CreateAsync`
+  with a `workflowProfileId` parameter (optional, default null).
+  Validation happens at the grain: throws
+  `UnknownWorkflowProfileException` when the supplied id is not
+  in `IssueWorkflowProfileRegistry`. The POST handler also does a
+  cheap pre-check so the request can return 400 without paying the
+  grain call; the grain-side check is the authoritative one and
+  also gets surfaced as 400.
+- Extended `Domain.Issue.Create` with a `workflowProfileId`
+  parameter; the aggregate setter normalizes whitespace to null and
+  the constructor records an `IssueWorkflowProfileChanged` event
+  when a non-null selection is supplied (matches the established
+  `ReplaceWorkflowProfile` event semantics for free).
+- Extended `UpdateIssueData` with `WorkflowProfileId` and the
+  three-state semantics: `present` ⇒ call
+  `_issue.ReplaceWorkflowProfile(data.WorkflowProfileId)` on the
+  aggregate, which handles value/null/whitespace uniformly.
+- Extended `UpdateIssueRequest.BindAsync` to capture
+  `workflowProfileId` presence in the `Fields` set and bind the
+  string value (so it stays null for both "absent" and
+  "present-and-null"; presence comes from `Fields`).
+- Added a new `WorkflowProfileLockedException` (sealed,
+  `InvalidOperationException`) thrown by the grain before any
+  field-level work, so a started issue is never half-mutated by a
+  profile change. The PATCH route maps it to a 409 with code
+  `workflow_profile_locked` and the exception message includes the
+  active workflow run id so the caller can identify the run.
+- Added `UnknownWorkflowProfileException` (sealed,
+  `ArgumentException`) for the unknown-id path. POST and PATCH both
+  return 400 with code `unknown_workflow_profile`; PATCH only
+  validates non-null values (null is a valid "clear" signal).
+- The variable/prompt PUT endpoints in `IssueRoutes.WorkflowProfile`
+  are untouched. They mutate `IssueWorkflowProfile` (the
+  `IssueWorkflowProfileManager` runtime overlay table) and never go
+  near `issue.WorkflowProfileId` — D5's distinction between
+  execution-template and runtime-overlay is preserved structurally.
+- New regression test file
+  `Specs/Issue/Api/IssueWorkflowProfileApiConsistencySpecs.cs`:
+  - `CreateIssue_WithPrWorkflowProfile_PersistsAndReadModelAgrees`
+    (detail/list/workflow-profile endpoint all report
+    `mohist/pr`).
+  - `CreateIssue_WithoutWorkflowProfile_InheritsDefaultOnAllReadSurfaces`
+    (no selection → every read surface reports `mohist/default`).
+  - `CreateIssue_WithUnknownWorkflowProfile_ReturnsBadRequest`
+    (400, code `unknown_workflow_profile`).
+  - `PatchIssue_ReplacesWorkflowProfile_WhenPresent` (PATCH
+    value, all read surfaces report the new value).
+  - `PatchIssue_WithoutWorkflowProfile_PreservesExistingSelection`
+    (absent key keeps the prior `mohist/pr`).
+  - `PatchIssue_NullWorkflowProfile_ClearsSelectionAndReadsInheritDefault`
+    (present-null clears; reads fall back to `mohist/default`).
+  - `PatchIssue_WithUnknownWorkflowProfile_ReturnsBadRequest`
+    (PATCH with unknown id returns 400).
+  - `PatchIssue_ProfileOnStartedIssue_ReturnsConflictAndLeavesSelectionUnchanged`
+    (issue started, PATCH profile → 409 with
+    `workflow_profile_locked`, selection unchanged).
+  - `PutVariables_OnStartedIssue_StillSucceeds` (PUT
+    `/workflow-profile/variables` is unaffected by the
+    started-issue guard; the rejection is scoped to the
+    execution-template change only).
+  - `PatchIssue_ProfileUpdate_PreservesConfiguredVariablesAndPrompts`
+    (seed variables + prompt via the runtime endpoints, PATCH the
+    profile, then assert the variables and prompt are still
+    intact and the profile id changed).
+
+## Gotchas
+
+- POST handler default for `isDraft` is `true` per the existing
+  `req.IsDraft ?? true` line. Tests that exercise the
+  started-issue-guard path need to explicitly set `isDraft = false`
+  on create; otherwise `StartWorkAsync` rejects the start with
+  `IssueStartBlockedException(IssueStartBlocker.Draft)`.
+- The grain throws `WorkflowProfileLockedException` **before** any
+  field-level mutation, including attachment validation. This is
+  intentional: if the caller can't change the profile, we don't
+  half-apply other changes either.
+- `UpdateIssueRequest` uses `string?` for `WorkflowProfileId`. The
+  three-state semantics (absent vs present-null) is read off
+  `req.Contains(nameof(WorkflowProfileId))` (the Fields set), not
+  off the bound value. The bound value carries the value-or-null
+  payload that the grain will apply.
+- LSP reports pre-existing test errors in
+  `IssueWorkflowProfileConsistencySpecs.cs` referencing
+  `Mohist.Server.Project.Domain.ProjectEntry` (the file uses
+  `Mohist.Server.Infrastructure.Data.Project.ProjectRow`).
+  `dotnet build` is clean — the LSP is stale. Left untouched
+  (out of scope for T-002).

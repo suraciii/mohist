@@ -54,6 +54,7 @@ public record UpdateIssueRequest
     public Dictionary<string, Dictionary<string, string>>? StageVariables { get; init; }
     public bool? IsDraft { get; init; }
     public string[]? AttachmentIds { get; init; }
+    public string? WorkflowProfileId { get; init; }
 
     /// <summary>
     /// Raw JSON body, captured at bind time. Used by the route handler to
@@ -100,6 +101,7 @@ public record UpdateIssueRequest
         if (raw.TryGetProperty("priority", out _)) fields.Add(nameof(Priority));
         if (raw.TryGetProperty("isDraft", out _)) fields.Add(nameof(IsDraft));
         if (raw.TryGetProperty("attachmentIds", out _)) fields.Add(nameof(AttachmentIds));
+        if (raw.TryGetProperty("workflowProfileId", out _)) fields.Add(nameof(WorkflowProfileId));
 
         return new UpdateIssueRequest
         {
@@ -115,6 +117,7 @@ public record UpdateIssueRequest
             StageVariables = GetNestedStringMap(raw, "stageVariables"),
             IsDraft = GetNullableBool(raw, "isDraft"),
             AttachmentIds = GetStringArray(raw, "attachmentIds"),
+            WorkflowProfileId = GetString(raw, "workflowProfileId"),
             Raw = raw,
             Fields = fields,
         };

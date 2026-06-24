@@ -331,6 +331,7 @@ public class IssueGrain : Grain, IIssueGrain
         var hasPriority = present.Contains(nameof(UpdateIssueData.Priority));
         var hasIsDraft = present.Contains(nameof(UpdateIssueData.IsDraft));
         var hasAttachments = present.Contains(nameof(UpdateIssueData.AttachmentIds));
+        var hasWorkflowProfile = present.Contains(nameof(UpdateIssueData.WorkflowProfileId));
 
         var title = hasTitle ? data.Title : null;
         var body = hasBody ? data.Body : null;
@@ -340,6 +341,16 @@ public class IssueGrain : Grain, IIssueGrain
         if (hasAttachments && !presentAttachmentsNull)
         {
             await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Id, data.AttachmentIds);
+        }
+
+        // Workflow profile selection is an execution-template fact: it cannot
+        // be changed once the issue has started. Reject any attempt early so
+        // we never half-apply other fields. Variable/prompt endpoints are
+        // untouched and remain valid run-scoped runtime overrides; this only
+        // guards the issue-level selection.
+        if (hasWorkflowProfile && _issue!.ActiveWorkflowRunId is not null)
+        {
+            throw new WorkflowProfileLockedException(_issue.Number, _issue.ActiveWorkflowRunId);
         }
 
         // For labels, the grain honors three-state semantics:
@@ -358,6 +369,17 @@ public class IssueGrain : Grain, IIssueGrain
 
         if (hasIsDraft && data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
+
+        if (hasWorkflowProfile)
+        {
+            // Three-state: absent = leave alone (handled by hasWorkflowProfile
+            // guard above), present-and-null = clear to inherit-default,
+            // present-and-value = replace with the supplied id. The route
+            // handler has already validated that any non-null value refers to
+            // a known profile; the aggregate's ReplaceWorkflowProfile
+            // normalizes whitespace to null.
+            _issue.ReplaceWorkflowProfile(data.WorkflowProfileId);
+        }
 
         await SaveIssueAsync();
 
@@ -413,32 +435,38 @@ public class IssueGrain : Grain, IIssueGrain
             await CompleteWorkAsync(workflowRunId);
     }
 
-public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null)
+public async Task<string> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? issueId = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null)
+{
+    if (_issue is not null)
+        throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
+
+    var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
+    var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
+    await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
+
+    if (!string.IsNullOrWhiteSpace(workflowProfileId) && !_profiles.Exists(workflowProfileId))
     {
-        if (_issue is not null)
-            throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
-
-        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
-        var resolvedIssueId = issueId ?? $"issue_{Guid.NewGuid():N}";
-        await _attachmentService.ValidateIssueBindAsync(projectId, resolvedIssueId, attachmentIds);
-
-        var issue = Domain.Issue.Create(
-            resolvedIssueId,
-            projectId,
-            number,
-            title,
-            body,
-            labels,
-            priority ?? "p2",
-            resolvedRef,
-            risk,
-            isDraft);
-
-        _issue = issue;
-        await SaveIssueAsync();
-        await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
-        return issue.Id;
+        throw new UnknownWorkflowProfileException(workflowProfileId);
     }
+
+    var issue = Domain.Issue.Create(
+        resolvedIssueId,
+        projectId,
+        number,
+        title,
+        body,
+        labels,
+        priority ?? "p2",
+        resolvedRef,
+        risk,
+        isDraft,
+        workflowProfileId);
+
+    _issue = issue;
+    await SaveIssueAsync();
+    await _attachmentService.BindIssueAsync(projectId, issue.Id, attachmentIds);
+    return issue.Id;
+}
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
@@ -612,5 +640,6 @@ public record UpdateIssueData(
     [property: Id(3)] string? Priority = null,
     [property: Id(4)] bool? IsDraft = null,
     [property: Id(5)] string[]? AttachmentIds = null,
-    [property: Id(6)] IReadOnlySet<string>? PresentFields = null
+    [property: Id(6)] IReadOnlySet<string>? PresentFields = null,
+    [property: Id(7)] string? WorkflowProfileId = null
 );

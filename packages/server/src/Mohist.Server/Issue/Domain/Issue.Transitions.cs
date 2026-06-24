@@ -15,6 +15,7 @@ public sealed partial class Issue
         string? repositoryRef = null,
         string? risk = null,
         bool isDraft = true,
+        string? workflowProfileId = null,
         DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
@@ -29,6 +30,7 @@ public sealed partial class Issue
             Risk = risk,
             RepositoryRef = repositoryRef,
             IsDraft = isDraft,
+            WorkflowProfileId = workflowProfileId,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
@@ -39,6 +41,10 @@ public sealed partial class Issue
             Labels: issue.SnapshotLabels(),
             Risk: risk,
             RepositoryRef: repositoryRef));
+        if (!string.IsNullOrWhiteSpace(workflowProfileId))
+        {
+            issue.RecordEvent(new IssueWorkflowProfileChanged(issue.WorkflowProfileId));
+        }
         return issue;
     }
 
