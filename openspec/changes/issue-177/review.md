@@ -1,6 +1,6 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
@@ -8,30 +8,33 @@
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Events/Hosting/EpicReconciliationService.cs:96`
-  Evidence: The reconciliation safety-net only loads `.Where(e => e.Status == "active").Take(500)` with no ordering, pagination, or cursor. If the database contains more than 500 active epics and the first batch includes long-lived unready epics, every sweep can keep revisiting those same rows while later ready-but-active epics are never considered. This violates T-003's missed-event recovery requirement for ready active epics beyond the fixed candidate window. [disallowed:behavior-change]
-  SuggestedAction: Make the sweep process all active epics in stable pages, or persist/use a cursor so each run eventually reaches every active epic; add a regression test with more than one batch where a ready epic is outside the first page.
-  Verification: `npm test -- --filter EpicAutoDone` passes 24 tests, but existing tests only cover small candidate sets and do not exercise the batch boundary/starvation case.
-  Status: open
+(none)
 
 ## Follow-up Items
 
-- [ID: item-2]
-  Severity: follow-up
-  Scope: `packages/server/src/Mohist.Server/Events/Hosting/EpicReconciliationService.cs:30`
-  Evidence: `ReconciliationPeriod` is a public static mutable test seam. It works for tests, but global mutable cadence can leak between tests or be changed accidentally by any in-process code.
-  SuggestedAction: Prefer options/time-provider injection if this service gains more tests or runtime configurability.
-  Status: follow-up
+(none)
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-3]
+- [ID: item-1]
   Severity: info
   Scope: workflow artifacts under `openspec/changes/issue-177/`
-  Evidence: `proposal.md`, `design.md`, `tasks.json`, `self-review.md`, and delta specs are workflow context for this review and are expected to exist during the Check stage; they are not product deliverables for the runtime behavior.
+  Evidence: `proposal.md`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, and `specs/epic-lifecycle/spec.md` are Mohist workflow context/evidence for issue 177 and are expected during Check/Integrate. They are not product-deliverable runtime files and do not block the candidate.
   SuggestedAction: No action.
   Status: out-of-scope
 
-<promise>FAIL</promise>
+- [ID: item-2]
+  Severity: info
+  Scope: acceptance criteria and implementation evidence
+  Evidence: Auto-done is implemented by `EpicAutoDoneHandler` resolving `projectid`/`issueid` and invoking `IEpicGrain.AutoMarkDoneIfReadyAsync` (`packages/server/src/Mohist.Server/Events/Subscriptions/EpicAutoDoneHandler.cs:28`, `packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:226`). Readiness reuses `ComputeUndeliveredLinkedNumbersAsync` and `EpicProgress.IsCompleted`, preserving cancelled-as-incomplete behavior (`packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:249`, `packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:271`). Paused/terminal epics no-op in auto flow (`packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:241`) and resume re-evaluates readiness (`packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:158`). Manual mark done still uses `domain.MarkDone` through `SetStatusAsync("done")` (`packages/server/src/Mohist.Server/Epic/Grains/EpicGrain.cs:181`). The reconciliation sweep now pages all active epics by stable keys and includes a regression for a ready epic beyond the first 500 candidates (`packages/server/src/Mohist.Server/Events/Hosting/EpicReconciliationService.cs:99`, `packages/server/tests/Mohist.Server.Tests/Specs/Events/Epic/EpicReconciliationServiceSpecs.cs:230`).
+  SuggestedAction: No action.
+  Status: out-of-scope
+
+- [ID: item-3]
+  Severity: info
+  Scope: verification
+  Evidence: `npm test -- --filter "EpicAutoDone|EpicReconciliationServiceSpecs"` passed 33 tests, covering the grain auto-done path, event handler, paused/resume interactions, cancelled issue behavior, idempotency, and reconciliation batch-boundary recovery.
+  SuggestedAction: No action.
+  Status: out-of-scope
+
+<promise>PASS</promise>
