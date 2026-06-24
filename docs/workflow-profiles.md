@@ -57,40 +57,73 @@ stages:
 
 ## GitHub PR Profile
 
-`mohist/pr` 的目标是使用同样的 plan/build/check 阶段，但 integrate 阶段通过 GitHub PR 交付：
+`mohist/pr` 走 PR-first 形态：plan 批准后立刻通过显式 task 创建/复用 PR，
+后续 stage 需要把最新工作推到 GitHub 时在该 stage 尾部追加显式 update PR task，
+integrate 收尾只剩 `merge-pull-request`：
 
 ```yaml
-- id: integrate:open-pr
-  uses: mohist/create-pull-request
-  setVars:
-    github.pr.number: output.prNumber
-    github.pr.url: output.prUrl
-- id: integrate:merge-pr
-  uses: mohist/merge-pull-request
-  with:
-    prNumber: ${{ vars.github.pr.number }}
+- stage: build
+  tasks:
+    - id: build:open-pr         # mohist/create-pull-request
+      setVars:
+        github.pr.number: output.prNumber
+        github.pr.url: output.prUrl
+    - id: load-tasks
+    - id: build:update-pr       # mohist/create-pull-request
+      setVars:
+        github.pr.number: output.prNumber
+        github.pr.url: output.prUrl
+
+- stage: integrate
+  tasks:
+    - id: integrate:merge-pr    # mohist/merge-pull-request
+      with:
+        prNumber: ${{ vars.github.pr.number }}
+      onFailure:
+        limit: 1
+        cases:
+          - when:
+              output.errorCode: base-moved
+            tasks:
+              - recover:rebase        # mohist/rebase
+              - recover:open-pr       # mohist/create-pull-request
+              - recover:merge-pr      # mohist/merge-pull-request
 ```
 
-当前语义是正常路径不预先 rebase。Mohist 会推送 workflow branch，打开或更新同 head/base 的 PR，把 `prNumber`/`prUrl` 写入 workflow runtime variables，然后通过 GitHub squash merge。只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并时，workflow 才通过 recovery task rebase 后重新 open/merge PR。
+当前语义是正常路径不预先 rebase。`build:open-pr` 在 build 一开始就推送
+workflow branch，按 head/base 打开或复用 open PR，并把 `prNumber`/`prUrl`
+写入 workflow runtime variables；`build:update-pr` 在 build 的 load-tasks
+完成后再次推送同一个 head/base，让 GitHub 更新 PR。integrate 的 happy path
+只跑 `integrate:merge-pr`：它读取 `vars.github.pr.number`，在真正 merge 前
+等待 GitHub PR checks，通过后调用 `gh pr merge --squash`，并确认
+`state=MERGED` 才视为集成完成。
 
-PR title/body 不从 workflow metadata 读取。profile 通过 `titleFrom: issue.title`、`bodyFrom: issue.body` 指示 action 在运行时执行 `mo issue show <number> --project-id <projectId> --output json`，再用返回的 issue title/body 创建 PR。
+只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并
+时，integrate:merge-pr 才会触发 `base-moved` recovery，依次执行
+`rebase -> create-pull-request -> merge-pull-request`，复用同一个 workflow
+branch 和 open PR。
+
+PR title/body 不从 workflow metadata 读取。profile 通过
+`titleFrom: issue.title`、`bodyFrom: issue.body` 指示 action 在运行时执行
+`mo issue show <number> --project-id <projectId> --output json`，再用返回
+的 issue title/body 创建或更新 PR。
 
 `mohist/pr` 使用两个 GitHub PR action：
 
-- `create-pull-request` 负责推送 workflow branch、创建/复用 PR，并通过 `titleFrom` / `bodyFrom` 在运行时读取 issue title/body 作为 PR title/body。
-- `create-pull-request` 只把稳定 PR 身份写入 workflow runtime variables：`vars.github.pr.number` 和 `vars.github.pr.url`。
-- `merge-pull-request` 读取 `vars.github.pr.number`，在真正 merge 前等待 GitHub PR checks；pending 时继续等待，passed/skipped 后 merge，failed/cancelled/action_required 时以 `errorCode: pr-checks-failed` 失败。
-- `merge-pull-request` 的合并语义是把当前 workflow branch 合入 base branch，不要求 head SHA 锁。
-- recovery 重新执行 `rebase -> create-pull-request -> merge-pull-request`，复用同一个 workflow branch 和 open PR。
+- `create-pull-request` 负责推送 workflow branch、创建/复用 PR，并通过
+  `titleFrom` / `bodyFrom` 在运行时读取 issue title/body 作为 PR title/body。
+- `create-pull-request` 只把稳定 PR 身份写入 workflow runtime
+  variables：`vars.github.pr.number` 和 `vars.github.pr.url`。
+- `merge-pull-request` 读取 `vars.github.pr.number`，在真正 merge 前等待
+  GitHub PR checks；pending 时继续等待，passed/skipped 后 merge，
+  failed/cancelled/action_required 时以 `errorCode: pr-checks-failed` 失败。
+- `merge-pull-request` 的合并语义是把当前 workflow branch 合入 base
+  branch，不要求 head SHA 锁。
 
 PR checks 属于 `merge-pull-request` action 的内部前置条件，不是 stage-level
-check。checks 失败时当前不自动修复，workflow 保留普通 task failure，由用户介入后
-retry/rerun。后续如果要自动修 PR checks，应在 profile 里对
+check。checks 失败时当前不自动修复，workflow 保留普通 task failure，由用户
+介入后 retry/rerun。后续如果要自动修 PR checks，应在 profile 里对
 `output.errorCode: pr-checks-failed` 声明显式 recovery task。
-
-下一步的 PR-first 目标是让 PR 在 workflow 早期通过普通 task 创建，并在需要把
-stage 结果推到 GitHub 时，把 update PR 作为该 stage 的收尾 task。这个设计仍沿用
-stage、tasks、checks 架构，不引入隐藏 stage hook 或 stage boundary side effect。
 
 ## 关键字段
 
