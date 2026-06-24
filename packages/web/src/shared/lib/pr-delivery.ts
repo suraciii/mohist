@@ -26,7 +26,11 @@ function readPublishViaPrRecord(value: unknown): Record<string, unknown> | null 
   if (parsed == null) return null
   if (typeof parsed !== 'object' || Array.isArray(parsed)) return null
   const record = parsed as Record<string, unknown>
-  if (record['kind'] !== 'publish-via-pr') return null
+  if (
+    record['kind'] !== 'publish-via-pr' &&
+    record['kind'] !== 'create-pull-request' &&
+    record['kind'] !== 'merge-pull-request'
+  ) return null
   return record
 }
 

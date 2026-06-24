@@ -63,6 +63,16 @@ describe('PR-specific delivery-failure resolution from output', () => {
     expect(resolution.guidance?.nextAction).toMatch(/gh auth login/)
   })
 
+  it('resolves base-moved from an errorCode field on split PR action output', () => {
+    const resolution = resolveDeliveryFailureFromOutput({
+      kind: 'merge-pull-request',
+      errorCode: 'base-moved',
+      message: 'GitHub reports this pull request is not mergeable',
+    })
+    expect(resolution.failureKind).toBe('base-moved')
+    expect(resolution.guidance?.retryable).toBe(true)
+  })
+
   it('resolves protection-conflict from a failureKind field on the output JSON', () => {
     const resolution = resolveDeliveryFailureFromOutput({
       kind: 'publish-via-pr',

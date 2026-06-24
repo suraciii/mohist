@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { PrDeliveryIndicator, PrDeliverySummary, findPublishViaPrMetadata, isCompletedPublishViaPrTask } from './PrDeliveryIndicator'
+import {
+  PrDeliveryIndicator,
+  PrDeliverySummary,
+  findPublishViaPrMetadata,
+  findPullRequestDeliveryMetadata,
+  isCompletedPublishViaPrTask,
+  isCompletedPullRequestDeliveryTask,
+} from './PrDeliveryIndicator'
 import type { WorkflowTimeline } from '../../../entities/issue/model/workflow-timeline'
 
 const sampleMetadata = {
@@ -62,6 +69,25 @@ describe('PrDeliverySummary', () => {
     const link = screen.getByTestId('pr-delivery-indicator')
     expect(link.getAttribute('href')).toBe('https://github.com/acme/widgets/pull/7')
     expect(link.textContent).toContain('#7')
+  })
+
+  it('does not render before the split PR workflow has merged the PR', () => {
+    const timeline = makeTimeline([
+      {
+        id: 'open-pr.1',
+        title: 'Open or update GitHub PR',
+        uses: 'mohist/create-pull-request',
+        status: 'completed',
+        output: JSON.stringify({
+          kind: 'create-pull-request',
+          prNumber: 8,
+          prUrl: 'https://github.com/acme/widgets/pull/8',
+          targetBranch: 'main',
+        }),
+      },
+    ])
+    const { container } = render(<PrDeliverySummary timeline={timeline} />)
+    expect(container.firstChild).toBeNull()
   })
 
   it('does not render for direct-push mohist/publish task', () => {
@@ -169,6 +195,21 @@ describe('PrDeliverySummary', () => {
     expect(metadata).not.toBeNull()
     expect(metadata!.prNumber).toBe(9)
   })
+
+  it('finds completed split PR task metadata', () => {
+    const timeline = makeTimeline([
+      {
+        id: 'merge-pr.1',
+        title: 'Merge GitHub PR',
+        uses: 'mohist/merge-pull-request',
+        status: 'completed',
+        output: JSON.stringify({ kind: 'merge-pull-request', prNumber: 11, prUrl: 'https://x/11' }),
+      },
+    ])
+    const metadata = findPullRequestDeliveryMetadata(timeline)
+    expect(metadata).not.toBeNull()
+    expect(metadata!.prNumber).toBe(11)
+  })
 })
 
 describe('isCompletedPublishViaPrTask', () => {
@@ -212,6 +253,35 @@ describe('isCompletedPublishViaPrTask', () => {
         message: null,
       }),
     ).toBe(false)
+  })
+
+  it('recognizes only completed merged PR delivery tasks through the new helper', () => {
+    expect(
+      isCompletedPullRequestDeliveryTask({
+        id: 'open-pr.1',
+        title: 'Open or update GitHub PR',
+        uses: 'mohist/create-pull-request',
+        status: 'completed',
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        attempts: 1,
+        message: null,
+      }),
+    ).toBe(false)
+    expect(
+      isCompletedPullRequestDeliveryTask({
+        id: 'merge-pr.1',
+        title: 'Merge GitHub PR',
+        uses: 'mohist/merge-pull-request',
+        status: 'completed',
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        attempts: 1,
+        message: null,
+      }),
+    ).toBe(true)
   })
 })
 

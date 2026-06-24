@@ -57,23 +57,46 @@ export interface PrDeliverySummaryProps {
 }
 
 export function PrDeliverySummary({ timeline }: PrDeliverySummaryProps) {
-  const metadata = findPublishViaPrMetadata(timeline)
+  const metadata = findMergedPullRequestDeliveryMetadata(timeline)
   if (!metadata) return null
   return <PrDeliveryIndicator metadata={metadata} />
 }
 
-export function findPublishViaPrMetadata(
+export function findPullRequestDeliveryMetadata(
+  timeline: WorkflowTimeline | null | undefined,
+): PrDeliveryMetadata | null {
+  return findMergedPullRequestDeliveryMetadata(timeline)
+}
+
+export function findMergedPullRequestDeliveryMetadata(
   timeline: WorkflowTimeline | null | undefined,
 ): PrDeliveryMetadata | null {
   if (!timeline) return null
   for (const stage of timeline.stages) {
     for (const task of stage.tasks) {
-      if (!isCompletedPublishViaPrTask(task)) continue
+      if (!isCompletedMergedPullRequestDeliveryTask(task)) continue
       const metadata = extractPrDeliveryMetadata(task.output)
       if (metadata) return metadata
     }
   }
   return null
+}
+
+export function findPublishViaPrMetadata(
+  timeline: WorkflowTimeline | null | undefined,
+): PrDeliveryMetadata | null {
+  return findMergedPullRequestDeliveryMetadata(timeline)
+}
+
+export function isCompletedPullRequestDeliveryTask(task: WorkflowTimelineTask): boolean {
+  return isCompletedMergedPullRequestDeliveryTask(task)
+}
+
+export function isCompletedMergedPullRequestDeliveryTask(task: WorkflowTimelineTask): boolean {
+  return task.status === 'completed' && (
+    task.uses === 'mohist/publish-via-pr' ||
+    task.uses === 'mohist/merge-pull-request'
+  )
 }
 
 export function isCompletedPublishViaPrTask(task: WorkflowTimelineTask): boolean {

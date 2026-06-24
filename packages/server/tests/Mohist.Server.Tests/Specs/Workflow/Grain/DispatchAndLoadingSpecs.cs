@@ -526,32 +526,33 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await StartWorkflowAsync(SingleStage(
             tasks: [
                 new TaskDefinition(
-                    "integrate:publish",
-                    "Publish changes",
-                    "mohist/publish-via-pr",
+                    "integrate:merge-pr",
+                    "Merge GitHub PR",
+                    "mohist/merge-pull-request",
                     OnFailure: new TaskFailureAction(
                         1,
                         [
                             new TaskFailureCase(
                                 new Dictionary<string, JsonElement?>
                                 {
-                                    ["output.failureKind"] = JsonSerializer.SerializeToElement("base-moved")
+                                    ["output.errorCode"] = JsonSerializer.SerializeToElement("base-moved")
                                 },
                                 [
                                     new TaskDefinition("recover:rebase", "Rebase after base moved", "mohist/rebase"),
-                                    new TaskDefinition("recover:publish", "Publish changes", "mohist/publish-via-pr")
+                                    new TaskDefinition("recover:open-pr", "Open or update GitHub PR", "mohist/create-pull-request"),
+                                    new TaskDefinition("recover:merge-pr", "Merge GitHub PR", "mohist/merge-pull-request")
                                 ])
                         ]))
             ],
             checks: []));
 
-        var (publish, publishRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("integrate:publish.", publish.WorkId);
-        await ReportAsync(publishRunnerId, publish.WorkId, new WorkResult("failed", "base moved", Output: """
+        var (mergePr, mergePrRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("integrate:merge-pr.", mergePr.WorkId);
+        await ReportAsync(mergePrRunnerId, mergePr.WorkId, new WorkResult("failed", "base moved", Output: """
         {
-          "kind": "publish-via-pr",
+          "kind": "merge-pull-request",
           "status": "failed",
-          "failureKind": "base-moved"
+          "errorCode": "base-moved"
         }
         """));
 
@@ -563,10 +564,15 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.Equal("mohist/rebase", rebase.Uses);
         await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
 
-        var (recoverPublish, recoverPublishRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("recover:publish.", recoverPublish.WorkId);
-        Assert.Equal("mohist/publish-via-pr", recoverPublish.Uses);
-        await ReportAsync(recoverPublishRunnerId, recoverPublish.WorkId, "completed");
+        var (recoverOpenPr, recoverOpenPrRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("recover:open-pr.", recoverOpenPr.WorkId);
+        Assert.Equal("mohist/create-pull-request", recoverOpenPr.Uses);
+        await ReportAsync(recoverOpenPrRunnerId, recoverOpenPr.WorkId, "completed");
+
+        var (recoverMergePr, recoverMergePrRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("recover:merge-pr.", recoverMergePr.WorkId);
+        Assert.Equal("mohist/merge-pull-request", recoverMergePr.Uses);
+        await ReportAsync(recoverMergePrRunnerId, recoverMergePr.WorkId, "completed");
 
         status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
         Assert.Equal("Completed", status);

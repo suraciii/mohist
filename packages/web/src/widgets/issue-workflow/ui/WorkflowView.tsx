@@ -643,12 +643,21 @@ function isScriptHealthCheck(check: StageCheckState): boolean {
 function isDeliveryFailureTask(task: StageTaskState): boolean {
   const uses = task.origin?.uses
   if (typeof uses !== 'string') {
-    return typeof task.taskId === 'string' && (task.taskId.startsWith('integrate:prepare') || task.taskId.startsWith('integrate:publish'))
+    return typeof task.taskId === 'string' && (
+      task.taskId.startsWith('integrate:prepare') ||
+      task.taskId.startsWith('integrate:publish') ||
+      task.taskId.startsWith('integrate:open-pr') ||
+      task.taskId.startsWith('integrate:merge-pr') ||
+      task.taskId.startsWith('recover:open-pr') ||
+      task.taskId.startsWith('recover:merge-pr')
+    )
   }
   return (
     uses === 'mohist/prepare' ||
     uses === 'mohist/publish' ||
-    uses === 'mohist/publish-via-pr'
+    uses === 'mohist/publish-via-pr' ||
+    uses === 'mohist/create-pull-request' ||
+    uses === 'mohist/merge-pull-request'
   )
 }
 

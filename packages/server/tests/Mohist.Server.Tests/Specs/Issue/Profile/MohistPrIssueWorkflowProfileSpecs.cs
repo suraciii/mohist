@@ -205,7 +205,7 @@ public class MohistPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void PrWorkflowDefinition_IntegrateStage_PublishesDirectlyWithBaseMovedRecovery()
+    public void PrWorkflowDefinition_IntegrateStage_OpensAndMergesPrWithBaseMovedRecovery()
     {
         var pr = MohistWorkflow.PrWorkflowDefinition;
         var def = MohistWorkflow.Definition;
@@ -213,7 +213,7 @@ public class MohistPrIssueWorkflowProfileSpecs
         var prIntegrate = pr.Stages.Single(s => s.Stage == "integrate");
         var defIntegrate = def.Stages.Single(s => s.Stage == "integrate");
 
-        var orderedIds = new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:publish" };
+        var orderedIds = new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:open-pr", "integrate:merge-pr" };
         Assert.Equal(orderedIds, prIntegrate.Tasks.Select(t => t.Id).ToArray());
         Assert.Equal(new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push" }, defIntegrate.Tasks.Select(t => t.Id).ToArray());
 
@@ -229,24 +229,33 @@ public class MohistPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/rebase", defRebase.Uses);
         Assert.Equal(ReadBoolWith(defRebase, "squash"), true);
 
-        var prPublish = prIntegrate.Tasks.Single(t => t.Id == "integrate:publish");
+        var prOpen = prIntegrate.Tasks.Single(t => t.Id == "integrate:open-pr");
+        var prMerge = prIntegrate.Tasks.Single(t => t.Id == "integrate:merge-pr");
         var defPush = defIntegrate.Tasks.Single(t => t.Id == "integrate:push");
-        Assert.Equal("mohist/publish-via-pr", prPublish.Uses);
+        Assert.Equal("mohist/create-pull-request", prOpen.Uses);
+        Assert.Equal("mohist/merge-pull-request", prMerge.Uses);
         Assert.Equal("mohist/push", defPush.Uses);
-        Assert.Equal(ReadStringWith(prPublish, "source"), ReadStringWith(defPush, "source"));
-        Assert.Equal(ReadStringWith(prPublish, "target"), ReadStringWith(defPush, "target"));
-        Assert.Equal(ReadStringWith(prPublish, "remote"), ReadStringWith(defPush, "remote"));
-        Assert.Equal("issue.title", ReadStringWith(prPublish, "titleFrom"));
-        Assert.Equal("issue.body", ReadStringWith(prPublish, "bodyFrom"));
+        Assert.Equal(ReadStringWith(prOpen, "source"), ReadStringWith(defPush, "source"));
+        Assert.Equal(ReadStringWith(prOpen, "target"), ReadStringWith(defPush, "target"));
+        Assert.Equal(ReadStringWith(prOpen, "remote"), ReadStringWith(defPush, "remote"));
+        Assert.Equal("issue.title", ReadStringWith(prOpen, "titleFrom"));
+        Assert.Equal("issue.body", ReadStringWith(prOpen, "bodyFrom"));
+        Assert.NotNull(prOpen.SetVars);
+        Assert.Equal("output.prNumber", prOpen.SetVars!["github.pr.number"]);
+        Assert.Equal("output.prUrl", prOpen.SetVars!["github.pr.url"]);
+        Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(prMerge, "prNumber"));
+        Assert.Equal("squash", ReadStringWith(prMerge, "method"));
+        Assert.Equal("issue.title", ReadStringWith(prMerge, "subjectFrom"));
 
-        var onFailure = prPublish.OnFailure;
+        var onFailure = prMerge.OnFailure;
         Assert.NotNull(onFailure);
         Assert.Equal(1, onFailure!.Limit);
         var failureCase = Assert.Single(onFailure.Cases);
-        Assert.Equal("base-moved", failureCase.When["output.failureKind"]!.Value.GetString());
-        Assert.Equal(new[] { "recover:rebase", "recover:publish" }, failureCase.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal("base-moved", failureCase.When["output.errorCode"]!.Value.GetString());
+        Assert.Equal(new[] { "recover:rebase", "recover:open-pr", "recover:merge-pr" }, failureCase.Tasks.Select(t => t.Id).ToArray());
         Assert.Equal("mohist/rebase", failureCase.Tasks[0].Uses);
-        Assert.Equal("mohist/publish-via-pr", failureCase.Tasks[1].Uses);
+        Assert.Equal("mohist/create-pull-request", failureCase.Tasks[1].Uses);
+        Assert.Equal("mohist/merge-pull-request", failureCase.Tasks[2].Uses);
     }
 
     private static bool? ReadBoolWith(Mohist.Server.Workflow.Domain.Definition.TaskDefinition task, string key)
@@ -278,10 +287,10 @@ public class MohistPrIssueWorkflowProfileSpecs
         Assert.Empty(pushTasks);
 
         var deliveryTasks = integrate.Tasks
-            .Where(t => t.Id.EndsWith(":publish", StringComparison.Ordinal) || t.Id.EndsWith(":push", StringComparison.Ordinal))
+            .Where(t => t.Id.EndsWith(":open-pr", StringComparison.Ordinal) || t.Id.EndsWith(":merge-pr", StringComparison.Ordinal) || t.Id.EndsWith(":publish", StringComparison.Ordinal) || t.Id.EndsWith(":push", StringComparison.Ordinal))
             .Select(t => t.Id)
             .ToList();
-        Assert.Equal(new[] { "integrate:publish" }, deliveryTasks);
+        Assert.Equal(new[] { "integrate:open-pr", "integrate:merge-pr" }, deliveryTasks);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -295,7 +304,9 @@ public class MohistPrIssueWorkflowProfileSpecs
 
         Assert.Equal("mohist/pr", definition.Id);
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
-        Assert.Contains("publish-via-pr", JsonSerializer.Serialize(definition.Stages[3].Tasks));
+        var integrateTasks = JsonSerializer.Serialize(definition.Stages[3].Tasks);
+        Assert.Contains("create-pull-request", integrateTasks);
+        Assert.Contains("merge-pull-request", integrateTasks);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -339,23 +350,33 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "                    - <promise>done</promise>\n" +
                 "                    - <promise>unfinished</promise>"
             ),
-            // Delivery: default rebases+squashes then pushes; PR publishes
-            // directly and only schedules rebase as base-moved recovery.
+            // Delivery: default rebases+squashes then pushes; PR opens and
+            // merges a GitHub PR, scheduling rebase only as base-moved recovery.
             (
-                "      - id: integrate:publish\n" +
-                "        title: Publish changes\n" +
-                "        uses: mohist/publish-via-pr\n" +
+                "      - id: integrate:open-pr\n" +
+                "        title: Open or update GitHub PR\n" +
+                "        uses: mohist/create-pull-request\n" +
                 "        with:\n" +
                 "          source: ${{ workspace.branch }}\n" +
                 "          target: ${{ repository.baseBranch }}\n" +
                 "          remote: origin\n" +
                 "          titleFrom: issue.title\n" +
                 "          bodyFrom: issue.body\n" +
+                "        setVars:\n" +
+                "          github.pr.number: output.prNumber\n" +
+                "          github.pr.url: output.prUrl\n" +
+                "      - id: integrate:merge-pr\n" +
+                "        title: Merge GitHub PR\n" +
+                "        uses: mohist/merge-pull-request\n" +
+                "        with:\n" +
+                "          prNumber: ${{ vars.github.pr.number }}\n" +
+                "          method: squash\n" +
+                "          subjectFrom: issue.title\n" +
                 "        onFailure:\n" +
                 "          limit: 1\n" +
                 "          cases:\n" +
                 "            - when:\n" +
-                "                output.failureKind: base-moved\n" +
+                "                output.errorCode: base-moved\n" +
                 "              tasks:\n" +
                 "                - id: recover:rebase\n" +
                 "                  title: Rebase after base moved\n" +
@@ -368,15 +389,25 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "                      title: Resolve rebase conflicts\n" +
                 "                      with:\n" +
                 "                        description: \"Resolve rebase conflicts, stage resolved files, and continue until the rebase completes.\"\n" +
-                "                - id: recover:publish\n" +
-                "                  title: Publish changes\n" +
-                "                  uses: mohist/publish-via-pr\n" +
+                "                - id: recover:open-pr\n" +
+                "                  title: Open or update GitHub PR\n" +
+                "                  uses: mohist/create-pull-request\n" +
                 "                  with:\n" +
                 "                    source: ${{ workspace.branch }}\n" +
                 "                    target: ${{ repository.baseBranch }}\n" +
                 "                    remote: origin\n" +
                 "                    titleFrom: issue.title\n" +
-                "                    bodyFrom: issue.body",
+                "                    bodyFrom: issue.body\n" +
+                "                  setVars:\n" +
+                "                    github.pr.number: output.prNumber\n" +
+                "                    github.pr.url: output.prUrl\n" +
+                "                - id: recover:merge-pr\n" +
+                "                  title: Merge GitHub PR\n" +
+                "                  uses: mohist/merge-pull-request\n" +
+                "                  with:\n" +
+                "                    prNumber: ${{ vars.github.pr.number }}\n" +
+                "                    method: squash\n" +
+                "                    subjectFrom: issue.title",
                 "      - id: integrate:rebase\n" +
                 "        title: Rebase and squash branch\n" +
                 "        uses: mohist/rebase\n" +

@@ -5,8 +5,8 @@ import { runCommand } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
 
-type GitRunner = typeof defaultGit
-type GhRunner = typeof runCommand
+export type GitRunner = typeof defaultGit
+export type GhRunner = typeof runCommand
 
 let git: GitRunner = defaultGit
 let gh: GhRunner = runCommand
@@ -54,7 +54,7 @@ export async function publishViaPrAction(context: ActionContext): Promise<Action
   const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
   const remote = stringInput(context.with, "remote") ?? "origin"
   const issueNumber = resolveIssueNumber(context)
-  const workDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
+  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
   const steps: PublishViaPrStep[] = []
   const record = (name: string, command: string, exitCode: number, output: string) => {
@@ -309,21 +309,22 @@ async function openOrReusePr(
   return { kind: "ok", prNumber, prUrl: url }
 }
 
-interface MergeOrConfirmPrOk {
+export interface MergeOrConfirmPrOk {
   kind: "ok"
   mergeCommitSha: string | null
   prUrl: string | null
   output: string
 }
 
-interface MergeOrConfirmPrFailure {
+export interface MergeOrConfirmPrFailure {
   kind: "failure"
   failureKind: PublishViaPrFailureKind
   message: string
+  prUrl: string | null
   output: string
 }
 
-async function mergeOrConfirmPr(
+export async function mergeOrConfirmPr(
   gh: GhRunner,
   workDir: string,
   prNumber: number,
@@ -339,6 +340,7 @@ async function mergeOrConfirmPr(
       kind: "failure",
       failureKind: classifyGhFailure(viewResult.stdout, viewResult.stderr),
       message: `gh pr view ${prNumber} failed: ${viewOutput}`,
+      prUrl: null,
       output: viewOutput,
     }
   }
@@ -349,6 +351,7 @@ async function mergeOrConfirmPr(
       kind: "failure",
       failureKind: "retry-safe",
       message: `gh pr view ${prNumber} returned unparseable JSON: ${viewOutput}`,
+      prUrl: null,
       output: viewOutput,
     }
   }
@@ -367,6 +370,7 @@ async function mergeOrConfirmPr(
       kind: "failure",
       failureKind: "pr-state-conflict",
       message: `PR #${prNumber} is closed; refusing to recreate. Re-open the PR or run workflow integrate retry from prepare.`,
+      prUrl: view.url ?? null,
       output: viewOutput,
     }
   }
@@ -380,6 +384,7 @@ async function mergeOrConfirmPr(
       kind: "failure",
       failureKind: classifyGhFailure(mergeResult.stdout, mergeResult.stderr),
       message: `gh pr merge ${prNumber} --squash failed: ${mergeOutput}`,
+      prUrl: view.url ?? null,
       output: mergeOutput,
     }
   }
@@ -392,6 +397,7 @@ async function mergeOrConfirmPr(
       kind: "failure",
       failureKind: classifyGhFailure(recheck.stdout, recheck.stderr),
       message: `gh pr view ${prNumber} (post-merge confirm) failed: ${recheckOutput}`,
+      prUrl: view.url ?? null,
       output: recheckOutput,
     }
   }
@@ -404,6 +410,7 @@ async function mergeOrConfirmPr(
       message: confirmed
         ? `PR #${prNumber} is in state ${confirmed.state} after merge; expected MERGED.`
         : `gh pr view ${prNumber} returned unparseable JSON after merge: ${recheckOutput}`,
+      prUrl: confirmed?.url ?? view.url ?? null,
       output: recheckOutput,
     }
   }
@@ -416,7 +423,7 @@ async function mergeOrConfirmPr(
   }
 }
 
-async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
+export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
   const version = await gh("gh", ["--version"], workDir, signal)
   if (version.exitCode !== 0) {
     const output = combinedGhOutput(version)
@@ -442,7 +449,7 @@ async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal)
   return { ok: true, output: `${version.stdout.trim()}\n${authOutput}` }
 }
 
-async function resolveCurrentBranch(git: GitRunner, workDir: string, signal: AbortSignal): Promise<{ success: true; name: string } | { success: false; exitCode: number; combinedOutput: string }> {
+export async function resolveCurrentBranch(git: GitRunner, workDir: string, signal: AbortSignal): Promise<{ success: true; name: string } | { success: false; exitCode: number; combinedOutput: string }> {
   const result = await git(workDir, ["rev-parse", "--abbrev-ref", "HEAD"], signal)
   if (!result.success) {
     return { success: false, exitCode: result.exitCode, combinedOutput: result.combinedOutput }
@@ -454,19 +461,19 @@ async function resolveCurrentBranch(git: GitRunner, workDir: string, signal: Abo
   return { success: true, name }
 }
 
-interface BaseShaOk {
+export interface BaseShaOk {
   kind: "ok"
   sha: string
 }
 
-interface BaseShaFailure {
+export interface BaseShaFailure {
   kind: "failure"
   failureKind: PublishViaPrFailureKind
   message: string
   output: string
 }
 
-async function resolveBaseSha(
+export async function resolveBaseSha(
   git: GitRunner,
   workDir: string,
   remote: string,
@@ -621,11 +628,11 @@ export function extractIssueNumberFromMessage(message: string): string | null {
   return match && match[1] ? match[1] : null
 }
 
-function combinedGhOutput(result: { stdout: string; stderr: string }): string {
+export function combinedGhOutput(result: { stdout: string; stderr: string }): string {
   return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 

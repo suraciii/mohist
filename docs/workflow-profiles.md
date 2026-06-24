@@ -60,15 +60,22 @@ stages:
 `mohist/pr` 的目标是使用同样的 plan/build/check 阶段，但 integrate 阶段通过 GitHub PR 交付：
 
 ```yaml
-- id: integrate:publish
-  uses: mohist/publish-via-pr
+- id: integrate:open-pr
+  uses: mohist/create-pull-request
+  setVars:
+    github.pr.number: output.prNumber
+    github.pr.url: output.prUrl
+- id: integrate:merge-pr
+  uses: mohist/merge-pull-request
+  with:
+    prNumber: ${{ vars.github.pr.number }}
 ```
 
-目标语义是正常路径不预先 rebase。Mohist 会推送 workflow branch，打开或复用同 head/base 的 PR，然后通过 GitHub squash merge。只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并时，workflow 才通过 recovery task rebase 后重新 publish。
+当前语义是正常路径不预先 rebase。Mohist 会推送 workflow branch，打开或更新同 head/base 的 PR，把 `prNumber`/`prUrl` 写入 workflow runtime variables，然后通过 GitHub squash merge。只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并时，workflow 才通过 recovery task rebase 后重新 open/merge PR。
 
 PR title/body 不从 workflow metadata 读取。profile 通过 `titleFrom: issue.title`、`bodyFrom: issue.body` 指示 action 在运行时执行 `mo issue show <number> --project-id <projectId> --output json`，再用返回的 issue title/body 创建 PR。
 
-后续目标是把 `publish-via-pr` 拆成 `create-pull-request` 与 `merge-pull-request` 两个 task：
+`mohist/pr` 使用两个 GitHub PR action：
 
 - `create-pull-request` 负责推送 workflow branch、创建/复用 PR，并通过 `titleFrom` / `bodyFrom` 在运行时读取 issue title/body 作为 PR title/body。
 - `create-pull-request` 只把稳定 PR 身份写入 workflow runtime variables：`vars.github.pr.number` 和 `vars.github.pr.url`。

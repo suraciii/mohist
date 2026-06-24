@@ -320,7 +320,9 @@ internal static class DeliveryFailureGuidance
         if (node is JsonObject obj)
         {
             if (obj.TryGetPropertyValue("failureKind", out var direct) ||
-                obj.TryGetPropertyValue("FailureKind", out direct))
+                obj.TryGetPropertyValue("FailureKind", out direct) ||
+                obj.TryGetPropertyValue("errorCode", out direct) ||
+                obj.TryGetPropertyValue("ErrorCode", out direct))
             {
                 if (direct is JsonValue dv && dv.TryGetValue<string>(out var dvs))
                 {
