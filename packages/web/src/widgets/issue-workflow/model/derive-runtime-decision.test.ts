@@ -572,13 +572,40 @@ describe('deriveRuntimeDecision', () => {
       })
 
       const actionKinds = decision.actions.map((a) => a.kind)
-      for (const kind of ['retry', 'resume', 'rerun', 'stop'] as const) {
+      for (const kind of ['retry', 'resume', 'rerun', 'start'] as const) {
         const found = decision.actions.find((a) => a.kind === kind)
         expect(found, `expected an action entry for ${kind}`).toBeDefined()
         expect(found?.enabled, `expected ${kind} to be disabled when no projection allows it`).toBe(false)
       }
       expect(actionKinds).not.toContain('approve')
       expect(actionKinds).not.toContain('send-back')
+      expect(actionKinds).not.toContain('stop')
+    })
+
+    it('exposes Start new workflow (not Stop) when a failed workflow offers start', () => {
+      const decision = deriveRuntimeDecision({
+        issue: baseIssue({
+          workflowStage: WorkflowStage.Build,
+          recovery: {
+            currentWorkItem: { type: 'task', id: 't1', title: 'Broken task' },
+            latestAttemptState: 'failed',
+            workflowSummaryState: 'waiting-for-recovery',
+            allowedActions: [],
+          },
+        }),
+        timeline: {
+          currentStage: WorkflowStage.Build,
+          status: 'Failed',
+          stages: [],
+          pendingWork: null,
+          availableActions: [{ name: 'start', label: 'Start new workflow', target: null }],
+        },
+      })
+
+      expect(decision.summary).toBe('failed')
+      expect(decision.actions.find((a) => a.kind === 'start')?.enabled).toBe(true)
+      expect(decision.actions.some((a) => a.kind === 'stop')).toBe(false)
+      expect(decision.nextAction).toBe('Start a new workflow run, discarding the failed one.')
     })
   })
 

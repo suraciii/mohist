@@ -329,6 +329,25 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task WorkflowFailed_UserViewsWorkflowStatus_StartNewWorkflowActionIsAvailable()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "failed", "compile error");
+
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
+        Assert.NotNull(status);
+        Assert.Equal("failed", status.Status);
+
+        var startAction = status.AvailableActions.Find(a => a.Name == "start");
+        Assert.NotNull(startAction);
+        Assert.Equal("Start new workflow", startAction!.Label);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task CheckFails_UserViewsWorkflowStatus_RetryActionIsAvailable()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
