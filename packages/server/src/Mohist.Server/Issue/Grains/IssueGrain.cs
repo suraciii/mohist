@@ -217,29 +217,29 @@ public class IssueGrain : Grain, IIssueGrain
     private async Task<string?> TryReuseActiveWorkflowAsync()
     {
         var issue = _issue!;
-        var activeWorkflowRunId = issue.ActiveWorkflowRunId;
-        if (activeWorkflowRunId is null) return null;
+        var workflowRunId = issue.WorkflowRunId;
+        if (workflowRunId is null) return null;
 
         try
         {
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(activeWorkflowRunId);
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
             if (await workflow.IsStoppedOrTerminalAsync())
             {
-                issue.ClearStoppedWorkflow(activeWorkflowRunId);
+                issue.ClearStoppedWorkflow(workflowRunId);
                 await SaveIssueAsync();
                 return null;
             }
 
-            _log.LogInformation("Issue {IssueId} reusing active workflow {WorkflowRunId}", issue.Id, activeWorkflowRunId);
-            return activeWorkflowRunId;
+            _log.LogInformation("Issue {IssueId} reusing workflow run {WorkflowRunId}", issue.Id, workflowRunId);
+            return workflowRunId;
         }
         catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
         {
             _log.LogWarning(ex,
-                "Issue {IssueId} active workflow {WorkflowRunId} cannot be loaded while starting; clearing active workflow reference",
+                "Issue {IssueId} workflow run {WorkflowRunId} cannot be loaded while starting; clearing workflow run reference",
                 issue.Id,
-                activeWorkflowRunId);
-            issue.ClearStoppedWorkflow(activeWorkflowRunId);
+                workflowRunId);
+            issue.ClearStoppedWorkflow(workflowRunId);
             await SaveIssueAsync();
             return null;
         }
@@ -292,14 +292,43 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task CancelAsync()
     {
         EnsureIssue();
-        if (_issue!.ActiveWorkflowRunId is { } wrId)
+        // "Has a workflow run reference" (an execution fact) is NOT the
+        // same as "has an active, controllable workflow" (status + run
+        // state). Only run the cannot-close-while-running guard when the
+        // issue is actually InProgress with a non-null workflowRunId AND
+        // the run is not stopped/terminal — a Done or archived issue that
+        // preserved its reference is not a running workflow, and Close()
+        // already rejects Done/archived itself.
+        var wfStatus = await GetControllableWorkflowStatusAsync();
+        if (wfStatus is { } running
+            && running is "running" or "paused" or "awaiting-approval")
         {
-            var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
-            if (wfStatus?.Status is "running" or "paused" or "awaiting-approval")
-                throw new InvalidOperationException($"Cannot close issue while workflow is {wfStatus.Status}. Stop the workflow first.");
+            throw new InvalidOperationException($"Cannot close issue while workflow is {running}. Stop the workflow first.");
         }
-        _issue.Close("user-cancelled");
+        _issue!.Close("user-cancelled");
         await SaveIssueAsync();
+    }
+
+    /// <summary>
+    /// Derived judgment: the issue currently has an active, controllable
+    /// workflow run. Combines the issue's status (must be
+    /// <c>InProgress</c>) with the run's state (must not be stopped or
+    /// terminal). Returns the workflow status string when controllable,
+    /// <c>null</c> otherwise. Used by control paths that previously
+    /// conflated "has a workflow run reference" with "has an active
+    /// workflow" — see design decision D3.
+    /// </summary>
+    private async Task<string?> GetControllableWorkflowStatusAsync()
+    {
+        var issue = _issue;
+        if (issue is null) return null;
+        if (issue.Status != Domain.IssueStatus.InProgress) return null;
+        if (issue.WorkflowRunId is not { } wrId) return null;
+
+        var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
+        if (wfStatus?.Status is null) return null;
+        if (wfStatus.Status is "stopped" or "completed" or "failed") return null;
+        return wfStatus.Status;
     }
 
     public async Task CompleteWorkAsync(string workflowRunId)
@@ -364,9 +393,9 @@ public class IssueGrain : Grain, IIssueGrain
         // we never half-apply other fields. Variable/prompt endpoints are
         // untouched and remain valid run-scoped runtime overrides; this only
         // guards the issue-level selection.
-        if (hasWorkflowProfile && _issue!.ActiveWorkflowRunId is not null)
+        if (hasWorkflowProfile && _issue!.WorkflowRunId is not null)
         {
-            throw new WorkflowProfileLockedException(_issue.Number, _issue.ActiveWorkflowRunId);
+            throw new WorkflowProfileLockedException(_issue.Number, _issue.WorkflowRunId);
         }
 
         // For labels, the grain honors three-state semantics:
@@ -416,7 +445,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         EnsureIssue();
 
-        var wrId = _issue!.ActiveWorkflowRunId;
+        var wrId = _issue!.WorkflowRunId;
         if (wrId is null) return null;
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
@@ -445,7 +474,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null || wfStatus is null) return;
         if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        if (_issue.ActiveWorkflowRunId != workflowRunId) return;
+        if (_issue.WorkflowRunId != workflowRunId) return;
 
         if (wfStatus.Status == "completed")
             await CompleteWorkAsync(workflowRunId);

@@ -110,6 +110,20 @@ function DraftPill() {
   )
 }
 
+function ArchivedPill({ archivedAt }: { archivedAt: string | null | undefined }) {
+  return (
+    <span
+      data-testid="archived-pill"
+      data-archived-at={archivedAt ?? ''}
+      className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 px-2 py-0.5 text-[10px] font-semibold"
+      title="Archived — preserved execution history is still readable below"
+    >
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500" />
+      Archived
+    </span>
+  )
+}
+
 function formatRelativeTime(iso: string): string {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime())
   const seconds = Math.floor(diff / 1000)
@@ -141,32 +155,33 @@ function attachmentFromMetadata(id: string, attachments: AttachmentInfo[] | unde
   }
 }
 
-function WorkflowYamlDialog({ workflowRunId }: { workflowRunId: string }) {
+function WorkflowYamlDialog({ workflowRunId, isArchived }: { workflowRunId: string; isArchived: boolean }) {
   const [open, setOpen] = useState(false)
   const { data, isLoading } = useWorkflowYaml(workflowRunId, open)
+  const heading = isArchived ? 'Workflow run YAML' : 'Active run YAML'
+  const description = isArchived
+    ? 'Rendered runtime output of the preserved workflow run. The workflow is no longer active; this is the historical record.'
+    : 'Rendered runtime output of the active workflow run, not the issue\u0027s workflow profile configuration.'
 
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         data-testid="active-run-yaml-trigger"
+        data-yaml-mode={isArchived ? 'archived' : 'active'}
         className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors"
       >
         <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-600">Active run YAML</span>
+          <span className="text-sm text-gray-600">{heading}</span>
           <span className="text-xs text-blue-600">View</span>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Rendered runtime output of the active workflow run, not the issue&apos;s workflow profile configuration.
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-hidden flex flex-col p-0">
           <DialogHeader>
-            <DialogTitle>Active run YAML</DialogTitle>
-            <p className="text-xs text-muted-foreground pt-1">
-              Rendered runtime output of the active workflow run, not the issue&apos;s workflow profile configuration.
-            </p>
+            <DialogTitle>{heading}</DialogTitle>
+            <p className="text-xs text-muted-foreground pt-1">{description}</p>
           </DialogHeader>
           <div className="flex-1 overflow-auto px-4 pb-4">
             {isLoading ? (
@@ -395,6 +410,7 @@ export function IssueDetailPage() {
   const isCapacityFull = activeAgents.length >= maxConcurrent
   const runnerUnavailable = agentStatus?.runnerAvailable === false
   const isBacklog = issue.status === IssueStatus.Backlog
+  const isArchived = !!issue.archivedAt
   const workflowStage = issue.workflowStage ?? null
   const prDeliveryMetadata = findPublishViaPrMetadata(workflowTimeline)
   const workflowAllowedActions = workflowTimeline?.availableActions.map((action) => action.name) ?? []
@@ -418,12 +434,12 @@ export function IssueDetailPage() {
         <div className="max-w-4xl min-w-0 mx-auto px-4 sm:px-6 py-6">
           <button
             type="button"
-            onClick={() => navigate(toProjectPath())}
-            data-testid="back-to-board"
+            onClick={() => navigate(isArchived ? toProjectPath('/archived') : toProjectPath())}
+            data-testid={isArchived ? 'back-to-archived' : 'back-to-board'}
             className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeftIcon className="size-3.5" />
-            <span>Back to board</span>
+            <span>{isArchived ? 'Back to archived' : 'Back to board'}</span>
           </button>
 
           <div className="mb-8" data-testid="issue-detail-header">
@@ -433,9 +449,10 @@ export function IssueDetailPage() {
               </span>
               <PriorityChip priority={issue.priority} />
               {issue.isDraft && <DraftPill />}
+              {isArchived && <ArchivedPill archivedAt={issue.archivedAt} />}
               <WorkflowStagePill stage={issue.workflowStage ?? undefined} />
               <HealthPill health={issue.health} />
-              {isAgentRunningOnThis && (
+              {!isArchived && isAgentRunningOnThis && (
                 <span
                   data-testid="running-pill"
                   className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-[10px] font-semibold"
@@ -451,6 +468,16 @@ export function IssueDetailPage() {
                 </span>
               )}
             </div>
+            {isArchived && (
+              <div
+                data-testid="archived-banner"
+                data-archived-at={issue.archivedAt ?? ''}
+                className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
+              >
+                Archived{issue.archivedAt ? ` ${formatTime(issue.archivedAt)}` : ''}.
+                The workflow timeline, artifacts, events, and feedback below are preserved for reference.
+              </div>
+            )}
             <div className="flex items-start gap-3">
               <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
                 {issue.title}
@@ -600,7 +627,7 @@ export function IssueDetailPage() {
               )}
 
               {issue.workflowRunId && (
-                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} />
+                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} isArchived={isArchived} />
               )}
 
               {diffData?.available === true && (
@@ -975,6 +1002,14 @@ export function IssueDetailPage() {
 
               <CardSection title="Actions">
                 <div className="space-y-2">
+                  {isArchived ? (
+                    <div
+                      data-testid="archived-actions-note"
+                      className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700"
+                    >
+                      This issue is archived. Active workflow controls (start, stop, retry, rerun, resume, force stop) are not available because the workflow is no longer running. The execution history is preserved above.
+                    </div>
+                  ) : null}
                   {isBacklog && (
                     <>
                       {issue.isDraft ? (
@@ -1132,7 +1167,7 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {(issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (() => {
+                  {!isArchived && (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (() => {
                     const canRetry = canRetryWorkflow
                     const canResume = canResumeWorkflow
                     const canRerun = canRerunWorkflow

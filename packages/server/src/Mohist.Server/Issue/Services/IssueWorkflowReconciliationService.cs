@@ -10,11 +10,15 @@ namespace Mohist.Server.Issue.Services;
 
 /// <summary>
 /// Sweeps issues that are stuck in InProgress (with a non-null
-/// ActiveWorkflowRunId) and reconciles them by triggering
+/// WorkflowRunId) and reconciles them by triggering
 /// <c>GetWorkflowStatusAsync</c>, which performs the lazy reconciliation
 /// against the workflow's persisted state. Companion to the lazy path
 /// in <see cref="IssueGrain.GetWorkflowStatusAsync"/>; covers the long
 /// tail of issues nobody opens.
+///
+/// Candidate selection uses the issue status computed column so a preserved
+/// <c>workflowRunId</c> on <c>Done</c>/archived issues remains historical data,
+/// not a stuck-run signal.
 ///
 /// Runs once a day by default; the period is tunable for tests via the
 /// <see cref="ReconciliationPeriod"/> static field.
@@ -66,20 +70,21 @@ public sealed class IssueWorkflowReconciliationService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Test seam — invokes the same candidate-walk the hosted loop runs
+    /// without waiting for the timer. Safe to call repeatedly: each
+    /// per-issue call goes through <see cref="IssueGrain.GetWorkflowStatusAsync"/>,
+    /// which is idempotent.
+    /// </summary>
+    public Task ReconcileOnceAsync(CancellationToken ct = default) =>
+        ReconcileStuckIssuesAsync(ct);
+
     private async Task ReconcileStuckIssuesAsync(CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        // Find issues still in InProgress with a workflow pointer set. We
-        // deliberately skip issues that are not InProgress — they have
-        // already been reconciled or were never in a workflow.
-        // IssueRow.State is a JSON blob; we can't easily filter by status in
-        // SQL. Pull the candidates (issues with a workflow pointer set)
-        // and let the per-issue grain do the InProgress guard during
-        // GetWorkflowStatusAsync → ReconcileWithWorkflowTerminalStateAsync.
-        // For 500-row batches this is fast; the daily cadence keeps the
-        // working set bounded.
+        // Find issues still in InProgress with a workflow pointer set.
         var stuck = await db.Issues.AsNoTracking()
-            .Where(i => i.WorkflowRunId != null)
+            .Where(i => i.Status == "inProgress" && i.WorkflowRunId != null)
             .Select(i => new { i.IssueId, i.ProjectId, i.WorkflowRunId })
             .Take(500)
             .ToListAsync(ct);

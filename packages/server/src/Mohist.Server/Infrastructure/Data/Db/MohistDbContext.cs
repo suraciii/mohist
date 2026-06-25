@@ -233,10 +233,15 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.projectId'), json_extract(State, '$.ProjectId'))", stored: true);
             entity.Property(e => e.Number)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.number'), json_extract(State, '$.Number'))", stored: true);
+            entity.Property(e => e.Status)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))", stored: true);
             entity.Property(e => e.WorkflowRunId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true);
+            entity.Property(e => e.IsArchived)
+                .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL", stored: true);
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
             entity.HasIndex(e => e.WorkflowRunId);
+            entity.HasIndex(e => e.Status);
         });
 
         modelBuilder.Entity<AgentRow>(entity =>

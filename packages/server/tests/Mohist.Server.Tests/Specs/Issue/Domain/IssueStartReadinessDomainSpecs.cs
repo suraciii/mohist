@@ -243,7 +243,7 @@ public class IssueStartReadinessDomainSpecs
         issue.Start("wr_1", null, now);
 
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.InProgress, issue.Status);
-        Assert.Equal("wr_1", issue.ActiveWorkflowRunId);
+        Assert.Equal("wr_1", issue.WorkflowRunId);
         Assert.Equal(now, issue.UpdatedAt);
 
         var hasWorkStarted = false;
@@ -266,7 +266,7 @@ public class IssueStartReadinessDomainSpecs
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, issue.Status);
 
         Assert.Throws<InvalidOperationException>(() => issue.Start("wr_2", null));
-        Assert.Equal("wr_1", issue.ActiveWorkflowRunId);
+        Assert.Equal("wr_1", issue.WorkflowRunId);
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, issue.Status);
     }
 
@@ -279,7 +279,7 @@ public class IssueStartReadinessDomainSpecs
         issue.Start("wr_1", null);
 
         Assert.Throws<InvalidOperationException>(() => issue.Start("wr_2", null));
-        Assert.Equal("wr_1", issue.ActiveWorkflowRunId);
+        Assert.Equal("wr_1", issue.WorkflowRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

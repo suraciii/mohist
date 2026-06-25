@@ -117,9 +117,9 @@ public sealed partial class Issue
     {
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");
-        if (_activeWorkflowRunId is not null)
-            throw new InvalidOperationException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
-        _activeWorkflowRunId = NormalizeOptional(wrId);
+        if (_workflowRunId is not null)
+            throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
+        _workflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         Touch(now);
         RecordEvent(new IssueWorkStarted(wrId));
@@ -152,10 +152,10 @@ public sealed partial class Issue
 
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");
-        if (_activeWorkflowRunId is not null)
-            throw new InvalidOperationException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
+        if (_workflowRunId is not null)
+            throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
 
-        _activeWorkflowRunId = NormalizeOptional(wrId);
+        _workflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         Touch(now);
         RecordEvent(new IssueWorkStarted(wrId));
@@ -163,14 +163,14 @@ public sealed partial class Issue
 
     public void ClearStoppedWorkflow(string workflowRunId, DateTime? now = null)
     {
-        if (_activeWorkflowRunId != workflowRunId) return;
-        _activeWorkflowRunId = null;
+        if (_workflowRunId != workflowRunId) return;
+        _workflowRunId = null;
         Touch(now);
     }
 
     public bool Complete(string workflowRunId, DateTime? now = null)
     {
-        if (_activeWorkflowRunId != workflowRunId) return false;
+        if (_workflowRunId != workflowRunId) return false;
         if (_status == IssueStatus.Done) return false;
         if (_status != IssueStatus.InProgress)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
@@ -186,7 +186,6 @@ public sealed partial class Issue
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only Done can archive");
         var archivedAt = now ?? DateTime.UtcNow;
         _archivedAt = archivedAt;
-        _activeWorkflowRunId = null;
         Touch(archivedAt);
         RecordEvent(new IssueArchived());
     }
@@ -204,7 +203,6 @@ public sealed partial class Issue
         if (_status == IssueStatus.Done || _archivedAt != null)
             throw new InvalidOperationException($"Issue #{Number} cannot close");
         _status = IssueStatus.Cancelled;
-        _activeWorkflowRunId = null;
         Touch(now);
         RecordEvent(new IssueClosed(reason));
     }

@@ -16,11 +16,13 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).ResumeAsync();
             return ApiResults.Ok();
         });
@@ -30,11 +32,13 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync();
             return ApiResults.Ok();
         });
@@ -45,11 +49,13 @@ public static partial class IssueRoutes
             int number,
             RejectRequest? req,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             if (string.IsNullOrWhiteSpace(req?.Message))
                 return ApiResults.BadRequest("Reject reason is required");
             await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message);
@@ -61,11 +67,13 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             try
             {
                 await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
@@ -95,8 +103,9 @@ public static partial class IssueRoutes
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.RetryOrRerun);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             try
             {
                 await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
@@ -117,11 +126,13 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             await grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("user-force-stop");
             return ApiResults.Ok();
         });
@@ -133,11 +144,13 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
+            IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery) =>
         {
             var project = GetRequiredProject(ctx);
-            var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
-            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, issueIdentityResolver, grains, WorkflowControlAction.ActiveOnly);
+            if (control.Result is not null) return control.Result;
+            var wrId = control.WorkflowRunId!;
             try
             {
                 await grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("user-stop");
@@ -149,6 +162,40 @@ public static partial class IssueRoutes
             }
         });
     }
+
+    private static async Task<WorkflowControlResolution> ResolveWorkflowControlAsync(
+        string projectId,
+        int number,
+        IssueQuerier issuesQuery,
+        IssueIdentityResolver issueIdentityResolver,
+        IGrainFactory grains,
+        WorkflowControlAction action)
+    {
+        var issue = await issuesQuery.GetInfoAsync(projectId, number);
+        if (issue is null) return new(null, ApiResults.NotFound($"Issue #{number} not found"));
+        if (issue.WorkflowRunId is null) return new(null, ApiResults.NotFound("No workflow run"));
+        if (issue.Status is not "in_progress" and not "in-progress")
+            return new(null, ApiResults.Conflict("Workflow is not active for this issue"));
+
+        var issueGrain = await GetIssueGrainAsync(grains, issueIdentityResolver, projectId, number);
+        if (issueGrain is null) return new(null, ApiResults.NotFound($"Issue #{number} not found"));
+
+        var workflow = await issueGrain.GetWorkflowStatusAsync();
+        var workflowStatus = workflow?.Workflow?.Status;
+        if (!IsWorkflowControllableForAction(workflowStatus, action))
+            return new(null, ApiResults.Conflict("Workflow is not active for this issue"));
+
+        return new(issue.WorkflowRunId, null);
+    }
+
+    private static bool IsWorkflowControllableForAction(string? workflowStatus, WorkflowControlAction action) =>
+        workflowStatus switch
+        {
+            "stopped" or "completed" => false,
+            "failed" => action == WorkflowControlAction.RetryOrRerun,
+            null => false,
+            _ => true,
+        };
 
     private static bool IsWorkflowRunStateCorruption(Exception ex)
     {
@@ -163,4 +210,12 @@ public static partial class IssueRoutes
     }
 
     internal sealed record RejectRequest(string? Message);
+
+    private sealed record WorkflowControlResolution(string? WorkflowRunId, IResult? Result);
+
+    private enum WorkflowControlAction
+    {
+        ActiveOnly,
+        RetryOrRerun,
+    }
 }

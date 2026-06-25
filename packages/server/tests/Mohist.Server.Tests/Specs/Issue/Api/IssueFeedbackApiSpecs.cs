@@ -572,7 +572,7 @@ public class IssueFeedbackApiSpecs
         var issue = Mohist.Server.Infrastructure.Data.Issue.IssueStore.Deserialize(row!.State);
         Assert.NotNull(issue);
 
-        // The JSON has "workflowRunId" (alias of ActiveWorkflowRunId)
+        // The JSON has "workflowRunId" (the single canonical reference name)
         var json = row.State;
         using var doc = JsonDocument.Parse(json);
         var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(doc.RootElement.GetRawText())!;
