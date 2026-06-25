@@ -19,7 +19,7 @@
       "type": "WRITE",
       "output": "Server changes: WorkDispatchResponse + cleanup policy config, runner batch status endpoint, terminal-event→runner SignalR routing; with passing server tests.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Ship additive; runners ignore unknown fields. Policy defaults to null/disabled so no eviction occurs until configured. Decide server config scope (system-wide vs per-project) during implementation (see design Open Questions)."
     },
     {
