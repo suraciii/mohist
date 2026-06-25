@@ -24,7 +24,7 @@ public class IssueDomainSpecs
         issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
 
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.InProgress, issue.Status);
-        Assert.Equal("wr_1", issue.ActiveWorkflowRunId);
+        Assert.Equal("wr_1", issue.WorkflowRunId);
         Assert.Equal(new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc), issue.UpdatedAt);
     }
 
@@ -73,25 +73,27 @@ public class IssueDomainSpecs
         Assert.Equal(issue.Labels, reloaded.Labels);
         Assert.Equal(issue.RepositoryRef, reloaded.RepositoryRef);
         Assert.Equal(issue.PrerequisiteNumbers, reloaded.PrerequisiteNumbers);
-        Assert.Equal(issue.ActiveWorkflowRunId, reloaded.ActiveWorkflowRunId);
+        Assert.Equal(issue.WorkflowRunId, reloaded.WorkflowRunId);
         Assert.Equal(issue.Status, reloaded.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void Close_ClearsWorkflowReference_AndMarksCancelled()
+    public void Close_PreservesWorkflowReference_AndMarksCancelled()
     {
-        // After the G3 fix, Close() clears ActiveWorkflowRunId so the issue
-        // can be reopened or a new workflow started (the old "stuck issue"
-        // pattern).
+        // The workflow run reference is an execution fact. Closing/cancelling
+        // an issue records the cancelled state but must not sever the link to
+        // the run that was bound to it. Reopen uses Issue.Reopen which
+        // preserves the reference too; starting a new workflow requires an
+        // explicit ClearStoppedWorkflow call on the grain (TryReuse path).
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
         issue.StartWorkflow("wr_1");
 
         issue.Close();
 
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Cancelled, issue.Status);
-        Assert.Null(issue.ActiveWorkflowRunId);
+        Assert.Equal("wr_1", issue.WorkflowRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

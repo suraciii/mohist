@@ -12,7 +12,7 @@ public sealed partial class Issue
     private string? _risk;
     private DateTime _updatedAt;
     private DateTime? _archivedAt;
-    private string? _activeWorkflowRunId;
+    private string? _workflowRunId;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
@@ -68,17 +68,18 @@ public sealed partial class Issue
         init => _archivedAt = value;
     }
 
-    [JsonIgnore]
-    public string? ActiveWorkflowRunId
-    {
-        get => _activeWorkflowRunId;
-        init => _activeWorkflowRunId = NormalizeOptional(value);
-    }
-
+    /// <summary>
+    /// Workflow run reference. Records a workflow run that was once bound to
+    /// this issue. This is an execution fact, not an indicator that the
+    /// workflow is currently active or controllable: it survives <c>Done</c>,
+    /// <c>Archive</c>, and <c>Cancel</c>/<c>Close</c>. Whether a workflow is
+    /// active/controllable is a derived judgment from the issue's status and
+    /// the workflow run's state, never from the mere presence of this id.
+    /// </summary>
     public string? WorkflowRunId
     {
-        get => ActiveWorkflowRunId;
-        init => _activeWorkflowRunId = NormalizeOptional(value);
+        get => _workflowRunId;
+        init => _workflowRunId = NormalizeOptional(value);
     }
 
     public IssueStatus Status

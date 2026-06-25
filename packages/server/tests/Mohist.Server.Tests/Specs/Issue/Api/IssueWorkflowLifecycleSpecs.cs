@@ -55,7 +55,9 @@ public class IssueWorkflowLifecycleSpecs
 
         await issue.ArchiveAsync();
         var archived = await GetIssueInfoAsync(projectId, issueNumber);
-        Assert.Null(archived!.WorkflowRunId);
+        Assert.NotNull(archived);
+        Assert.Equal(wrId, archived!.WorkflowRunId);
+        Assert.NotNull(archived.ArchivedAt);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -85,7 +87,52 @@ public class IssueWorkflowLifecycleSpecs
         var final = await GetIssueInfoAsync(projectId, issueNumber);
         Assert.NotNull(final);
         Assert.Equal("cancelled", final!.Status);
-        Assert.Null(final.WorkflowRunId);
+        Assert.Equal(wrId, final.WorkflowRunId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task CancelAsync_WhenIssueIsDoneWithPreservedReference_RejectsViaCloseOnly()
+    {
+        // A Done issue preserves its workflowRunId as an execution fact.
+        // CancelAsync must not run the "cannot close while workflow is
+        // running" check (the workflow is not active); Close() itself
+        // rejects Done/archived with a different error. Verify the thrown
+        // exception is the Close() rejection, not the workflow-running one.
+        var (_, _, _, issueId, wrId) = await SeedIssueInProgressAsync();
+
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        await issue.CompleteWorkAsync(wrId);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issue.CancelAsync());
+        Assert.Contains("cannot close", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("workflow is", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task UpdateFullAsync_WhenWorkflowHasStarted_RejectsWorkflowProfileChange()
+    {
+        // The profile-lock guard keeps its "has started" semantics:
+        // workflowRunId != null means the issue has bound a run, and the
+        // template is locked from that point onward, including after
+        // Done/archive. Verify the guard still rejects a profile change
+        // when the reference is present, regardless of status.
+        var (projectId, _, issueNumber, issueId, wrId) = await SeedIssueInProgressAsync();
+
+        var issue = _grains.GetGrain<IIssueGrain>(issueId);
+        await issue.CompleteWorkAsync(wrId);
+
+        await Assert.ThrowsAsync<WorkflowProfileLockedException>(() =>
+            issue.UpdateFullAsync(new UpdateIssueData(
+                WorkflowProfileId: "mohist/pr",
+                PresentFields: new HashSet<string>(StringComparer.Ordinal) { nameof(UpdateIssueData.WorkflowProfileId) })));
+
+        var final = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.Equal("done", final!.Status);
+        Assert.Equal(wrId, final.WorkflowRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
