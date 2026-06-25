@@ -9,15 +9,20 @@ using Orleans;
 namespace Mohist.Server.Events.Hosting;
 
 /// <summary>
-/// Safety-net sweep for the event-driven auto-done path. The in-memory
-/// CloudEvent bus used to signal <c>com.mohist.issue.work-completed</c>
-/// is at-most-once and swallows publish failures, so a missed event
-/// would leave a ready epic in <c>idle</c> or <c>running</c>. This
-/// service periodically walks candidate epics (idle + running) and
-/// re-invokes <see cref="IEpicGrain.AutoMarkDoneIfReadyAsync"/>, which
-/// is idempotent and short-circuits terminal/paused epics. The cadence
-/// mirrors <c>IssueWorkflowReconciliationService</c>: runs once a day
-/// by default, tunable through <see cref="EpicReconciliationOptions"/>.
+/// Safety-net sweep for the event-driven terminal-reconcile path. The
+/// in-memory CloudEvent bus used to signal <c>com.mohist.issue.work-completed</c>
+/// and <c>com.mohist.issue.closed</c> is at-most-once and swallows
+/// publish failures, so a missed event would leave a ready epic in
+/// <c>idle</c> or a <c>running</c> epic stuck waiting for the
+/// in-progress slot to clear. This service periodically walks
+/// candidate epics (idle + running) and re-invokes
+/// <see cref="IEpicGrain.ReconcileAfterTerminalAsync"/>, which is
+/// idempotent — covers both the auto-done readiness check (for
+/// <c>idle</c> candidates) and the next-issue advance (for
+/// <c>running</c> candidates), and short-circuits on
+/// terminal/paused epics. The cadence mirrors
+/// <c>IssueWorkflowReconciliationService</c>: runs once a day by
+/// default, tunable through <see cref="EpicReconciliationOptions"/>.
 ///
 /// Lives outside the <c>Epic</c> feature slice to honor the
 /// "feature directories only contain Domain/Grains/Services"
@@ -78,7 +83,7 @@ public sealed class EpicReconciliationService : BackgroundService
     /// Test seam — invokes the same candidate-walk the hosted loop runs
     /// without waiting for the timer. Safe to call repeatedly: each
     /// per-epic call goes through
-    /// <see cref="IEpicGrain.AutoMarkDoneIfReadyAsync"/>, which is
+    /// <see cref="IEpicGrain.ReconcileAfterTerminalAsync"/>, which is
     /// idempotent.
     /// </summary>
     public async Task ReconcileOnceAsync(CancellationToken ct = default) =>
@@ -96,8 +101,11 @@ public sealed class EpicReconciliationService : BackgroundService
             // (ProjectId, Status, CreatedAt) index on EpicRow supports the
             // status filter. The sweep covers idle and running epics:
             //   - idle: auto-done readiness applies (mirrors manual "Mark Done").
-            //   - running: T-003 widens the sweep to running once the
-            //     terminal-event subscription covers both done/cancelled.
+            //   - running: a missed work-completed/closed terminal event
+            //     would otherwise leave a running epic stuck waiting for
+            //     the in-progress slot to clear. The sweep re-invokes
+            //     ReconcileAfterTerminalAsync so TryStartNext can advance
+            //     the next startable issue.
             // The legacy "active" filter was renamed to "idle" by the
             // EpicIdleRename migration; the sweep now matches the new
             // string set produced by EpicStatusName.
@@ -120,7 +128,7 @@ public sealed class EpicReconciliationService : BackgroundService
                 try
                 {
                     var grain = _grains.GetGrain<IEpicGrain>($"{row.ProjectId}:{row.Id}");
-                    await grain.AutoMarkDoneIfReadyAsync();
+                    await grain.ReconcileAfterTerminalAsync();
                 }
                 catch (Exception ex)
                 {

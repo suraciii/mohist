@@ -211,3 +211,115 @@ New `EpicProgressionSpecs` covers:
 
 All 18 new tests + 193 total Epic tests pass; full server suite
 (2641 tests, 10 skipped pre-existing) green.
+
+## Key implementation decisions (T-003)
+
+- `EpicAutoDoneHandler` (work-completed) keeps its public class identity
+  and `[Subscription]` attribute for back-compat (HTTP routes / DI
+  wiring reference the type by name in some legacy tests).
+- Added a second public class `EpicClosedReconcileHandler`
+  (`[Subscription(Type = "com.mohist.issue.closed")]`,
+  `ICloudEventHandler<IssueClosed>`). Auto-discovery
+  (`AddCloudEventHandlersFromAssembly`) picks it up the same way —
+  no DI / registration changes needed.
+- Extracted the CloudEvent extension parsing + epic lookup +
+  grain call into an `internal sealed class
+  EpicReconcileDispatcher`. Both handler classes hold one
+  dispatcher instance; the dispatcher accepts the event-id,
+  extensions dictionary, and a log-friendly event-type label.
+  This avoids duplicating the `projectid`/`issueid` parsing
+  and exception swallowing across the two handlers while
+  keeping the surface area small (the dispatcher is package-
+  internal — wiring concern only).
+- `EpicAutoDoneHandler` now invokes
+  `IEpicGrain.ReconcileAfterTerminalAsync()` instead of the
+  legacy `AutoMarkDoneIfReadyAsync()`; the dispatcher calls
+  the same method on both event types. The legacy method
+  remains on the interface for now (no caller).
+- `EpicReconciliationService` candidate query is
+  `Status IN ('idle','running')` (was `active`); the per-epic
+  invocation now calls `ReconcileAfterTerminalAsync()` (was
+  `AutoMarkDoneIfReadyAsync()`). This widens the safety net
+  to running epics that may have missed a terminal event.
+- Test grain `RecordingGrainFactory` (in `EpicProgressionSpecs`)
+  is the "real" EpicGrain executor — it produces the actual
+  state transitions the new tests assert on. The
+  `TestEpicGrainFactory` in the event-wiring specs only
+  records that the grain was called; that test style keeps
+  the wiring layer thin (no need to re-model TryStartNext
+  in two places).
+
+## Gotchas (T-003)
+
+- The dispatcher needs a non-generic `ILogger` (not
+  `ILogger<T>`) because it's reused across two handler types.
+  Pass `NullLogger.Instance` in tests; the typed logger on
+  the handler constructor is forwarded into the dispatcher
+  via covariance (the typed logger implements the non-generic
+  interface).
+- `[Subscription]`-attribute discovery is reflection-based and
+  case-sensitive on `Type` strings — the literal
+  `"com.mohist.issue.closed"` must match what `IssueClosed`
+  events are published as on the bus. Confirm with the
+  publisher code path (`IssueGrain.CancelAsync` /
+  `CloseAsync` consumers).
+- The `BothHandlers_FireOnOutOfOrderTerminalSignals_Converge`
+  test exercises the wiring only (records grain calls) — it
+  asserts convergence via grain-call count, not epic-state
+  readback, because the test grain doesn't model
+  `TryStartNext` wiring. The end-to-end "converge to done"
+  property is owned by `EpicGrain.ReconcileAfterTerminalAsync`
+  (covered in `EpicProgressionSpecs`).
+- `ReconcileOnceAsync_RunningEpicRepeatedSweeps_AreIdempotent`
+  asserts `3` grain calls because the candidate query still
+  includes the running epic on every sweep — idempotency is
+  enforced inside the grain (it short-circuits no-ops on
+  terminal/stable states), not by suppressing redundant
+  sweeps. That matches the design's "missed event recovery"
+  intent: repeated sweeps are safe and harmless.
+- The auto-discovery loop in
+  `AddCloudEventHandlersFromAssembly` runs once at DI setup;
+  the two handler classes must both be present in the
+  assembly at startup. Adding the new class file is enough
+  — no registration edits.
+
+## Test coverage added (T-003)
+
+`EpicAutoDoneHandlerSpecs` (8 new tests):
+- `ClosedHandler_HasSubscriptionAttributeOnClosedType`
+  asserts the `[Subscription]` attribute is on the closed
+  handler class.
+- `ClosedHandler_CancelledIssue_InvokesReconcileOnOwningEpic`
+  asserts a cancelled linked issue dispatches reconcile to
+  the owning epic grain.
+- `ClosedHandler_IssueNotLinkedToAnyEpic_NoOpsWithoutGrainCall`
+  asserts unlinked issues no-op (no grain call).
+- `ClosedHandler_DuplicateClosedEvents_AreIdempotent` asserts
+  duplicate closed events don't error and converge.
+- `ClosedHandler_TerminalEpic_StaysTerminalNoError` asserts
+  terminal epics absorb the closed event without flipping
+  state.
+- `ClosedHandler_MissingProjectIdExtension_NoOpsWithoutError`
+  and `ClosedHandler_MissingIssueIdExtension_NoOpsWithoutError`
+  assert missing extension no-ops.
+- `BothHandlers_FireOnOutOfOrderTerminalSignals_Converge`
+  asserts the work-completed and closed handlers both
+  converge when reordered.
+
+`EpicReconciliationServiceSpecs` (5 new tests):
+- `ReconcileOnceAsync_RunningEpic_IsCandidateAndInvokesReconcile`
+  asserts running epics are walked by the sweep.
+- `ReconcileOnceAsync_RunningEpicMissedClosedEvent_AdvancesNext`
+  asserts a missed `com.mohist.issue.closed` is recovered
+  by the sweep and the next startable issue is advanced.
+- `ReconcileOnceAsync_RunningEpicMissedDoneEventWithAllComplete_AutoMarksDone`
+  asserts a missed `com.mohist.issue.work-completed` is
+  recovered by the sweep and the epic auto-marks done.
+- `ReconcileOnceAsync_MixedIdleAndRunningEpics_AllReachTheGrain`
+  asserts idle and running candidates are walked together.
+- `ReconcileOnceAsync_RunningEpicRepeatedSweeps_AreIdempotent`
+  asserts repeated sweeps on a running epic don't toggle
+  state.
+
+All 30 event-wiring + reconcile tests pass; full server
+suite (2654 tests, 10 skipped pre-existing) green.
