@@ -25,7 +25,7 @@
     {
       "id": "T-002",
       "title": "Runner active workspace registry with materialize/verify/manual-cleanup registration hooks",
-      "spec": "specs/runner-workspace-cleanup/spec.md#Runner-maintains-an-active-workspace-registry",
+      "spec": "specs/runner-workspace-cleanup/spec.md#runner-maintains-an-active-workspace-registry",
       "description": "Add a runner-local workspace registry persisted at <runnerRoot>/.mohist/runner-state/workspaces.json, keyed by workflowRunId, recording issueId, issueNumber, workflowRunId, resolved workspacePath, phase (active/eligible), materializedAt, terminalAt. Load into RunnerHost at startup and write-through atomically on every mutation. Register/refresh an active entry on WorkspaceManager.materialize() success and on verify() reuse; delete the entry when the manual RemoveWorkspace handler removes a directory. Keep the on-disk .mohist/workspace.json marker exactly identity-only (issueId, issueNumber, workflowRunId) — no timestamps are written to the marker.",
       "acceptanceCriteria": [
         "After a successful materialize, a registry entry keyed by workflowRunId exists in phase 'active' with materializedAt set and the resolved workspacePath.",
@@ -45,7 +45,7 @@
     {
       "id": "T-003",
       "title": "Runner terminal-state detection via event push and convergence backstop",
-      "spec": "specs/runner-workspace-cleanup/spec.md#Terminal-state-transitions-a-workspace-to-cleanup-eligible",
+      "spec": "specs/runner-workspace-cleanup/spec.md#terminal-state-transitions-a-workspace-to-cleanup-eligible",
       "description": "Handle the server's ReceiveWorkflowRunStatus SignalR method to transition the matching registry entry from active to eligible and stamp terminalAt (idempotent — already-eligible entries are not re-stamped). Add a convergence backstop that, on startup, on SignalR reconnect, and on a periodic timer, queries POST /api/runner/{runnerId}/workflow-runs/status exclusively for entries still in phase 'active' and transitions any server-reported-terminal run to eligible. The runner must never scan the server's full workflow history or re-query already-eligible entries.",
       "acceptanceCriteria": [
         "On ReceiveWorkflowRunStatus for a terminal status, the matching active registry entry transitions to eligible with terminalAt set; an already-eligible entry is not re-transitioned or re-stamped.",
@@ -58,14 +58,17 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "Runner ReceiveWorkflowRunStatus handler + convergence query wired into RunnerHost lifecycle (startup, onReconnected, periodic timer); with passing runner tests.",
-      "dependsOn": ["T-001", "T-002"],
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
       "passes": false,
       "notes": "Push is a latency optimization only; correctness must not depend on it — the convergence query is the authoritative catch-all for missed events."
     },
     {
       "id": "T-004",
       "title": "Runner automatic cleanup: retention, storage-budget eviction, and pre-delete guards",
-      "spec": "specs/runner-workspace-cleanup/spec.md#Retention-policy-evicts-aged-eligible-workspaces",
+      "spec": "specs/runner-workspace-cleanup/spec.md#retention-policy-evicts-aged-eligible-workspaces",
       "description": "Add a runCleanupLoop in RunnerHost that, on each tick, evicts eligible workspaces older than the configured retention window (measured from terminalAt) and, when usage exceeds the configured storage budget, evicts eligible workspaces in ascending terminalAt order until usage drops below the target watermark. Each removal runs a shared safeRemove that verifies the target path is contained under runnerRoot AND the on-disk marker's workflowRunId matches the registry entry before deleteDirectory, aborting (and leaving both directory and entry intact) on any mismatch, missing marker, or out-of-root path. The loop must never evict active entries and must not collide with in-flight work for a run. Read cleanupPolicy from the poll response (T-001); when policy fields are null/unlimited the corresponding eviction is disabled.",
       "acceptanceCriteria": [
         "Eligible workspaces past the retention window are removed; those within the window are kept; retention disabled (null) disables age-based eviction.",
@@ -80,7 +83,11 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "Runner runCleanupLoop with safeRemove guards (reusing isUnderRunnerRoot/readMarker) consuming cleanupPolicy from the poll response; with passing runner tests.",
-      "dependsOn": ["T-001", "T-002", "T-003"],
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
       "passes": false,
       "notes": "safeRemove reuses isUnderRunnerRoot (runner-signalr.ts) and readMarker (workspace.ts) unchanged. Budget usage computation should be lazy and cached between ticks to avoid expensive du on every tick. Ship with policy defaulting to disabled so no workspaces are removed until a policy is configured."
     }
