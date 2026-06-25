@@ -2,7 +2,8 @@ import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, WorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
-import { deleteDirectory, ensureDir, exists, runCommand } from "../system/process.js"
+import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
+import type { WorkspaceRegistry } from "./workspace-registry.js"
 
 // The workflow workspace is just a clone of the project repo checked out
 // on a per-run branch. Preparing it is two steps: (1) have a clone at the
@@ -19,7 +20,10 @@ export interface WorkspaceInfo {
 }
 
 export class WorkspaceManager {
-  constructor(private readonly runnerRoot = defaultRunnerRoot()) {}
+  constructor(
+    private readonly runnerRoot = defaultRunnerRoot(),
+    private readonly registry: WorkspaceRegistry | null = null,
+  ) {}
 
   // Ensure this run has a usable workspace: a clone of the repo on the
   // run branch. Idempotent — a workspace already on this run's branch is
@@ -59,7 +63,77 @@ export class WorkspaceManager {
     }
 
     if (changeDir) await ensureDir(join(workspacePath, changeDir, "specs"))
+    await ensureMarkerExcluded(workspacePath)
+    await writeText(markerPath(workspacePath), JSON.stringify(marker, null, 2))
+    if (this.registry) {
+      await this.registry.register({
+        issueId: marker.issueId,
+        issueNumber: marker.issueNumber,
+        workflowRunId: runId ?? "",
+        workspacePath,
+      })
+    }
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
+  }
+
+  async verify(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+    const variables = work.variables ?? {}
+    const issueNumber = numberAt(variables, ["issue", "number"])
+    const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
+    const runBranch = runBranchName(runId)
+    const marker = issueWorkspaceMarker(variables)
+    const changeDir = stringAt(variables, ["openspecChangeDir"])
+
+    const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
+    const suppliedPath = stringAt(variables, ["workspace", "path"])
+    const workspacePath = suppliedPath
+      ? resolve(suppliedPath)
+      : issueWorkspacePath(this.runnerRoot, projectName, issueNumber ?? 0)
+
+    // Health gate: every dispatch passes through verify(), so this is
+    // the per-task entry point. A residual rebase / merge / cherry-pick
+    // from a prior mid-flight crash is detected and aborted here, BEFORE
+    // the marker / branch checks below — otherwise a `git checkout` from
+    // the residual state would refuse with "resolve your current index
+    // first" (the #166 fatality). The gate is non-destructive: the
+    // `reset --hard <runBranch>` aligns the tree to the run branch ref,
+    // which has not moved because the failed rebase never advanced it.
+    await this.runHealthGate(workspacePath, runBranch, signal)
+
+    if (!exists(workspacePath)) {
+      throw new WorkspaceMissingError(
+        `Workflow workspace ${workspacePath} is missing; workflow start materialization did not produce a bound workspace for this run.`,
+        workspacePath,
+      )
+    }
+
+    const markerOnDisk = await readMarker(workspacePath)
+    if (markerOnDisk === null) {
+      throw new WorkspaceCorruptError(
+        `Workflow workspace ${workspacePath} has no marker at .mohist/workspace.json; the bound workspace identity cannot be verified.`,
+        workspacePath,
+      )
+    }
+    if (!markerMatches(markerOnDisk, marker)) {
+      throw new WorkspaceIdentityMismatchError(
+        `Workflow workspace ${workspacePath} marker is bound to a different run (expected ${formatIdentity(marker)}, found ${formatIdentity(markerOnDisk)}).`,
+        workspacePath,
+        marker,
+        markerOnDisk,
+      )
+    }
+
+    await verifyWorkspaceBranch(workspacePath, runBranch, signal)
+
+    if (this.registry) {
+      await this.registry.refreshMaterializedAt(runId ?? "")
+    }
+
+    return {
+      path: workspacePath,
+      branch: runBranch,
+      changeDir: changeDir ? join(workspacePath, changeDir) : null,
+    }
   }
 
   // True only when <path> is a git clone that already has <runBranch> —

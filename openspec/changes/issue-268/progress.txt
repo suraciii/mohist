@@ -173,3 +173,136 @@ Status: complete.
   storageBudgetBytes: null, storageTargetWatermarkBytes: null}` and skip both evictions.
   This is the safe rollout posture — the new code path is unreachable without operator
   opt-in.
+
+## T-002 — Runner active workspace registry with materialize/verify/manual-cleanup registration hooks
+
+Status: complete.
+
+### Files changed / added
+
+- `packages/runner/src/runtime/workspace-registry.ts` (new) — `WorkspaceRegistry` class
+  managing an in-memory cache + atomic on-disk persistence at
+  `<runnerRoot>/.mohist/runner-state/workspaces.json`. Methods: `load()`, `register()`,
+  `refreshMaterializedAt()`, `markEligible()`, `remove()`, `findByWorkspacePath()`,
+  `get()`, `list()`. Mutations are write-through atomic (temp file + rename).
+- `packages/runner/src/runtime/workspace.ts` — `WorkspaceManager` constructor now takes an
+  optional `WorkspaceRegistry`. `materialize()` registers/refreshes an `active` entry
+  after writing the marker; `verify()` calls `refreshMaterializedAt(workflowRunId)` on
+  the matching entry. Marker writer (`issueWorkspaceMarker`) is unchanged: still
+  identity-only.
+- `packages/runner/src/server/runner-signalr.ts` — `RunnerSignalRClient` accepts a
+  `registry` option and shares it with its internal `WorkspaceManager`. The
+  `RemoveWorkspace` handler drops the matching registry entry by workspacePath (handles
+  both the "directory existed + delete succeeded" and the "already missing" branches —
+  the latter per the T-002 safeRemove contract). Out-of-root paths refuse before
+  touching the registry.
+- `packages/runner/src/runtime/host.ts` — `RunnerHost` creates a single
+  `WorkspaceRegistry` for the host, passes it to both `WorkspaceManager` and
+  `RunnerSignalRClient`, and eagerly calls `load()` at the top of `run()` before any
+  dispatch / SignalR RPC fires.
+- Tests:
+  - `packages/runner/tests/workspace-registry.spec.ts` (new) — 13 unit tests covering
+    register persistence, load round-trip (existing file, missing file, corrupt JSON),
+    register refresh of materializedAt, markEligible transition + idempotency +
+    unknown-id no-op, remove + unknown-id no-op, findByWorkspacePath, atomic rename
+    (no temp leftovers), and the "must call load() first" guard.
+  - `packages/runner/tests/workspace-registry-integration.spec.ts` (new) — 8
+    integration tests covering materialize registration, marker identity-only
+    invariant, verify refresh of materializedAt, verify does NOT fabricate a missing
+    entry, restart reload preserves active phase, manual RemoveWorkspace drops
+    registry entry on success, manual RemoveWorkspace drops entry on already-missing
+    directory, manual RemoveWorkspace refuses out-of-root paths without touching the
+    registry.
+
+### Decisions taken during implementation
+
+- **`WorkspaceManager.materialize()` always stamps `materializedAt = now`.** Per design
+  D7 ("upsert registry entry `active`, `materializedAt = now`"), every successful
+  materialize bumps the timestamp. `terminalAt` is preserved across re-materialize
+  for the same workflowRunId (eligibility is sticky; only a fresh workflowRunId gets a
+  fresh entry because the registry is keyed by run id).
+
+- **`WorkspaceManager.verify()` does NOT create an entry when none exists.** Verify is
+  the dispatch-time read path; the design says "ensure entry exists, refresh
+  materializedAt" but the only legitimate way an entry could be missing is a stale
+  pre-registry disk state. Creating an entry on verify would silently mask that. The
+  integration test `Verify_OnRunIdWithNoRegistryEntry_DoesNotCreateEntry` pins this.
+
+- **`RemoveWorkspace` drops the entry BEFORE the disk-existence check.** The handler
+  resolves `query.workspacePath` and looks up the registry entry first; if a match
+  exists the entry is dropped regardless of whether the directory is still on disk.
+  This satisfies the T-002 safeRemove contract "tolerate an already-missing
+  directory (treat as removed, delete the entry)". Out-of-root paths refuse before
+  the lookup so a malicious caller cannot drop a registry entry for a directory the
+  runner never managed.
+
+- **Marker stays exactly identity-only** (`issueId`, `issueNumber`, `workflowRunId`).
+  No `materializedAt`/`terminalAt` is written into the marker. The integration test
+  `Marker_WrittenOnMaterialize_ContainsExactlyIdentityFields` asserts
+  `Object.keys(marker).sort()` equals the three identity fields.
+
+- **`WorkspaceRegistry.load()` is the contract.** All read methods (`list`, `get`,
+  `findByWorkspacePath`) throw a clear "has not been loaded; call load() first"
+  error if called before load. This catches wiring mistakes early (e.g., constructing
+  a registry but forgetting the eager `load()` in `RunnerHost.run()`).
+
+- **Atomic persistence via temp file + rename.** The file lives at a sibling temp
+  path `<file>.<pid>.<msec>.tmp` and is renamed over the live path. A crash mid-write
+  cannot leave a half-written file behind. The integration test
+  `Persist_UsesAtomicRename_NoTempFilesRemain` reads the runner-state directory and
+  asserts no `.tmp` leftovers remain after a register.
+
+- **Registry file location: `<runnerRoot>/.mohist/runner-state/workspaces.json`.** This
+  sits ABOVE `<runnerRoot>/repos/` and `<runnerRoot>/<project>/workspaces/`. It is
+  intentionally NOT inside any workspace directory so a workspace cleanup cannot
+  accidentally delete the registry.
+
+### Verification
+
+- `npm run typecheck -w packages/runner` — clean.
+- `npx vitest run tests/workspace-registry.spec.ts tests/workspace-registry-integration.spec.ts` — 21/21 passed.
+- Focused regression: `npx vitest run tests/workspace-registry.spec.ts tests/workspace-registry-integration.spec.ts tests/workspace.spec.ts tests/runner-signalr.spec.ts tests/runner-host.spec.ts` — 103/103 passed.
+- Full suite contains pre-existing flaky tests in `tests/acp/session-strategies-{resume,reuse}.spec.ts` and `tests/acp-agent.spec.ts` that fail under load but pass in isolation. Verified unrelated to this change by running on the base branch.
+
+### Gotchas for the next tasks
+
+- **`WorkspaceRegistry` is consumed via a single instance per host.** `RunnerHost`
+  owns the lifecycle; `WorkspaceManager` and `RunnerSignalRClient` receive the same
+  instance. Future tasks that need the registry (T-003 handler, T-004 cleanup loop)
+  should reach for it through `RunnerHost.workspaceRegistry` rather than constructing
+  a new one — multiple instances on the same runnerRoot would clobber each other on
+  persist.
+
+- **`WorkspaceRegistry.refreshMaterializedAt(workflowRunId)` is a no-op when the
+  entry does not exist.** It returns `null` and does NOT persist. T-004's cleanup
+  loop should rely on `findByWorkspacePath` (or `list()`) for entry discovery, not
+  `refreshMaterializedAt`.
+
+- **`findByWorkspacePath` resolves both sides before comparison.** It compares
+  `resolve(entry.workspacePath) === resolve(workspacePath)`. The signalr handler
+  also resolves `query.workspacePath` before the lookup, so symlinks and `.`/`..`
+  segments on either side still match.
+
+- **The runner registry is per-runner.** Two runners sharing a `runnerRoot` will
+  overwrite each other's registry file on every persist. This is documented in the
+  design as a non-goal; do not relax the "one runner per runnerRoot" assumption in
+  future tasks.
+
+- **Workspace path matching for the cleanup loop (T-004).** `safeRemove` will need
+  both `isUnderRunnerRoot(runnerRoot, workspacePath)` and `readMarker(workspacePath)`
+  to match the registry entry's `workflowRunId`. Both primitives are already
+  available: `isUnderRunnerRoot` is exported from `runner-signalr.ts:521` and
+  `readMarker` is an internal in `workspace.ts:450`. The cleanup loop should reuse
+  them unchanged per design D5.
+
+- **Concurrent writes are serialized by Node.js fs promises.** The atomic rename is
+  per-call; two parallel `register()` calls will race on the temp-file path (same
+  `<pid>.<msec>` collision). For now this is acceptable because the runner has a
+  single dispatcher per host. If T-004's cleanup loop ever runs concurrently with a
+  materialize, the cleanup's `remove()` should be sequenced behind the dispatcher's
+  in-flight registry mutations (a small mutex on the registry would do it).
+
+- **T-003 handler note:** when the server pushes `ReceiveWorkflowRunStatus` with a
+  terminal status, the runner handler must call `registry.markEligible(workflowRunId)`
+  (not `remove`). The convergence query should call `markEligible` too. `remove` is
+  reserved for the manual cleanup path.
