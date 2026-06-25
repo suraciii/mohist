@@ -352,8 +352,8 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var yaml = yamlBody.GetProperty("data").GetProperty("yaml").GetString();
 
         Assert.NotNull(yaml);
-        Assert.Contains("integrate:open-pr", yaml!, StringComparison.Ordinal);
-        Assert.Contains("mohist/create-pull-request", yaml!, StringComparison.Ordinal);
+        Assert.Contains("integrate:merge-pr", yaml!, StringComparison.Ordinal);
+        Assert.Contains("mohist/merge-pull-request", yaml!, StringComparison.Ordinal);
         Assert.DoesNotContain("integrate:rebase", yaml!, StringComparison.Ordinal);
     }
 
