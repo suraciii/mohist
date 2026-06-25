@@ -380,7 +380,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<bool?>("IsArchived")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
-                        .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL", true);
+                        .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
 
                     b.Property<int?>("Number")
                         .ValueGeneratedOnAddOrUpdate()
@@ -403,7 +403,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("Status")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
 
                     b.Property<string>("WorkflowRunId")
                         .ValueGeneratedOnAddOrUpdate()
