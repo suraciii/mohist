@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { isUnderRunnerRoot, normalizeMaterializePayload, resolveWorkspaceQuery, RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { isUnderRunnerRoot, resolveWorkspaceQuery, RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { CommandResult } from "../src/system/process.js"
 
 interface CapturedBuilder {
@@ -446,67 +446,6 @@ describe("RunnerSignalRClient liveness + reconnect", () => {
   })
 })
 
-describe("normalizeMaterializePayload", () => {
-  // Regression: WorkDispatch.Variables is `string?` on the C# side, so the
-  // SignalR wire format carries `variables` as a JSON-encoded string. The
-  // MaterializeWorkspace handler previously passed that string straight to
-  // workspaceManager.materialize, where stringAt(... ["repository","gitUrl"])
-  // returned undefined (string is not an object) and every retry-time
-  // re-materialization threw "Workspace requires repository.gitUrl...".
-  const fullVars = {
-    issue: { id: "issue_1", number: 212, title: "t", body: "" },
-    repository: { name: "master", gitUrl: "https://github.com/x/y.git", baseBranch: "master" },
-    project: { id: "proj_1", name: "demo" },
-    mohist: { system: "mohist", runId: "wr_1" },
-    workspace: { path: "/tmp/ws", branch: "mohist/run-wr_1", changeDir: "openspec/changes/issue-212" },
-  }
-
-  it("ParsesStringVariablesIntoObject_SignalRWireFormat", () => {
-    const work = normalizeMaterializePayload({
-      workflowRunId: "wr_1",
-      workId: "T-001.1",
-      workType: "task",
-      stage: "build",
-      variables: JSON.stringify(fullVars),
-      with: JSON.stringify({ agent: { type: "opencode" } }),
-    })
-
-    expect(work.variables).toEqual(fullVars)
-    expect(work.variables).not.toBeTypeOf("string")
-    expect(work.with).toEqual({ agent: { type: "opencode" } })
-  })
-
-  it("PreservesObjectVariables_AlreadyParsedShape", () => {
-    const work = normalizeMaterializePayload({
-      workflowRunId: "wr_1",
-      workId: "T-001.1",
-      workType: "task",
-      stage: "build",
-      variables: fullVars,
-    })
-
-    expect(work.variables).toEqual(fullVars)
-  })
-
-  it("ExposesRepositoryAndIssueAtExpectedPaths_AfterStringParse", () => {
-    const work = normalizeMaterializePayload({
-      workflowRunId: "wr_1",
-      workId: "T-001.1",
-      workType: "task",
-      variables: JSON.stringify(fullVars),
-    })
-
-    // These are the exact reads workspace.ts materialize() performs.
-    expect((work.variables as Record<string, unknown>)["repository"]).toEqual(fullVars.repository)
-    expect((work.variables as Record<string, unknown>)["issue"]).toEqual(fullVars.issue)
-  })
-
-  it("RejectsNonObjectPayload", () => {
-    expect(() => normalizeMaterializePayload(null)).toThrow()
-    expect(() => normalizeMaterializePayload("not-an-object")).toThrow()
-    expect(() => normalizeMaterializePayload([])).toThrow()
-  })
-})
 
 type AnyFn = (...args: any[]) => any
 

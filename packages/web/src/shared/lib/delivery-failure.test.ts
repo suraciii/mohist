@@ -139,9 +139,10 @@ describe('existing failure kinds retain their guidance', () => {
     expect(guidance.retryable).toBe(true)
   })
 
-  it('workspace-materialization kinds are unchanged', () => {
-    expect(getDeliveryFailureGuidance('workspace-missing').failureKind).toBe('workspace-missing')
-    expect(getDeliveryFailureGuidance('workspace-corrupt').failureKind).toBe('workspace-corrupt')
-    expect(getDeliveryFailureGuidance('workspace-identity-mismatch').failureKind).toBe('workspace-identity-mismatch')
+  it('workspace-setup kind guidance is present', () => {
+    const guidance = getDeliveryFailureGuidance('workspace-setup')
+    expect(guidance.failureKind).toBe('workspace-setup')
+    expect(guidance.label).toBe('Workflow workspace setup failure')
+    expect(guidance.retryable).toBe(false)
   })
 })

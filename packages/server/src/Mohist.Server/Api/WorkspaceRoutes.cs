@@ -353,7 +353,7 @@ public static class WorkspaceRoutes
     }
 
     /// <summary>
-    /// Returns the workspace's recorded head ref. The runner materializes the
+    /// Returns the workspace's recorded head ref. The runner prepares the
     /// per-run branch <c>mohist/run-${workflowRunId}</c> inside the workspace;
     /// review APIs use that ref instead of legacy <c>mo/issue-{N}</c>.
     /// </summary>

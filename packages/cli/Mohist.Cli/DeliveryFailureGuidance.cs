@@ -10,9 +10,7 @@ internal static class DeliveryFailureGuidance
     public const string BaseMoved = "base-moved";
     public const string RetrySafe = "retry-safe";
     public const string BranchInvariantViolation = "branch-invariant-violation";
-    public const string WorkspaceMissing = "workspace-missing";
-    public const string WorkspaceCorrupt = "workspace-corrupt";
-    public const string WorkspaceIdentityMismatch = "workspace-identity-mismatch";
+    public const string WorkspaceSetup = "workspace-setup";
     public const string ConfigError = "config-error";
     public const string ProtectionConflict = "protection-conflict";
     public const string PrStateConflict = "pr-state-conflict";
@@ -32,15 +30,9 @@ internal static class DeliveryFailureGuidance
             [BranchInvariantViolation] = (
                 Label: "Runner / action branch-invariant violation",
                 NextAction: "This is a runner or action bug: the workflow workspace left its expected run branch. Retry the task — the runner will restore the run branch automatically — and report the issue if it recurs. Issue work is not the cause."),
-            [WorkspaceMissing] = (
-                Label: "Workflow workspace materialization failure",
-                NextAction: "The runner could not find the workflow workspace bound to this run. Issue work is not the cause — the workflow-start materialization pipeline must be repaired (rebind the workspace, or investigate the runner's workspace root) before this run can continue."),
-            [WorkspaceCorrupt] = (
-                Label: "Workflow workspace materialization failure",
-                NextAction: "The runner's workflow workspace is unreadable or its workspace marker is missing/corrupt. Issue work is not the cause — re-materialize the workflow workspace at the run's bound path before this run can continue."),
-            [WorkspaceIdentityMismatch] = (
-                Label: "Workflow workspace materialization failure",
-                NextAction: "The workflow workspace at the run's bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue."),
+            [WorkspaceSetup] = (
+                Label: "Workflow workspace setup failure",
+                NextAction: "The runner could not prepare the workflow workspace for this run (clone, base branch, or checkout failed). Issue work is not the cause — check the repository gitUrl / base branch and the runner's workspace root, then retry."),
             [ConfigError] = (
                 Label: "Runner environment is misconfigured",
                 NextAction: "Install the GitHub CLI (`gh`) on the runner host and run `gh auth login` to authenticate with GitHub. Then re-run the issue. The workflow will not auto-retry this kind — environment fixes need a human before the next attempt."),
@@ -58,23 +50,19 @@ internal static class DeliveryFailureGuidance
         BaseMoved,
         RetrySafe,
         BranchInvariantViolation,
-        WorkspaceMissing,
-        WorkspaceCorrupt,
-        WorkspaceIdentityMismatch,
+        WorkspaceSetup,
         ConfigError,
         ProtectionConflict,
         PrStateConflict,
     };
 
-    public static readonly IReadOnlyList<string> WorkspaceMaterializationKinds = new[]
+    public static readonly IReadOnlyList<string> WorkspaceSetupKinds = new[]
     {
-        WorkspaceMissing,
-        WorkspaceCorrupt,
-        WorkspaceIdentityMismatch,
+        WorkspaceSetup,
     };
 
     private static readonly Regex KindInMessage = new(
-        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch|config-error|protection-conflict|pr-state-conflict)\)",
+        @"\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-setup|config-error|protection-conflict|pr-state-conflict)\)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex BranchInvariantInMessage = new(
@@ -91,15 +79,12 @@ internal static class DeliveryFailureGuidance
         string? Boundary,
         string? ObservedRef);
 
-    public sealed record WorkspaceEvidence(
-        string? WorkspacePath,
-        string? ExpectedRunId,
-        string? ActualRunId);
+    public sealed record WorkspaceEvidence(string? WorkspacePath);
 
-    public static bool IsWorkspaceMaterializationKind(string? failureKind)
+    public static bool IsWorkspaceSetupKind(string? failureKind)
     {
         if (string.IsNullOrEmpty(failureKind)) return false;
-        return WorkspaceMaterializationKinds.Contains(failureKind, StringComparer.OrdinalIgnoreCase);
+        return WorkspaceSetupKinds.Contains(failureKind, StringComparer.OrdinalIgnoreCase);
     }
 
     public static string? ResolveFailureKind(string? message)
@@ -177,7 +162,7 @@ internal static class DeliveryFailureGuidance
         var kind = ResolveFailureKind(output) ?? ResolveFailureKind(message);
         var guidance = ResolveGuidance(kind);
         WorkspaceEvidence? evidence = null;
-        if (IsWorkspaceMaterializationKind(kind))
+        if (IsWorkspaceSetupKind(kind))
         {
             evidence = ResolveWorkspaceEvidence(message, output);
         }
@@ -388,26 +373,14 @@ internal static class DeliveryFailureGuidance
         var node = FindWorkspaceEvidenceNode(output);
         if (node is null) return null;
         var workspacePath = StringOf(node, "workspacePath");
-        var expectedRunId = StringOf(ReadIdentityNode(node, "expected"), "workflowRunId");
-        var actualRunId = StringOf(ReadIdentityNode(node, "actual"), "workflowRunId");
-        if (string.IsNullOrEmpty(workspacePath)
-            && string.IsNullOrEmpty(expectedRunId)
-            && string.IsNullOrEmpty(actualRunId))
-        {
-            return null;
-        }
-        return new WorkspaceEvidence(
-            WorkspacePath: string.IsNullOrEmpty(workspacePath) ? null : workspacePath,
-            ExpectedRunId: string.IsNullOrEmpty(expectedRunId) ? null : expectedRunId,
-            ActualRunId: string.IsNullOrEmpty(actualRunId) ? null : actualRunId);
+        if (string.IsNullOrEmpty(workspacePath)) return null;
+        return new WorkspaceEvidence(workspacePath);
     }
 
     private static WorkspaceEvidence? ExtractWorkspaceEvidenceFromMessage(string message)
     {
-        // The runner emits `workflow workspace materialization failure
-        // (<kind>): <explanation>`. The structured output is the source
-        // of truth for workspacePath / expected / actual; the message
-        // is only a fallback when structured output is unavailable.
+        // The structured output is the source of truth for workspacePath;
+        // the message is only a fallback and carries none here.
         return null;
     }
 
@@ -446,7 +419,7 @@ internal static class DeliveryFailureGuidance
         if (node is JsonObject obj)
         {
             var kind = StringOf(obj, "kind");
-            if (IsWorkspaceMaterializationKind(kind))
+        if (IsWorkspaceSetupKind(kind))
             {
                 return obj;
             }
@@ -458,12 +431,5 @@ internal static class DeliveryFailureGuidance
         }
 
         return null;
-    }
-
-    private static JsonNode? ReadIdentityNode(JsonObject? parent, string property)
-    {
-        if (parent is null) return null;
-        if (!parent.TryGetPropertyValue(property, out var value)) return null;
-        return value;
     }
 }

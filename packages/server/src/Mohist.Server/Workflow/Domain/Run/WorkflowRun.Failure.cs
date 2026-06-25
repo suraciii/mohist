@@ -44,14 +44,12 @@ public static partial class WorkflowRunExtensions
                         throw new InvalidOperationException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
 
                     current.RetryFailedTask(taskId);
-                    run.WorkspaceMaterializedAt = null;
                     run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
                     return [new WorkflowRunResumed()];
                 }
                 case FailureReason.CheckUnrepaired:
                     current.RetryFailedCheck(current.Failure.CheckName);
-                    run.WorkspaceMaterializedAt = null;
                     run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
                     return [new WorkflowRunResumed()];
@@ -132,7 +130,6 @@ public static partial class WorkflowRunExtensions
                 Status = StageRunStatus.Running,
             };
             run.Stages[stageIdx] = newStage;
-            run.WorkspaceMaterializedAt = null;
             run.Failure = null;
             run.Status = WorkflowRunStatus.Running;
             return [

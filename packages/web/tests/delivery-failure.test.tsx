@@ -4,13 +4,13 @@ import {
   resolveDeliveryFailureFromMessage,
   resolveDeliveryFailureFromOutput,
   isDeliveryFailureKind,
-  isWorkspaceMaterializationFailureKind,
+  isWorkspaceSetupFailureKind,
   getDeliveryFailureGuidance,
   extractBranchInvariantEvidence,
-  extractWorkspaceMaterializationEvidence,
+  extractWorkspaceSetupEvidence,
   type DeliveryFailureKind,
   type BranchInvariantEvidence,
-  type WorkspaceMaterializationEvidence,
+  type WorkspaceSetupEvidence,
 } from '../src/shared/lib/delivery-failure'
 import { WorkflowView } from '../src/widgets/issue-workflow/ui/WorkflowView'
 import {
@@ -40,17 +40,9 @@ const EXPECTED_GUIDANCE: Record<DeliveryFailureKind, { label: string; nextAction
     label: 'Runner / action branch-invariant violation',
     nextAction: 'This is a runner or action bug: the workflow workspace left its expected run branch. Retry the task — the runner will restore the run branch automatically — and report the issue if it recurs. Issue work is not the cause.',
   },
-  'workspace-missing': {
-    label: 'Workflow workspace materialization failure',
-    nextAction: 'The runner could not find the workflow workspace bound to this run. Issue work is not the cause — the workflow-start materialization pipeline must be repaired (rebind the workspace, or investigate the runner\'s workspace root) before this run can continue.',
-  },
-  'workspace-corrupt': {
-    label: 'Workflow workspace materialization failure',
-    nextAction: 'The runner\'s workflow workspace is unreadable or its workspace marker is missing/corrupt. Issue work is not the cause — re-materialize the workflow workspace at the run\'s bound path before this run can continue.',
-  },
-  'workspace-identity-mismatch': {
-    label: 'Workflow workspace materialization failure',
-    nextAction: 'The workflow workspace at the run\'s bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue.',
+  'workspace-setup': {
+    label: 'Workflow workspace setup failure',
+    nextAction: 'The runner could not prepare the workflow workspace for this run (clone, base branch, or checkout failed). Issue work is not the cause — check the repository gitUrl / base branch and the runner\'s workspace root, then retry.',
   },
   'config-error': {
     label: 'Runner environment is misconfigured',
@@ -159,34 +151,14 @@ describe('delivery-failure guidance mapping', () => {
       expect(result.guidance).toBeNull()
     })
 
-    it('extracts the workspace-missing kind from a runner failure message', () => {
+    it('extracts the workspace-setup kind from a runner failure message', () => {
       const result = resolveDeliveryFailureFromMessage(
-        'workflow workspace materialization failure (workspace-missing): workspace path does not exist',
+        'could not prepare workflow workspace (workspace-setup): git clone failed for ...',
       )
-      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-missing')
-      expect(result.guidance?.label).toBe(EXPECTED_GUIDANCE['workspace-missing'].label)
-      expect(result.guidance?.nextAction).toBe(EXPECTED_GUIDANCE['workspace-missing'].nextAction)
+      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-setup')
+      expect(result.guidance?.label).toBe(EXPECTED_GUIDANCE['workspace-setup'].label)
+      expect(result.guidance?.nextAction).toBe(EXPECTED_GUIDANCE['workspace-setup'].nextAction)
       expect(result.workspaceEvidence).toBeNull()
-    })
-
-    it('extracts the workspace-corrupt kind from a runner failure message', () => {
-      const result = resolveDeliveryFailureFromMessage(
-        'workflow workspace materialization failure (workspace-corrupt): marker missing or unreadable',
-      )
-      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-corrupt')
-      expect(result.guidance?.label).toBe(EXPECTED_GUIDANCE['workspace-corrupt'].label)
-      expect(result.guidance?.nextAction).toBe(EXPECTED_GUIDANCE['workspace-corrupt'].nextAction)
-    })
-
-    it('extracts the workspace-identity-mismatch kind from a runner failure message', () => {
-      const result = resolveDeliveryFailureFromMessage(
-        'workflow workspace materialization failure (workspace-identity-mismatch): workspace belongs to wr_other',
-      )
-      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-identity-mismatch')
-      expect(result.guidance?.label).toBe(EXPECTED_GUIDANCE['workspace-identity-mismatch'].label)
-      expect(result.guidance?.nextAction).toBe(
-        EXPECTED_GUIDANCE['workspace-identity-mismatch'].nextAction,
-      )
     })
   })
 
@@ -292,37 +264,20 @@ describe('delivery-failure guidance mapping', () => {
       expect(result).toEqual(EMPTY_RESOLUTION)
     })
 
-    it('extracts workspace-missing from a runner output object', () => {
+    it('extracts workspace-setup from a runner output object', () => {
       const result = resolveDeliveryFailureFromOutput({
-        kind: 'workspace-missing',
+        kind: 'workspace-setup',
         workspacePath: '/home/runner/workspaces/proj_x/run_abc',
         status: 'failed',
       })
-      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-missing')
-      expect(result.guidance?.label).toBe(EXPECTED_GUIDANCE['workspace-missing'].label)
-      expect(result.workspaceEvidence).toEqual<WorkspaceMaterializationEvidence>({
+      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-setup')
+      expect(result.guidance?.label).toBe(EXPECTED_GUIDANCE['workspace-setup'].label)
+      expect(result.workspaceEvidence).toEqual<WorkspaceSetupEvidence>({
         workspacePath: '/home/runner/workspaces/proj_x/run_abc',
-        expectedRunId: null,
-        actualRunId: null,
       })
     })
 
-    it('extracts workspace-identity-mismatch and the expected/actual run ids', () => {
-      const result = resolveDeliveryFailureFromOutput({
-        kind: 'workspace-identity-mismatch',
-        workspacePath: '/home/runner/workspaces/proj_x/run_abc',
-        expected: { workflowRunId: 'wr_abc' },
-        actual: { workflowRunId: 'wr_other' },
-      })
-      expect(result.failureKind).toBe<DeliveryFailureKind>('workspace-identity-mismatch')
-      expect(result.workspaceEvidence).toEqual<WorkspaceMaterializationEvidence>({
-        workspacePath: '/home/runner/workspaces/proj_x/run_abc',
-        expectedRunId: 'wr_abc',
-        actualRunId: 'wr_other',
-      })
-    })
-
-    it('does not confuse dirty-worktree in output with workspace-materialization kinds', () => {
+    it('does not confuse dirty-worktree in output with workspace-setup kind', () => {
       const result = resolveDeliveryFailureFromOutput({
         kind: 'dirty-worktree',
         message: 'staged changes left behind',
@@ -366,53 +321,43 @@ describe('delivery-failure guidance mapping', () => {
     })
   })
 
-  describe('workspace-materialization evidence + predicate', () => {
-    it('isWorkspaceMaterializationFailureKind recognises the three workspace-* kinds and rejects the others', () => {
-      expect(isWorkspaceMaterializationFailureKind('workspace-missing')).toBe(true)
-      expect(isWorkspaceMaterializationFailureKind('workspace-corrupt')).toBe(true)
-      expect(isWorkspaceMaterializationFailureKind('workspace-identity-mismatch')).toBe(true)
-      expect(isWorkspaceMaterializationFailureKind('conflict')).toBe(false)
-      expect(isWorkspaceMaterializationFailureKind('base-moved')).toBe(false)
-      expect(isWorkspaceMaterializationFailureKind('retry-safe')).toBe(false)
-      expect(isWorkspaceMaterializationFailureKind('branch-invariant-violation')).toBe(false)
-      expect(isWorkspaceMaterializationFailureKind(null)).toBe(false)
-      expect(isWorkspaceMaterializationFailureKind(undefined)).toBe(false)
-      expect(isWorkspaceMaterializationFailureKind(42)).toBe(false)
+  describe('workspace-setup evidence + predicate', () => {
+    it('isWorkspaceSetupFailureKind recognises the workspace-setup kind and rejects the others', () => {
+      expect(isWorkspaceSetupFailureKind('workspace-setup')).toBe(true)
+      expect(isWorkspaceSetupFailureKind('conflict')).toBe(false)
+      expect(isWorkspaceSetupFailureKind('base-moved')).toBe(false)
+      expect(isWorkspaceSetupFailureKind('retry-safe')).toBe(false)
+      expect(isWorkspaceSetupFailureKind('branch-invariant-violation')).toBe(false)
+      expect(isWorkspaceSetupFailureKind(null)).toBe(false)
+      expect(isWorkspaceSetupFailureKind(undefined)).toBe(false)
+      expect(isWorkspaceSetupFailureKind(42)).toBe(false)
     })
 
-    it('extractWorkspaceMaterializationEvidence pulls workspacePath / expectedRunId / actualRunId', () => {
-      const evidence = extractWorkspaceMaterializationEvidence({
-        kind: 'workspace-identity-mismatch',
+    it('extractWorkspaceSetupEvidence pulls workspacePath', () => {
+      const evidence = extractWorkspaceSetupEvidence({
+        kind: 'workspace-setup',
         workspacePath: '/home/runner/workspaces/proj_x/run_abc',
-        expected: { workflowRunId: 'wr_abc' },
-        actual: { workflowRunId: 'wr_other' },
       })
-      expect(evidence).toEqual<WorkspaceMaterializationEvidence>({
+      expect(evidence).toEqual<WorkspaceSetupEvidence>({
         workspacePath: '/home/runner/workspaces/proj_x/run_abc',
-        expectedRunId: 'wr_abc',
-        actualRunId: 'wr_other',
       })
     })
 
-    it('extractWorkspaceMaterializationEvidence returns null for unrelated sources', () => {
-      expect(extractWorkspaceMaterializationEvidence(null)).toBeNull()
-      expect(extractWorkspaceMaterializationEvidence({ kind: 'prepare' })).toBeNull()
-      expect(
-        extractWorkspaceMaterializationEvidence({ kind: 'workspace-missing' }),
-      ).toBeNull()
+    it('extractWorkspaceSetupEvidence returns null for unrelated sources', () => {
+      expect(extractWorkspaceSetupEvidence(null)).toBeNull()
+      expect(extractWorkspaceSetupEvidence({ kind: 'prepare' })).toBeNull()
+      expect(extractWorkspaceSetupEvidence({ kind: 'workspace-setup' })).toBeNull()
     })
 
-    it('extractWorkspaceMaterializationEvidence walks into a nested output string', () => {
-      const evidence = extractWorkspaceMaterializationEvidence({
+    it('extractWorkspaceSetupEvidence walks into a nested output string', () => {
+      const evidence = extractWorkspaceSetupEvidence({
         output: JSON.stringify({
-          kind: 'workspace-missing',
+          kind: 'workspace-setup',
           workspacePath: '/srv/workspaces/proj_x/run_abc',
         }),
       })
-      expect(evidence).toEqual<WorkspaceMaterializationEvidence>({
+      expect(evidence).toEqual<WorkspaceSetupEvidence>({
         workspacePath: '/srv/workspaces/proj_x/run_abc',
-        expectedRunId: null,
-        actualRunId: null,
       })
     })
   })
@@ -433,9 +378,7 @@ const DELIVERY_TASK_KIND: Record<FailureKind, 'prepare' | 'publish' | 'publish-v
   conflict: 'prepare',
   'base-moved': 'publish',
   'retry-safe': 'prepare',
-  'workspace-missing': 'prepare',
-  'workspace-corrupt': 'prepare',
-  'workspace-identity-mismatch': 'prepare',
+  'workspace-setup': 'prepare',
   'config-error': 'publish-via-pr',
   'protection-conflict': 'publish-via-pr',
   'pr-state-conflict': 'publish-via-pr',
@@ -459,15 +402,11 @@ function makeFailureTimeline(kind: FailureKind): WorkflowTimeline {
       ? 'Prepare failed (conflict): CONFLICT in foo.ts'
       : kind === 'base-moved'
         ? 'Publish failed (base-moved): non-fast-forward'
-        : kind === 'retry-safe'
-          ? 'Prepare failed (retry-safe): network reset'
-          : kind === 'workspace-missing'
-            ? 'workflow workspace materialization failure (workspace-missing): workspace path does not exist'
-            : kind === 'workspace-corrupt'
-              ? 'workflow workspace materialization failure (workspace-corrupt): marker is missing'
-              : kind === 'workspace-identity-mismatch'
-                ? 'workflow workspace materialization failure (workspace-identity-mismatch): workspace bound to a different run'
-                : kind === 'config-error'
+          : kind === 'retry-safe'
+            ? 'Prepare failed (retry-safe): network reset'
+            : kind === 'workspace-setup'
+              ? 'could not prepare workflow workspace (workspace-setup): git clone failed for ...'
+              : kind === 'config-error'
                   ? 'Publish via PR failed (config-error): gh CLI not found'
                   : kind === 'protection-conflict'
                     ? 'Publish via PR failed (protection-conflict): required status checks are not satisfied'
@@ -765,7 +704,7 @@ describe('WorkflowView delivery failure rendering', () => {
     expect(screen.getByText('master')).toBeInTheDocument()
   })
 
-  it.each(['workspace-missing', 'workspace-corrupt', 'workspace-identity-mismatch'] as const)(
+  it.each(['workspace-setup'] as const)(
     'shows the %s kind, workflow-infrastructure attribution, and a distinct next action in the task banner',
     async (kind) => {
       mockedUseWorkflowTimeline.mockReturnValue({
@@ -779,11 +718,11 @@ describe('WorkflowView delivery failure rendering', () => {
 
       expect(await screen.findByText('Failure kind')).toBeInTheDocument()
       expect(screen.getByText(kind)).toBeInTheDocument()
-      expect(screen.getByText('Workflow workspace materialization failure')).toBeInTheDocument()
+      expect(screen.getByText('Workflow workspace setup failure')).toBeInTheDocument()
       expect(
         screen.getByText('Attribution: workflow infrastructure (not issue work)'),
       ).toBeInTheDocument()
-      // The workspace-materialization failure must NOT reuse the existing
+      // The workspace-setup failure must NOT reuse the existing
       // delivery-failure labels (conflict, base-moved, retry-safe,
       // branch-invariant-violation).
       expect(screen.queryByText('Conflict needs attention')).not.toBeInTheDocument()
@@ -798,7 +737,7 @@ describe('WorkflowView delivery failure rendering', () => {
     },
   )
 
-  it('renders the workspace-identity-mismatch evidence (workspace path, expected, actual) in the banner', async () => {
+  it('renders the workspace-setup evidence (workspace path) in the banner', async () => {
     const timeline: WorkflowTimeline = {
       workflowRunId: 'wr_abc',
       status: 'failed',
@@ -822,12 +761,10 @@ describe('WorkflowView delivery failure rendering', () => {
               completedAt: '2026-01-01T00:01:00.000Z',
               durationMs: 60000,
               attempts: 1,
-              message: 'workflow workspace materialization failure (workspace-identity-mismatch): workspace bound to a different run',
+              message: 'could not prepare workflow workspace (workspace-setup): git clone failed for ...',
               output: JSON.stringify({
-                kind: 'workspace-identity-mismatch',
+                kind: 'workspace-setup',
                 workspacePath: '/home/runner/workspaces/proj_x/wr_abc',
-                expected: { workflowRunId: 'wr_abc' },
-                actual: { workflowRunId: 'wr_other' },
               }),
             },
           ],
@@ -845,12 +782,10 @@ describe('WorkflowView delivery failure rendering', () => {
     fireEvent.click(taskButton)
 
     expect(await screen.findByText('Failure kind')).toBeInTheDocument()
-    expect(screen.getByText('workspace-identity-mismatch')).toBeInTheDocument()
+    expect(screen.getByText('workspace-setup')).toBeInTheDocument()
     expect(
       screen.getByText('Attribution: workflow infrastructure (not issue work)'),
     ).toBeInTheDocument()
     expect(screen.getByText('/home/runner/workspaces/proj_x/wr_abc')).toBeInTheDocument()
-    expect(screen.getByText('wr_abc')).toBeInTheDocument()
-    expect(screen.getByText('wr_other')).toBeInTheDocument()
   })
 })

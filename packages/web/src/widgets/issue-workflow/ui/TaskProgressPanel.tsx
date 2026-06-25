@@ -60,10 +60,7 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
       : null)
   const workspaceEvidence = outputResolution.workspaceEvidence ?? messageResolution.workspaceEvidence
   const failureKind = deliveryGuidance?.failureKind
-  const isWorkspaceMaterializationFailure =
-    failureKind === 'workspace-missing' ||
-    failureKind === 'workspace-corrupt' ||
-    failureKind === 'workspace-identity-mismatch'
+  const isWorkspaceSetupFailure = failureKind === 'workspace-setup'
 
   return (
     <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border'} overflow-hidden`}>
@@ -103,7 +100,7 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
               className={`rounded border px-2 py-1.5 text-xs space-y-1 ${
                 deliveryGuidance.failureKind === 'branch-invariant-violation'
                   ? 'border-purple-300 bg-purple-50 text-purple-800'
-                  : isWorkspaceMaterializationFailure
+                  : isWorkspaceSetupFailure
                     ? 'border-rose-300 bg-rose-50 text-rose-800'
                     : 'border-red-200 bg-white text-red-700'
               }`}
@@ -114,7 +111,7 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
                   className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${
                     deliveryGuidance.failureKind === 'branch-invariant-violation'
                       ? 'bg-white/70'
-                      : isWorkspaceMaterializationFailure
+                      : isWorkspaceSetupFailure
                         ? 'bg-white/70'
                         : 'bg-red-100'
                   }`}
@@ -149,7 +146,7 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
                   </div>
                 </div>
               )}
-              {isWorkspaceMaterializationFailure && workspaceEvidence && (
+              {isWorkspaceSetupFailure && workspaceEvidence && (
                 <div className="rounded bg-white/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
                   <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
                     Attribution: workflow infrastructure (not issue work)
@@ -158,18 +155,6 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
                     <div>
                       <span className="font-sans opacity-70">workspace:</span>{' '}
                       {workspaceEvidence.workspacePath}
-                    </div>
-                  )}
-                  {workspaceEvidence.expectedRunId && (
-                    <div>
-                      <span className="font-sans opacity-70">expected:</span>{' '}
-                      <span className="text-green-700">{workspaceEvidence.expectedRunId}</span>
-                    </div>
-                  )}
-                  {workspaceEvidence.actualRunId && (
-                    <div>
-                      <span className="font-sans opacity-70">actual:</span>{' '}
-                      <span className="text-red-700">{workspaceEvidence.actualRunId}</span>
                     </div>
                   )}
                 </div>

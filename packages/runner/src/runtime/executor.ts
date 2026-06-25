@@ -5,7 +5,7 @@ import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir, runCommand } from "../system/process.js"
-import { runnerVariables, WorkspaceBranchMismatchError, WorkspaceCorruptError, WorkspaceIdentityMismatchError, WorkspaceManager, WorkspaceMissingError } from "./workspace.js"
+import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import { acpAgentAction } from "../actions/acp-agent.js"
 import { git as defaultGit } from "../actions/git.js"
@@ -98,7 +98,7 @@ export class WorkExecutor {
   async execute(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== "agent-job") {
-      const precheck = await this.verifyBoundWorkspace(work, signal)
+      const precheck = await this.prepareWorkspace(work, signal)
       if (precheck.kind === "failure") return precheck.result
       resolvedWorkspace = precheck.workspace
     } else {
@@ -109,12 +109,12 @@ export class WorkExecutor {
     return await this.executeOne(work, resolvedWorkspace, signal)
   }
 
-  private async verifyBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async prepareWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
-      const info = await this.workspaceManager.verify(work, signal)
+      const info = await this.workspaceManager.prepare(work, signal)
       return { kind: "ok", workspace: infoToResolved(info) }
     } catch (error) {
-      return { kind: "failure", result: workspaceMaterializationFailureFromError(work, error) }
+      return { kind: "failure", result: workspaceSetupFailure(work, error) }
     }
   }
 
@@ -577,65 +577,19 @@ function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal,
   return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, projectId: work.projectId, issueNumber: work.issueNumber, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
 }
 
-// Build a workflow-infrastructure failure result for a workspace
-// precheck. The `kind` becomes the structured `output.kind` so CLI /
-// API / UI surfaces (T-003) can render these distinctly from ordinary
-// task failures (dirty-worktree, conflict, base-moved, branch-invariant
-// violation). The `message` carries a human-readable explanation
-// including the underlying cause where available.
-function workspaceMaterializationFailure(work: WorkItem, kind: "workspace-missing" | "workspace-corrupt" | "workspace-identity-mismatch", message: string, detail?: JsonObject): WorkItemResult {
-  const output = { kind, ...(detail ?? {}) }
+// Build a failure result for when the runner could not prepare the
+// workflow workspace (clone failed, base branch missing, checkout could
+// not be restored). The `kind` is the structured `output.kind` so the
+// CLI / API / UI can render it distinctly from ordinary task failures.
+function workspaceSetupFailure(work: WorkItem, error: unknown): WorkItemResult {
+  const message = error instanceof Error ? error.message : String(error)
   return {
     status: work.workType === "check" || work.workType === "checks" ? "fail" : "failed",
-    message: `workflow workspace materialization failure (${kind}): ${message}`.slice(0, 4000),
-    output: JSON.stringify(output),
+    message: `could not prepare workflow workspace (workspace-setup): ${message}`.slice(0, 4000),
+    output: JSON.stringify({ kind: "workspace-setup" }),
   }
 }
 
-function workspaceMaterializationFailureFromError(work: WorkItem, error: unknown): WorkItemResult {
-  if (error instanceof WorkspaceMissingError) {
-    return workspaceMaterializationFailure(work, "workspace-missing", error.message, { workspacePath: error.workspacePath ?? null })
-  }
-  if (error instanceof WorkspaceCorruptError) {
-    return workspaceMaterializationFailure(work, "workspace-corrupt", error.message, { workspacePath: error.workspacePath ?? null })
-  }
-  if (error instanceof WorkspaceIdentityMismatchError) {
-    return workspaceMaterializationFailure(work, "workspace-identity-mismatch", error.message, {
-      workspacePath: error.workspacePath ?? null,
-      expected: error.expected ? {
-        issueId: error.expected.issueId,
-        issueNumber: error.expected.issueNumber,
-        workflowRunId: error.expected.workflowRunId,
-      } : null,
-      actual: error.actual ? {
-        issueId: error.actual.issueId ?? null,
-        issueNumber: error.actual.issueNumber ?? null,
-        workflowRunId: error.actual.workflowRunId ?? null,
-      } : null,
-    })
-  }
-  if (error instanceof WorkspaceBranchMismatchError) {
-    return branchInvariantViolationFailure(work, {
-      kind: "branch-invariant-violation",
-      boundary: "start",
-      expectedBranch: error.expectedBranch,
-      observedBranch: error.observedBranch ?? "",
-      observedRef: error.observedRef,
-      detail: error.detail ?? error.message,
-    })
-  }
-  // Materialize-time errors that are not workspace-* kinds (e.g. a
-  // first-materialization clone failure) are still infrastructure
-  // failures: they mean the start boundary cannot complete. Surface
-  // them as workspace-corrupt so the CLI / API / UI can render a
-  // distinct "workflow-start materialization failure" rather than a
-  // generic task failure.
-  return workspaceMaterializationFailure(
-    work,
-    "workspace-corrupt",
-    error instanceof Error ? error.message : String(error),
-  )
-}
 
 function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {
   const status = result.status.toLowerCase()
