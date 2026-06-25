@@ -16,6 +16,7 @@ internal static class EpicCommands
         epic.Subcommands.Add(BuildUpdate(api));
         epic.Subcommands.Add(BuildLink(api));
         epic.Subcommands.Add(BuildUnlink(api));
+        epic.Subcommands.Add(BuildStart(api));
         epic.Subcommands.Add(BuildDone(api));
         epic.Subcommands.Add(BuildClose(api));
 
@@ -307,6 +308,41 @@ internal static class EpicCommands
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
                     ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/done"),
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.EpicShow));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildStart(MohistCliApi api)
+    {
+        var cmd = new Command("start", "Start autonomous progression on an epic");
+        var idArg = IdArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(idArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var id = ctx.GetValue(idArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return StartAsync();
+
+            async Task<int> StartAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var (mode, exit) = ValidateOutput(api, output);
+                if (exit != 0) return exit;
+                return await api.PrintPostWithOutputAsync(
+                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/start"),
                     new { },
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));

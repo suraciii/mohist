@@ -496,3 +496,64 @@ assertions):
 
 All 17 new tests pass; full server suite (2671 tests,
 10 skipped pre-existing) green.
+
+## Key implementation decisions (T-005)
+
+- `mo epic start {id|number}` implemented in
+  `packages/cli/Mohist.Cli/MohistCliCommands.Epic.cs` mirroring the
+  `BuildDone` / `BuildClose` pattern exactly: same `IdArg()`
+  (accepts id or number), same `--project` / `--project-id`
+  pair from `MohistCliCommands.ProjectRefOption()`, same
+  `--output`/`-o` from `MohistCliCommands.OutputOption()`, same
+  empty-body POST. The endpoint path is
+  `/api/projects/{projectId}/epics/{id}/start` and the table
+  shape is `EpicShow` so the resulting DTO prints in the same
+  shape `done`/`close` use.
+- The CLI only adds `start` for this task. Pause/resume are not
+  in the CLI yet — the task description says "mirroring existing
+  pause/resume/done" but T-005's acceptance criteria only cover
+  `start`. Adding pause/resume to the CLI is out of scope for
+  this task (those commands don't exist yet; they will likely
+  land as a follow-up).
+- `TableRenderer.RenderEpicList` / `RenderEpicShow` print the
+  raw `status` field verbatim — no special-case colorization for
+  epic statuses. `idle`, `running`, `paused`, `done`, `closed`
+  are all ≤ 7 chars so they fit the 12-char status column
+  without truncation. Existing list/show rendering works for
+  the new status strings without changes.
+- `ColorizeStatus` in `TableRenderer` is scoped to runner
+  statuses (`idle`, `busy`, `stale`, `offline`). The epic
+  statuses `idle` / `running` / `paused` share the literal
+  string "idle" but they're rendered by different code paths
+  (the `EpicList` row builder doesn't call `ColorizeStatus`),
+  so there's no accidental ANSI bleed-through.
+
+## Test coverage added (T-005)
+
+9 new CLI tests in `CliEpicCommandSpecs`:
+- `EpicStart_Success_PostsToStartEndpointAndPrintsRunningState`:
+  happy path. POSTs to `/epics/{id}/start` with `{}`, table
+  output renders `status:     running`.
+- `EpicStart_ByNumber_HitsEpicsStartRouteNotIssuesRoute`:
+  numeric epic id routes to the epics endpoint (not issues).
+- `EpicStart_OnAlreadyTerminal_Returns409EpicAlreadyTerminalCleanly`:
+  409 error code surfaces cleanly on stderr.
+- `EpicStart_OnPaused_Returns409EpicStartRequiresIdleCleanly`:
+  start-from-paused surfaces `EPIC_START_REQUIRES_IDLE` cleanly.
+- `EpicStart_TableOutput_RendersIdleAndRunningStatusesVerbatim`:
+  list table renders `idle`/`running`/`paused` rows verbatim.
+- `EpicStart_JsonOutput_EmitsIdleAndRunningStatusesVerbatim`:
+  JSON output preserves `"status": "idle"` / `"status": "running"`
+  with no `"status": "active"` leak.
+- `EpicStart_TableConflict_SurfacesConflictCodeWithoutTableBody`:
+  409 in table mode prints error code on stderr and emits no
+  table body on stdout.
+- `EpicStart_ProjectOverride_UsesProjectArgument`: `--project`
+  override routes to the overridden project.
+- `EpicStart_InvalidOutput_FailsWithoutCallingApi`: invalid
+  `-o yaml` fails before any HTTP call.
+
+The existing `EpicHelp_ListsAllSubcommands` test was updated
+to include `start` in the expected subcommand list.
+
+All 214 CLI tests pass (205 baseline + 9 new).
