@@ -52,11 +52,11 @@ public class EffectiveWorkflowProfileResolverSpecs
     public void ResolveCore_ExplicitIssueSelection_TakesPrecedenceOverProjectDefault()
     {
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
-            issueSelection: "mohist/pr",
+            issueSelection: "mohist/github-pr",
             projectDefaultId: "mohist/default",
             exists: _ => true);
 
-        Assert.Equal("mohist/pr", resolved);
+        Assert.Equal("mohist/github-pr", resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -66,10 +66,10 @@ public class EffectiveWorkflowProfileResolverSpecs
     {
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
             issueSelection: null,
-            projectDefaultId: "mohist/pr",
-            exists: id => id == "mohist/pr");
+            projectDefaultId: "mohist/github-pr",
+            exists: id => id == "mohist/github-pr");
 
-        Assert.Equal("mohist/pr", resolved);
+        Assert.Equal("mohist/github-pr", resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -79,10 +79,10 @@ public class EffectiveWorkflowProfileResolverSpecs
     {
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
             issueSelection: "team/custom",
-            projectDefaultId: "mohist/pr",
-            exists: id => id == "mohist/pr" || id == IssueWorkflowProfiles.DefaultId);
+            projectDefaultId: "mohist/github-pr",
+            exists: id => id == "mohist/github-pr" || id == IssueWorkflowProfiles.DefaultId);
 
-        Assert.Equal("mohist/pr", resolved);
+        Assert.Equal("mohist/github-pr", resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -132,9 +132,9 @@ public class EffectiveWorkflowProfileResolverSpecs
     {
         var resolver = BuildResolver();
 
-        var resolved = resolver.Resolve(issueSelection: "mohist/pr", projectDefaultId: null);
+        var resolved = resolver.Resolve(issueSelection: "mohist/github-pr", projectDefaultId: null);
 
-        Assert.Equal("mohist/pr", resolved);
+        Assert.Equal("mohist/github-pr", resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -144,9 +144,9 @@ public class EffectiveWorkflowProfileResolverSpecs
     {
         var resolver = BuildResolver();
 
-        var resolved = resolver.Resolve(issueSelection: null, projectDefaultId: "mohist/pr");
+        var resolved = resolver.Resolve(issueSelection: null, projectDefaultId: "mohist/github-pr");
 
-        Assert.Equal("mohist/pr", resolved);
+        Assert.Equal("mohist/github-pr", resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -156,7 +156,7 @@ public class EffectiveWorkflowProfileResolverSpecs
     {
         var resolver = BuildResolver();
 
-        var resolved = resolver.Resolve(issueSelection: "mohist/default", projectDefaultId: "mohist/pr");
+        var resolved = resolver.Resolve(issueSelection: "mohist/default", projectDefaultId: "mohist/github-pr");
 
         Assert.Equal("mohist/default", resolved);
     }

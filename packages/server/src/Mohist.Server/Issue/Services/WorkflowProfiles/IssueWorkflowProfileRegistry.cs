@@ -16,11 +16,11 @@ public class IssueWorkflowProfileRegistry : IScopedService
         IDbContextFactory<MohistDbContext> dbFactory)
     {
         var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, dbFactory);
-        var pr = new MohistPrIssueWorkflowProfile(promptLoader, dbFactory);
+        var githubPr = new MohistGithubPrIssueWorkflowProfile(promptLoader, dbFactory);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
             [defaults.Id] = defaults,
-            [pr.Id] = pr,
+            [githubPr.Id] = githubPr,
         };
     }
 

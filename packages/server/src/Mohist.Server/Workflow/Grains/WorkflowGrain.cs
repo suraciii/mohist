@@ -968,11 +968,46 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         foreach (var failureCase in onFailure.Cases)
         {
-            if (MatchesTaskFailureCase(task.Output, failureCase.When))
-                return failureCase.Tasks;
+            if (!MatchesTaskFailureCase(task.Output, failureCase.When))
+                continue;
+
+            return BuildRecoverySequence(task, failureCase, failedAttempts, onFailure);
         }
 
         return null;
+    }
+
+    private static List<TaskDefinition> BuildRecoverySequence(
+        TaskRun task,
+        TaskFailureCase matchedCase,
+        int failedAttempts,
+        TaskFailureAction onFailure)
+    {
+        var sequence = new List<TaskDefinition>(matchedCase.Tasks.Count + 1);
+        sequence.AddRange(matchedCase.Tasks);
+
+        if (matchedCase.RetrySelf)
+        {
+            sequence.Add(new TaskDefinition(
+                task.DefinitionId,
+                task.Title,
+                task.Uses,
+                CloneTaskWith(task.WithInput),
+                task.Artifacts,
+                task.SetVars,
+                task.OnFailure));
+        }
+
+        return sequence;
+    }
+
+    private static Dictionary<string, JsonElement?>? CloneTaskWith(Dictionary<string, JsonElement?>? source)
+    {
+        if (source is null) return null;
+        var clone = new Dictionary<string, JsonElement?>(source.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in source)
+            clone[key] = value.HasValue ? value.Value.Clone() : null;
+        return clone;
     }
 
     private static bool MatchesTaskFailureCase(JsonElement? output, Dictionary<string, JsonElement?> when)

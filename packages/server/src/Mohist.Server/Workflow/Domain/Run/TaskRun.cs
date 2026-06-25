@@ -34,6 +34,7 @@ public sealed class TaskRun
     public TaskFailureAction? OnFailure { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
     public string? CausedByFeedbackId { get; init; }
+    public string? CausedByFailedTaskId { get; init; }
     public JsonElement? Output { get; set; }
 }
 
@@ -41,6 +42,7 @@ public static class TaskRunExtensions
 {
     private const string ExpectKey = "expect";
     private const string FilesKey = "files";
+    private const string MarkersKey = "markers";
     private const string SessionKey = "session";
 
     public static string? ExtractSessionName(Dictionary<string, JsonElement?>? withInput)
@@ -60,29 +62,66 @@ public static class TaskRunExtensions
         if (!withInput.TryGetValue(ExpectKey, out var expect) || !expect.HasValue || expect.Value.ValueKind != JsonValueKind.Object)
             return [];
 
-        if (!expect.Value.TryGetProperty(FilesKey, out var files) || files.ValueKind != JsonValueKind.Array)
-            return [];
-
         var result = new List<WorkflowTaskRequiredFile>();
-        foreach (var item in files.EnumerateArray())
+        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+
+        if (expect.Value.TryGetProperty(MarkersKey, out var markerEntries) && markerEntries.ValueKind == JsonValueKind.Array)
         {
-            if (item.ValueKind != JsonValueKind.Object) continue;
-
-            var path = item.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
-            if (string.IsNullOrEmpty(path)) continue;
-
-            string[]? markers = null;
-            if (item.TryGetProperty("markers", out var m) && m.ValueKind == JsonValueKind.Array)
+            foreach (var entry in markerEntries.EnumerateArray())
             {
-                var markerList = new List<string>();
-                foreach (var marker in m.EnumerateArray())
-                    if (marker.ValueKind == JsonValueKind.String)
-                        markerList.Add(marker.GetString()!);
-                markers = markerList.Count > 0 ? markerList.ToArray() : null;
-            }
+                if (entry.ValueKind != JsonValueKind.Object) continue;
 
-            result.Add(new WorkflowTaskRequiredFile(path, "task-expect", CanFetchContent: true, markers));
+                var path = entry.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+                if (string.IsNullOrEmpty(path)) continue;
+
+                string[]? oneOf = null;
+                if (entry.TryGetProperty("oneOf", out var oneOfEl) && oneOfEl.ValueKind == JsonValueKind.Array)
+                {
+                    var list = new List<string>();
+                    foreach (var v in oneOfEl.EnumerateArray())
+                        if (v.ValueKind == JsonValueKind.String)
+                            list.Add(v.GetString()!);
+                    oneOf = list.Count > 0 ? list.ToArray() : null;
+                }
+
+                string? contains = null;
+                if (entry.TryGetProperty("contains", out var containsEl) && containsEl.ValueKind == JsonValueKind.String)
+                    contains = containsEl.GetString();
+
+                string? failIf = null;
+                if (entry.TryGetProperty("failIf", out var failIfEl) && failIfEl.ValueKind == JsonValueKind.String)
+                    failIf = failIfEl.GetString();
+
+                var legacyMarkers = oneOf ?? (contains is not null ? new[] { contains } : null);
+                if (seenPaths.Add(path!))
+                    result.Add(new WorkflowTaskRequiredFile(path!, "task-expect", CanFetchContent: true, legacyMarkers, oneOf, failIf));
+            }
         }
+
+        if (expect.Value.TryGetProperty(FilesKey, out var files) && files.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in files.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+
+                var path = item.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+                if (string.IsNullOrEmpty(path)) continue;
+
+                string[]? markers = null;
+                if (item.TryGetProperty("markers", out var m) && m.ValueKind == JsonValueKind.Array)
+                {
+                    var markerList = new List<string>();
+                    foreach (var marker in m.EnumerateArray())
+                        if (marker.ValueKind == JsonValueKind.String)
+                            markerList.Add(marker.GetString()!);
+                    markers = markerList.Count > 0 ? markerList.ToArray() : null;
+                }
+
+                if (seenPaths.Add(path!))
+                    result.Add(new WorkflowTaskRequiredFile(path!, "task-expect", CanFetchContent: true, markers));
+            }
+        }
+
         return result;
     }
 
@@ -95,7 +134,11 @@ public static class TaskRunExtensions
 
     extension(TaskRun)
     {
-        internal static TaskRun MakeTask(IEnumerable<TaskRun> existing, TaskDefinition input, string? causedByFeedbackId = null)
+        internal static TaskRun MakeTask(
+            IEnumerable<TaskRun> existing,
+            TaskDefinition input,
+            string? causedByFeedbackId = null,
+            string? causedByFailedTaskId = null)
         {
             var attempt = existing
                               .Where(t => t.DefinitionId == input.Id)
@@ -118,7 +161,8 @@ public static class TaskRunExtensions
                 SetVars = input.SetVars,
                 OnFailure = input.OnFailure,
                 Classification = classification,
-                CausedByFeedbackId = causedByFeedbackId
+                CausedByFeedbackId = causedByFeedbackId,
+                CausedByFailedTaskId = causedByFailedTaskId
             };
         }
     }

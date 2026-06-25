@@ -1,6 +1,6 @@
 # Workflow Profile
 
-Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带 `mohist/default` 和 `mohist/pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
+Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带 `mohist/default` 和 `mohist/github-pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
 
 ## 默认 Profile
 
@@ -57,81 +57,172 @@ stages:
 
 ## GitHub PR Profile
 
-`mohist/pr` 走 PR-first 形态：plan 批准后立刻通过显式 task 创建/复用 PR，
-后续 stage 需要把最新工作推到 GitHub 时在该 stage 尾部追加显式 update PR task，
-integrate 收尾只剩 `merge-pull-request`：
+`mohist/github-pr` 走 PR-first 形态：plan stage 最后一个 task 通过显式
+`mohist/create-github-pr` 打开或复用 draft PR，把 `prNumber`/`prUrl` 写入
+workflow runtime variables；check stage 在 `ai-review` 通过后用
+`mohist/push`（`forceWithLease: true`）把最新 commit 推到 PR head，
+再用 `mohist/mark-github-pr-ready` 把 PR 标记为 ready，最后用只读的
+`mohist/github-pr-status` check 确认 PR 状态并等待人工批准；integrate
+stage 依次执行 `spec-sync` → `archive-change` → `push` → `merge-pr`，
+用 `mohist/github-pr-status` 的 `expect: merged` check 验证 PR 已合入。
 
 ```yaml
-- stage: build
+- stage: plan
   tasks:
-    - id: build:open-pr         # mohist/create-pull-request
+    - id: proposal
+    - id: specs
+    - id: design
+    - id: tasks
+    - id: self-review
+      with:
+        prompt: ${{ prompts.self-review }}
+        expect:
+          markers:
+            - path: ${{ openspecChangeDir }}/self-review.md
+              oneOf: [PASS, FAIL]
+              failIf: FAIL
+      onFailure:
+        limit: 2
+        cases:
+          - when:
+              output.errorCode: review-failed
+            tasks:
+              - id: recover:fix-plan-review
+                uses: mohist/acp-agent
+                with: { prompt: ${{ prompts.fix-plan-review }} }
+            retry: self
+    - id: open-draft-pr        # mohist/create-github-pr
+      with:
+        draft: true
+        titleFrom: issue.title
+        bodyFrom: issue.body
       setVars:
         github.pr.number: output.prNumber
         github.pr.url: output.prUrl
-    - id: load-tasks
-    - id: build:update-pr       # mohist/create-pull-request
-      setVars:
-        github.pr.number: output.prNumber
-        github.pr.url: output.prUrl
+  checks:
+    - name: plan-artifacts     # mohist/openspec-artifacts
+      with:
+        changeDir: ${{ openspecChangeDir }}
 
 - stage: check
   tasks:
     - id: ai-review
+      with:
+        prompt: ${{ prompts.review }}
+        expect:
+          markers:
+            - path: ${{ openspecChangeDir }}/review.md
+              oneOf: [PASS, FAIL]
+              failIf: FAIL
+      onFailure:
+        limit: 2
+        cases:
+          - when:
+              output.errorCode: review-failed
+            tasks:
+              - id: recover:fix-review-findings
+                uses: mohist/acp-agent
+                with: { prompt: ${{ prompts.auto-fix }} }
+            retry: self
+    - id: push                 # mohist/push (forceWithLease: true)
+    - id: mark-pr-ready        # mohist/mark-github-pr-ready
   checks:
-    - health / review-passed / merge-ready repair paths append check:update-pr
+    - name: github-pr-status   # mohist/github-pr-status (read-only)
 
 - stage: integrate
   tasks:
-    - id: integrate:merge-pr    # mohist/merge-pull-request
+    - id: spec-sync
+    - id: archive-change
+    - id: push
+    - id: merge-pr            # mohist/merge-github-pr
       with:
         prNumber: ${{ vars.github.pr.number }}
+        method: squash
       onFailure:
-        limit: 1
+        limit: 2
         cases:
           - when:
               output.errorCode: base-moved
             tasks:
-              - recover:rebase        # mohist/rebase
-              - recover:open-pr       # mohist/create-pull-request
-              - recover:merge-pr      # mohist/merge-pull-request
+              - id: recover:rebase        # mohist/rebase (conflictMode: task)
+                onFailure:
+                  limit: 1
+                  cases:
+                    - when:
+                        output.failureKind: conflict
+                      tasks:
+                        - id: recover:resolve-rebase-conflicts
+                          uses: mohist/acp-agent
+                          with: { prompt: ${{ prompts.resolve-rebase-conflicts }} }
+              - id: recover:push
+            retry: self
+
+          - when:
+              output.errorCode: pr-checks-failed
+            tasks:
+              - id: recover:fix-pr-checks   # mohist/acp-agent
+                with: { prompt: ${{ prompts.fix-pr-checks }} }
+              - id: recover:push
+            retry: self
+  checks:
+    - name: merge-verified    # mohist/github-pr-status with expect: merged
 ```
 
-当前语义是正常路径不预先 rebase。`build:open-pr` 在 build 一开始就推送
-workflow branch，按 head/base 打开或复用 open PR，并把 `prNumber`/`prUrl`
-写入 workflow runtime variables；`build:update-pr` 在 build 的 load-tasks
-完成后再次推送同一个 head/base，让 GitHub 更新 PR；check stage 的
-`health` / `review-passed` / `merge-ready` repair 路径会在修复或 rebase 后
-追加 `check:update-pr`，再次推送同一个 PR。integrate 的 happy path 只跑
-`integrate:merge-pr`：它读取 `vars.github.pr.number`，在真正 merge 前等待
-GitHub PR checks，通过后调用 `gh pr merge --squash`，并确认 `state=MERGED`
-才视为集成完成。
+`self-review` 和 `ai-review` 都使用 `expect.markers` + `failIf: FAIL` 把
+marker 命中映射成 task 失败，`output.errorCode`（如 `review-failed`）由
+对应 action 在自己的 marker artifact 中声明（参见
+[`design/workflow/actions.md`](../design/workflow/actions.md)）。失败会
+触发 `onFailure` 声明的 recovery task，recovery 完成后用 `retry: self`
+重新运行原失败 task。
 
-只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并
-时，integrate:merge-pr 才会触发 `base-moved` recovery，依次执行
-`rebase -> create-pull-request -> merge-pull-request`，复用同一个 workflow
-branch 和 open PR。
+`open-draft-pr` 是 plan 的最后一个 task，它把稳定的 PR 身份写入 workflow
+runtime variables，后续 stage 不需要重复打开 PR：
+`vars.github.pr.number` 和 `vars.github.pr.url`。
+
+`mark-pr-ready` 只依赖 `vars.github.pr.number`，幂等：PR 已经 ready 时
+`gh pr ready` 不再调用、直接成功返回。它不更新 title/body、不推送代码。
+
+`push` 是显式同步 task，把本地线性 workflow branch 推到同名远程 branch；
+`forceWithLease: true` 用于 rebase 后允许 head history 重写。`push` 不
+声明业务 recovery —— 失败意味着权限/网络或远程 branch 被外部写入，应作为
+普通 task failure 暴露。
+
+`merge-pr` 等待 GitHub PR checks，通过后 `gh pr merge --squash`，并重新
+查询确认 `state=MERGED` 才视为集成完成。`merge-verified` check 通过
+`mohist/github-pr-status` 的 `expect: merged` 做只读确认。
+
+rebase 在 `conflictMode: task` 下不会调用内置 `conflictResolver`，冲突时
+返回 `output.failureKind: conflict` 并保留 rebase 进行中；profile 的
+`recover:rebase.onFailure`（`output.failureKind: conflict` → 
+`recover:resolve-rebase-conflicts`）由 agent 解决冲突、完成 rebase，然后
+workflow 继续走 `recover:push` 并 `retry: self` 重新合并。
 
 PR title/body 不从 workflow metadata 读取。profile 通过
-`titleFrom: issue.title`、`bodyFrom: issue.body` 指示 action 在运行时执行
-`mo issue show <number> --project-id <projectId> --output json`，再用返回
-的 issue title/body 创建或更新 PR。
+`titleFrom: issue.title`、`bodyFrom: issue.body` 指示 `mohist/create-github-pr`
+在运行时执行 `mo issue show <number> --project-id <projectId> --output json`，
+再用返回的 issue title/body 创建或更新 PR。
 
-`mohist/pr` 使用两个 GitHub PR action：
+`mohist/github-pr` 使用四个 GitHub PR action：
 
-- `create-pull-request` 负责推送 workflow branch、创建/复用 PR，并通过
-  `titleFrom` / `bodyFrom` 在运行时读取 issue title/body 作为 PR title/body。
-- `create-pull-request` 只把稳定 PR 身份写入 workflow runtime
-  variables：`vars.github.pr.number` 和 `vars.github.pr.url`。
-- `merge-pull-request` 读取 `vars.github.pr.number`，在真正 merge 前等待
-  GitHub PR checks；pending 时继续等待，passed/skipped 后 merge，
-  failed/cancelled/action_required 时以 `errorCode: pr-checks-failed` 失败。
-- `merge-pull-request` 的合并语义是把当前 workflow branch 合入 base
-  branch，不要求 head SHA 锁。
+- `mohist/create-github-pr` 推送 workflow branch、创建或复用 draft PR，
+  返回 `output.prNumber` 和 `output.prUrl` 供 `setVars` 写入 workflow
+  runtime variables。
+- `mohist/mark-github-pr-ready` 只读 `vars.github.pr.number`，调用
+  `gh pr ready` 把 draft PR 标记为 ready；幂等。
+- `mohist/push` 推送本地 workflow branch 到远程 head；可选
+  `forceWithLease: true` 携带 `--force-with-lease`。
+- `mohist/merge-github-pr` 读取 `vars.github.pr.number`，在真正 merge 前
+  等待 GitHub PR checks，通过后 `gh pr merge --squash` 并确认
+  `state=MERGED`；recoverable failure 返回 action-owned
+  `errorCode: base-moved` 或 `errorCode: pr-checks-failed`，由 profile 的
+  `merge-pr.onFailure` 显式处理。
+- `mohist/github-pr-status` 是只读 check：默认验证 PR 已 ready，
+  `expect: merged` 验证 PR 已合入。
 
-PR checks 属于 `merge-pull-request` action 的内部前置条件，不是 stage-level
-check。checks 失败时当前不自动修复，workflow 保留普通 task failure，由用户
-介入后 retry/rerun。后续如果要自动修 PR checks，应在 profile 里对
-`output.errorCode: pr-checks-failed` 声明显式 recovery task。
+PR checks 属于 `mohist/merge-github-pr` 的内部前置条件，不是 stage-level
+check。`pr-checks-failed` 在 `merge-pr.onFailure` 里显式声明 recovery
+（`recover:fix-pr-checks` → `recover:push` → `retry: self`），失败后由
+agent 自动修并重新合并；不依赖 stage hook 或隐式边界动作。
 
 ## 关键字段
 
@@ -275,4 +366,4 @@ mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 
 ---
 
-对应源码：`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`、[`design/workflow/profile.md`](../design/workflow/profile.md)。
+对应源码：`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`、`Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml`、[`design/workflow/profile.md`](../design/workflow/profile.md)、[`design/workflow/builtin-workflows/github-pr.md`](../design/workflow/builtin-workflows/github-pr.md)。

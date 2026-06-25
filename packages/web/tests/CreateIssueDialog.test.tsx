@@ -194,11 +194,11 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     expect(payload).not.toHaveProperty('workflowProfileId')
   })
 
-  it('sends workflowProfileId=mohist/pr when the user explicitly selects it', async () => {
+  it('sends workflowProfileId=mohist/github-pr when the user explicitly selects it', async () => {
     ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
 
@@ -207,7 +207,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'PR work' } })
 
     const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
-    fireEvent.change(workflowSelect, { target: { value: 'mohist/pr' } })
+    fireEvent.change(workflowSelect, { target: { value: 'mohist/github-pr' } })
 
     fireEvent.click(screen.getByText('Create'))
 
@@ -215,7 +215,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/pr')
+    expect(payload.workflowProfileId).toBe('mohist/github-pr')
   })
 })
 
@@ -240,13 +240,13 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
       labels: {},
       createdAt: '2026-06-16T00:00:00.000Z',
       updatedAt: '2026-06-16T00:00:00.000Z',
-      workflowProfileId: 'mohist/pr',
+      workflowProfileId: 'mohist/github-pr',
     }
     ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue(createdIssue)
     ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
 
@@ -254,16 +254,16 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'PR work' } })
     const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
-    fireEvent.change(workflowSelect, { target: { value: 'mohist/pr' } })
+    fireEvent.change(workflowSelect, { target: { value: 'mohist/github-pr' } })
     fireEvent.click(screen.getByText('Create'))
 
     await waitFor(() => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/pr')
+    expect(payload.workflowProfileId).toBe('mohist/github-pr')
 
     const returned = await (createIssue as ReturnType<typeof vi.fn>).mock.results[0].value
-    expect(returned.workflowProfileId).toBe('mohist/pr')
+    expect(returned.workflowProfileId).toBe('mohist/github-pr')
   })
 })

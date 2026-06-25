@@ -58,8 +58,11 @@ public class PromptReferenceScannerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
-    public void Scan_RepairAndVerifyTasks_ReturnTheirPromptKeys()
+    public void Scan_RepairTask_ReturnsItsPromptKey()
     {
+        // VerifyTask is removed from the check-repair model. The
+        // scanner only walks the repair task; there is no verify step
+        // branch to traverse.
         var definition = Parse("""
         stages:
           - stage: build
@@ -77,19 +80,12 @@ public class PromptReferenceScannerSpecs
                   uses: mohist/acp-agent
                   with:
                     prompt: ${{ prompts.auto-fix }}
-                verifyTask:
-                  id: verify
-                  title: Verify
-                  uses: mohist/acp-agent
-                  with:
-                    prompt: ${{ prompts.re-verify }}
         """);
 
         var keys = PromptReferenceScanner.Scan(definition);
 
         Assert.Contains("review", keys);
         Assert.Contains("auto-fix", keys);
-        Assert.Contains("re-verify", keys);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

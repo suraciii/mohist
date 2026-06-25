@@ -1,0 +1,58 @@
+---
+name: "Fix PR Checks"
+description: "Fixes failing GitHub PR checks"
+tags: [integrate, pr-checks]
+stage: integrate
+---
+Read the current Mohist issue details before interpreting this task:
+
+```bash
+mo issue show ${{ issue.number }} --project-id ${{ project.id }}
+```
+
+## Context
+
+`mohist/merge-github-pr` rejected the merge because one or more GitHub PR checks
+failed for PR #`${{ failure.output.prNumber }}` (`${{ failure.output.prUrl }}`).
+The merge action is waiting on you to repair the checks before it can squash-merge.
+
+The previous failure surfaced a structured `failure.output.message` describing
+which checks failed; read that as the entry point.
+
+## Process
+
+1. Inspect the PR check status for the affected PR:
+   ```bash
+   gh pr checks ${{ failure.output.prNumber }} --json bucket,name,state
+   ```
+2. For every check whose `bucket` is `fail` (or whose state is `FAILURE` /
+   `ERROR` / `CANCELLED`), identify the failing job.
+3. Use `gh run view <run-id>` / `gh run view <run-id> --log-failed` to fetch
+   the failing job's logs and pinpoint the root cause.
+4. Apply focused fixes to source code, tests, or build configuration so that
+   the affected checks would pass on the next run. Prefer correcting code or
+   tests over weakening assertions.
+5. Stage and commit the fixes on the workflow branch.
+6. Do not push from this task. The workflow will run the explicit
+   `recover:push` task after this repair completes.
+
+## Rules
+
+- Do NOT reopen or recreate the PR. Reuse the same workflow branch and the
+  same open PR (`${{ failure.output.prNumber }}`).
+- Do NOT mark the PR ready again — `merge-github-pr` only checks PR state,
+  not PR readiness. Committing the fix is enough; `recover:push` handles sync.
+- Do NOT modify the merge action's behavior. Recovery is scoped to making
+  the existing PR's checks pass.
+- Do NOT run `git push`; branch synchronization is an explicit workflow task.
+
+## Output
+
+```markdown
+## Applied PR Check Repairs
+- PR #<number> check: <name> — root cause and fix summary
+
+## Verification
+- Local build/test/typecheck command run and result
+- Commit created on `${{ workspace.branch }}`
+```

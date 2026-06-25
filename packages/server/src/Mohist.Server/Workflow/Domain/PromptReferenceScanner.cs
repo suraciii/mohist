@@ -26,8 +26,6 @@ public static class PromptReferenceScanner
                 if (check.OnFailure?.Repair is { } repair)
                 {
                     ScanTask(repair.Task, keys);
-                    if (repair.VerifyTask is not null)
-                        ScanTask(repair.VerifyTask, keys);
                 }
             }
         }

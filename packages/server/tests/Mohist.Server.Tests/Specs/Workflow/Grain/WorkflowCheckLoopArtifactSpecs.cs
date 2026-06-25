@@ -53,15 +53,18 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
                 [new("review-passed", "Review passed", "spec/marker",
                     OnFailure: new CheckFailureAction(new CheckFailureRepair(
                         2,
-                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"),
-                        new TaskDefinition("ai-review", "AI review", "spec/review"))))])
+                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"))))])
         ]);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task CheckLoop_RecordsEachReviewVersionAsSeparateImmutableArtifact()
+    public async Task CheckLoop_RepairPathExposesSingleRepairTaskThenCheckReRuns()
     {
+        // VerifyTask is removed. The check-repair path is exactly
+        // [repairTask] with no verify step. After the repair task
+        // completes, the check is re-run directly; the original
+        // ai-review task is not re-injected.
         await StartWorkflowAsync(CheckLoopDefinition());
 
         // First ai-review.1 produces a failing review.
@@ -77,23 +80,17 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
         Assert.Equal("checks", checks1.WorkType);
         await ReportChecksFailAsync(r2, checks1, "review-passed", "marker missing");
 
-        // fix-review-findings runs and completes.
+        // fix-review-findings runs and completes — the only injected
+        // task before the check re-runs.
         var (fix, r3) = await PollWorkAnyAsync();
         Assert.Equal("fix-review-findings:1.1", fix.WorkId);
         await ReportAsync(r3, fix.WorkId, "completed");
 
-        // Second ai-review.2 produces a passing review.
-        var (review2, r4) = await PollWorkAnyAsync();
-        Assert.Equal("ai-review.2", review2.WorkId);
-        var secondUploadId = await SeedReviewPendingUploadAsync(
-            review2.WorkflowRunId, review2.WorkId, "ai-review.2", "review.md",
-            "review-round-2: PASS");
-        await ReportAsync(r4, review2.WorkId, new WorkResult("completed", ArtifactUploadIds: [secondUploadId]));
-
-        // Second check passes.
-        var (checks2, r5) = await PollWorkAnyAsync();
+        // Second check passes. There is no re-injection of ai-review as
+        // a verify task.
+        var (checks2, r4) = await PollWorkAnyAsync();
         Assert.Equal("checks", checks2.WorkType);
-        await ReportChecksPassAsync(r5, checks2, "review-passed");
+        await ReportChecksPassAsync(r4, checks2, "review-passed");
 
         var workflowRunId = review1.WorkflowRunId;
         await using var db = CreateDb();
@@ -103,13 +100,11 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
             .OrderBy(a => a.RecordedAt)
             .ToList();
 
-        // Both ai-review task runs produced an immutable review.md record.
-        Assert.Equal(2, reviewRows.Count);
-        Assert.Equal("ai-review.1", reviewRows[0].TaskRunId);
-        Assert.Equal("ai-review.2", reviewRows[1].TaskRunId);
-        Assert.NotEqual(reviewRows[0].ArtifactId, reviewRows[1].ArtifactId);
-        Assert.NotEqual(reviewRows[0].ArtifactStoragePath, reviewRows[1].ArtifactStoragePath);
-        Assert.True(reviewRows[1].RecordedAt >= reviewRows[0].RecordedAt);
+        // Without the verify step, only the original ai-review run
+        // produced an immutable review.md record. The check re-ran on
+        // the existing artifact after the repair task finished.
+        var review = Assert.Single(reviewRows);
+        Assert.Equal("ai-review.1", review.TaskRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -125,24 +120,22 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
         var realQuerier = new WorkflowArtifactQuerier(scopedFactory);
 
         var firstRun = await realQuerier.ListByTaskRunAsync(workflowRunId, "ai-review.1");
-        var secondRun = await realQuerier.ListByTaskRunAsync(workflowRunId, "ai-review.2");
 
         var firstReview = Assert.Single(firstRun);
         Assert.Equal("review.md", firstReview.Path);
         Assert.Equal("ai-review.1", firstReview.TaskRunId);
         Assert.Contains("FAIL", ReadStorageContent(firstReview.ArtifactStoragePath));
-
-        var secondReview = Assert.Single(secondRun);
-        Assert.Equal("review.md", secondReview.Path);
-        Assert.Equal("ai-review.2", secondReview.TaskRunId);
-        Assert.Contains("PASS", ReadStorageContent(secondReview.ArtifactStoragePath));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task CheckLoop_PathHistoryReturnsBothVersionsInProductionOrder()
+    public async Task CheckLoop_PathHistoryReturnsTheSingleReviewVersion()
     {
+        // Without the verify step, the original ai-review.1 is the
+        // only review run; the check re-runs on the existing artifact
+        // after the repair task finishes, so the path history holds
+        // exactly one row.
         var workflowRunId = await RunCheckLoopOnceAsync();
 
         var scopedFactory = CreateDbContextFactory();
@@ -150,16 +143,14 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
 
         var history = await realQuerier.ListHistoryAsync(workflowRunId, "review.md");
 
-        Assert.Equal(2, history.Count);
-        Assert.Equal("ai-review.1", history[0].TaskRunId);
-        Assert.Equal("ai-review.2", history[1].TaskRunId);
-        Assert.True(history[1].RecordedAt >= history[0].RecordedAt);
+        var only = Assert.Single(history);
+        Assert.Equal("ai-review.1", only.TaskRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task CheckLoop_LatestQueryReturnsOnlyNewestReview()
+    public async Task CheckLoop_LatestQueryReturnsTheSingleReview()
     {
         var workflowRunId = await RunCheckLoopOnceAsync();
 
@@ -170,7 +161,7 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
 
         var review = Assert.Single(latest);
         Assert.Equal("review.md", review.Path);
-        Assert.Equal("ai-review.2", review.TaskRunId);
+        Assert.Equal("ai-review.1", review.TaskRunId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -184,19 +175,15 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
         var realQuerier = new WorkflowArtifactQuerier(scopedFactory);
 
         var history = await realQuerier.ListHistoryAsync(workflowRunId, "review.md");
-        var v1 = history.Single(a => a.TaskRunId == "ai-review.1");
-        var v2 = history.Single(a => a.TaskRunId == "ai-review.2");
+        var v1 = Assert.Single(history);
 
-        // The recorded content for each version must be the bytes the
-        // runner wrote during that task run — not anything that may
-        // exist in the live workspace afterwards. This is the
-        // historical guarantee the user pain point depends on.
+        // The recorded content for the single review run must be the
+        // bytes the runner wrote during that task run — not anything
+        // that may exist in the live workspace afterwards. This is
+        // the historical guarantee the user pain point depends on.
         var v1Bytes = ReadStorageContent(v1.ArtifactStoragePath);
-        var v2Bytes = ReadStorageContent(v2.ArtifactStoragePath);
 
         Assert.Equal("review-round-1: FAIL", v1Bytes);
-        Assert.Equal("review-round-2: PASS", v2Bytes);
-        Assert.NotEqual(v1Bytes, v2Bytes);
 
         // Even if the storage path's filename is the same, opening
         // each version returns its own immutable content. Overwriting
@@ -212,42 +199,27 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
     {
         var workflowRunId = await RunCheckLoopOnceAsync();
 
-        // The workflow history read model should expose each ai-review
-        // task run with the artifact summary it produced. This is the
-        // second complementary view promised in the issue ("Task
-        // artifacts" view on the issue page).
+        // The workflow history read model exposes the single ai-review
+        // task run with the artifact summary it produced.
         var status = await GetQuerier().GetStatusAsync(workflowRunId);
         Assert.NotNull(status);
 
         var checkStage = Assert.Single(status!.Stages);
         var reviewTasks = checkStage.Tasks.Where(t => t.Id.StartsWith("ai-review.")).ToList();
-        Assert.Equal(2, reviewTasks.Count);
-
-        var v1Task = reviewTasks.Single(t => t.Id == "ai-review.1");
-        var v2Task = reviewTasks.Single(t => t.Id == "ai-review.2");
+        var v1Task = Assert.Single(reviewTasks);
+        Assert.Equal("ai-review.1", v1Task.Id);
 
         Assert.NotNull(v1Task.ArtifactSummaries);
         var v1Summary = Assert.Single(v1Task.ArtifactSummaries!);
         Assert.Equal("review.md", v1Summary.Path);
         Assert.Equal("file", v1Summary.Kind);
-
-        Assert.NotNull(v2Task.ArtifactSummaries);
-        var v2Summary = Assert.Single(v2Task.ArtifactSummaries!);
-        Assert.Equal("review.md", v2Summary.Path);
-        Assert.Equal("file", v2Summary.Kind);
-
-        // The two task rows must point at different artifact ids;
-        // the later version must not overwrite or shadow the earlier
-        // one from the user's perspective.
-        Assert.NotEqual(v1Summary.ArtifactId, v2Summary.ArtifactId);
     }
 
     /// <summary>
-    /// Drives the full ai-review → check fail → fix → ai-review.2 →
-    /// check pass flow once and returns the workflow run id. The
-    /// first review is "FAIL", the second is "PASS", each backed by
-    /// a separate uploaded <c>review.md</c> file on the artifact
-    /// storage root.
+    /// Drives the full ai-review → check fail → fix → check pass flow
+    /// once and returns the workflow run id. The first review is
+    /// "FAIL"; the repair task runs to completion and the check is
+    /// re-run on the existing artifact (no verify-step re-injection).
     /// </summary>
     private async Task<string> RunCheckLoopOnceAsync()
     {
@@ -268,16 +240,9 @@ public class WorkflowCheckLoopArtifactSpecs : WorkflowGrainSpecs, IDisposable
         Assert.Equal("fix-review-findings:1.1", fix.WorkId);
         await ReportAsync(r3, fix.WorkId, "completed");
 
-        var (review2, r4) = await PollWorkAnyAsync();
-        Assert.Equal("ai-review.2", review2.WorkId);
-        var secondUploadId = await SeedReviewPendingUploadAsync(
-            review2.WorkflowRunId, review2.WorkId, "ai-review.2", "review.md",
-            "review-round-2: PASS");
-        await ReportAsync(r4, review2.WorkId, new WorkResult("completed", ArtifactUploadIds: [secondUploadId]));
-
-        var (checks2, r5) = await PollWorkAnyAsync();
+        var (checks2, r4) = await PollWorkAnyAsync();
         Assert.Equal("checks", checks2.WorkType);
-        await ReportChecksPassAsync(r5, checks2, "review-passed");
+        await ReportChecksPassAsync(r4, checks2, "review-passed");
 
         return review1.WorkflowRunId;
     }

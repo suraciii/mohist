@@ -181,18 +181,20 @@ public struct TaskFailureCaseSurrogate
 {
     [Id(0)] public Dictionary<string, JsonElement?> When;
     [Id(1)] public List<TaskDefinition> Tasks;
+    [Id(2)] public bool RetrySelf;
 }
 
 [RegisterConverter]
 public sealed class TaskFailureCaseSurrogateConverter : IConverter<TaskFailureCase, TaskFailureCaseSurrogate>
 {
     public TaskFailureCase ConvertFromSurrogate(in TaskFailureCaseSurrogate surrogate) =>
-        new(surrogate.When, surrogate.Tasks);
+        new(surrogate.When, surrogate.Tasks, surrogate.RetrySelf);
 
     public TaskFailureCaseSurrogate ConvertToSurrogate(in TaskFailureCase value) => new()
     {
         When = value.When,
         Tasks = value.Tasks,
+        RetrySelf = value.RetrySelf,
     };
 }
 
@@ -245,19 +247,17 @@ public struct CheckFailureRepairSurrogate
 {
     [Id(0)] public int Limit;
     [Id(1)] public TaskDefinition Task;
-    [Id(2)] public TaskDefinition? VerifyTask;
 }
 
 [RegisterConverter]
 public sealed class CheckFailureRepairSurrogateConverter : IConverter<CheckFailureRepair, CheckFailureRepairSurrogate>
 {
     public CheckFailureRepair ConvertFromSurrogate(in CheckFailureRepairSurrogate surrogate) =>
-        new(surrogate.Limit, surrogate.Task, surrogate.VerifyTask);
+        new(surrogate.Limit, surrogate.Task);
 
     public CheckFailureRepairSurrogate ConvertToSurrogate(in CheckFailureRepair value) => new()
     {
         Limit = value.Limit,
         Task = value.Task,
-        VerifyTask = value.VerifyTask,
     };
 }

@@ -1,5 +1,5 @@
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
-import { mkdir, readdir, readFile, rename } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
 import { exists, copyDirectory } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
@@ -52,6 +52,45 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   await context.serverConnection.addTasks(context.workflowRunId, tasks)
 
   return { status: "success", message: `Loaded ${tasks.length} tasks`, output: JSON.stringify({ loaded: tasks.length }) }
+}
+
+export async function openspecArtifactsAction(context: ActionContext): Promise<ActionResult> {
+  const changeDir = resolveChangeDir(context)
+  if (!changeDir) return { status: "failure", message: "OpenSpec artifacts check requires 'changeDir'" }
+
+  const required: Array<{ path: string; kind: "file" | "directory" }> = [
+    { path: join(changeDir, "proposal.md"), kind: "file" },
+    { path: join(changeDir, "specs"), kind: "directory" },
+    { path: join(changeDir, "design.md"), kind: "file" },
+    { path: join(changeDir, "tasks.json"), kind: "file" },
+  ]
+
+  const missing: string[] = []
+  for (const entry of required) {
+    if (!(await isPresentOfKind(entry.path, entry.kind))) missing.push(entry.path)
+  }
+
+  const present = missing.length === 0
+  const output = JSON.stringify({
+    kind: "openspec-artifacts",
+    changeDir,
+    present,
+    missing,
+  })
+
+  if (present) {
+    return {
+      status: "success",
+      message: `OpenSpec artifacts present under ${changeDir}`,
+      output,
+    }
+  }
+
+  return {
+    status: "failure",
+    message: `OpenSpec artifacts missing under ${changeDir}: ${missing.join(", ")}`,
+    output,
+  }
 }
 
 export async function openspecSyncAction(context: ActionContext): Promise<ActionResult> {
@@ -344,6 +383,16 @@ async function hasFiles(directory: string): Promise<boolean> {
       if (entry.isDirectory() && await hasFiles(join(directory, entry.name))) return true
     }
     return false
+  } catch {
+    return false
+  }
+}
+
+async function isPresentOfKind(path: string, kind: "file" | "directory"): Promise<boolean> {
+  if (!exists(path)) return false
+  try {
+    const stats = await stat(path)
+    return kind === "directory" ? stats.isDirectory() : stats.isFile()
   } catch {
     return false
   }

@@ -95,12 +95,15 @@ public static class WorkflowYamlSerializer
 
         var artifacts = ParseTaskArtifacts(map);
         var setVars = ParseTaskSetVars(map, id);
-        var onFailure = ParseTaskFailureAction(map, id);
+        var onFailure = ParseTaskFailureAction(map, id, allowNestedOnFailure: true);
 
         return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars, onFailure);
     }
 
-    private static TaskFailureAction? ParseTaskFailureAction(Dictionary<string, object?> taskMap, string taskId)
+    private static TaskFailureAction? ParseTaskFailureAction(
+        Dictionary<string, object?> taskMap,
+        string taskId,
+        bool allowNestedOnFailure)
     {
         var onFailure = OptionalMap(taskMap, "onFailure");
         if (onFailure is null) return null;
@@ -117,17 +120,61 @@ public static class WorkflowYamlSerializer
             if (when is null || when.Count == 0)
                 throw new InvalidOperationException($"Workflow task '{taskId}' onFailure case requires when");
 
-            var tasks = List(caseMap, "tasks").Select(ToTask).ToList();
+            var retrySelf = ParseTaskFailureRetry(caseMap, taskId);
+            var tasks = List(caseMap, "tasks").Select(v => ToRecoveryTask(v, allowNestedOnFailure, taskId)).ToList();
             if (tasks.Count == 0)
                 throw new InvalidOperationException($"Workflow task '{taskId}' onFailure case requires at least one task");
 
-            cases.Add(new TaskFailureCase(when, tasks));
+            cases.Add(new TaskFailureCase(when, tasks, retrySelf));
         }
 
         if (cases.Count == 0)
             throw new InvalidOperationException($"Workflow task '{taskId}' onFailure requires at least one case");
 
         return new TaskFailureAction(limit, cases);
+    }
+
+    private static TaskDefinition ToRecoveryTask(object? value, bool allowNestedOnFailure, string parentTaskId)
+    {
+        var map = Map(value, "task");
+        var id = String(map, "id");
+        if (string.IsNullOrWhiteSpace(id))
+            throw new InvalidOperationException("Workflow task requires id");
+
+        var title = String(map, "title");
+        if (string.IsNullOrWhiteSpace(title))
+            throw new InvalidOperationException($"Workflow task {id} requires title");
+
+        var withMap = OptionalMap(map, "with");
+        if (withMap is not null)
+            ValidateTaskExpectations(id, withMap);
+
+        var artifacts = ParseTaskArtifacts(map);
+        var setVars = ParseTaskSetVars(map, id);
+
+        if (!allowNestedOnFailure && OptionalMap(map, "onFailure") is not null)
+        {
+            throw new InvalidOperationException(
+                $"Workflow recovery task '{id}' (declared under onFailure for '{parentTaskId}') must not declare its own onFailure; " +
+                "nested recovery is bounded to one level. Move the failing case to the enclosing task's onFailure or describe it as a sequential recovery task.");
+        }
+
+        var onFailure = ParseTaskFailureAction(map, id, allowNestedOnFailure: false);
+
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars, onFailure);
+    }
+
+    private static bool ParseTaskFailureRetry(Dictionary<string, object?> caseMap, string taskId)
+    {
+        if (!caseMap.TryGetValue("retry", out var retryValue) || retryValue is null)
+            return false;
+
+        var retryStr = retryValue.ToString()?.Trim() ?? "";
+        if (string.Equals(retryStr, "self", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        throw new InvalidOperationException(
+            $"Workflow task '{taskId}' onFailure case 'retry' value must be 'self' (got '{retryStr}')");
     }
 
     private static Dictionary<string, string>? ParseTaskSetVars(Dictionary<string, object?> taskMap, string taskId)
@@ -273,16 +320,13 @@ public static class WorkflowYamlSerializer
         var repairTask = map.TryGetValue("repairTask", out var repairTaskValue) && repairTaskValue is not null
             ? ToTask(repairTaskValue)
             : null;
-        var verifyTask = map.TryGetValue("verifyTask", out var verifyTaskValue) && verifyTaskValue is not null
-            ? ToTask(verifyTaskValue)
-            : null;
 
         return new CheckDefinition(
             name,
             title,
             NullIfEmpty(String(map, "uses")),
             JsonElementMap(OptionalMap(map, "with")),
-            repairLimit > 0 && repairTask is not null ? new CheckFailureAction(new CheckFailureRepair(repairLimit, repairTask, verifyTask)) : null);
+            repairLimit > 0 && repairTask is not null ? new CheckFailureAction(new CheckFailureRepair(repairLimit, repairTask)) : null);
     }
 
     private static Dictionary<string, object?> ToStageMap(StageDefinition stage)
@@ -321,10 +365,15 @@ public static class WorkflowYamlSerializer
         map["onFailure"] = new Dictionary<string, object?>
         {
             ["limit"] = onFailure.Limit,
-            ["cases"] = onFailure.Cases.Select(c => (object?)new Dictionary<string, object?>
+            ["cases"] = onFailure.Cases.Select(c =>
             {
-                ["when"] = ObjectMap(c.When),
-                ["tasks"] = c.Tasks.Select(ToTaskMap).ToList(),
+                var caseMap = new Dictionary<string, object?>
+                {
+                    ["when"] = ObjectMap(c.When),
+                    ["tasks"] = c.Tasks.Select(ToTaskMap).ToList(),
+                };
+                if (c.RetrySelf) caseMap["retry"] = "self";
+                return (object?)caseMap;
             }).ToList(),
         };
     }
@@ -355,8 +404,6 @@ public static class WorkflowYamlSerializer
         {
             map["repairLimit"] = repair.Limit;
             map["repairTask"] = ToTaskMap(repair.Task);
-            if (repair.VerifyTask is not null)
-                map["verifyTask"] = ToTaskMap(repair.VerifyTask);
         }
         return map;
     }

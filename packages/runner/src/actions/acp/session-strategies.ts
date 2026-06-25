@@ -533,9 +533,10 @@ function appendAgentText(existing: string, addition: string): string {
 export async function satisfyExpectations(context: ActionContext, result: AcpSessionResult, runPrompt: AcpPromptRunner): Promise<TaskArtifactExpectation> {
   let verification = await verifyExpectations(context)
   if (verification.satisfied) return verification
+  if (verification.failIfMatches.length > 0) return verification
 
   const repairLimit = expectationRepairLimit(context)
-  for (let attempt = 1; attempt <= repairLimit && !verification.satisfied; attempt += 1) {
+  for (let attempt = 1; attempt <= repairLimit && !verification.satisfied && verification.failIfMatches.length === 0; attempt += 1) {
     const repair = await runPrompt(buildExpectationRepairPrompt(verification, attempt, repairLimit))
     result.activityCount = (result.activityCount ?? 0) + repair.activityCount
     if (repair.usageText) result.text = appendAgentText(result.text, repair.usageText)

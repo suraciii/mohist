@@ -185,13 +185,13 @@ describe('IssueCard - no legacy startEligibility fields rendered', () => {
 
 describe('IssueCard - workflow profile chip', () => {
   it('renders the workflow profile chip when the read model carries a selection', () => {
-    const issue = makeIssue({ workflowProfileId: 'mohist/pr' })
+    const issue = makeIssue({ workflowProfileId: 'mohist/github-pr' })
     renderCard(issue)
 
     const chip = screen.getByTestId('issue-card-workflow-profile')
     expect(chip).toBeInTheDocument()
-    expect(chip).toHaveTextContent('mohist/pr')
-    expect(chip.dataset.workflowProfile).toBe('mohist/pr')
+    expect(chip).toHaveTextContent('mohist/github-pr')
+    expect(chip.dataset.workflowProfile).toBe('mohist/github-pr')
   })
 
   it('renders the inherited default profile when the read model has no selection', () => {

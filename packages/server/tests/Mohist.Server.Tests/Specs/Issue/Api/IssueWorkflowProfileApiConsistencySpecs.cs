@@ -60,22 +60,22 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 title = "PR profile issue",
                 projectId = project.Id,
-                workflowProfileId = "mohist/pr",
+                workflowProfileId = "mohist/github-pr",
             });
 
-        Assert.Equal("mohist/pr", issue.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", issue.WorkflowProfileId);
 
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", detail.WorkflowProfileId);
 
         var listed = await _client.GetDataAsync<IssueDto[]>($"/api/projects/{project.Id}/issues?all=true");
         var listItem = Assert.Single(listed, i => i.Id == issue.Id);
-        Assert.Equal("mohist/pr", listItem.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", listItem.WorkflowProfileId);
 
         var profileResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         Assert.Equal(HttpStatusCode.OK, profileResponse.StatusCode);
         var profile = await profileResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("mohist/pr", profile.GetProperty("data").GetProperty("profileId").GetString());
+        Assert.Equal("mohist/github-pr", profile.GetProperty("data").GetProperty("profileId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -130,21 +130,21 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         var patched = await _client.PatchDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
-            new { workflowProfileId = "mohist/pr" });
+            new { workflowProfileId = "mohist/github-pr" });
 
-        Assert.Equal("mohist/pr", patched.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", patched.WorkflowProfileId);
 
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", detail.WorkflowProfileId);
 
         var listed = await _client.GetDataAsync<IssueDto[]>($"/api/projects/{project.Id}/issues?all=true");
         var listItem = Assert.Single(listed, i => i.Id == issue.Id);
-        Assert.Equal("mohist/pr", listItem.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", listItem.WorkflowProfileId);
 
         var profile = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         Assert.Equal(HttpStatusCode.OK, profile.StatusCode);
         var profileData = (await profile.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.Equal("mohist/pr", profileData.GetProperty("profileId").GetString());
+        Assert.Equal("mohist/github-pr", profileData.GetProperty("profileId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -155,13 +155,13 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var project = await CreateProjectAsync("wfp-patch-keep");
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues",
-            new { title = "Keep profile", projectId = project.Id, workflowProfileId = "mohist/pr" });
+            new { title = "Keep profile", projectId = project.Id, workflowProfileId = "mohist/github-pr" });
 
         var patched = await _client.PatchDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
             new { body = "Renamed body" });
 
-        Assert.Equal("mohist/pr", patched.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", patched.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -172,7 +172,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var project = await CreateProjectAsync("wfp-patch-clear");
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues",
-            new { title = "Clear profile", projectId = project.Id, workflowProfileId = "mohist/pr" });
+            new { title = "Clear profile", projectId = project.Id, workflowProfileId = "mohist/github-pr" });
 
         var patched = await _client.PatchDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
@@ -213,7 +213,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var project = await CreateProjectAsync("wfp-patch-locked");
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues",
-            new { title = "Started issue", projectId = project.Id, workflowProfileId = "mohist/pr", isDraft = false });
+            new { title = "Started issue", projectId = project.Id, workflowProfileId = "mohist/github-pr", isDraft = false });
 
         var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(
@@ -232,7 +232,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         // Selection must be unchanged after the rejected PATCH.
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", detail.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -304,14 +304,14 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         var patched = await _client.PatchDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
-            new { workflowProfileId = "mohist/pr" });
+            new { workflowProfileId = "mohist/github-pr" });
 
-        Assert.Equal("mohist/pr", patched.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", patched.WorkflowProfileId);
 
         var afterProfile = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var afterData = (await afterProfile.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         var afterVariables = afterData.GetProperty("variables");
-        Assert.Equal("mohist/pr", afterData.GetProperty("profileId").GetString());
+        Assert.Equal("mohist/github-pr", afterData.GetProperty("profileId").GetString());
         // The configured runtime overlay must survive a profile selection
         // change — PATCH workflowProfileId touches the issue aggregate's
         // selection only, not the variable bundle.
@@ -336,7 +336,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 title = "PR startup",
                 projectId = project.Id,
-                workflowProfileId = "mohist/pr",
+                workflowProfileId = "mohist/github-pr",
                 isDraft = false,
             });
 
@@ -352,9 +352,13 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         var yaml = yamlBody.GetProperty("data").GetProperty("yaml").GetString();
 
         Assert.NotNull(yaml);
-        Assert.Contains("integrate:merge-pr", yaml!, StringComparison.Ordinal);
-        Assert.Contains("mohist/merge-pull-request", yaml!, StringComparison.Ordinal);
+        Assert.Contains("id: merge-pr", yaml!, StringComparison.Ordinal);
+        Assert.Contains("mohist/merge-github-pr", yaml!, StringComparison.Ordinal);
         Assert.DoesNotContain("integrate:rebase", yaml!, StringComparison.Ordinal);
+        Assert.DoesNotContain("integrate:merge-pr", yaml!, StringComparison.Ordinal);
+        Assert.DoesNotContain("mohist/merge-pull-request", yaml!, StringComparison.Ordinal);
+        Assert.DoesNotContain("mohist/create-pull-request", yaml!, StringComparison.Ordinal);
+        Assert.Contains("open-draft-pr", yaml!, StringComparison.Ordinal);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -404,7 +408,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 title = "Endpoint agreement",
                 projectId = project.Id,
-                workflowProfileId = "mohist/pr",
+                workflowProfileId = "mohist/github-pr",
             });
 
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
@@ -415,9 +419,9 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         // GET /api/issues/:n, the list endpoint, and the workflow-profile
         // endpoint MUST all report the same effective profile id.
-        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
-        Assert.Equal("mohist/pr", listItem.WorkflowProfileId);
-        Assert.Equal("mohist/pr", profileData.GetProperty("profileId").GetString());
+        Assert.Equal("mohist/github-pr", detail.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", listItem.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", profileData.GetProperty("profileId").GetString());
 
         // hasCustomTemplate is false — the issue has no advanced override;
         // the displayed selection IS the effective profile.
@@ -437,7 +441,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 title = "Override startup",
                 projectId = project.Id,
-                workflowProfileId = "mohist/pr",
+                workflowProfileId = "mohist/github-pr",
                 isDraft = false,
             });
 
@@ -475,10 +479,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
         // does NOT rewrite the displayed profile id; it is surfaced via
         // HasCustomTemplate / TemplateSource instead.
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("mohist/pr", detail.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", detail.WorkflowProfileId);
         var profileResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var profileData = (await profileResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.Equal("mohist/pr", profileData.GetProperty("profileId").GetString());
+        Assert.Equal("mohist/github-pr", profileData.GetProperty("profileId").GetString());
         Assert.True(profileData.GetProperty("hasCustomTemplate").GetBoolean());
         Assert.Equal("custom", profileData.GetProperty("templateSource").GetString());
     }

@@ -287,6 +287,192 @@ describe("verifyExpectations", () => {
     expect(result.matched).toBe("<promise>done</promise>")
     expect(result.missingArtifactMarkers).toHaveLength(0)
   })
+
+  it("FailIf_PASSMarker_DoesNotFailTask", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "<promise>PASS</promise>")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+          failIf: "<promise>FAIL</promise>",
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(true)
+    expect(result.failIfMatches).toHaveLength(0)
+    expect(result.matched).toBe("<promise>PASS</promise>")
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+  })
+
+  it("FailIf_FAILMarker_FailsTaskWithErrorCode", async () => {
+    const dir = mkTestDir()
+    writeFileSync(
+      join(dir, "review.md"),
+      "errorCode: review-failed\nReviewing found issues.\n<promise>FAIL</promise>\n",
+    )
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+          failIf: "<promise>FAIL</promise>",
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.failIfMatches).toHaveLength(1)
+    expect(result.failIfMatches[0].marker).toBe("<promise>FAIL</promise>")
+    expect(result.failIfMatches[0].failIf).toBe("<promise>FAIL</promise>")
+    expect(result.failIfMatches[0].errorCode).toBe("review-failed")
+    expect(result.failIfMatches[0].path).toContain("review.md")
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+    expect(result.matched).toBe("<promise>FAIL</promise>")
+    expect(result.message).toContain("failIf marker matched")
+    expect(result.message).toContain("review-failed")
+  })
+
+  it("FailIf_GithubPrProfileReviewMarker_FailsTaskWithErrorCode", async () => {
+    const dir = mkTestDir()
+    writeFileSync(
+      join(dir, "review.md"),
+      "# Review Report\n\nerrorCode: review-failed\n\n<promise>FAIL</promise>\n",
+    )
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+          failIf: "<promise>FAIL</promise>",
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.matched).toBe("<promise>FAIL</promise>")
+    expect(result.failIfMatches).toHaveLength(1)
+    expect(result.failIfMatches[0]).toMatchObject({
+      marker: "<promise>FAIL</promise>",
+      failIf: "<promise>FAIL</promise>",
+      errorCode: "review-failed",
+    })
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+  })
+
+  it("FailIf_FAILMarker_NoErrorCodeInArtifact_StillFailsTask", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "<promise>FAIL</promise>")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+          failIf: "<promise>FAIL</promise>",
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.failIfMatches).toHaveLength(1)
+    expect(result.failIfMatches[0].marker).toBe("<promise>FAIL</promise>")
+    expect(result.failIfMatches[0].errorCode).toBeNull()
+    expect(result.missingArtifactMarkers).toHaveLength(0)
+  })
+
+  it("FailIf_NoMarkerMatched_DoesNotFailTask", async () => {
+    const dir = mkTestDir()
+    writeFileSync(join(dir, "review.md"), "Still drafting the review.")
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "review.md",
+          oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+          failIf: "<promise>FAIL</promise>",
+        }],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.failIfMatches).toHaveLength(0)
+    expect(result.missingArtifactMarkers).toHaveLength(1)
+  })
+
+  it("FailIf_OutputMarker_FAILMarker_FailsTaskWithErrorCode", async () => {
+    const dir = mkTestDir()
+    const agentText = "Could not finish.\nerrorCode: review-failed\n<promise>unfinished</promise>"
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+          failIf: "<promise>unfinished</promise>",
+        }],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(false)
+    expect(result.failIfMatches).toHaveLength(1)
+    expect(result.failIfMatches[0].marker).toBe("<promise>unfinished</promise>")
+    expect(result.failIfMatches[0].errorCode).toBe("review-failed")
+    expect(result.matched).toBe("<promise>unfinished</promise>")
+  })
+
+  it("FailIf_OutputMarker_DoneMarker_DoesNotFailTask", async () => {
+    const dir = mkTestDir()
+    const agentText = "All done.\n<promise>done</promise>"
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [{
+          path: "_output",
+          oneOf: ["<promise>done</promise>", "<promise>unfinished</promise>"],
+          failIf: "<promise>unfinished</promise>",
+        }],
+      },
+    }, dir), agentText)
+
+    expect(result.satisfied).toBe(true)
+    expect(result.failIfMatches).toHaveLength(0)
+    expect(result.matched).toBe("<promise>done</promise>")
+  })
+
+  it("FailIf_MultipleMarkers_AllFailIfHitsRecorded", async () => {
+    const dir = mkTestDir()
+    writeFileSync(
+      join(dir, "review.md"),
+      "errorCode: review-failed\n<promise>FAIL</promise>\n",
+    )
+
+    const result = await verifyExpectations(makeContext({
+      expect: {
+        markers: [
+          {
+            path: "review.md",
+            oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+            failIf: "<promise>FAIL</promise>",
+          },
+          {
+            path: "review.md",
+            contains: "<promise>FAIL</promise>",
+            failIf: "<promise>FAIL</promise>",
+          },
+        ],
+      },
+    }, dir))
+
+    expect(result.satisfied).toBe(false)
+    expect(result.failIfMatches).toHaveLength(2)
+    expect(result.failIfMatches.every((m) => m.errorCode === "review-failed")).toBe(true)
+  })
 })
 
 function mkTestDir(): string {

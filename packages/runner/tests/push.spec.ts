@@ -357,4 +357,91 @@ describe("mohist/push", () => {
     expect(output.pushed).toBe(true)
     expect(result.status).toBe("success")
   })
+
+  it("ForceWithLease_AppendsLeaseFlagToGitPushInvocation", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "push --force-with-lease origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ forceWithLease: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse mo/issue-99",
+      "push --force-with-lease origin mo/issue-99:master",
+    ])
+    expect(workspaceCalls(calls).some((cmd) => cmd === "push origin mo/issue-99:master")).toBe(false)
+    expect(output).toMatchObject({
+      forceWithLease: true,
+      pushed: true,
+      landedCommit: "rewritten-sha",
+      failureKind: null,
+    })
+  })
+
+  it("ForceWithLease_AcceptsTruthyStringAndRejectsAbsent", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("a-sha\n")
+        case "push --force-with-lease origin mo/issue-99:master":
+          return ok("ok\n")
+        case "push origin mo/issue-99:master":
+          return ok("ok\n")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const stringTrue = await pushAction(context({ forceWithLease: "true" }))
+    const stringTrueOutput = JSON.parse(stringTrue.output ?? "{}")
+    expect(stringTrue.status).toBe("success")
+    expect(stringTrueOutput.forceWithLease).toBe(true)
+    expect(workspaceCalls(calls)).toContain("push --force-with-lease origin mo/issue-99:master")
+
+    calls.length = 0
+    const absent = await pushAction(context({ forceWithLease: "no" }))
+    const absentOutput = JSON.parse(absent.output ?? "{}")
+    expect(absent.status).toBe("success")
+    expect(absentOutput.forceWithLease).toBe(false)
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse mo/issue-99",
+      "push origin mo/issue-99:master",
+    ])
+    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("push --force-with-lease"))).toBe(false)
+  })
+
+  it("ForceWithLease_RecordsFlagOnNonFastForwardFailure", async () => {
+    installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "push --force-with-lease origin mo/issue-99:master":
+          return fail("To https://example.com/repo.git\n ! [rejected]        mo/issue-99 -> mo/issue-99 (stale info)\nerror: failed to push some refs")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ forceWithLease: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      forceWithLease: true,
+      pushed: false,
+      failureKind: "base-moved",
+    })
+  })
 })

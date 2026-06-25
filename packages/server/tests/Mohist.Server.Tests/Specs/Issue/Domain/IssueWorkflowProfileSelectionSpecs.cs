@@ -35,17 +35,17 @@ public class IssueWorkflowProfileSelectionSpecs
     public void State_RoundTripsExplicitSelection()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "PR issue");
-        issue.ReplaceWorkflowProfile("mohist/pr");
+        issue.ReplaceWorkflowProfile("mohist/github-pr");
 
         var json = IssueStore.Serialize(issue);
         using var document = System.Text.Json.JsonDocument.Parse(json);
         Assert.True(document.RootElement.TryGetProperty("workflowProfileId", out var el));
-        Assert.Equal("mohist/pr", el.GetString());
+        Assert.Equal("mohist/github-pr", el.GetString());
 
         var reloaded = IssueStore.Deserialize(json);
 
         Assert.NotNull(reloaded);
-        Assert.Equal("mohist/pr", reloaded!.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", reloaded!.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -83,7 +83,7 @@ public class IssueWorkflowProfileSelectionSpecs
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
 
-        issue.ReplaceWorkflowProfile("mohist/pr");
+        issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
         issue.ReplaceWorkflowProfile("mohist/default");
 
@@ -98,7 +98,7 @@ public class IssueWorkflowProfileSelectionSpecs
     public void ReplaceWorkflowProfile_NullClearsSelection()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
-        issue.ReplaceWorkflowProfile("mohist/pr");
+        issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
 
         issue.ReplaceWorkflowProfile(null);
@@ -115,10 +115,10 @@ public class IssueWorkflowProfileSelectionSpecs
     public void ReplaceWorkflowProfile_SameValueIsNoOp()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Title");
-        issue.ReplaceWorkflowProfile("mohist/pr");
+        issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
 
-        issue.ReplaceWorkflowProfile("mohist/pr");
+        issue.ReplaceWorkflowProfile("mohist/github-pr");
 
         Assert.Empty(issue.PendingEvents);
     }

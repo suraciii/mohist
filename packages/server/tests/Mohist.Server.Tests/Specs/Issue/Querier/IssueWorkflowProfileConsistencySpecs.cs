@@ -93,7 +93,7 @@ public class IssueWorkflowProfileConsistencySpecs
             Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
-            WorkflowProfileId = "mohist/pr",
+            WorkflowProfileId = "mohist/github-pr",
         };
         db.Issues.Add(new IssueRow
         {
@@ -107,7 +107,7 @@ public class IssueWorkflowProfileConsistencySpecs
         var detail = await service.GetAsync(project.Id, issue.Number, project);
 
         Assert.NotNull(detail);
-        Assert.Equal("mohist/pr", detail!.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", detail!.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -134,7 +134,7 @@ public class IssueWorkflowProfileConsistencySpecs
             Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
-            WorkflowProfileId = "mohist/pr",
+            WorkflowProfileId = "mohist/github-pr",
         };
         db.Issues.Add(new IssueRow
         {
@@ -148,7 +148,7 @@ public class IssueWorkflowProfileConsistencySpecs
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
-        Assert.Equal("mohist/pr", item.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", item.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -175,7 +175,7 @@ public class IssueWorkflowProfileConsistencySpecs
             Labels = new Dictionary<string, string>(StringComparer.Ordinal),
             Priority = "p2",
             Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
-            WorkflowProfileId = "mohist/pr",
+            WorkflowProfileId = "mohist/github-pr",
         };
         db.Issues.Add(new IssueRow
         {
@@ -190,7 +190,7 @@ public class IssueWorkflowProfileConsistencySpecs
         var list = await service.ListAsync(project.Id, project);
 
         Assert.NotNull(detail);
-        Assert.Equal("mohist/pr", detail!.WorkflowProfileId);
+        Assert.Equal("mohist/github-pr", detail!.WorkflowProfileId);
         var item = Assert.Single(list);
         Assert.Equal(detail.WorkflowProfileId, item.WorkflowProfileId);
     }

@@ -31,30 +31,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
                 [new("review-passed", "Review passed", "spec/marker",
                     OnFailure: new CheckFailureAction(new CheckFailureRepair(
                         2,
-                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"),
-                        new TaskDefinition("ai-review", "AI review", "spec/review"))))])
-        ]);
-
-    private static WorkflowDefinition StageWithPrUpdateAfterReviewRepair() =>
-        new("spec/workflow", [
-            new StageDefinition("check",
-                [new("ai-review", "AI review", "spec/review")],
-                [new("review-passed", "Review passed", "spec/marker",
-                    OnFailure: new CheckFailureAction(new CheckFailureRepair(
-                        2,
-                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"),
-                        new TaskDefinition("check:update-pr", "Update PR", "spec/create-pull-request"))))])
-        ]);
-
-    private static WorkflowDefinition StageWithPrUpdateAfterMergeReadyRepair() =>
-        new("spec/workflow", [
-            new StageDefinition("check",
-                [new("ai-review", "AI review", "spec/review")],
-                [new("merge-ready", "Merge ready", "spec/merge-ready",
-                    OnFailure: new CheckFailureAction(new CheckFailureRepair(
-                        1,
-                        new TaskDefinition("rebase-onto-base", "Rebase onto base branch", "spec/rebase"),
-                        new TaskDefinition("check:update-pr", "Update PR", "spec/create-pull-request"))))])
+                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"))))])
         ]);
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -88,7 +65,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task CheckFails_RepairTaskRunsVerifyTaskBeforeRecheck()
+    public async Task CheckFails_RepairTaskRunsThenCheckReRuns()
     {
         await StartWorkflowAsync(StageWithRepairAndVerifyCheck());
 
@@ -104,72 +81,89 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("fix-review-findings:1.1", fix.WorkId);
         await ReportAsync(r3, fix.WorkId, "completed");
 
-        var (review2, r4) = await PollWorkAnyAsync();
-        Assert.Equal("ai-review.2", review2.WorkId);
-        await ReportAsync(r4, review2.WorkId, "completed");
-
-        var (checks2, r5) = await PollWorkAnyAsync();
+        var (checks2, r4) = await PollWorkAnyAsync();
         Assert.Equal("checks", checks2.WorkType);
-        await ReportChecksPassAsync(r5, checks2, "review-passed");
+        await ReportChecksPassAsync(r4, checks2, "review-passed");
 
-        var runner = Grains.GetGrain<IRunnerGrain>(r5);
+        var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.Null(await runner.PollAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task ReviewRepair_RunsPrUpdateBeforeRecheck()
+    public async Task CheckFails_RepairTaskIsOnlyInjectedTaskBeforeRecheck()
     {
-        await StartWorkflowAsync(StageWithPrUpdateAfterReviewRepair());
+        // The check-repair path is exactly [repairTask] with no verify step.
+        // After the repair task completes, the check is re-run directly.
+        var captured = new List<string>();
+        await StartWorkflowAsync(StageWithRepairAndVerifyCheck());
 
         var (review1, r1) = await PollWorkAnyAsync();
-        Assert.Equal("ai-review.1", review1.WorkId);
+        captured.Add(review1.WorkId);
         await ReportAsync(r1, review1.WorkId, "completed");
 
         var (checks1, r2) = await PollWorkAnyAsync();
-        Assert.Equal("checks", checks1.WorkType);
+        captured.Add(checks1.WorkType);
         await ReportChecksFailAsync(r2, checks1, "review-passed", "review failed");
 
         var (fix, r3) = await PollWorkAnyAsync();
+        captured.Add(fix.WorkId);
         Assert.Equal("fix-review-findings:1.1", fix.WorkId);
         await ReportAsync(r3, fix.WorkId, "completed");
 
-        var (updatePr, r4) = await PollWorkAnyAsync();
-        Assert.Equal("check:update-pr.1", updatePr.WorkId);
-        Assert.Equal("spec/create-pull-request", updatePr.Uses);
-        await ReportAsync(r4, updatePr.WorkId, "completed");
-
-        var (checks2, _) = await PollWorkAnyAsync();
+        var (checks2, r4) = await PollWorkAnyAsync();
+        captured.Add(checks2.WorkType);
         Assert.Equal("checks", checks2.WorkType);
+        await ReportChecksPassAsync(r4, checks2, "review-passed");
+
+        // The captured sequence must be: ai-review.1 -> checks -> fix-review-findings:1.1 -> checks.
+        // No additional task (the old verify task) is injected between fix and the re-check.
+        Assert.Equal(
+            new[] { "ai-review.1", "checks", "fix-review-findings:1.1", "checks" },
+            captured);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task MergeReadyRepair_RunsPrUpdateBeforeRecheck()
+    public async Task MergeReadyRepair_DoesNotInjectPrUpdateBeforeRecheck()
     {
-        await StartWorkflowAsync(StageWithPrUpdateAfterMergeReadyRepair());
+        // Stage the same way as the historical pr-update-after-merge-ready
+        // repair, but the verify task concept is gone. After a failed
+        // merge-ready check, only the rebase repair task is injected
+        // before the checks re-run.
+        var definition = new WorkflowDefinition("spec/workflow", [
+            new StageDefinition("check",
+                [new("ai-review", "AI review", "spec/review")],
+                [new("merge-ready", "Merge ready", "spec/merge-ready",
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(
+                        1,
+                        new TaskDefinition("rebase-onto-base", "Rebase onto base branch", "spec/rebase"))))])
+        ]);
+
+        var captured = new List<string>();
+        await StartWorkflowAsync(definition);
 
         var (review, r1) = await PollWorkAnyAsync();
-        Assert.Equal("ai-review.1", review.WorkId);
+        captured.Add(review.WorkId);
         await ReportAsync(r1, review.WorkId, "completed");
 
         var (checks1, r2) = await PollWorkAnyAsync();
-        Assert.Equal("checks", checks1.WorkType);
+        captured.Add(checks1.WorkType);
         await ReportChecksFailAsync(r2, checks1, "merge-ready", "base moved");
 
         var (rebase, r3) = await PollWorkAnyAsync();
+        captured.Add(rebase.WorkId);
         Assert.Equal("rebase-onto-base:1.1", rebase.WorkId);
         await ReportAsync(r3, rebase.WorkId, "completed");
 
-        var (updatePr, r4) = await PollWorkAnyAsync();
-        Assert.Equal("check:update-pr.1", updatePr.WorkId);
-        Assert.Equal("spec/create-pull-request", updatePr.Uses);
-        await ReportAsync(r4, updatePr.WorkId, "completed");
-
         var (checks2, _) = await PollWorkAnyAsync();
-        Assert.Equal("checks", checks2.WorkType);
+        captured.Add(checks2.WorkType);
+
+        Assert.Equal(
+            new[] { "ai-review.1", "checks", "rebase-onto-base:1.1", "checks" },
+            captured);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
