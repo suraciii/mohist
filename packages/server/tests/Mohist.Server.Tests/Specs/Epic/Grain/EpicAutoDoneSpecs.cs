@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -264,14 +265,22 @@ public class EpicAutoDoneSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ResumeAsync_IdleEpicThrowsResumeRequiresPaused()
+    public async Task ResumeAsync_IdleEpicIsIdempotentNoOpAtGrainBoundary()
     {
+        // T-002 enforces idempotency at the grain boundary: the
+        // domain still throws EpicResumeRequiresPausedException for
+        // an idle epic, but the grain catches it and returns the
+        // current DTO so API/CLI callers see a stable 200.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         var grain = CreateGrain(database.Factory, "project_1:epic_1");
 
-        await Assert.ThrowsAsync<EpicResumeRequiresPausedException>(
-            () => grain.ResumeAsync());
+        var result = await grain.ResumeAsync();
+
+        Assert.Equal("idle", result.Status);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("idle", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -315,7 +324,7 @@ public class EpicAutoDoneSpecs
     }
 
     private static EpicGrain CreateGrain(TestDbContextFactory factory, string grainKey) =>
-        new(factory, null!)
+        new(factory, null!, NullLogger<EpicGrain>.Instance)
         {
             GrainKeyForTest = grainKey,
         };

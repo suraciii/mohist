@@ -86,3 +86,128 @@
 - `EpicProgress.IsTerminal` short-circuits on `Done`/`Closed` strings — adding
   `Running` does not change its semantics. `Idle` and `Running` are both
   non-terminal; the existing `IsCompleted`/`IsTerminal(string)` helpers apply.
+
+## Codebase Patterns (T-002)
+
+- **Grain constructor DI**: when adding a new constructor argument
+  (e.g. `ILogger<T>`), every test that constructs the grain directly
+  (sqlite-backed unit specs) needs a matching argument — typically
+  `NullLogger<T>.Instance` (imported from
+  `Microsoft.Extensions.Logging.Abstractions`). Affected tests in this
+  change: `EpicAutoDoneSpecs`, `EpicAutoDoneHandlerSpecs`,
+  `EpicReconciliationServiceSpecs`. Existing `null!` for `IGrainFactory`
+  stayed.
+- **Grain instance property vs static helper class**: the EpicGrain
+  defines a private `GrainKey` instance property; the static helper
+  class with the same name lives in
+  `Mohist.Server.Infrastructure.Orleans.GrainKey`. Inside EpicGrain,
+  reference the static class with its fully qualified name
+  (`Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(...)`) to avoid
+  the local property shadowing it.
+
+## Key implementation decisions (T-002)
+
+- `EpicProgress.SelectStartableNext` promoted from `private static` to
+  `public static` so both the read-model (`EpicProgress.Build`) and
+  the grain's new `TryStartNext` share identical selection ordering
+  and cancel-skip semantics — no drift between "what the dashboard
+  says is next" and "what the grain starts".
+- `EpicGrain.ReconcileAfterTerminalAsync()` (new grain method) is the
+  single reconcile entry point. Semantics:
+  - Terminal/paused → no-op.
+  - All linked delivered → mark done.
+  - `running` → call `TryStartNext()`.
+  - `idle` → no advance (not self-driving).
+- `EpicGrain.TryStartNext()` (new private helper):
+  - Bail if any linked issue is `in_progress` (serial slot occupied,
+    covers the failed/blocked case).
+  - `next = EpicProgress.SelectStartableNext(undelivered)`. If null
+    → no-op (running-but-idle, `nextIssueReason` computed by the
+    read model in the dashboard).
+  - Call `IIssueGrain.StartWorkAsync()` via
+    `GrainKey.Issue(next.Id)`. Exceptions are caught and logged; the
+    epic remains `running` (running-but-idle) so the next reconcile
+    retry can re-evaluate.
+- `EpicGrain.StartAsync` is now `Idle→Running + TryStartNext`; if no
+  startable issue exists, the epic is `running` (running-but-idle)
+  with no error.
+- `EpicGrain.ResumeAsync` calls `ReconcileAfterTerminalAsync()` after
+  the paused→running transition so it auto-marks done when all
+  linked issues are already delivered, or advances the next startable
+  otherwise. This replaces the old `TryAutoMarkDoneAsync` call —
+  `AutoMarkDoneIfReadyAsync` is still on the interface (T-003 will
+  keep it for the legacy `IssueWorkCompleted` path; new wiring calls
+  `ReconcileAfterTerminalAsync`).
+- Idempotency at the GRAIN boundary: `StartAsync`/`PauseAsync`/
+  `ResumeAsync` catch the four domain lifecycle exceptions
+  (`EpicStartRequiresIdleException`, `EpicPauseRequiresRunningException`,
+  `EpicResumeRequiresPausedException`, `EpicAlreadyTerminalException`)
+  and return the current DTO. The domain stays strict (throws on
+  invalid transitions); idempotency is a UX/API concern handled by
+  the grain. HTTP error mapping in T-004 still translates terminal
+  attempts to 409 `EPIC_ALREADY_TERMINAL`; pause-from-non-running
+  becomes 409 `EPIC_NOT_RUNNING`.
+- `EpicGrain.BuildLinkedIssueDtosAsync` was enriched: it now computes
+  `CanStart` / `StartBlocker` per linked issue (using
+  `Issue.CanStart(undeliveredPrereqNumbers)` and
+  `Issue.StartBlocker(...)` + `IssueStartBlockerDto.FromDomain`)
+  against the peer-set of undelivered issues. Without this, the
+  shared `SelectStartableNext` would always see `CanStart=false` and
+  return null, and `TryStartNext` would never start anything. The
+  read-model (EpicQuerier → IssueQuerier.ListAsync) was already
+  doing the equivalent for the dashboard; the grain now does the
+  same locally so the selection works.
+- The grain-to-grain call `IIssueGrain.StartWorkAsync` does NOT pass
+  a `WorkflowProjectContext` — `IssueGrain.StartWorkAsync` resolves
+  the project context itself via `IProjectGrain.GetAsync()`. The
+  existing `IssueRoutes.Lifecycle` and `IssueRoutes.WorkflowControl`
+  callers also call it with no argument. This addresses the
+  T-002 note's design Open Question Q2.
+
+## Gotchas (T-002)
+
+- `EpicProgress.SelectStartableNext` is now public; the private
+  `PriorityRank` helper inside `EpicProgress` is the same priority
+  ranking the read model uses (p0=0, ..., p4=4, other=9). Don't
+  introduce a duplicate ranking helper elsewhere.
+- The "no startable issue" test case requires the issue's
+  `IsDraft=true` so `Issue.StartBlocker(...)` returns a `Draft`
+  blocker. Without that flag, a `Backlog` issue with no
+  prerequisites is startable (`CanStart=true`).
+- Updating the `EpicGrain` constructor signature forced updates to
+  every test that constructs the grain directly. Going forward,
+  prefer `IGrainFactory` mocks over direct `new EpicGrain(...)` so
+  this doesn't repeat.
+- `BuildLinkedIssueDtosAsync`'s `undeliveredPrereqNumbers` set uses
+  `IssueStatus.Done | Cancelled` to mean "delivered-or-removed".
+  This matches the existing EpicProgress semantics: cancelled issues
+  are skipped, not undelivered-blockers.
+- `ResumeAsync_IdleEpicThrowsResumeRequiresPaused` (old behavior:
+  `EpicResumeRequiresPausedException`) was renamed to
+  `ResumeAsync_IdleEpicIsIdempotentNoOpAtGrainBoundary` and now
+  asserts the grain returns the current DTO. The domain method
+  still throws — the test changed to reflect the new boundary
+  contract.
+
+## Test coverage added (T-002)
+
+New `EpicProgressionSpecs` covers:
+- Start advances first startable; running-but-idle when none
+  startable; idempotent on already-running.
+- Reconcile-on-done advances next; on done with all complete
+  auto-marks done.
+- Reconcile-on-cancel (in-progress cancelled, slot cleared) advances
+  next.
+- Cancelled non-in-progress issue is skipped, next startable chosen.
+- Failed (blocked, still in_progress) holds the epic.
+- Paused epic does not advance on reconcile.
+- Idle epic does not advance on reconcile.
+- Terminal epic is no-op.
+- Highest-priority startable wins.
+- Reconcile swallows `StartWorkAsync` failures (epic remains
+  running-but-idle).
+- Resume advances after paused→running; idempotent on already-running.
+- Pause idempotent on already-paused; no-op on idle (grain boundary).
+
+All 18 new tests + 193 total Epic tests pass; full server suite
+(2641 tests, 10 skipped pre-existing) green.

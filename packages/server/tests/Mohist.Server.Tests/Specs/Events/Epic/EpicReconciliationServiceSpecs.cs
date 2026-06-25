@@ -377,7 +377,7 @@ public class EpicReconciliationServiceSpecs
         public IEpicGrain GetEpicGrain(string grainKey)
         {
             Calls.Add(new RecordedGrainCall(grainKey));
-            return new EpicGrain(_dbFactory, this) { GrainKeyForTest = grainKey };
+            return new EpicGrain(_dbFactory, this, NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
         }
 
         public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)

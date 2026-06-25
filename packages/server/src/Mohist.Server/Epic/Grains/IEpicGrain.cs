@@ -13,4 +13,5 @@ public interface IEpicGrain : IGrainWithStringKey
     Task<EpicDto> StartAsync();
     Task<EpicDto?> UpdateAsync(string? title, string? description, string? priority);
     Task<EpicDto?> AutoMarkDoneIfReadyAsync();
+    Task<EpicDto?> ReconcileAfterTerminalAsync();
 }
