@@ -53,6 +53,7 @@ export default defineConfig({
       '**/dist/**',
       '**/tests/a11y/**',
       '**/tests/e2e/**',
+      '**/e2e/**',
       'tests/e2e/**',
       'node_modules/**',
       'dist/**',

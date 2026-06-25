@@ -232,12 +232,12 @@ describe('useCompletionSnapshot', () => {
 
   it('returns the {completed, failed, new} shape derived from useIssues()', () => {
     useIssuesMock.mockReturnValue({
-      data: [
-        makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1) }),
-        makeIssue({ status: 'cancelled', createdAt: daysAgo(2), updatedAt: daysAgo(2) }),
-        makeIssue({ status: 'in_progress', createdAt: daysAgo(1), updatedAt: daysAgo(1) }),
-      ],
-    })
+        data: [
+          makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1) }),
+          makeIssue({ status: 'cancelled', createdAt: daysAgo(3), updatedAt: daysAgo(2) }),
+          makeIssue({ status: 'in_progress', createdAt: daysAgo(1), updatedAt: daysAgo(1) }),
+        ],
+      })
 
     const { result } = renderHook(() => useCompletionSnapshot())
     expect(result.current).toEqual({ completed: 1, failed: 1, new: 3 })

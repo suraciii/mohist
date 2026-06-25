@@ -50,11 +50,11 @@ public class InfoCollectorVerboseSpecs
                 "---\nname: mohist\ndescription: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue 或 epic，查看项目状态或日志，或任何涉及 Mohist issue/epic/workflow 的操作时使用。旧 Node CLI 已移除。\n---\n");
 
             var skills = new SkillAssetService(RealFileSystem.Instance, assetRoot);
-            var collector = new InfoCollector(
+            var collector = new InfoVerboseCollector(
                 new FakeFileSystem(),
                 new NoopCommandExecutor(),
-                BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
                 new MockEnvironmentVariableProvider(),
+                BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
                 skills);
 
             var result = await collector.GetSkillsVerboseAsync();
@@ -93,11 +93,11 @@ public class InfoCollectorVerboseSpecs
 
             var skills = new SkillAssetService(RealFileSystem.Instance, assetRoot);
 
-            var collector = new InfoCollector(
+            var collector = new InfoVerboseCollector(
                 new FakeFileSystem(),
                 new NoopCommandExecutor(),
-                BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
                 new MockEnvironmentVariableProvider(),
+                BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
                 skills);
 
             var result = await collector.GetSkillsVerboseAsync();
@@ -120,11 +120,11 @@ public class InfoCollectorVerboseSpecs
     public async Task Verbose_Skills_NoSkillService_ReturnsEmptyButResolved()
     {
         var fs = new FakeFileSystem();
-        var collector = new InfoCollector(
+        var collector = new InfoVerboseCollector(
             fs,
             new NoopCommandExecutor(),
-            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
             new MockEnvironmentVariableProvider(),
+            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
             skillAssetService: null);
 
         var result = await collector.GetSkillsVerboseAsync();
@@ -146,11 +146,7 @@ public class InfoCollectorVerboseSpecs
         var commands = new RecordingCommandExecutor();
         commands.Queue("git", 0, "git@github.com:suraciii/mohist.git\n");
 
-        var collector = new InfoCollector(
-            fs,
-            commands,
-            BuildApi(fs, commands, HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            var collector = BuildVerboseCollector(fs, commands);
 
         var result = await collector.GetGitRemoteVerboseAsync(sourcePath);
 
@@ -171,11 +167,7 @@ public class InfoCollectorVerboseSpecs
         var commands = new RecordingCommandExecutor();
         commands.Queue("git", 1, "fatal: No such remote 'origin'\n");
 
-        var collector = new InfoCollector(
-            fs,
-            commands,
-            BuildApi(fs, commands, HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            var collector = BuildVerboseCollector(fs, commands);
 
         var result = await collector.GetGitRemoteVerboseAsync(sourcePath);
 
@@ -192,11 +184,7 @@ public class InfoCollectorVerboseSpecs
         var fs = new FakeFileSystem();
         fs.AddDirectory(sourcePath);
 
-        var collector = new InfoCollector(
-            fs,
-            new NoopCommandExecutor(),
-            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            var collector = BuildVerboseCollector(fs, new NoopCommandExecutor());
 
         var result = await collector.GetGitRemoteVerboseAsync(sourcePath);
 
@@ -211,11 +199,7 @@ public class InfoCollectorVerboseSpecs
     {
         var fs = new FakeFileSystem();
 
-        var collector = new InfoCollector(
-            fs,
-            new NoopCommandExecutor(),
-            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            var collector = BuildVerboseCollector(fs, new NoopCommandExecutor());
 
         var result = await collector.GetGitRemoteVerboseAsync("/does/not/exist");
 
@@ -233,7 +217,7 @@ public class InfoCollectorVerboseSpecs
         var api = BuildApi(fs: new FakeFileSystem(), commands, HttpStatusCode.OK,
             """{ "success": true, "data": { "command": "opencode", "models": ["m1", "m2", "m3"] } }""");
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
 
         var result = await collector.GetOpencodeRuntimeVerboseAsync();
 
@@ -252,7 +236,7 @@ public class InfoCollectorVerboseSpecs
         commands.Queue("opencode", 1, "");
         var api = BuildApi(fs: new FakeFileSystem(), commands, HttpStatusCode.InternalServerError, "{}");
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
 
         var result = await collector.GetOpencodeRuntimeVerboseAsync();
 
@@ -271,7 +255,7 @@ public class InfoCollectorVerboseSpecs
         commands.Queue("opencode", 0, "v9.9.9\n");
         var api = BuildApi(fs: new FakeFileSystem(), commands, HttpStatusCode.OK, "{}");
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, env);
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, env, api);
 
         var result = await collector.GetOpencodeRuntimeVerboseAsync();
 
@@ -289,7 +273,7 @@ public class InfoCollectorVerboseSpecs
         var commands = new RecordingCommandExecutor();
         var api = BuildApi(fs: new FakeFileSystem(), commands, HttpStatusCode.OK, "{}");
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, env);
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, env, api);
 
         var result = await collector.GetOpencodeRuntimeVerboseAsync();
 
@@ -309,11 +293,11 @@ public class InfoCollectorVerboseSpecs
             """);
         var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
 
-        var collector = new InfoCollector(
+        var collector = new InfoVerboseCollector(
             new FakeFileSystem(),
             commands,
-            BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            new MockEnvironmentVariableProvider(),
+            BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}"));
 
         var result = await collector.GetEnvVarsVerboseAsync(runner, systemdAvailable: true);
 
@@ -332,11 +316,11 @@ public class InfoCollectorVerboseSpecs
         env["RUNNER_ID"] = "fallback-runner";
         env["SERVER_URL"] = "http://example.test:1234";
 
-        var collector = new InfoCollector(
+        var collector = new InfoVerboseCollector(
             new FakeFileSystem(),
             new NoopCommandExecutor(),
-            BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
-            env);
+            env,
+            BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"));
 
         var runner = new InfoService(null, null);
         var result = await collector.GetEnvVarsVerboseAsync(runner, systemdAvailable: false);
@@ -353,11 +337,11 @@ public class InfoCollectorVerboseSpecs
         var commands = new RecordingCommandExecutor();
         commands.Queue("node", 0, "v22.5.0\n");
 
-        var collector = new InfoCollector(
+        var collector = new InfoVerboseCollector(
             new FakeFileSystem(),
             commands,
-            BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            new MockEnvironmentVariableProvider(),
+            BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}"));
 
         var result = await collector.GetOsRuntimeVerboseAsync();
 
@@ -375,11 +359,11 @@ public class InfoCollectorVerboseSpecs
         var commands = new RecordingCommandExecutor();
         commands.Queue("node", 1, "");
 
-        var collector = new InfoCollector(
+        var collector = new InfoVerboseCollector(
             new FakeFileSystem(),
             commands,
-            BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+            new MockEnvironmentVariableProvider(),
+            BuildApi(new FakeFileSystem(), commands, HttpStatusCode.OK, "{}"));
 
         var result = await collector.GetOsRuntimeVerboseAsync();
 
@@ -409,7 +393,36 @@ public class InfoCollectorVerboseSpecs
         var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
         var project = new InfoProject("proj_1", "mohist-local", 1, 0);
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
+
+        var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
+
+        Assert.Equal(2, result.ActiveWorkflows);
+        Assert.Equal(8, result.MaxConcurrentWorkflows);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task Verbose_Capacity_FallsBackToServerMaxWhenUnitAndEnvMissing()
+    {
+        var commands = new RecordingCommandExecutor();
+        commands.Queue("systemctl", 0, "Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456\n");
+        var handler = new MultiResponseHandler(new[]
+        {
+            (HttpStatusCode.OK, """{ "success": true, "data": { "capacity": { "active": 2, "max": 8 } } }"""),
+        });
+        var api = new MohistCliApi(
+            new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") },
+            TextWriter.Null,
+            TextWriter.Null,
+            new FakeFileSystem(),
+            commands);
+
+        var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
+        var project = new InfoProject("proj_1", "mohist-local", 1, 0);
+
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
 
         var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
 
@@ -430,7 +443,7 @@ public class InfoCollectorVerboseSpecs
 
         var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
 
         var result = await collector.GetCapacityVerboseAsync(runner, project: null, systemdAvailable: true);
 
@@ -452,7 +465,7 @@ public class InfoCollectorVerboseSpecs
         var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
         var project = new InfoProject("proj_1", "mohist-local", 1, 0);
 
-        var collector = new InfoCollector(new FakeFileSystem(), commands, api, new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
 
         var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
 
@@ -480,8 +493,8 @@ public class InfoCollectorVerboseSpecs
         commands.Queue("du", 0, "2M\t/data/.mohist/logs\n");
         commands.Queue("du", 0, "100K\t/data/.mohist/worktrees\n");
 
-        var collector = new InfoCollector(fs, commands, BuildApi(fs, commands, HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(fs, commands, new MockEnvironmentVariableProvider(),
+            BuildApi(fs, commands, HttpStatusCode.OK, "{}"));
 
         var data = new InfoDataDir(dataDir, "12M");
         var result = await collector.GetDiskUsageVerboseAsync(data);
@@ -506,9 +519,8 @@ public class InfoCollectorVerboseSpecs
     public async Task Verbose_DiskUsage_MissingDataDir_ReturnsEmpty()
     {
         var fs = new FakeFileSystem();
-        var collector = new InfoCollector(fs, new NoopCommandExecutor(),
-            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(fs, new NoopCommandExecutor(), new MockEnvironmentVariableProvider(),
+            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"));
 
         var result = await collector.GetDiskUsageVerboseAsync(new InfoDataDir("/missing/.mohist", null));
 
@@ -525,9 +537,8 @@ public class InfoCollectorVerboseSpecs
         fs.AddDirectory(dataDir);
         fs.AddDirectory(Path.Combine(dataDir, "projects"));
 
-        var collector = new InfoCollector(fs, new NoopCommandExecutor(),
-            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
-            new MockEnvironmentVariableProvider());
+        var collector = new InfoVerboseCollector(fs, new NoopCommandExecutor(), new MockEnvironmentVariableProvider(),
+            BuildApi(fs, new NoopCommandExecutor(), HttpStatusCode.OK, "{}"));
 
         var result = await collector.GetDiskUsageVerboseAsync(new InfoDataDir(dataDir, "5M"));
 
@@ -681,7 +692,8 @@ public class InfoCollectorVerboseSpecs
             DiskUsage: new InfoVerboseDiskUsage([new InfoVerboseDiskCategory("projects", "10M", 3)], Resolved: true));
 
         var writer = new StringWriter();
-        collector.RenderVerbose(writer, verbose);
+        var renderer = new InfoRenderer();
+        renderer.RenderVerbose(writer, verbose);
         var text = writer.ToString();
 
         Assert.Contains("Skills:", text);
@@ -712,7 +724,8 @@ public class InfoCollectorVerboseSpecs
             DiskUsage: new InfoVerboseDiskUsage([], Resolved: true));
 
         var writer = new StringWriter();
-        collector.RenderVerbose(writer, verbose);
+        var renderer = new InfoRenderer();
+        renderer.RenderVerbose(writer, verbose);
         var text = writer.ToString();
 
         Assert.Contains("<unknown>", text);
@@ -727,7 +740,7 @@ public class InfoCollectorVerboseSpecs
             Environment=KEY1=value1 KEY2=value2 KEY3="quoted value with spaces" PATH=/usr/bin
             """;
 
-        var result = InfoCollector.ParseSystemdEnvironment(output);
+        var result = SystemdUnitParser.ParseSystemdEnvironment(output);
 
         Assert.Equal("value1", result["KEY1"]);
         Assert.Equal("value2", result["KEY2"]);
@@ -746,7 +759,7 @@ public class InfoCollectorVerboseSpecs
             Environment=FOO=bar
             """;
 
-        var result = InfoCollector.ParseSystemdEnvironment(output);
+        var result = SystemdUnitParser.ParseSystemdEnvironment(output);
 
         Assert.Single(result);
         Assert.Equal("bar", result["FOO"]);
@@ -757,8 +770,8 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildOriginUrl_NoUrlAndNotGitRepo_ReturnsUnknown()
     {
-        var result = InfoCollector.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: false));
-        Assert.Equal(InfoCollector.Unknown, result);
+        var result = InfoRenderer.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: false));
+        Assert.Equal(SystemdUnitParser.Unknown, result);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -766,8 +779,8 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildOriginUrl_NoUrlButIsGitRepo_ReturnsNotAGitRepo()
     {
-        var result = InfoCollector.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: true));
-        Assert.Equal(InfoCollector.NotAGitRepo, result);
+        var result = InfoRenderer.BuildOriginUrl(new InfoVerboseGitRemote(null, IsGitRepo: true));
+        Assert.Equal(SystemdUnitParser.NotAGitRepo, result);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -775,7 +788,7 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildSkillLines_OrdersByName()
     {
-        var lines = InfoCollector.BuildSkillLines(new InfoVerboseSkills(
+        var lines = InfoRenderer.BuildSkillLines(new InfoVerboseSkills(
         [
             new("zeta", "/path/zeta"),
             new("alpha", "/path/alpha"),
@@ -791,7 +804,7 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildEnvVarLines_FormatsNameEqualsValue()
     {
-        var lines = InfoCollector.BuildEnvVarLines([
+        var lines = InfoRenderer.BuildEnvVarLines([
             new("B", "2"),
             new("A", "1"),
         ]).ToArray();
@@ -806,7 +819,7 @@ public class InfoCollectorVerboseSpecs
     [Fact]
     public void BuildDiskCategoryLines_FormatsSizeAndFileCount()
     {
-        var lines = InfoCollector.BuildDiskCategoryLines([
+        var lines = InfoRenderer.BuildDiskCategoryLines([
             new("logs", "2M", 4),
             new("projects", "10M", null),
             new("worktrees", null, null),
@@ -831,6 +844,15 @@ public class InfoCollectorVerboseSpecs
             TextWriter.Null,
             fs,
             commands);
+    }
+
+    private static InfoVerboseCollector BuildVerboseCollector(IFileSystem fs, ICommandExecutor commands)
+    {
+        return new InfoVerboseCollector(
+            fs,
+            commands,
+            new MockEnvironmentVariableProvider(),
+            BuildApi(fs, commands, HttpStatusCode.OK, "{}"));
     }
 
     private static MohistCliApi BuildMultiResponseApi(IFileSystem fs, ICommandExecutor commands, (HttpStatusCode Status, string Body)[] responses)

@@ -205,7 +205,7 @@ describe("mohist/acp-agent", () => {
   it("ThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     const fixture = createFixture("liveness-non-message")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 }))
+    const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
@@ -214,7 +214,7 @@ describe("mohist/acp-agent", () => {
   it("SharedAcpThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     const fixture = createSharedFixture("liveness-non-message")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 }))
+    const result = await acpAgentAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)

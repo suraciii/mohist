@@ -361,9 +361,16 @@ public sealed class SkillsContentSpecs
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(_environment);
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(output, error, _files, sp.GetRequiredService<ICommandExecutor>()));
+        services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), _files, _environment));
+        services.AddSingleton(new RuntimeConsistencyValidator(new HttpClient(), new SystemCommandExecutor(), _files, _environment, output));
+        services.AddSingleton(new ServiceReadinessProbe(new HttpClient(), output));
+        services.AddSingleton(new RunnerRefreshVerifier(new HttpClient(), new SystemCommandExecutor(), _files));
+        services.AddSingleton(new UpdateOutcomeReporter(new HttpClient(), output));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton(assets ?? BuildDefaultService());
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
         services.AddSingleton<SkillInstallService>(_ => new SkillInstallService(
             _.GetRequiredService<SkillAssetService>(),
             _.GetRequiredService<IFileSystem>(),

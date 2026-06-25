@@ -225,7 +225,7 @@ public sealed class UpdateInstallSyncSpecs
             new StringWriter(),
             files,
             commands);
-        var updater = new SourceCodeUpdater(
+        var updater = SourceCodeUpdater.CreateWithDefaults(
             new StringWriter(),
             new StringWriter(),
             installer,

@@ -368,10 +368,10 @@ describe("WorkExecutor branch-stability boundary checks", () => {
         return { action: "verify" as const, workspacePath: workDir }
       },
       async ensure(work: WorkItem, signal: AbortSignal) {
-        // T-002 contract: the executor's start-boundary precheck
-        // routes through `ensure`, which mirrors the real
-        // `WorkspaceManager.ensure` by planning first and then
-        // dispatching to `materialize` or `verify` accordingly.
+        // The executor's start-boundary precheck calls `ensure`
+        // (issue #181). `ensure` delegates to `planResolution` and
+        // then to `materialize` / `verify` based on the action, so
+        // leaf counters only track the final materialize/verify call.
         const plan = await this.planResolution(work, signal)
         return plan.action === "materialize"
           ? await this.materialize(work, signal)
@@ -439,12 +439,12 @@ describe("WorkExecutor branch-stability boundary checks", () => {
       async planResolution() {
         return { action: "verify" as const, workspacePath: workDir }
       },
-      async ensure() {
+      async ensure(_work: WorkItem, _signal: AbortSignal) {
         // T-002 contract: the executor's start-boundary precheck
         // routes through `ensure`, which calls `planResolution` and
         // dispatches to `verify` here because the workspace is
         // already bound.
-        return await this.verify()
+        return await this.verify(_work, _signal)
       },
     }
     const executor = new WorkExecutor(

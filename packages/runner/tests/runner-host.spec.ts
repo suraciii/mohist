@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 
 const connect = vi.fn()
@@ -17,6 +17,8 @@ const probeLiveness = vi.fn(async () => true)
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
 
 const forceReconnect = vi.fn(async () => undefined)
+const createSharedAcpConnection = vi.fn()
+const shutdownSharedAcpConnection = vi.fn()
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -56,15 +58,20 @@ vi.mock("../src/runtime/acp-connection.js", () => ({
     has() { return false }
     delete() {}
   },
-  createSharedAcpConnection: vi.fn(async () => ({
+  createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
+}))
+
+beforeEach(() => {
+  createSharedAcpConnection.mockResolvedValue({
     connection: { prompt: vi.fn(), cancel: vi.fn(), newSession: vi.fn(), resumeSession: vi.fn(), setSessionConfigOption: vi.fn(), closeSession: vi.fn() },
     processPid: 99999,
     setSessionHandlers,
     clearSessionHandlers,
-    shutdown: acpShutdown,
-  })),
-}))
-
+    shutdown: shutdownSharedAcpConnection,
+  })
+  acpShutdown.mockResolvedValue(undefined)
+  shutdownSharedAcpConnection.mockResolvedValue(undefined)
+})
 describe("RunnerHost", () => {
   it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
     vi.clearAllMocks()
