@@ -117,7 +117,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadTemplate_Priority4_FallsBackToProjectDefault()
+    public async Task LoadTemplate_ProjectDefaultCustomTemplate_UsesEffectiveSystemProfile()
     {
         var runId = "wr_default01";
         await SeedAsync(projectId: "proj4", issueId: "issue_4", runId: runId,
@@ -129,7 +129,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Equal(5, result.Structure.Stages.Count);
+        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -195,17 +196,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadTemplate_IssuePrProfile_ProjectDefaultIsDifferent_SystemFallsBackToIssueProfile()
+    public async Task LoadTemplate_IssuePrProfile_ProjectDefaultIsDifferent_UsesIssueProfile()
     {
-        // Project default points at mohist/default. Issue has explicit
-        // mohist/pr selection. Neither issue-level override (Template /
-        // SourceTemplateId) is present. The resolution order is:
-        //   1. issue custom YAML  → none
-        //   2. issue SourceTemplateId → none
-        //   3. project DefaultTemplateId → mohist/default
-        // Step 3 wins here because the project's default template is a known
-        // system template (mohist/default). The new effective-profile
-        // fallback only fires when no override AND no project default apply.
         var runId = "wr_issue_pr_proj_default";
         await SeedAsync(projectId: "proj-issue-pr-proj-default", issueId: "issue_pr_proj", runId: runId,
             issueTemplateJson: null,
@@ -216,7 +208,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        Assert.Contains("system-template:mohist/pr", result.Id ?? "");
+        var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
+        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:open-pr");
+        Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

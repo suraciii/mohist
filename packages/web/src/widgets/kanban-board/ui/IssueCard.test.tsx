@@ -194,10 +194,13 @@ describe('IssueCard - workflow profile chip', () => {
     expect(chip.dataset.workflowProfile).toBe('mohist/pr')
   })
 
-  it('does not render a profile chip when the issue has no selection', () => {
+  it('renders the inherited default profile when the read model has no selection', () => {
     const issue = makeIssue({ workflowProfileId: null })
     renderCard(issue)
 
-    expect(screen.queryByTestId('issue-card-workflow-profile')).not.toBeInTheDocument()
+    const chip = screen.getByTestId('issue-card-workflow-profile')
+    expect(chip).toBeInTheDocument()
+    expect(chip).toHaveTextContent('mohist/default')
+    expect(chip.dataset.workflowProfile).toBe('mohist/default')
   })
 })

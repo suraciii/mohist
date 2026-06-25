@@ -21,9 +21,8 @@ namespace Mohist.Server.Workflow.Services;
 /// Template resolution precedence (highest first):
 ///   1. Issue custom YAML (issue_workflow_profile.Template)
 ///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
-///   3. Project default template (project_workflow_profile.DefaultTemplateId)
-///   4. Issue's effective workflow profile (issue.WorkflowProfileId →
-///      project default → mohist/default), resolved through the centralized
+///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
+///      project default template → mohist/default), resolved through the centralized
 ///      <see cref="EffectiveWorkflowProfileResolver"/> so the running
 ///      workflow agrees with the profile id projected by every read surface.
 /// </summary>
@@ -83,18 +82,6 @@ public class WorkflowProfileManager : IScopedService
             var template = await LoadTemplateReferenceAsync(db, context.ProjectId, issueProfile.SourceTemplateId);
             if (template is not null)
                 return template;
-        }
-
-        if (!string.IsNullOrWhiteSpace(context.ProjectId))
-        {
-            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
-            if (projectProfile is not null && !string.IsNullOrWhiteSpace(projectProfile.DefaultTemplateId))
-            {
-                var template = await LoadTemplateReferenceAsync(db, context.ProjectId, projectProfile.DefaultTemplateId);
-                if (template is not null)
-                    return template;
-            }
         }
 
         var effectiveProfileId = await ResolveEffectiveProfileIdAsync(db, context);
