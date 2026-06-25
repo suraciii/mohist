@@ -84,12 +84,21 @@ public class WorkflowProfileManager : IScopedService
                 return template;
         }
 
-        var effectiveProfileId = await ResolveEffectiveProfileIdAsync(db, context);
-        var effectiveDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(effectiveProfileId);
+        var profileContext = await ResolveEffectiveProfileContextAsync(db, context);
+        if (string.IsNullOrWhiteSpace(profileContext.IssueSelection)
+            && !string.IsNullOrWhiteSpace(profileContext.ProjectDefaultId)
+            && !string.IsNullOrWhiteSpace(context.ProjectId))
+        {
+            var projectDefault = await LoadTemplateReferenceAsync(db, context.ProjectId, profileContext.ProjectDefaultId);
+            if (projectDefault is not null)
+                return projectDefault;
+        }
+
+        var effectiveDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(profileContext.EffectiveProfileId);
         if (effectiveDefinition is not null)
         {
             return ResolvedTemplate.FromDefinition(
-                $"system-template:{effectiveProfileId}",
+                $"system-template:{profileContext.EffectiveProfileId}",
                 effectiveDefinition);
         }
 
@@ -98,7 +107,7 @@ public class WorkflowProfileManager : IScopedService
             ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId));
     }
 
-    private async Task<string> ResolveEffectiveProfileIdAsync(MohistDbContext db, RunContext context)
+    private async Task<EffectiveProfileContext> ResolveEffectiveProfileContextAsync(MohistDbContext db, RunContext context)
     {
         string? issueSelection = null;
         if (!string.IsNullOrWhiteSpace(context.IssueId))
@@ -117,8 +126,16 @@ public class WorkflowProfileManager : IScopedService
             projectDefaultId = projectProfile?.DefaultTemplateId;
         }
 
-        return _effectiveProfileResolver.Resolve(issueSelection, projectDefaultId);
+        return new EffectiveProfileContext(
+            issueSelection,
+            projectDefaultId,
+            _effectiveProfileResolver.Resolve(issueSelection, projectDefaultId));
     }
+
+    private sealed record EffectiveProfileContext(
+        string? IssueSelection,
+        string? ProjectDefaultId,
+        string EffectiveProfileId);
 
     private async Task<VariableBundle> ResolveConfiguredVariablesAsync(string runId)
     {

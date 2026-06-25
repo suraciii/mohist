@@ -117,7 +117,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task LoadTemplate_ProjectDefaultCustomTemplate_UsesEffectiveSystemProfile()
+    public async Task LoadTemplate_ProjectDefaultCustomTemplate_NoIssueSelection_UsesProjectDefault()
     {
         var runId = "wr_default01";
         await SeedAsync(projectId: "proj4", issueId: "issue_4", runId: runId,
@@ -129,8 +129,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/default", result.Id ?? "");
-        Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
+        Assert.Contains("project-template", result.Id ?? "");
+        Assert.Equal(5, result.Structure.Stages.Count);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
