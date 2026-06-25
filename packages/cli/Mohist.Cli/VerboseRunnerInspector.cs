@@ -75,7 +75,7 @@ internal sealed class VerboseRunnerInspector
     {
         int? maxFromUnit = null;
         int? maxFromEnv = null;
-        int? active = null;
+        RunnerCapacity? serverCapacity = null;
         var envSource = unitEnv ?? await TryGetRunnerUnitEnvironmentAsync(systemdAvailable, CancellationToken.None);
 
         if (runner.Status is { State: "active" } && envSource is not null
@@ -91,12 +91,12 @@ internal sealed class VerboseRunnerInspector
             maxFromEnv = maxEnvParsed;
 
         if (project is not null && !string.IsNullOrWhiteSpace(project.Id))
-            active = await TryGetActiveCapacityAsync(project.Id!);
+            serverCapacity = await TryGetServerCapacityAsync(project.Id!);
 
-        return new InfoVerboseCapacity(active, maxFromUnit ?? maxFromEnv);
+        return new InfoVerboseCapacity(serverCapacity?.Active, maxFromUnit ?? serverCapacity?.Max ?? maxFromEnv);
     }
 
-    private async Task<int?> TryGetActiveCapacityAsync(string projectId)
+    private async Task<RunnerCapacity?> TryGetServerCapacityAsync(string projectId)
     {
         try
         {
@@ -109,13 +109,20 @@ internal sealed class VerboseRunnerInspector
             if (stream.Length == 0)
                 return null;
             var node = await System.Text.Json.Nodes.JsonNode.ParseAsync(stream, cancellationToken: cts.Token);
-            return node?["data"]?["capacity"]?["active"]?.GetValue<int?>();
+            var capacity = node?["data"]?["capacity"];
+            if (capacity is null)
+                return null;
+            return new RunnerCapacity(
+                capacity["active"]?.GetValue<int?>(),
+                capacity["max"]?.GetValue<int?>());
         }
         catch
         {
             return null;
         }
     }
+
+    private sealed record RunnerCapacity(int? Active, int? Max);
 
     private static readonly string[] WatchedEnvVarNames =
     {

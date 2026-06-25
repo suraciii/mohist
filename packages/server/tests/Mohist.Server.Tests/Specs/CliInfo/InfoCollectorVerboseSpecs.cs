@@ -404,6 +404,35 @@ public class InfoCollectorVerboseSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public async Task Verbose_Capacity_FallsBackToServerMaxWhenUnitAndEnvMissing()
+    {
+        var commands = new RecordingCommandExecutor();
+        commands.Queue("systemctl", 0, "Environment=RUNNER_ID=r1 SERVER_URL=http://localhost:3456\n");
+        var handler = new MultiResponseHandler(new[]
+        {
+            (HttpStatusCode.OK, """{ "success": true, "data": { "capacity": { "active": 2, "max": 8 } } }"""),
+        });
+        var api = new MohistCliApi(
+            new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") },
+            TextWriter.Null,
+            TextWriter.Null,
+            new FakeFileSystem(),
+            commands);
+
+        var runner = new InfoService(new InfoServiceStatus("active", 1234, "5m"), null);
+        var project = new InfoProject("proj_1", "mohist-local", 1, 0);
+
+        var collector = new InfoVerboseCollector(new FakeFileSystem(), commands, new MockEnvironmentVariableProvider(), api);
+
+        var result = await collector.GetCapacityVerboseAsync(runner, project, systemdAvailable: true);
+
+        Assert.Equal(2, result.ActiveWorkflows);
+        Assert.Equal(8, result.MaxConcurrentWorkflows);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public async Task Verbose_Capacity_NoProject_FallsBackToUnitMax()
     {
         var commands = new RecordingCommandExecutor();
