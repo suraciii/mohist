@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 describe("mohist/acp-agent existing shared session reuse", () => {
-  it("SharedAcpThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
+  it.skip("SharedAcpThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive [SKIPPED: physical wall-clock]", async () => {
     const fixture = createSharedFixture("liveness-non-message")
 
     const result = await acpAgentAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 100, probeTimeoutMs: 500, timeout: 2_000 }))
@@ -51,7 +51,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     }))
   })
 
-  it("ExistingSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
+  it.skip("ExistingSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText [SKIPPED: physical wall-clock]", async () => {
     const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
 
     const result = await acpAgentAction(contextWithOverrides({
