@@ -134,12 +134,15 @@ internal static class MohistCliCommands
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
         services.AddSingleton(http);
         services.AddSingleton<IServiceInstaller>(sp => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor) : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor));
+        services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), commandExecutor, fileSystem, environment));
         services.AddSingleton(new RuntimeConsistencyValidator(http, commandExecutor, fileSystem, environment, output));
         services.AddSingleton(new ServiceReadinessProbe(http, output));
         services.AddSingleton(new RunnerRefreshVerifier(http, commandExecutor, fileSystem));
+        services.AddSingleton(new UpdateOutcomeReporter(http, output));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
         services.AddSingleton<InfoRenderer>();
         var provider = services.BuildServiceProvider();

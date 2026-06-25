@@ -24,7 +24,7 @@ internal sealed partial class SourceCodeUpdater
         _out.WriteLine(StageLabels.PrepareRunner);
         context.RecordStage(StageLabels.PrepareRunner, "querying runner state");
 
-        context.RunnerInstalled = context.DryRun || await _systemd.IsRunnerInstalledAsync(_unitDir);
+        context.RunnerInstalled = context.DryRun || await _operations.IsRunnerInstalledAsync();
         if (!context.RunnerInstalled)
         {
             var reason = "runner service is not installed";
@@ -37,7 +37,7 @@ internal sealed partial class SourceCodeUpdater
 
         if (!context.DryRun)
         {
-            context.RunnerWasRunning = await _systemd.IsRunnerRunningAsync(token);
+            context.RunnerWasRunning = await _operations.IsRunnerRunningAsync(token);
         }
         else
         {
@@ -53,7 +53,7 @@ internal sealed partial class SourceCodeUpdater
         }
 
         context.RecordStage(StageLabels.PrepareRunner, "stopping runner for server update");
-        var stop = await _systemd.StopRunnerAsync(new ServiceCommandOptions(context.DryRun, null, 100, false));
+        var stop = await _operations.StopRunnerAsync(context.DryRun);
         if (stop != 0)
         {
             context.RecordStage(StageLabels.PrepareRunner, "stop failed");
@@ -74,14 +74,14 @@ internal sealed partial class SourceCodeUpdater
 
         if (context.DryRun)
         {
-            _out.WriteLine($"  cd {ResolveRepoRoot(context.RepoRoot)} && dotnet build Mohist.sln");
-            _out.WriteLine($"  {RestartCommandLine("server")} (if installed)");
+            _out.WriteLine($"  cd {_operations.ResolveRepoRoot(context.RepoRoot)} && dotnet build Mohist.sln");
+            _out.WriteLine($"  {UpdateOperations.RestartCommandLine("server")} (if installed)");
             context.RecordStage(StageLabels.UpdateServer, "complete (dry run)");
             return 0;
         }
 
-        var root = ResolveRepoRoot(context.RepoRoot);
-        var exitCode = await BuildAndRestartServerAsync(root, token);
+        var root = _operations.ResolveRepoRoot(context.RepoRoot);
+        var exitCode = await _operations.BuildAndRestartServerAsync(root, token);
         if (exitCode != 0)
         {
             context.RecordStage(StageLabels.UpdateServer, "failed");
@@ -128,11 +128,10 @@ internal sealed partial class SourceCodeUpdater
 
         if (!context.DryRun)
         {
-            var root = ResolveRepoRoot(context.RepoRoot);
-            var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("npm", ["run", "build", "-w", "packages/runner"], root);
+            var root = _operations.ResolveRepoRoot(context.RepoRoot);
+            var build = await _operations.BuildRunnerAsync(root);
             if (build != 0)
             {
-                WriteCommandFailureOutput(buildOut, buildErr);
                 context.RecordStage(StageLabels.RestoreRunner, "runner build failed");
                 context.UnavailableCapability ??= "Runner unavailable";
                 return build;
@@ -141,11 +140,11 @@ internal sealed partial class SourceCodeUpdater
         }
         else
         {
-            var root = ResolveRepoRoot(context.RepoRoot);
+            var root = _operations.ResolveRepoRoot(context.RepoRoot);
             _out.WriteLine($"  cd {root} && npm run build -w packages/runner");
         }
 
-        var start = await _systemd.StartRunnerAsync(new ServiceCommandOptions(context.DryRun, null, 100, false));
+        var start = await _operations.StartRunnerAsync(context.DryRun);
         if (start != 0)
         {
             context.RecordStage(StageLabels.RestoreRunner, "failed to start");

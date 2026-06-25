@@ -24,7 +24,7 @@ internal sealed partial class InfoCollector
     private readonly ICommandExecutor _commandExecutor;
     private readonly IEnvironmentVariableProvider _environment;
     private readonly MohistCliApi _api;
-    private readonly SkillAssetService? _skillAssetService;
+    private readonly InfoVerboseCollector _verboseCollector;
     private readonly Func<string?> _getServerBaseAddress;
     private readonly Func<string?> _getRunnerServerUrlOverride;
     private readonly Func<bool>? _isSystemdAvailableOverride;
@@ -77,7 +77,7 @@ internal sealed partial class InfoCollector
         _commandExecutor = commandExecutor;
         _environment = environment;
         _api = api;
-        _skillAssetService = options.SkillAssetService;
+        _verboseCollector = new InfoVerboseCollector(fileSystem, commandExecutor, environment, api, options.SkillAssetService);
         _getServerBaseAddress = () => null;
         _getRunnerServerUrlOverride = () => null;
         _isSystemdAvailableOverride = options.IsSystemdAvailable;
@@ -122,7 +122,7 @@ internal sealed partial class InfoCollector
         InfoVerbose? verboseInfo = null;
         if (verbose)
         {
-            verboseInfo = await CollectVerboseAsync(server, runner, project, dataDir, systemdAvailable);
+            verboseInfo = await _verboseCollector.CollectVerboseAsync(server, runner, project, dataDir, systemdAvailable);
         }
 
         return new InfoResult(
@@ -152,10 +152,6 @@ internal sealed partial class InfoCollector
             },
         };
     }
-
-
-    private static bool IsWatchedEnvVar(string name) =>
-    WatchedEnvVarNames.Contains(name, StringComparer.Ordinal);
 
     internal async Task<InfoCli> GetCliAsync()
     {

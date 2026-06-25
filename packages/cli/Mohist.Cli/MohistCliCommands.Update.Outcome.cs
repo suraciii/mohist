@@ -44,15 +44,7 @@ internal sealed partial class SourceCodeUpdater
             {
                 Content = JsonContent.Create(payload, options: CliOutcomeJson.Options),
             };
-            using var response = await _http.SendAsync(request, postCts.Token);
-            if (!response.IsSuccessStatusCode)
-            {
-                _out.WriteLine($"Could not persist update outcome to server (HTTP {(int)response.StatusCode}). The CLI terminal output above is the authoritative result.");
-                return false;
-            }
-
-            _out.WriteLine("Update outcome persisted to server.");
-            return true;
+            return await _outcomeReporter.PostAsync(request, postCts.Token);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {

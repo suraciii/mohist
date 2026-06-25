@@ -205,10 +205,7 @@ describe("mohist/acp-agent", () => {
   it("ThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     const fixture = createFixture("liveness-non-message")
 
-    // The fixture paces updates ~20ms apart; use a quiet threshold
-    // well above that so the assertion holds even when setTimeout
-    // drift widens the gaps under heavy parallel load.
-    const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 200, probeTimeoutMs: 500, timeout: 2_000 }))
+    const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
@@ -217,7 +214,7 @@ describe("mohist/acp-agent", () => {
   it("SharedAcpThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     const fixture = createSharedFixture("liveness-non-message")
 
-    const result = await acpAgentAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 200, probeTimeoutMs: 500, timeout: 2_000 }))
+    const result = await acpAgentAction(fixture.context({ prompt: "long task", session: "build", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
 
     expect(result.status).toBe("success")
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)

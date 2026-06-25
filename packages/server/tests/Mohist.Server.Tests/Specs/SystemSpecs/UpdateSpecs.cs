@@ -516,7 +516,10 @@ public class UpdateSpecs
             files,
             environment);
 
-        Assert.Equal(new Uri("http://127.0.0.1:3456"), updater.ServerBaseAddress);
+        var httpField = typeof(RuntimeConsistencyValidator)
+            .GetField("_http", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var http = Assert.IsType<HttpClient>(httpField!.GetValue(updater.Validator));
+        Assert.Equal(new Uri("http://127.0.0.1:3456"), http.BaseAddress);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

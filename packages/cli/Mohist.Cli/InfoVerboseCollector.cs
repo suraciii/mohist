@@ -3,8 +3,30 @@ using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-internal sealed partial class InfoCollector
+internal sealed class InfoVerboseCollector
 {
+    private static readonly TimeSpan CollectorTimeout = TimeSpan.FromSeconds(2);
+
+    private readonly IFileSystem _fileSystem;
+    private readonly ICommandExecutor _commandExecutor;
+    private readonly IEnvironmentVariableProvider _environment;
+    private readonly MohistCliApi _api;
+    private readonly SkillAssetService? _skillAssetService;
+
+    public InfoVerboseCollector(
+        IFileSystem fileSystem,
+        ICommandExecutor commandExecutor,
+        IEnvironmentVariableProvider environment,
+        MohistCliApi api,
+        SkillAssetService? skillAssetService = null)
+    {
+        _fileSystem = fileSystem;
+        _commandExecutor = commandExecutor;
+        _environment = environment;
+        _api = api;
+        _skillAssetService = skillAssetService;
+    }
+
     internal async Task<InfoVerbose> CollectVerboseAsync(
         InfoService server,
         InfoService runner,
@@ -16,19 +38,19 @@ internal sealed partial class InfoCollector
         var isGitRepo = (sourcePath is not null) && (server.Source?.CommitShort is not null || runner.Source?.CommitShort is not null);
 
         using var sharedCts = new CancellationTokenSource(CollectorTimeout);
-        var unitEnvTask = SafeAsync(() => TryGetRunnerUnitEnvironmentAsync(systemdAvailable, sharedCts.Token));
+        var unitEnvTask = InfoCollector.SafeAsync(() => TryGetRunnerUnitEnvironmentAsync(systemdAvailable, sharedCts.Token));
 
-        var skillsTask = SafeAsync(() => GetSkillsVerboseAsync());
-        var gitRemoteTask = SafeAsync(() => GetGitRemoteVerboseAsync(sourcePath));
-        var opencodeTask = SafeAsync(GetOpencodeRuntimeVerboseAsync);
-        var osRuntimeTask = SafeAsync(GetOsRuntimeVerboseAsync);
-        var diskTask = SafeAsync(() => GetDiskUsageVerboseAsync(dataDir));
+        var skillsTask = InfoCollector.SafeAsync(() => GetSkillsVerboseAsync());
+        var gitRemoteTask = InfoCollector.SafeAsync(() => GetGitRemoteVerboseAsync(sourcePath));
+        var opencodeTask = InfoCollector.SafeAsync(GetOpencodeRuntimeVerboseAsync);
+        var osRuntimeTask = InfoCollector.SafeAsync(GetOsRuntimeVerboseAsync);
+        var diskTask = InfoCollector.SafeAsync(() => GetDiskUsageVerboseAsync(dataDir));
 
         await Task.WhenAll(skillsTask, gitRemoteTask, opencodeTask, osRuntimeTask, diskTask, unitEnvTask);
         var unitEnv = await unitEnvTask;
 
-        var envVarsTask = SafeAsync(() => GetEnvVarsVerboseAsync(runner, systemdAvailable, unitEnv));
-        var capacityTask = SafeAsync(() => GetCapacityVerboseAsync(runner, project, systemdAvailable, unitEnv));
+        var envVarsTask = InfoCollector.SafeAsync(() => GetEnvVarsVerboseAsync(runner, systemdAvailable, unitEnv));
+        var capacityTask = InfoCollector.SafeAsync(() => GetCapacityVerboseAsync(runner, project, systemdAvailable, unitEnv));
         await Task.WhenAll(envVarsTask, capacityTask);
 
         return new InfoVerbose(
@@ -194,7 +216,7 @@ internal sealed partial class InfoCollector
         {
             foreach (var kvp in envSource)
             {
-                if (IsWatchedEnvVar(kvp.Key))
+                if (WatchedEnvVarNames.Contains(kvp.Key, StringComparer.Ordinal))
                     collected[kvp.Key] = kvp.Value;
             }
         }
@@ -398,4 +420,33 @@ internal sealed partial class InfoCollector
         "RUNNER_ID",
         "SERVER_URL",
     };
+
+    private async Task<string?> ComputeDiskUsageAsync(string path, CancellationToken ct)
+    {
+        try
+        {
+            var (exit, stdout, _) = await WithTimeout(
+                _commandExecutor.ExecuteAsync("du", ["-sh", path]),
+                ct);
+            if (exit == 0 && !string.IsNullOrWhiteSpace(stdout))
+            {
+                var firstLine = stdout.Split('\n').FirstOrDefault()?.Trim();
+                if (!string.IsNullOrWhiteSpace(firstLine))
+                {
+                    var parts = firstLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                    return parts.Length > 0 ? parts[0] : firstLine;
+                }
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<T> WithTimeout<T>(Task<T> task, CancellationToken ct)
+    {
+        return await InfoCollector.WithTimeout(task, ct);
+    }
 }

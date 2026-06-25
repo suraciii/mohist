@@ -780,9 +780,12 @@ public class InfoCommandRegistrationSpecs
             sp.GetRequiredService<HttpClient>(),
             sp.GetRequiredService<ICommandExecutor>(),
             sp.GetRequiredService<IFileSystem>()));
+        services.AddSingleton<UpdateOperations>(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IEnvironmentVariableProvider>()));
+        services.AddSingleton<UpdateOutcomeReporter>(sp => new UpdateOutcomeReporter(sp.GetRequiredService<HttpClient>(), TextWriter.Null));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
         services.AddSingleton<InfoRenderer>();
         services.AddSingleton<InfoRenderer>();
@@ -828,9 +831,12 @@ public class InfoCommandRegistrationSpecs
             sp.GetRequiredService<HttpClient>(),
             sp.GetRequiredService<ICommandExecutor>(),
             sp.GetRequiredService<IFileSystem>()));
+        services.AddSingleton<UpdateOperations>(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IEnvironmentVariableProvider>()));
+        services.AddSingleton<UpdateOutcomeReporter>(sp => new UpdateOutcomeReporter(sp.GetRequiredService<HttpClient>(), TextWriter.Null));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
         services.AddSingleton<InfoRenderer>();
         services.AddSingleton<InfoRenderer>();
