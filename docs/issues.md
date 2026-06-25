@@ -24,7 +24,7 @@ mo issue create "Refactor auth module" --body-file ./issue-body.md
 cat ./my-issue.md | mo issue create "My issue" --body-stdin
 
 # 指定优先级和标签
-mo issue create "Critical fix" --priority p0 --label bug --label urgent
+mo issue create "Critical fix" --priority p0 --label kind=bug
 
 # 指定 workflow profile
 mo issue create "Implement search" --workflow-profile mohist/default
@@ -226,7 +226,7 @@ Web UI 上有 Archive 页。
 mo issue update 42 --title "New title"
 mo issue update 42 --body-file ./new-body.md
 mo issue update 42 --priority p1
-mo issue update 42 --label bug --label critical
+mo issue update 42 --label kind=bug --label area=web
 ```
 
 启动后的 issue 改 body 要谨慎——AI 已经基于旧 body 在工作。

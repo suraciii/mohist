@@ -29,22 +29,7 @@ public class LabelCatalogServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, "Label")]
     [Fact]
-    public async Task ListAsync_ReturnsSystemDefinitionsForProjectWithNoUserRows()
-    {
-        var service = CreateService();
-        var projectId = $"proj-{Guid.NewGuid():N}";
-
-        var definitions = await service.ListAsync(projectId);
-
-        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == LabelOrigin.System);
-        Assert.Contains(definitions, d => d.Key == "refactor"
-            && d.Description.Contains("without changing observable behavior", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task ListAsync_MergesSystemAndUserDefinitions()
+    public async Task ListAsync_ReturnsOnlyUserDefinitionsForProject()
     {
         var service = CreateService();
         var projectId = $"proj-{Guid.NewGuid():N}";
@@ -56,9 +41,7 @@ public class LabelCatalogServiceSpecs
 
         var definitions = await service.ListAsync(projectId);
 
-        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == LabelOrigin.System);
-        Assert.Contains(definitions, d => d.Key == "module" && d.Origin == LabelOrigin.User);
-        var module = definitions.First(d => d.Key == "module");
+        var module = Assert.Single(definitions, d => d.Key == "module");
         Assert.Equal("Classifies the subsystem an issue touches", module.Description);
         Assert.NotNull(module.SupportedValues);
         Assert.Contains("auth", module.SupportedValues);
@@ -68,7 +51,20 @@ public class LabelCatalogServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, "Label")]
     [Fact]
-    public async Task CreateAsync_WithValidData_PersistsAndReturnsUserOrigin()
+    public async Task ListAsync_ReturnsEmptyForProjectWithNoDefinitions()
+    {
+        var service = CreateService();
+        var projectId = $"proj-{Guid.NewGuid():N}";
+
+        var definitions = await service.ListAsync(projectId);
+
+        Assert.Empty(definitions);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, "Label")]
+    [Fact]
+    public async Task CreateAsync_WithValidData_PersistsAndReturnsDefinition()
     {
         var service = CreateService();
         var projectId = $"proj-{Guid.NewGuid():N}";
@@ -80,33 +76,11 @@ public class LabelCatalogServiceSpecs
         Assert.NotNull(result.Definition);
         Assert.Equal("module", result.Definition.Key);
         Assert.Equal("Classifies the subsystem an issue touches", result.Definition.Description);
-        Assert.Equal(LabelOrigin.User, result.Definition.Origin);
         Assert.NotNull(result.Definition.SupportedValues);
         Assert.Equal(2, result.Definition.SupportedValues.Count);
 
         var definitions = await service.ListAsync(projectId);
-        Assert.Contains(definitions, d => d.Key == "module" && d.Origin == LabelOrigin.User);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task CreateAsync_WithSystemKey_RejectsWithError()
-    {
-        var service = CreateService();
-        var projectId = $"proj-{Guid.NewGuid():N}";
-
-        var result = await service.CreateAsync(projectId, "refactor",
-            "Some custom description");
-
-        Assert.NotNull(result.Error);
-        Assert.Contains("reserved", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(result.Definition);
-
-        var definitions = await service.ListAsync(projectId);
-        var refactorDef = definitions.First(d => d.Key == "refactor");
-        Assert.Equal(LabelOrigin.System, refactorDef.Origin);
-        Assert.DoesNotContain(definitions, d => d.Key == "refactor" && d.Origin == LabelOrigin.User);
+        Assert.Contains(definitions, d => d.Key == "module");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -216,30 +190,9 @@ public class LabelCatalogServiceSpecs
         Assert.Null(result.Error);
         Assert.NotNull(result.Definition);
         Assert.Equal("Updated description", result.Definition.Description);
-        Assert.Equal(LabelOrigin.User, result.Definition.Origin);
         Assert.NotNull(result.Definition.SupportedValues);
         Assert.Single(result.Definition.SupportedValues);
         Assert.Equal("data", result.Definition.SupportedValues[0]);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task UpdateAsync_SystemKey_RejectsAsImmutable()
-    {
-        var service = CreateService();
-        var projectId = $"proj-{Guid.NewGuid():N}";
-
-        var result = await service.UpdateAsync(projectId, "refactor",
-            "Modified description");
-
-        Assert.NotNull(result.Error);
-        Assert.Contains("immutable", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(result.Definition);
-
-        var definitions = await service.ListAsync(projectId);
-        var refactorDef = definitions.First(d => d.Key == "refactor");
-        Assert.Contains("without changing observable behavior", refactorDef.Description, StringComparison.OrdinalIgnoreCase);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -273,23 +226,6 @@ public class LabelCatalogServiceSpecs
 
         var definitions = await service.ListAsync(projectId);
         Assert.DoesNotContain(definitions, d => d.Key == "module");
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task DeleteAsync_SystemKey_RejectsAsImmutable()
-    {
-        var service = CreateService();
-        var projectId = $"proj-{Guid.NewGuid():N}";
-
-        var result = await service.DeleteAsync(projectId, "refactor");
-
-        Assert.NotNull(result.Error);
-        Assert.Contains("immutable", result.Error, StringComparison.OrdinalIgnoreCase);
-
-        var definitions = await service.ListAsync(projectId);
-        Assert.Contains(definitions, d => d.Key == "refactor");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

@@ -33,7 +33,6 @@ public class MigratedDomainServicesRegistrationSpecs
         yield return new object[] { typeof(ProjectQuerier), ServiceLifetime.Singleton };
         yield return new object[] { typeof(ProjectRefResolver), ServiceLifetime.Singleton };
         yield return new object[] { typeof(IssueRepositoryResolver), ServiceLifetime.Singleton };
-        yield return new object[] { typeof(SystemLabelDefinitions), ServiceLifetime.Singleton };
         yield return new object[] { typeof(IssueIdentityResolver), ServiceLifetime.Scoped };
         yield return new object[] { typeof(IssueQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(AgentQuerier), ServiceLifetime.Scoped };

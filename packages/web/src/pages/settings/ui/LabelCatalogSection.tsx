@@ -104,11 +104,9 @@ function LabelDefinitionRow({
   onDelete: () => void
   isDeleting: boolean
 }) {
-  const isSystem = definition.origin === 'system'
   return (
     <CardSection
       data-testid={`label-catalog-row-${definition.key}`}
-      data-label-origin={definition.origin}
       className="space-y-2 p-3"
     >
       {isEditing ? (
@@ -193,16 +191,6 @@ function LabelDefinitionRow({
               >
                 {definition.key}
               </span>
-              <span
-                data-testid={`label-catalog-origin-${definition.key}`}
-                className={
-                  isSystem
-                    ? 'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-foreground border border-border'
-                    : 'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200'
-                }
-              >
-                {definition.origin}
-              </span>
             </div>
             <p
               className="text-sm text-foreground"
@@ -228,31 +216,27 @@ function LabelDefinitionRow({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {!isSystem && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onStartEdit}
-                className="min-h-11 px-3 py-2 text-xs"
-                data-testid={`label-catalog-edit-button-${definition.key}`}
-              >
-                <PencilIcon />
-                Edit
-              </Button>
-            )}
-            {!isSystem && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onDelete}
-                disabled={isDeleting}
-                className="min-h-11 px-3 py-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-50"
-                data-testid={`label-catalog-delete-button-${definition.key}`}
-              >
-                <Trash2Icon />
-                Delete
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onStartEdit}
+              className="min-h-11 px-3 py-2 text-xs"
+              data-testid={`label-catalog-edit-button-${definition.key}`}
+            >
+              <PencilIcon />
+              Edit
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              disabled={isDeleting}
+              className="min-h-11 px-3 py-2 text-xs text-red-700 hover:text-red-800 hover:bg-red-50"
+              data-testid={`label-catalog-delete-button-${definition.key}`}
+            >
+              <Trash2Icon />
+              Delete
+            </Button>
           </div>
         </div>
       )}
@@ -308,7 +292,6 @@ export function LabelCatalogSection() {
   }
 
   function startEdit(definition: LabelDefinition) {
-    if (definition.origin === 'system') return
     setEditingKey(definition.key)
     setEditDraft(draftFromDefinition(definition))
     setEditError(null)

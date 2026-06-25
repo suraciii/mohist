@@ -13,25 +13,20 @@ public class LabelCatalogService : IScopedService
         new(@"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly SystemLabelDefinitions _systemDefinitions;
 
-    public LabelCatalogService(
-        IDbContextFactory<MohistDbContext> dbFactory,
-        SystemLabelDefinitions systemDefinitions)
+    public LabelCatalogService(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        _systemDefinitions = systemDefinitions;
     }
 
     public async Task<IReadOnlyList<LabelDefinition>> ListAsync(string projectId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var userRows = await db.LabelDefinitions.AsNoTracking()
+        var rows = await db.LabelDefinitions.AsNoTracking()
             .Where(r => r.ProjectId == projectId)
             .ToListAsync();
 
-        var userDefs = userRows.Select(ToDefinition).ToList();
-        return MergeDefinitions(userDefs);
+        return rows.Select(ToDefinition).ToList();
     }
 
     public async Task<LabelCreateResult> CreateAsync(
@@ -43,10 +38,6 @@ public class LabelCatalogService : IScopedService
         var validationError = ValidateInput(key, description, supportedValues);
         if (validationError is not null)
             return new LabelCreateResult(Error: validationError);
-
-        var systemKeys = GetSystemKeySet();
-        if (systemKeys.Contains(key))
-            return new LabelCreateResult(Error: $"Key '{key}' is reserved as a system definition and cannot be created.");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -91,10 +82,6 @@ public class LabelCatalogService : IScopedService
         if (validationError is not null)
             return new LabelUpdateResult(Error: validationError);
 
-        var systemKeys = GetSystemKeySet();
-        if (systemKeys.Contains(key))
-            return new LabelUpdateResult(Error: $"System definition '{key}' is immutable and cannot be modified.");
-
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var row = await db.LabelDefinitions
@@ -112,10 +99,6 @@ public class LabelCatalogService : IScopedService
 
     public async Task<LabelDeleteResult> DeleteAsync(string projectId, string key)
     {
-        var systemKeys = GetSystemKeySet();
-        if (systemKeys.Contains(key))
-            return new LabelDeleteResult(Error: $"System definition '{key}' is immutable and cannot be removed.");
-
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var row = await db.LabelDefinitions
@@ -129,36 +112,11 @@ public class LabelCatalogService : IScopedService
         return new LabelDeleteResult(Error: null);
     }
 
-    private IReadOnlyList<LabelDefinition> MergeDefinitions(IReadOnlyList<LabelDefinition> userDefinitions)
-    {
-        var result = new List<LabelDefinition>();
-        var keys = GetSystemKeySet();
-        foreach (var sysDef in _systemDefinitions.All)
-            result.Add(sysDef);
-
-        foreach (var userDef in userDefinitions)
-        {
-            if (keys.Add(userDef.Key))
-                result.Add(userDef);
-        }
-
-        return result;
-    }
-
-    private HashSet<string> GetSystemKeySet()
-    {
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var def in _systemDefinitions.All)
-            keys.Add(def.Key);
-        return keys;
-    }
-
     private static LabelDefinition ToDefinition(LabelDefinitionRow row)
     {
         return new LabelDefinition(
             Key: row.Key,
             Description: row.Description,
-            Origin: LabelOrigin.User,
             SupportedValues: DeserializeSupportedValues(row.SupportedValuesJson));
     }
 
