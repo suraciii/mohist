@@ -763,7 +763,7 @@ public class SystemUpdateServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task RecordCliOutcomeAsync_RejectsJobIdMismatchWithTerminalExistingJob()
+    public async Task RecordCliOutcomeAsync_NewOutcomeReplacesPriorTerminalJob()
     {
         var store = new InMemoryUpdateStore();
         var now = DateTimeOffset.UtcNow;
@@ -791,16 +791,19 @@ public class SystemUpdateServiceSpecs
             new RecordingCommandRunner(),
             new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
-            JobId: "cli-attacker",
+        var response = await service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-1",
             Status: "succeeded",
             Stage: "Verifying workflow runtime",
             Outcome: "succeeded",
-            SourceHead: "newhash")));
+            SourceHead: "newhash"));
 
-        Assert.Contains("other-job-terminal", ex.Message);
+        Assert.Equal("cli-job-1", response.JobId);
+        Assert.Equal("succeeded", response.Status);
+
         var latest = await store.GetLatestAsync();
-        Assert.Equal("other-job-terminal", latest!.JobId);
+        Assert.Equal("cli-job-1", latest!.JobId);
+        Assert.Equal("succeeded", latest.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
