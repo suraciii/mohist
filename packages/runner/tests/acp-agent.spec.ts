@@ -37,8 +37,8 @@ describe("mohist/acp-agent", () => {
 
     await acpAgentAction(fixture.context({ prompt: "do the work", model: "openai/gpt-4.1" }))
 
-    expect(fixture.agent.calls.find((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model" && entry.value === "openai/gpt-4.1")).toBeTruthy()
-    expect(fixture.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption")).toBeLessThan(fixture.agent.calls.findIndex((entry) => entry.event === "prompt"))
+    expect(fixture.agent.calls.find((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-4.1")).toBeTruthy()
+    expect(fixture.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel")).toBeLessThan(fixture.agent.calls.findIndex((entry) => entry.event === "prompt"))
   })
 
   it("SessionConfigModelFails_ModelConfigured_FallsBackToUnstableSetSessionModel", async () => {
@@ -66,7 +66,7 @@ describe("mohist/acp-agent", () => {
       body: expect.objectContaining({ agentSessionId: "fake-session-1" }),
     }))
     expect(fixture.timeline.findIndex((entry) => entry.event === "newSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession"))
-    expect(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "setSessionConfigOption"))
+    expect(fixture.timeline.findIndex((entry) => entry.event === "attachWorkflowAgentSession")).toBeLessThan(fixture.timeline.findIndex((entry) => entry.event === "unstable_setSessionModel"))
   })
 
   it("PermissionRequestHasAllowOption_AgentRequestsPermission_SelectsAllowOption", async () => {
@@ -387,7 +387,7 @@ describe("mohist/acp-agent", () => {
     }, undefined, shared.context()))
 
     expect(result.status).toBe("success")
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model" && entry.value === "openai/gpt-5.5")
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-5.5")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
@@ -419,7 +419,7 @@ describe("mohist/acp-agent", () => {
       sessionName: "shared-session",
       body: expect.objectContaining({ agentSessionId: "replacement-session-1", model: "openai/gpt-5.5" }),
     }))
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.sessionId === "replacement-session-1" && entry.value === "openai/gpt-5.5")
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "replacement-session-1" && entry.modelId === "openai/gpt-5.5")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "replacement-session-1")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
@@ -1424,6 +1424,7 @@ class FakeAcpAgent {
         return { configOptions: [] }
       },
       async unstable_setSessionModel(params) {
+        self.timeline?.push({ event: "unstable_setSessionModel" })
         self.calls.push({ event: "unstable_setSessionModel", ...params })
         if (self.scenario === "model-config-fails") throw new Error("set model unsupported")
         return {}
@@ -1722,6 +1723,10 @@ class FakeSharedAcpAgent {
       async setSessionConfigOption(params) {
         self.calls.push({ event: "setSessionConfigOption", ...params })
         return { configOptions: [] }
+      },
+      async unstable_setSessionModel(params) {
+        self.calls.push({ event: "unstable_setSessionModel", ...params })
+        return {}
       },
       async prompt(params) {
         self.calls.push({ event: "prompt", sessionId: params.sessionId, text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })

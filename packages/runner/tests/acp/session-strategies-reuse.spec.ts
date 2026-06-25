@@ -86,7 +86,7 @@ describe("mohist/acp-agent existing shared session reuse", () => {
     }, undefined, shared.context()))
 
     expect(result.status).toBe("success")
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.configId === "model" && entry.value === "openai/gpt-5.5")
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "openai/gpt-5.5")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
@@ -118,9 +118,31 @@ describe("mohist/acp-agent existing shared session reuse", () => {
       sessionName: "shared-session",
       body: expect.objectContaining({ agentSessionId: "replacement-session-1", model: "openai/gpt-5.5" }),
     }))
-    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "setSessionConfigOption" && entry.sessionId === "replacement-session-1" && entry.value === "openai/gpt-5.5")
+    const setModelIndex = shared.agent.calls.findIndex((entry) => entry.event === "unstable_setSessionModel" && entry.sessionId === "replacement-session-1" && entry.modelId === "openai/gpt-5.5")
     const promptIndex = shared.agent.calls.findIndex((entry) => entry.event === "prompt" && entry.sessionId === "replacement-session-1")
     expect(setModelIndex).toBeGreaterThanOrEqual(0)
     expect(setModelIndex).toBeLessThan(promptIndex)
+  })
+
+  it("ExistingSharedSessionSameModelDifferentVariant_StartsFreshSessionDeliversNewVariant", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", {
+      cachedModel: "anthropic/claude-sonnet-4-5/max",
+      newSessionId: "variant-flip-session-1",
+      sessionRecord: { acpSessionId: "shared-session-1", model: "anthropic/claude-sonnet-4-5/max" },
+    })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "switch shared session variant",
+      session: "shared-session",
+      agent: { model: "anthropic/claude-sonnet-4-5", variant: "high" },
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
+    expect(shared.agent.calls.some((entry) => entry.event === "newSession")).toBe(true)
+    expect(shared.agent.calls.some((entry) => entry.event === "unstable_setSessionModel" && entry.modelId === "anthropic/claude-sonnet-4-5/high")).toBe(true)
   })
 })
