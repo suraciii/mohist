@@ -179,20 +179,12 @@ internal sealed partial class TableRenderer
                 _out.WriteLine($"  observed:   (detached at {evidence.ObservedRef})");
             }
         }
-        else if (DeliveryFailureGuidance.IsWorkspaceMaterializationKind(kind) && workspaceEvidence is not null)
+        else if (DeliveryFailureGuidance.IsWorkspaceSetupKind(kind) && workspaceEvidence is not null)
         {
             _out.WriteLine($"  attribution: workflow infrastructure (not issue work)");
             if (!string.IsNullOrEmpty(workspaceEvidence.WorkspacePath))
             {
                 _out.WriteLine($"  workspace:  {workspaceEvidence.WorkspacePath}");
-            }
-            if (!string.IsNullOrEmpty(workspaceEvidence.ExpectedRunId))
-            {
-                _out.WriteLine($"  expected:   {workspaceEvidence.ExpectedRunId}");
-            }
-            if (!string.IsNullOrEmpty(workspaceEvidence.ActualRunId))
-            {
-                _out.WriteLine($"  actual:     {workspaceEvidence.ActualRunId}");
             }
         }
     }

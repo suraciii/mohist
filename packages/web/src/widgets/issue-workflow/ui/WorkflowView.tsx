@@ -679,8 +679,6 @@ function DeliveryFailureBanner({
   } | null
   workspaceEvidence?: {
     workspacePath: string | null
-    expectedRunId: string | null
-    actualRunId: string | null
   } | null
 }) {
   const colors: Record<DeliveryFailureKind, string> = {
@@ -688,17 +686,12 @@ function DeliveryFailureBanner({
     'base-moved': 'border-amber-300 bg-amber-50 text-amber-800',
     'retry-safe': 'border-blue-300 bg-blue-50 text-blue-800',
     'branch-invariant-violation': 'border-purple-300 bg-purple-50 text-purple-800',
-    'workspace-missing': 'border-rose-300 bg-rose-50 text-rose-800',
-    'workspace-corrupt': 'border-rose-300 bg-rose-50 text-rose-800',
-    'workspace-identity-mismatch': 'border-rose-300 bg-rose-50 text-rose-800',
+    'workspace-setup': 'border-rose-300 bg-rose-50 text-rose-800',
     'config-error': 'border-orange-300 bg-orange-50 text-orange-800',
     'protection-conflict': 'border-orange-300 bg-orange-50 text-orange-800',
     'pr-state-conflict': 'border-orange-300 bg-orange-50 text-orange-800',
   }
-  const isWorkspaceMaterialization =
-    failureKind === 'workspace-missing' ||
-    failureKind === 'workspace-corrupt' ||
-    failureKind === 'workspace-identity-mismatch'
+  const isWorkspaceSetup = failureKind === 'workspace-setup'
   return (
     <div className={`rounded-md border px-2.5 py-2 text-xs space-y-1 ${colors[failureKind]}`}>
       <div className="flex items-center gap-2 font-semibold">
@@ -730,7 +723,7 @@ function DeliveryFailureBanner({
           </div>
         </div>
       )}
-      {isWorkspaceMaterialization && (
+      {isWorkspaceSetup && (
         <div className="rounded bg-white/60 px-2 py-1 space-y-0.5 font-mono text-[11px]">
           <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
             Attribution: workflow infrastructure (not issue work)
@@ -738,18 +731,6 @@ function DeliveryFailureBanner({
           {workspaceEvidence?.workspacePath && (
             <div>
               <span className="font-sans opacity-70">workspace:</span> {workspaceEvidence.workspacePath}
-            </div>
-          )}
-          {workspaceEvidence?.expectedRunId && (
-            <div>
-              <span className="font-sans opacity-70">expected:</span>{' '}
-              <span className="text-green-700">{workspaceEvidence.expectedRunId}</span>
-            </div>
-          )}
-          {workspaceEvidence?.actualRunId && (
-            <div>
-              <span className="font-sans opacity-70">actual:</span>{' '}
-              <span className="text-red-700">{workspaceEvidence.actualRunId}</span>
             </div>
           )}
         </div>
@@ -1339,10 +1320,7 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 
   const isBranchViolation =
     deliveryGuidance?.failureKind === 'branch-invariant-violation' && branchEvidence
-  const isWorkspaceMaterializationFailure =
-    deliveryGuidance?.failureKind === 'workspace-missing' ||
-    deliveryGuidance?.failureKind === 'workspace-corrupt' ||
-    deliveryGuidance?.failureKind === 'workspace-identity-mismatch'
+  const isWorkspaceSetupFailure = deliveryGuidance?.failureKind === 'workspace-setup'
 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
@@ -1385,24 +1363,12 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
             </div>
           </div>
         )}
-        {isWorkspaceMaterializationFailure && workspaceEvidence && (
+        {isWorkspaceSetupFailure && workspaceEvidence && (
           <div className="rounded border border-rose-300 bg-rose-50 px-2.5 py-2 text-xs text-rose-800 space-y-0.5 font-mono">
             <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: workflow infrastructure (not issue work)</div>
             {workspaceEvidence.workspacePath && (
               <div>
                 <span className="font-sans opacity-70">workspace:</span> {workspaceEvidence.workspacePath}
-              </div>
-            )}
-            {workspaceEvidence.expectedRunId && (
-              <div>
-                <span className="font-sans opacity-70">expected:</span>{' '}
-                <span className="text-green-700">{workspaceEvidence.expectedRunId}</span>
-              </div>
-            )}
-            {workspaceEvidence.actualRunId && (
-              <div>
-                <span className="font-sans opacity-70">actual:</span>{' '}
-                <span className="text-red-700">{workspaceEvidence.actualRunId}</span>
               </div>
             )}
           </div>

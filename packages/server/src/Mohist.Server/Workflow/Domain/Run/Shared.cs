@@ -15,7 +15,7 @@ public sealed record TaskResult(
     string? Reason = null);
 
 /// <summary>
-/// The per-run head ref the runner materializes inside the workflow
+/// The per-run head ref the runner prepares inside the workflow
 /// workspace. MUST stay in sync with the runner's <c>runBranchName()</c>
 /// helper in <c>packages/runner/src/runtime/workspace.ts</c>.
 /// </summary>

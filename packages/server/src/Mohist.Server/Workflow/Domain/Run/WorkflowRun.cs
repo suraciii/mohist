@@ -47,7 +47,6 @@ public sealed class WorkflowRun
     public DateTimeOffset? CompletedAt { get; set; }
     public FailureDetails? Failure { get; set; }
     public WorkspaceIdentity? Workspace { get; set; }
-    public DateTimeOffset? WorkspaceMaterializedAt { get; set; }
     public WorkflowWorkDelivery? WorkDelivery { get; set; }
     public List<ApprovalFeedback> Feedback { get; set; } = new();
 

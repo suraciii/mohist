@@ -3,9 +3,7 @@ export type DeliveryFailureKind =
   | 'base-moved'
   | 'retry-safe'
   | 'branch-invariant-violation'
-  | 'workspace-missing'
-  | 'workspace-corrupt'
-  | 'workspace-identity-mismatch'
+  | 'workspace-setup'
   | 'config-error'
   | 'protection-conflict'
   | 'pr-state-conflict'
@@ -24,10 +22,8 @@ export interface BranchInvariantEvidence {
   boundary: 'start' | 'end' | null
 }
 
-export interface WorkspaceMaterializationEvidence {
+export interface WorkspaceSetupEvidence {
   workspacePath: string | null
-  expectedRunId: string | null
-  actualRunId: string | null
 }
 
 export const DELIVERY_FAILURE_KINDS: readonly DeliveryFailureKind[] = [
@@ -35,19 +31,13 @@ export const DELIVERY_FAILURE_KINDS: readonly DeliveryFailureKind[] = [
   'base-moved',
   'retry-safe',
   'branch-invariant-violation',
-  'workspace-missing',
-  'workspace-corrupt',
-  'workspace-identity-mismatch',
+  'workspace-setup',
   'config-error',
   'protection-conflict',
   'pr-state-conflict',
 ] as const
 
-export const WORKSPACE_MATERIALIZATION_FAILURE_KINDS: readonly DeliveryFailureKind[] = [
-  'workspace-missing',
-  'workspace-corrupt',
-  'workspace-identity-mismatch',
-] as const
+export const WORKSPACE_SETUP_FAILURE_KINDS: readonly DeliveryFailureKind[] = ['workspace-setup'] as const
 
 const DELIVERY_FAILURE_GUIDANCE: Record<DeliveryFailureKind, DeliveryFailureGuidance> = {
   conflict: {
@@ -74,22 +64,10 @@ const DELIVERY_FAILURE_GUIDANCE: Record<DeliveryFailureKind, DeliveryFailureGuid
     nextAction: 'This is a runner or action bug: the workflow workspace left its expected run branch. Retry the task — the runner will restore the run branch automatically — and report the issue if it recurs. Issue work is not the cause.',
     retryable: true,
   },
-  'workspace-missing': {
-    failureKind: 'workspace-missing',
-    label: 'Workflow workspace materialization failure',
-    nextAction: 'The runner could not find the workflow workspace bound to this run. Issue work is not the cause — the workflow-start materialization pipeline must be repaired (rebind the workspace, or investigate the runner\'s workspace root) before this run can continue.',
-    retryable: false,
-  },
-  'workspace-corrupt': {
-    failureKind: 'workspace-corrupt',
-    label: 'Workflow workspace materialization failure',
-    nextAction: 'The runner\'s workflow workspace is unreadable or its workspace marker is missing/corrupt. Issue work is not the cause — re-materialize the workflow workspace at the run\'s bound path before this run can continue.',
-    retryable: false,
-  },
-  'workspace-identity-mismatch': {
-    failureKind: 'workspace-identity-mismatch',
-    label: 'Workflow workspace materialization failure',
-    nextAction: 'The workflow workspace at the run\'s bound path belongs to a different workflow run. Issue work is not the cause — re-bind a fresh workflow workspace to this run before it can continue.',
+  'workspace-setup': {
+    failureKind: 'workspace-setup',
+    label: 'Workflow workspace setup failure',
+    nextAction: 'The runner could not prepare the workflow workspace for this run (clone, base branch, or checkout failed). Issue work is not the cause — check the repository gitUrl / base branch and the runner\'s workspace root, then retry.',
     retryable: false,
   },
   'config-error': {
@@ -118,23 +96,17 @@ export function isDeliveryFailureKind(value: unknown): value is DeliveryFailureK
     value === 'base-moved' ||
     value === 'retry-safe' ||
     value === 'branch-invariant-violation' ||
-    value === 'workspace-missing' ||
-    value === 'workspace-corrupt' ||
-    value === 'workspace-identity-mismatch' ||
+    value === 'workspace-setup' ||
     value === 'config-error' ||
     value === 'protection-conflict' ||
     value === 'pr-state-conflict'
   )
 }
 
-export function isWorkspaceMaterializationFailureKind(
+export function isWorkspaceSetupFailureKind(
   value: unknown,
 ): value is DeliveryFailureKind {
-  return (
-    value === 'workspace-missing' ||
-    value === 'workspace-corrupt' ||
-    value === 'workspace-identity-mismatch'
-  )
+  return value === 'workspace-setup'
 }
 
 export function getDeliveryFailureGuidance(kind: DeliveryFailureKind): DeliveryFailureGuidance {
@@ -145,11 +117,11 @@ export interface DeliveryFailureResolution {
   failureKind: DeliveryFailureKind | null
   guidance: DeliveryFailureGuidance | null
   evidence: BranchInvariantEvidence | null
-  workspaceEvidence: WorkspaceMaterializationEvidence | null
+  workspaceEvidence: WorkspaceSetupEvidence | null
 }
 
 const KIND_IN_MESSAGE =
-  /\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-missing|workspace-corrupt|workspace-identity-mismatch|config-error|protection-conflict|pr-state-conflict)\)/i
+  /\((conflict|base-moved|retry-safe|branch-invariant-violation|workspace-setup|config-error|protection-conflict|pr-state-conflict)\)/i
 const BRANCH_INVARIANT_IN_MESSAGE = /\bbranch-invariant\s+violation\b(?:\s+at\s+(start|end)\s+boundary)?/i
 const BRANCH_EVIDENCE_IN_MESSAGE =
   /expected\s+branch\s+'(?<expected>[^']*)'.*?observed\s+(?:'(?<observed>[^']*)'|detached\s+at\s+(?<ref>\S+))/i
@@ -245,8 +217,8 @@ function resolveDeliveryFailure(
     candidate === 'branch-invariant-violation'
       ? extractBranchInvariantEvidence(evidenceSource)
       : null
-  const workspaceEvidence = isWorkspaceMaterializationFailureKind(candidate)
-    ? extractWorkspaceMaterializationEvidence(evidenceSource)
+  const workspaceEvidence = isWorkspaceSetupFailureKind(candidate)
+    ? extractWorkspaceSetupEvidence(evidenceSource)
     : null
   return {
     failureKind: candidate,
@@ -256,18 +228,14 @@ function resolveDeliveryFailure(
   }
 }
 
-export function extractWorkspaceMaterializationEvidence(
+export function extractWorkspaceSetupEvidence(
   source: unknown,
-): WorkspaceMaterializationEvidence | null {
+): WorkspaceSetupEvidence | null {
   const node = findWorkspaceEvidenceNode(source)
   if (!node) return null
   const workspacePath = readString(node.workspacePath) ?? null
-  const expected = readIdentityNode(node.expected)
-  const actual = readIdentityNode(node.actual)
-  const expectedRunId = readString(expected?.workflowRunId) ?? null
-  const actualRunId = readString(actual?.workflowRunId) ?? null
-  if (!workspacePath && !expectedRunId && !actualRunId) return null
-  return { workspacePath, expectedRunId, actualRunId }
+  if (!workspacePath) return null
+  return { workspacePath }
 }
 
 export function extractBranchInvariantEvidence(
@@ -363,8 +331,6 @@ function readString(value: unknown): string | undefined {
 
 function findWorkspaceEvidenceNode(value: unknown): {
   workspacePath?: unknown
-  expected?: unknown
-  actual?: unknown
 } | null {
   if (value == null) return null
   if (typeof value === 'string') {
@@ -388,12 +354,8 @@ function findWorkspaceEvidenceNode(value: unknown): {
   }
   if (typeof value === 'object') {
     const record = value as Record<string, unknown>
-    if (isWorkspaceMaterializationFailureKind(record['kind'])) {
-      return record as {
-        workspacePath?: unknown
-        expected?: unknown
-        actual?: unknown
-      }
+    if (isWorkspaceSetupFailureKind(record['kind'])) {
+      return record as { workspacePath?: unknown }
     }
     if ('output' in record) {
       const fromOutput = findWorkspaceEvidenceNode(record['output'])
@@ -401,9 +363,4 @@ function findWorkspaceEvidenceNode(value: unknown): {
     }
   }
   return null
-}
-
-function readIdentityNode(value: unknown): { workflowRunId?: unknown } | null {
-  if (!value || typeof value !== 'object') return null
-  return value as { workflowRunId?: unknown }
 }
