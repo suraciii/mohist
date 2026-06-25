@@ -76,7 +76,8 @@ PR task，integrate 收尾只剩 `merge-pull-request`。
 - stage: check
   tasks:
     - id: ai-review
-    - id: check:update-pr      # mohist/create-pull-request
+  checks:
+    - repair/verify paths append check:update-pr  # mohist/create-pull-request
 
 - stage: integrate
   tasks:
@@ -93,8 +94,9 @@ PR task，integrate 收尾只剩 `merge-pull-request`。
   `vars.github.pr.number` / `vars.github.pr.url`。
 - `build:update-pr` 显式声明在 build stage 的尾部，等 build 的
   load-tasks 跑完后再推送一次 head/base 同样的 PR，更新 title/body。
-- `check:update-pr` 显式声明在 check stage 的尾部，等 AI review 及其
-  auto-fix 路径收敛后再把最终 review 结果推到同一个 PR。
+- check stage 的 `health` / `review-passed` / `merge-ready` repair 路径会在
+  修复或 rebase 之后追加 `check:update-pr`，再重新运行 checks，从而把最终
+  check 结果推到同一个 PR。
 - 正常路径不预先 rebase；integrate 的 happy path 只有 `integrate:merge-pr`。
 - GitHub PR mergeability 是集成裁判；只有 GitHub 返回不可合并、base 已移动、
   branch out-of-date 等失败时，才进入 recovery rebase。
