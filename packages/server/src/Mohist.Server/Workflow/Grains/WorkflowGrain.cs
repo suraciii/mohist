@@ -16,10 +16,12 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Orleans.Concurrency;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
+[Reentrant]
 public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
@@ -39,6 +41,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowSessionHealthService _sessionHealth;
     private readonly ILogger<WorkflowGrain> _log;
+    private readonly WorkflowReadModel _readModel;
+
+    /// <summary>
+    /// Internal accessor exposing the in-memory run to grain-composed helpers
+    /// (notably <see cref="WorkflowReadModel"/>). Exposed as a property rather
+    /// than a field so the read model can stay grain-internal without forcing
+    /// the field to become <c>internal</c>.
+    /// </summary>
+    internal WorkflowRun? RunOrNull => _run;
+
+    /// <summary>
+    /// Internal accessor for the in-grain dispatched work id bookkeeping,
+    /// used by the composed read model and any other grain-internal helpers
+    /// that need to consult the most recent dispatch.
+    /// </summary>
+    internal string? DispatchedWorkId => _dispatchedWorkId;
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
@@ -50,6 +68,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _profileManager = profileManager;
         _sessionHealth = sessionHealth;
         _log = log;
+        _readModel = new WorkflowReadModel(this);
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -513,78 +532,23 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
     {
-        if (string.IsNullOrWhiteSpace(workId)) return Task.FromResult<WorkflowActiveWorkView?>(null);
-        var currentStage = _run?.CurrentStage();
-        if (currentStage is null) return Task.FromResult<WorkflowActiveWorkView?>(null);
-        var activeTask = currentStage.RunningTask;
-        var deliveryWorkId = _run?.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? _run.WorkDelivery.WorkId
-            : _dispatchedWorkId;
-        if (!string.Equals(activeTask?.WorkId ?? deliveryWorkId, workId, StringComparison.Ordinal))
-            return Task.FromResult<WorkflowActiveWorkView?>(null);
-
-        var projectId = GetProjectId();
-        var issueId = GetIssueId();
-        var stage = _run?.CurrentStageId ?? string.Empty;
-        return Task.FromResult<WorkflowActiveWorkView?>(new WorkflowActiveWorkView(
-            WorkId: workId,
-            WorkType: activeTask is not null ? "task" : "checks",
-            Stage: stage,
-            TaskRunId: activeTask?.Id ?? $"checks-{stage}",
-            Title: activeTask?.Title ?? "Stage checks",
-            ProjectId: string.IsNullOrWhiteSpace(projectId) ? null : projectId,
-            IssueId: issueId,
-            IssueNumber: ResolveIssueNumber()));
+        // Snapshot projection — delegated to the in-grain composed
+        // WorkflowReadModel so the write path stays focused on the state
+        // machine and read snapshots don't interleave with state transitions.
+        return Task.FromResult(_readModel.GetActiveWork(workId));
     }
 
     public Task<WorkflowFeedbackRecord?> GetFeedbackAsync(string feedbackId)
     {
         EnsureRun();
-        if (string.IsNullOrWhiteSpace(feedbackId))
-            return Task.FromResult<WorkflowFeedbackRecord?>(null);
-
-        var feedback = _run!.Feedback.FirstOrDefault(f => string.Equals(f.Id, feedbackId, StringComparison.Ordinal));
-        if (feedback is null)
-            return Task.FromResult<WorkflowFeedbackRecord?>(null);
-
-        return Task.FromResult<WorkflowFeedbackRecord?>(ToSnapshot(feedback));
+        return Task.FromResult(_readModel.GetFeedback(feedbackId));
     }
 
     public Task<IReadOnlyList<WorkflowFeedbackRecord>> ListFeedbackAsync()
     {
         EnsureRun();
-        var issueNumber = ResolveIssueNumber();
-        var snapshots = _run!.Feedback
-            .OrderByDescending(f => f.CreatedAt)
-            .Select(f => ToSnapshot(f, issueNumber))
-            .ToList();
-        return Task.FromResult<IReadOnlyList<WorkflowFeedbackRecord>>(snapshots);
+        return Task.FromResult(_readModel.ListFeedback());
     }
-
-    private WorkflowFeedbackRecord ToSnapshot(ApprovalFeedback feedback) =>
-        ToSnapshot(feedback, ResolveIssueNumber());
-
-    private WorkflowFeedbackRecord ToSnapshot(ApprovalFeedback feedback, int? issueNumber) =>
-        new(
-            Id: feedback.Id,
-            WorkflowRunId: feedback.WorkflowRunId,
-            Stage: feedback.Stage,
-            Body: feedback.Body,
-            Status: feedback.Status,
-            CreatedAt: feedback.CreatedAt,
-            Resolution: ToResolution(feedback),
-            IssueNumber: issueNumber);
-
-    private static WorkflowFeedbackResolution? ToResolution(ApprovalFeedback feedback) =>
-        feedback.Status == ApprovalFeedbackStatus.Resolved
-            ? new WorkflowFeedbackResolution(
-                ResolutionTaskId: feedback.ResolutionTaskId,
-                ResolvedAt: feedback.ResolvedAt,
-                ResolutionSummary: feedback.ResolutionSummary)
-            : null;
-
-    private int? ResolveIssueNumber() =>
-        int.TryParse(GetIssueNumber(), out var number) ? number : null;
 
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
     {
@@ -608,7 +572,23 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await ReleaseStageLocksAsync(_run.CurrentStageId, reason);
     }
 
-    private async Task ReleaseStageLocksAsync(string stage, string reason)
+    /// <summary>
+    /// Releases the sequential stage lock owned by this workflow run for the
+    /// given stage. Used by both the grain's retry/rerun/stop paths (via
+    /// <see cref="ReleaseCurrentStageLocksAsync"/>) and by the bus-side
+    /// <c>WorkflowStageLockReleaseHandler</c> that subscribes to
+    /// <c>com.mohist.workflow.stage.{completed,failed}</c> events.
+    ///
+    /// The grain's <c>On()</c> dispatch used to call this synchronously after
+    /// emitting a <see cref="StageCompleted"/>/<see cref="StageFailed"/>
+    /// event; the lock release now flows through the event bus so the
+    /// handler runs as part of the same in-process dispatch that
+    /// <c>WorkflowRunStopped</c> already rides. Pull-scheduling (T-005
+    /// cleanup D8) means a successful release no longer requires the
+    /// previously-no-op <c>RequeueWorkflowIdAsync</c>: the next runner poll
+    /// rediscovers the assignable workflow run from persisted state.
+    /// </summary>
+    public async Task ReleaseStageLocksAsync(string stage, string reason)
     {
         var resource = await GetSequentialLockResourceAsync(stage);
         if (resource is null) return;
@@ -620,10 +600,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var lockGrain = GrainFactory.GetGrain<IWorkflowStageLockGrain>(key);
         var result = await lockGrain.ReleaseAsync(new StageLockOwner(GrainKey, stage));
 
-        if (!result.Released) return;
-
-        if (!string.IsNullOrWhiteSpace(result.NextWorkflowRunId))
-            await RequeueWorkflowIdAsync(projectId, result.NextWorkflowRunId);
+        // The release grain surfaces the next waiter's run id, but pull
+        // scheduling rediscovers assignable runs from persisted workflow
+        // state — no per-project backlog mutation is required here. The
+        // previous RequeueWorkflowIdAsync was a no-op and is deleted.
+        _ = result.NextWorkflowRunId;
     }
 
     private async Task<string?> GetSequentialLockResourceAsync(string stage)
@@ -633,14 +614,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!string.Equals(stageDef.LockBehavior, "sequential", StringComparison.OrdinalIgnoreCase))
             return null;
         return stageDef.Resources?.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
-    }
-
-    private Task RequeueWorkflowIdAsync(string projectId, string workflowRunId)
-    {
-        // Pull scheduling has no per-project backlog to mutate here. Once the
-        // lock is released, the next runner poll can rediscover the assignable
-        // workflow run from persisted workflow state.
-        return Task.CompletedTask;
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>> ProcessTaskOutcomeAsync(
@@ -972,8 +945,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             WorkflowRunFailed => Task.CompletedTask,
             WorkflowRunCompleted => Task.CompletedTask,
             StageStarted => Task.CompletedTask,
-            StageCompleted x => ReleaseStageLocksAsync(x.Stage, "completed"),
-            StageFailed x => ReleaseStageLocksAsync(x.Stage, "failed"),
+            StageCompleted => Task.CompletedTask,
+            StageFailed => Task.CompletedTask,
             StageApprovalRequested => Task.CompletedTask,
             StageApprovalResolved x => Task.CompletedTask,
             FeedbackRequested => Task.CompletedTask,
@@ -991,17 +964,34 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         // Side effects now flow through the bus — IssueGrain subscribes
         // to com.mohist.workflow.run.stopped and the workspace cleanup
-        // service subscribes to .completed.
+        // service subscribes to .completed. Sequential stage lock release
+        // has likewise been migrated to a bus subscription (see
+        // WorkflowStageLockReleaseHandler) so this grain no longer holds
+        // any workflow-event-aware side effect that crosses the lock-grain
+        // boundary.
         return Task.CompletedTask;
     }
 
-    private string GetProjectId() =>
+    /// <summary>
+    /// Project id from the workflow run's metadata annotations. Used by the
+    /// grain's lock coordinator and exposed to the in-grain composed
+    /// <see cref="WorkflowReadModel"/>.
+    /// </summary>
+    internal string GetProjectId() =>
         _run?.Metadata?.Annotations?.TryGetValue("projectId", out var v) == true ? v : "";
 
-    private string? GetIssueId() =>
+    /// <summary>
+    /// Issue id from the workflow run's metadata annotations. Exposed to the
+    /// in-grain composed <see cref="WorkflowReadModel"/>.
+    /// </summary>
+    internal string? GetIssueId() =>
         _run?.Metadata?.Annotations?.TryGetValue("issueId", out var v) == true ? v : null;
 
-    private string? GetIssueNumber() =>
+    /// <summary>
+    /// Issue number from the workflow run's metadata annotations. Exposed to
+    /// the in-grain composed <see cref="WorkflowReadModel"/>.
+    /// </summary>
+    internal string? GetIssueNumber() =>
         _run?.Metadata?.Annotations?.TryGetValue("issueNumber", out var v) == true ? v : null;
 
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)

@@ -232,4 +232,42 @@
 ### Follow-up
 
 - Opened **issue #267** ("Runner-loss detection reminder-ization with persistent heartbeat") to track the remaining gap: `RunnerGrain.CheckHeartbeatAsync` is still based on `this.RegisterGrainTimer` + in-memory `_lastHeartbeat`. silo restart + permanent runner loss means no closeout fires. The fix is reminder + persistent heartbeat storage, scoped in #267.
-- T-005 (cleanup): `WorkflowGrain.On` `StageCompleted/Failed → ReleaseStageLocksAsync` (still inline) → migrate to eventbus `[Subscription]` handler. `WorkflowGrain.GetFeedbackAsync`/`ListFeedbackAsync`/`GetActiveWorkAsync`/`ToSnapshot` still inline → extract to `WorkflowReadModel`. `RequeueWorkflowIdAsync` still no-op stub (already identified in T-002 cleanup list).
+
+## T-005 Notes (read model extraction + lock bus migration + backlog deletion)
+
+### Implementation
+
+- **WorkflowReadModel** (`Workflow/Grains/WorkflowReadModel.cs`, new):
+  - Composed inside `WorkflowGrain` via `_readModel = new WorkflowReadModel(this)` in constructor.
+  - `GetActiveWork(workId)` — active work view projection (consults `RunOrNull`, `DispatchedWorkId`, `GetProjectId()`, `GetIssueId()`, `GetIssueNumber()`).
+  - `GetFeedback(feedbackId)` — single feedback record snapshot.
+  - `ListFeedback()` — ordered list of feedback records with issue number resolution.
+  - `ToSnapshot` / `ToResolution` — private static projection helpers moved from grain.
+  - Grain exposes `RunOrNull`, `DispatchedWorkId`, `GetProjectId()`, `GetIssueId()`, `GetIssueNumber()` as `internal` accessors.
+- **Lock → bus migration** (`WorkflowStageLockReleaseHandler.cs`, new):
+  - `[Subscription(Type = "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed")]` bus handler implementing `ICloudEventHandler`.
+  - `HandleAsync` extracts workflow run id from CloudEvent source URI and stage from event data, then calls `IWorkflowGrain.ReleaseStageLocksAsync(stage, reason)`.
+  - Auto-discovered by `AddCloudEventHandlersFromAssembly` (implements `ICloudEventHandler`).
+  - `InMemoryEventBus` gained `AddSubscription(Subscription)` for test fixtures to wire handlers post-construction, plus snapshot before iteration.
+- **Grain changes** (`WorkflowGrain.cs`):
+  - `GetActiveWorkAsync`/`GetFeedbackAsync`/`ListFeedbackAsync` delegating to `_readModel`; inlined projection helpers deleted.
+  - `ReleaseStageLocksAsync` promoted to `public` and added to `IWorkflowGrain` interface — driven by bus handler.
+  - `On()`: `StageCompleted`/`StageFailed` → `Task.CompletedTask` (lock release now flows through bus).
+  - `RequeueWorkflowIdAsync` method deleted (was a no-op); `_ = result.NextWorkflowRunId` discards the info.
+  - `[Reentrant]` added — bus handler re-enters the grain from `SaveAsync`'s publish; without it the call deadlocks.
+  - `GetProjectId()`/`GetIssueId()`/`GetIssueNumber()` visibility → `internal` for read model access.
+- **Test fixture** (`WorkflowGrainFixture.cs`):
+  - Fixed `InitializeAsync` (was missing `await`), wires `WorkflowStageLockReleaseHandler` into `InMemoryEventBus`.
+
+### Gotchas
+
+- **`[Reentrant]` is required**: publish inside `SaveAsync` → handler → same grain → deadlock without it.
+- **`InMemoryEventBus` subscription snapshot**: `_subscriptions` changed from `IReadOnlyList` to `List` + `Snapshot()` for thread-safe post-construction handler wiring.
+- **Fixture was missing `await`**: `InitializeAsync` had `return Cluster.DeployAsync()` inside a non-async method; changed to `async Task` with `await`.
+
+### Test coverage
+
+- 1 new grain spec: `FailedIntegrateStage_LockReleasedViaBusSubscriptionHandler` — lock released via bus, owner cleared after ReportAsync.
+- 10 new unit tests: `WorkflowStageLockReleaseHandlerSpecs` (attribute, URI parsing, stage extraction).
+- Full server: **2629 passed, 12 skipped, 0 failed** (+11 from T-004).
+- Runner TS: 482 pass (unchanged).
