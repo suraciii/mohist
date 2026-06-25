@@ -538,16 +538,6 @@ public sealed class SystemUpdateService : ISingletonService
         var info = await _getSystemInfo(cancellationToken);
         var now = DateTimeOffset.UtcNow;
 
-        var persistedLatest = await _store.GetLatestAsync(cancellationToken);
-        if (persistedLatest is not null
-            && !string.IsNullOrWhiteSpace(request.JobId)
-            && !string.Equals(persistedLatest.JobId, request.JobId, StringComparison.Ordinal)
-            && SystemUpdateJobState.TerminalStatuses.Contains(persistedLatest.Status))
-        {
-            throw new InvalidOperationException(
-                $"The latest persisted update job ('{persistedLatest.JobId}') is terminal and does not match the supplied JobId ('{request.JobId}'). Refusing to overwrite an unrelated job state.");
-        }
-
         var latest = await _store.GetLatestAsync(cancellationToken);
         var jobId = string.IsNullOrWhiteSpace(request.JobId) ? Guid.NewGuid().ToString("N") : request.JobId!;
         var stage = string.IsNullOrWhiteSpace(request.Stage) ? "Ready" : request.Stage!;
@@ -559,23 +549,30 @@ public sealed class SystemUpdateService : ISingletonService
         var serverUnit = request.ServerUnit ?? info.Install.ServerUnit;
         var runnerUnit = request.RunnerUnit ?? info.Install.RunnerUnit;
 
-        var baseState = latest ?? new SystemUpdateJobState(
-            jobId,
-            status,
-            stage,
-            info.Update.Available,
-            info.Running.GitHash,
-            sourceHead,
-            sourcePath,
-            serverUnit,
-            runnerUnit,
-            null,
-            [],
-            now,
-            now,
-            now,
-            outcome,
-            unavailableCapability);
+        // A CLI outcome either continues the same job (matching JobId, e.g. a retried
+        // report) or records a brand-new update. The store only keeps the latest job,
+        // so a prior terminal job is history and must not block the new outcome from
+        // becoming the latest job state. Reuse the persisted state only when the JobId
+        // matches; otherwise start from a fresh job.
+        var baseState = latest is not null && string.Equals(latest.JobId, jobId, StringComparison.Ordinal)
+            ? latest
+            : new SystemUpdateJobState(
+                jobId,
+                status,
+                stage,
+                info.Update.Available,
+                info.Running.GitHash,
+                sourceHead,
+                sourcePath,
+                serverUnit,
+                runnerUnit,
+                null,
+                [],
+                now,
+                now,
+                now,
+                outcome,
+                unavailableCapability);
 
         IReadOnlyList<SystemUpdateLogEntry> logs = baseState.Logs;
         if (request.Logs is { Count: > 0 })
