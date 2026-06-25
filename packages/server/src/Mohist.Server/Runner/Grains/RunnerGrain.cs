@@ -360,21 +360,48 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task NotifyTrackedWorkflowRunnersLostAsync()
     {
-        var workflowRunIds = await _workflowRuns.FindAssignedToAsync(RunnerId);
-        foreach (var workflowRunId in workflowRunIds)
+        // Snapshot the outstanding-work set so concurrent report/poll activity
+        // does not mutate it mid-iteration. Each entry is synthesized as a
+        // failed report through the normal ReportWorkflowResultAsync channel,
+        // which routes via the runner-side translator and the workflow grain's
+        // regular ReportTaskOutcome/ReportCheckOutcome entry points — the
+        // grain sees an ordinary failure, indistinguishable from a runner
+        // process that ran the work and reported `failed` itself.
+        if (_outstandingWorkflowWorks.Count == 0)
+            return;
+
+        var snapshot = _outstandingWorkflowWorks
+            .Select(kv => (Key: kv.Key, WorkflowRunId: ExtractWorkflowRunId(kv.Key), WorkId: ExtractWorkId(kv.Key)))
+            .ToList();
+
+        var synthesizedFailure = new WorkResult("failed", "runner-lost");
+        foreach (var entry in snapshot)
         {
             try
             {
-                await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId).NotifyRunnerLostAsync(RunnerId);
+                await ReportWorkflowResultAsync(entry.WorkflowRunId, entry.WorkId, synthesizedFailure);
             }
             catch (Exception ex)
             {
                 _log.LogWarning(ex,
-                    "Runner {RunnerId} failed to notify workflow {WorkflowRunId} about lost runner",
+                    "Runner {RunnerId} failed to synthesize failed report for workflow {WorkflowRunId} work {WorkId}",
                     RunnerId,
-                    workflowRunId);
+                    entry.WorkflowRunId,
+                    entry.WorkId);
             }
         }
+    }
+
+    private static string ExtractWorkflowRunId(string key)
+    {
+        var separator = key.IndexOf('\u001f');
+        return separator < 0 ? key : key.Substring(0, separator);
+    }
+
+    private static string ExtractWorkId(string key)
+    {
+        var separator = key.IndexOf('\u001f');
+        return separator < 0 ? string.Empty : key.Substring(separator + 1);
     }
 
     private async Task TouchPresenceAsync()

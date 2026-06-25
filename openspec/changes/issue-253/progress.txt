@@ -180,3 +180,56 @@
 
 - T-004 (supervision): the `WorkflowGrainOptions.WorkCompletionTimeout` + `ArmWorkCompletionTimer` + `FailTimedOutWorkAsync` + `IRemindable` + `EnsureWorkHeartbeatAsync` + `DisableWorkHeartbeatAsync` + `NotifyRunnerLostAsync` + `FailLostRunningTasksAsync` + `WorkflowRun.FailTaskForRunnerLost` paths still exist. T-004 deletes them, switches `RunnerGrain.NotifyTrackedWorkflowRunnersLostAsync` to synthesizing `TaskOutcome(WorkId, Failed, Detail:"runner-lost")` and reporting it via the normal channel (which now works because the protocol accepts `TaskOutcome` in `ReportTaskOutcomeAsync`). runner-loss reminder + persistent heartbeat detection is independent follow-up territory (open new issue).
 - T-005 (cleanup): `WorkflowGrain.On` `StageCompleted/Failed → ReleaseStageLocksAsync` (still inline) → migrate to eventbus `[Subscription]` handler. `WorkflowGrain.GetFeedbackAsync`/`ListFeedbackAsync`/`GetActiveWorkAsync`/`ToSnapshot` still inline → extract to `WorkflowReadModel`. `RequeueWorkflowIdAsync` still no-op stub (already identified in T-002 cleanup list).
+
+## T-004 Notes (runtime supervision split: delete control-plane supervision + RunnerGrain fallback synthesis)
+
+### Implementation
+
+- **Deleted (`WorkflowGrain.cs`)**:
+  - `NotifyRunnerLostAsync(string runnerId)` interface impl and `FailLostRunningTasksAsync` private helper.
+  - The `WorkflowGrainOptions.WorkCompletionTimeout` configuration option and the whole `WorkflowGrainOptions.cs` file. `MohistServiceRegistration` and `MohistSiloRegistration` no longer `Configure<WorkflowGrainOptions>(...)` — DI grep-verified clean.
+  - The `WorkflowRun.FailTaskForRunnerLost()` extension method in `WorkflowRun.Task.cs` (its test `FailTaskForRunnerLost_FailsRunningTaskAndEmitsFailureSequence` in `TaskLifecycleSpecs.cs` is also removed; the closeout now flows through `ProcessTaskOutcomeAsync(TaskOutcome(WorkId, Failed, Detail:"runner-lost"))`).
+- **Deleted (`IWorkflowGrain.cs`)**: the `NotifyRunnerLostAsync(string)` interface method — the workflow grain has no longer a public "I'm losing a runner" entry point.
+- **Runner-side closeout (`RunnerGrain.cs`)**:
+  - `NotifyTrackedWorkflowRunnersLostAsync` no longer calls `_workflowRuns.FindAssignedToAsync` + `IWorkflowGrain.NotifyRunnerLostAsync` — it now snapshots `_outstandingWorkflowWorks` and, for each entry, calls `ReportWorkflowResultAsync(workflowRunId, workId, new WorkResult("failed", "runner-lost"))`. The synthesized failure rides the normal report channel through the translator and surfaces as an ordinary `TaskOutcome(Failed, Detail:"runner-lost")` to the grain.
+  - The runner-side outstanding-work set (`_outstandingWorkflowWorks`) is already keyed `"{workflowRunId}\u001f{workId}"` (mirroring `_agentJobs` accounting). New helpers `ExtractWorkflowRunId` / `ExtractWorkId` split the composite key back into its parts for the loop.
+  - Both `UnregisterAsync` and `HandleTimeoutAsync` route through this single closeout helper, so the synthesized-failure path is shared between explicit and timeout-driven runner loss.
+- **Reactivation regression (`RunnerFailureSpecs.Reactivation_WithPersistedRunningTask_*`)**:
+  - The grain no longer auto-fails a persisted running task on reactivation; the comment + assertion changed from "task is failed with runner-lost" to "task remains Running — runner-loss detection is the RunnerGrain's responsibility and only fires from a live RunnerGrain during UnregisterAsync/handle-timeout". The grain-side supervision is gone.
+- **Check recovery (`CheckRecoverySpecs.Reactivation_WithDispatchedCheckAndOfflineRunner_*`)**:
+  - The check-work synthesized closeout is a `CheckOutcome` with an empty `Results` list, which is a no-op against `ProcessCheckOutcomeAsync` (no actions, no failure events). The work delivery is completed (`GetCurrentWorkIdAsync` returns null on reactivation) but the pending check stays pending. This is the correct behaviour for the new contract: a runner-loss check closeout is observable as "no checks completed by the runner" rather than "all checks failed".
+
+### Gotchas
+
+- **Composite key decomposition**: `_outstandingWorkflowWorks` keys are `"{workflowRunId}\u001f{workId}"` (US separator character). I tried to avoid the helper by re-keying with a record value type, but kept the composite for symmetry with `_agentJobs` (`WorkKey(ownerKind, ownerId, workId)`). `ExtractWorkflowRunId` / `ExtractWorkId` parse it with `IndexOf('\u001f')`.
+- **Snapshot before iteration**: `NotifyTrackedWorkflowRunnersLostAsync` snapshots the dictionary into a list before calling `ReportWorkflowResultAsync` because that method removes the entry from `_outstandingWorkflowWorks`. Iterating the live dictionary would throw "collection modified during enumeration" under concurrent poll activity.
+- **Try/catch around the report call**: the synthesized `ReportWorkflowResultAsync` call can throw (grain down, deserialization error, etc.). Catching + logging per-entry is essential — a single bad workflow should not skip the rest. The exception path logs at warning level and continues.
+- **`WorkflowGrainOptions.cs` removed entirely**: the file only had `WorkCompletionTimeout` (which was deleted in T-003's supervision cleanup, but the file remained as a stub). After T-004 the file is gone; both `MohistServiceRegistration` and `MohistSiloRegistration` had to drop the `Configure<WorkflowGrainOptions>(...)` calls. Verified no other references via grep across `packages/server`.
+- **`RunningTask_WithoutReport_TimesOutWithoutQueryingRunner` skip reason**: the skip note explicitly mentions runner-process-side liveness (`opencode-log-diagnostics`) as the replacement owner; that is `runner-process` test territory, not grain test territory.
+- **`CheckOutcome` empty results is the closeout for checks work**: when a runner is lost mid-checks-work, the synthesized `CheckOutcome(stage, [])` makes the grain emit no `CheckPassed`/`CheckFailed` events. The work delivery is completed (so the workflow can re-poll later), but the check stage stays `Pending`. This matches D5: "WorkflowGrain 收到的与普通失败无异" — for a checks work item, "no result returned" is what the runner would naturally report, and that's a no-op.
+- **Runner-side liveness calibration**: `packages/runner/src/actions/acp/session-strategies.ts` already has `DEFAULT_TIMEOUT_MS = 30 * 60 * 1000` (30 min — ≠ the deleted grain 20 min default) and `DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000` (5 min — distinct from `DEFAULT_TIMEOUT_MS`). No change needed; the calibration requirement is satisfied by existing defaults.
+
+### Test coverage
+
+- 4 new tests in `RunnerOutstandingWorkSpecs`:
+  - `PollAsync_TracksOutstandingWorkflowWork_AndReportRemovesIt` — accounting is observable via `GetRuntimeStateAsync().ActiveWorks`; report removes the entry.
+  - `RunnerLoss_SynthesizesFailedTaskOutcome_ViaReportChannel` — closeout reaches the grain with `TaskRunStatus.Failed`, `Failure.Message="runner-lost"`, `WorkflowRunStatus.Failed`.
+  - `RunnerLoss_WithoutOutstandingWorkflowWork_IsNoOp` — registering a runner with no workflow and immediately unregistering doesn't throw; status flips to Offline cleanly.
+  - `RunnerLoss_FailedReportHasDetailRunnerLost_OnWorkflowGrainSide` — pins the end-to-end observable contract (failure message = "runner-lost" after closeout).
+- 5 tests rewritten in `RunnerFailureSpecs`:
+  - `RunnerUnregistersWithInFlightWork_SynthesizesRunnerLostFailure_ViaReportChannel` (was `RunnerUnregistersWithInFlightWork_FailsRunningTaskAsRunnerLost`).
+  - `RunnerUnregistersWithoutOutstandingWork_DoesNotFailAlreadyCompletedWork` (was `NotifyRunnerLost_NonRunningTasksAreUnaffected`).
+  - `RunnerUnregisters_IsIdempotentForRunnerLoss` (was `NotifyRunnerLost_IsIdempotent_AndIgnoresOtherRunners`).
+  - `RunningTask_WithoutReport_TimesOutWithoutQueryingRunner` — kept as `Skip` with the reason now citing `runner-process-side liveness` as the replacement owner.
+  - `Reactivation_WithPersistedRunningTask_RecoversAssignmentButLeavesWorkDrainToRunnerSide` (was `Reactivation_WithOfflineRunner_DoesNotQueryRunner_AndRunnerLostNotificationFailsRunningTask`) — grain no longer auto-fails on reactivation.
+- 1 test rewritten in `CheckRecoverySpecs`:
+  - `Reactivation_WithDispatchedCheckAndOfflineRunner_SynthesizesEmptyCheckReport_WithoutFailingPendingChecks` — pending checks stay pending; `GetCurrentWorkIdAsync` returns null because the work delivery completed.
+- 1 test removed in `TaskLifecycleSpecs`:
+  - `FailTaskForRunnerLost_FailsRunningTaskAndEmitsFailureSequence` — domain method deleted, no longer applicable.
+- 0 regressions. Full server suite: **2619 passed, 12 skipped, 0 failed** (was 2616 before; +4 new outstanding-work tests, +1 net change in rewritten tests, -1 deleted domain test).
+- Runner TS: 482 tests pass (unchanged from T-003).
+
+### Follow-up
+
+- Opened **issue #267** ("Runner-loss detection reminder-ization with persistent heartbeat") to track the remaining gap: `RunnerGrain.CheckHeartbeatAsync` is still based on `this.RegisterGrainTimer` + in-memory `_lastHeartbeat`. silo restart + permanent runner loss means no closeout fires. The fix is reminder + persistent heartbeat storage, scoped in #267.
+- T-005 (cleanup): `WorkflowGrain.On` `StageCompleted/Failed → ReleaseStageLocksAsync` (still inline) → migrate to eventbus `[Subscription]` handler. `WorkflowGrain.GetFeedbackAsync`/`ListFeedbackAsync`/`GetActiveWorkAsync`/`ToSnapshot` still inline → extract to `WorkflowReadModel`. `RequeueWorkflowIdAsync` still no-op stub (already identified in T-002 cleanup list).

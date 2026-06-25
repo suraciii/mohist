@@ -94,27 +94,6 @@ public class TaskLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void FailTaskForRunnerLost_FailsRunningTaskAndEmitsFailureSequence()
-    {
-        var run = BuildRun();
-        run.StartTask("work-1", "runner-1");
-        var task = run.CurrentStage().Tasks[0];
-
-        var events = run.FailTaskForRunnerLost();
-
-        Assert.Equal(TaskRunStatus.Failed, task.Status);
-        Assert.NotNull(task.StartedAt);
-        Assert.NotNull(task.FinishedAt);
-        Assert.Equal("runner-lost", run.Failure?.Message);
-        Assert.Collection(events,
-            e => Assert.Equal(new TaskFailed("build", task.Id, "runner-lost"), WorkflowEventSerializer.Unwrap(e)),
-            e => Assert.Equal(new StageFailed("build", "runner-lost"), WorkflowEventSerializer.Unwrap(e)),
-            e => Assert.Equal(new WorkflowRunFailed("runner-lost"), WorkflowEventSerializer.Unwrap(e)));
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
     public void FailTaskForStopped_FailsRunningTaskWithStoppedReason()
     {
         var run = BuildRun();

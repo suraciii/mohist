@@ -479,14 +479,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await CommitAsync(events);
     }
 
-    public Task NotifyRunnerLostAsync(string runnerId)
-    {
-        if (string.IsNullOrWhiteSpace(runnerId) || _run is null)
-            return Task.CompletedTask;
-
-        return FailLostRunningTasksAsync(runnerId);
-    }
-
     public Task DeactivateForTestAsync()
     {
         DeactivateOnIdle();
@@ -861,28 +853,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _dispatchedWorkStartedAt = null;
         CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
-    }
-
-    private async Task<bool> FailLostRunningTasksAsync(string? runnerId = null)
-    {
-        if (_run?.CurrentStageId is null)
-            return false;
-
-        var runningTask = _run.CurrentStage().RunningTask;
-        if (runningTask is null || string.IsNullOrWhiteSpace(runningTask.RunnerId))
-            return false;
-
-        if (!string.IsNullOrWhiteSpace(runnerId)
-            && !string.Equals(runningTask.RunnerId, runnerId, StringComparison.Ordinal))
-            return false;
-
-        if (string.IsNullOrWhiteSpace(runnerId))
-            return false;
-
-        var events = _run.FailTaskForRunnerLost();
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
-        await CommitAsync(events);
-        return events.Count > 0;
     }
 
     private void CompleteWorkDelivery(WorkflowWorkDeliveryStatus status)
