@@ -11,43 +11,29 @@ None.
 - [ID: item-1]
   Severity: blocking
   Scope: packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileManager.cs
-  Evidence: Startup can still use a workflow definition that disagrees with the displayed effective profile. `EffectiveWorkflowProfileResolver` correctly defines issue selection precedence over project default in `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/EffectiveWorkflowProfileResolver.cs:45`, and issue/detail/list projection uses that resolver. However `WorkflowProfileManager.LoadTemplateAsync` returns the project default template before resolving the issue effective profile in `packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileManager.cs:88`. The added test explicitly locks in the conflicting behavior: an issue with `issueWorkflowProfileId: "mohist/pr"` and project default `mohist/default` is expected to load `system-template:mohist/default` in `packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Querier/WorkflowProfileManagerSpecs.cs:198`. This violates the issue invariant and acceptance criterion that startup uses the same profile the user sees; the issue read model would show `mohist/pr` while startup runs default. [disallowed:product-behavior-change]
-  SuggestedAction: Change startup/template resolution so explicit issue-level `WorkflowProfileId` wins over project default when no custom YAML or explicit issue template override is present, and update the regression test to assert the PR template in this scenario.
-  Verification: Add/run a test where project default is `mohist/default`, issue selection is `mohist/pr`, `GET /issues/:n` reports `mohist/pr`, and `/workflow-runs/:id/yaml` contains PR publish/merge tasks and not default rebase tasks.
-  Status: open
-
-- [ID: item-2]
-  Severity: warning
-  Scope: packages/web/src/widgets/kanban-board/ui/IssueCard.tsx
-  Evidence: The issue list card only renders a workflow profile chip when `issue.workflowProfileId` is truthy in `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx:272`, and the new test asserts that no chip renders for `workflowProfileId: null`. The acceptance criteria require the issue list to display the same effective profile fact as detail/API/workflow-profile; when no issue-level selection exists the server read model should resolve to `mohist/default`, not hide the value. If any list item reaches the UI with `null` or during stale/partial data, the list diverges from the detail control which falls back to `mohist/default`. [disallowed:product-behavior-change]
-  SuggestedAction: Render the effective profile on list cards consistently, falling back to the same default/profile endpoint semantics as the detail control or relying on the server read model always supplying a resolved non-null value; update the test to expect the inherited default rather than absence.
-  Verification: Run Web tests covering backlog cards for explicit `mohist/pr` and inherited `mohist/default`, and verify issue detail, workflow-profile page, and list display the same value.
-  Status: open
-
-- [ID: item-3]
-  Severity: test-gap
-  Scope: packages/runner/tests/acp-agent.spec.ts
-  Evidence: The candidate deletes `packages/runner/tests/acp-agent.spec.ts` entirely according to `git diff --name-status master...HEAD`; this is outside the workflow-profile product area and removes ACP agent regression coverage without replacement in the reviewed change. The candidate also modifies `packages/runner/tests/runner-host.spec.ts`, but that does not replace the deleted ACP agent behavioral coverage. [disallowed:broad/unrelated-test-coverage-change]
-  SuggestedAction: Restore the deleted runner ACP test file or provide an equivalent replacement that preserves the removed coverage; keep unrelated runner test cleanup out of this workflow-profile change unless it is required and documented.
-  Verification: Run `npm test -w packages/runner` and confirm ACP agent behavior remains covered.
+  Evidence: `WorkflowProfileManager.LoadTemplateAsync` no longer resolves project default custom templates. Before this change, the documented template precedence included `project_workflow_profile.DefaultTemplateId` as a template reference fallback (`packages/server/src/Mohist.Server/Workflow/Services/ResolvedTemplate.cs:9`). The current implementation jumps from issue custom/source overrides directly to the effective profile id and only calls `ProjectWorkflowProfileManager.GetSystemTemplateDefinition(effectiveProfileId)` (`packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileManager.cs:87`). Because `EffectiveWorkflowProfileResolver` only treats ids registered in the system issue profile registry as valid, a project default like `default-tmpl` is ignored and startup falls back to `mohist/default`. The updated test now codifies the regression by naming `LoadTemplate_ProjectDefaultCustomTemplate_UsesEffectiveSystemProfile` and expecting `system-template:mohist/default` even when `projectDefaultTemplateId: "default-tmpl"` points at a 5-stage project template (`packages/server/tests/Mohist.Server.Tests/Specs/Workflow/Querier/WorkflowProfileManagerSpecs.cs:120`). This breaks existing project default workflow-template behavior and the issue acceptance criterion that absent issue-level selection inherits the project default before system default. [disallowed:product-behavior-change]
+  SuggestedAction: Restore project default custom-template resolution for issues without an explicit issue-level `WorkflowProfileId`, while still ensuring an explicit issue selection such as `mohist/pr` wins over the project default. Add/restore tests for both cases: no issue selection uses a custom project default template, and explicit issue PR selection overrides a project default.
+  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~WorkflowProfileManagerSpecs"` and an integration startup test showing project default custom templates still run when no issue-level selection exists.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-4]
-  Severity: follow-up
-  Scope: packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.tsx
-  Evidence: New files lack trailing newlines, as shown by the diff markers for `WorkflowProfileControl.tsx`, `WorkflowProfileControl.test.tsx`, and several new C# tests. This is not behavioral, but it is easy to clean up before integration.
-  SuggestedAction: Run the repo formatter or add final newlines to new source/test files.
-  Status: follow-up
+None.
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-5]
+- [ID: item-2]
   Severity: info
   Scope: CodeGraph
-  Evidence: CodeGraph is not initialized in this workspace, so structural review used direct diff, grep, and file reads instead.
+  Evidence: CodeGraph is not initialized in this workspace, so the review used direct diff, grep, and file reads.
   SuggestedAction: Optionally initialize CodeGraph for future large cross-cutting reviews.
+  Status: out-of-scope
+
+- [ID: item-3]
+  Severity: info
+  Scope: verification
+  Evidence: The previous repair run reported passing targeted checks: `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~WorkflowProfileManagerSpecs"`, `npm run test:run -w packages/web -- IssueCard.test.tsx`, and `npm test -w packages/runner`. These checks do not catch the project-default custom-template regression because the server test expectation was changed to the incorrect behavior.
+  SuggestedAction: Keep those checks, but add the missing project-default custom-template assertion described in item-1.
   Status: out-of-scope
 
 <promise>FAIL</promise>
