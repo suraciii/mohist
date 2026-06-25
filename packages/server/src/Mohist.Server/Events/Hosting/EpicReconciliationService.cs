@@ -12,10 +12,10 @@ namespace Mohist.Server.Events.Hosting;
 /// Safety-net sweep for the event-driven auto-done path. The in-memory
 /// CloudEvent bus used to signal <c>com.mohist.issue.work-completed</c>
 /// is at-most-once and swallows publish failures, so a missed event
-/// would leave a ready epic in <c>active</c>. This service periodically
-/// walks <c>active</c> epics and re-invokes
-/// <see cref="IEpicGrain.AutoMarkDoneIfReadyAsync"/>, which is
-/// idempotent and short-circuits terminal/paused epics. The cadence
+/// would leave a ready epic in <c>idle</c> or <c>running</c>. This
+/// service periodically walks candidate epics (idle + running) and
+/// re-invokes <see cref="IEpicGrain.AutoMarkDoneIfReadyAsync"/>, which
+/// is idempotent and short-circuits terminal/paused epics. The cadence
 /// mirrors <c>IssueWorkflowReconciliationService</c>: runs once a day
 /// by default, tunable through <see cref="EpicReconciliationOptions"/>.
 ///
@@ -94,10 +94,15 @@ public sealed class EpicReconciliationService : BackgroundService
         while (!ct.IsCancellationRequested)
         {
             // (ProjectId, Status, CreatedAt) index on EpicRow supports the
-            // active filter. Stable keyset paging ensures long-lived unready
-            // epics in early rows cannot starve later ready epics.
+            // status filter. The sweep covers idle and running epics:
+            //   - idle: auto-done readiness applies (mirrors manual "Mark Done").
+            //   - running: T-003 widens the sweep to running once the
+            //     terminal-event subscription covers both done/cancelled.
+            // The legacy "active" filter was renamed to "idle" by the
+            // EpicIdleRename migration; the sweep now matches the new
+            // string set produced by EpicStatusName.
             var candidates = await db.Epics.AsNoTracking()
-                .Where(e => e.Status == "active")
+                .Where(e => e.Status == "idle" || e.Status == "running")
                 .Where(e => string.Compare(e.ProjectId, lastProjectId) > 0
                     || (e.ProjectId == lastProjectId && string.Compare(e.Id, lastEpicId) > 0))
                 .OrderBy(e => e.ProjectId)
@@ -131,7 +136,7 @@ public sealed class EpicReconciliationService : BackgroundService
         }
 
         if (total > 0)
-            _log.LogInformation("Reconciled {Count} active epics", total);
+            _log.LogInformation("Reconciled {Count} candidate epics", total);
     }
 }
 

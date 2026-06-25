@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -126,6 +127,29 @@ public class EpicGrain : Grain, IEpicGrain
         var domain = Materialize(row, links);
         var now = DateTimeOffset.UtcNow;
         domain.Pause(reason, now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
+        return ToDto(row);
+    }
+
+    public async Task<EpicDto> StartAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        var now = DateTimeOffset.UtcNow;
+        domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
@@ -345,22 +369,9 @@ public class EpicGrain : Grain, IEpicGrain
         if (row.CreatedAt == default) row.CreatedAt = now;
     }
 
-    private static string StatusName(EpicStatusEnum status) => status switch
-    {
-        EpicStatusEnum.Active => "active",
-        EpicStatusEnum.Paused => "paused",
-        EpicStatusEnum.Done => "done",
-        EpicStatusEnum.Closed => "closed",
-        _ => "active",
-    };
+    private static string StatusName(EpicStatusEnum status) => EpicStatusName.ToName(status);
 
-    private static EpicStatusEnum ParseStatus(string status) => status?.ToLowerInvariant() switch
-    {
-        "paused" => EpicStatusEnum.Paused,
-        "done" => EpicStatusEnum.Done,
-        "closed" => EpicStatusEnum.Closed,
-        _ => EpicStatusEnum.Active,
-    };
+    private static EpicStatusEnum ParseStatus(string status) => EpicStatusName.Parse(status);
 
     private static void ApplyPendingEvents(MohistDbContext db, EpicAggregate epic, string projectId, string epicId)
     {

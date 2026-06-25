@@ -48,7 +48,7 @@ public class EpicLifecycleSpecs
         Assert.Equal(1, envelope.Details!.UndeliveredCount);
 
         var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
-        Assert.Equal("active", after.Status);
+        Assert.Equal("idle", after.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -291,7 +291,7 @@ public class EpicLifecycleSpecs
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
 
         var beforeMark = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
-        Assert.Equal("active", beforeMark.Status);
+        Assert.Equal("idle", beforeMark.Status);
 
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.True(detail.Progress.ReadyToMarkDone);

@@ -25,7 +25,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task HandleAsync_LastIssueCompletes_TransitionsEpicToDone()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
 
@@ -49,7 +49,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task HandleAsync_IssueNotLinkedToAnyEpic_NoOpsAndDoesNotInvokeGrain()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
@@ -61,16 +61,16 @@ public class EpicAutoDoneHandlerSpecs
         Assert.Empty(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("active", stored.Status);
+        Assert.Equal("idle", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task HandleAsync_EpicStillHasIncompleteIssues_StaysActive()
+    public async Task HandleAsync_EpicStillHasIncompleteIssues_StaysIdle()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
@@ -85,7 +85,7 @@ public class EpicAutoDoneHandlerSpecs
 
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("active", stored.Status);
+        Assert.Equal("idle", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -117,7 +117,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task HandleAsync_DuplicateWorkCompletedEvents_ConvergeToDoneAndNoErrors()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
 
@@ -142,7 +142,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task HandleAsync_DeliveredThroughInMemoryBus_TypedHandlerDispatches()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
 
@@ -187,7 +187,7 @@ public class EpicAutoDoneHandlerSpecs
     public async Task HandleAsync_MissingProjectIdExtension_NoOpsWithoutError()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
 
         var querier = new EpicQuerier(database.Factory, null!);
         var grains = new TestEpicGrainFactory(database.Factory);
@@ -238,7 +238,7 @@ public class EpicAutoDoneHandlerSpecs
         string projectId = "project_1",
         string epicId = "epic_1",
         int number = 1,
-        string status = "active",
+        string status = "idle",
         string? pauseReason = null)
     {
         await using var db = database.CreateDbContext();
