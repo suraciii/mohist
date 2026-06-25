@@ -196,8 +196,6 @@ public class MohistPrIssueWorkflowProfileSpecs
         var def = MohistWorkflow.Definition;
 
         AssertStagesMatch(def.Stages[0], pr.Stages[0]);
-        AssertStagesMatch(def.Stages[2], pr.Stages[2]);
-
         Assert.Equal(def.Stages[0].RequiresApproval, pr.Stages[0].RequiresApproval);
         Assert.Equal(def.Stages[2].RequiresApproval, pr.Stages[2].RequiresApproval);
     }
@@ -248,6 +246,60 @@ public class MohistPrIssueWorkflowProfileSpecs
         var prLoad = prBuild.Tasks.Single(t => t.Id == "load-tasks");
         var defLoad = defBuild.Tasks.Single(t => t.Id == "load-tasks");
         AssertTaskWithMapsMatchExcept(prLoad, defLoad);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void PrWorkflowDefinition_CheckStage_AppendsCreatePullRequestAfterAiReview()
+    {
+        var pr = MohistWorkflow.PrWorkflowDefinition;
+        var def = MohistWorkflow.Definition;
+
+        var prCheck = pr.Stages.Single(s => s.Stage == "check");
+        var defCheck = def.Stages.Single(s => s.Stage == "check");
+
+        Assert.Equal(new[] { "ai-review", "check:update-pr" }, prCheck.Tasks.Select(t => t.Id).ToArray());
+
+        var aiReview = prCheck.Tasks.Single(t => t.Id == "ai-review");
+        var defAiReview = defCheck.Tasks.Single(t => t.Id == "ai-review");
+        Assert.Equal(defAiReview.Uses, aiReview.Uses);
+        Assert.Equal(defAiReview.Title, aiReview.Title);
+        AssertTaskWithMapsMatchExcept(defAiReview, aiReview);
+
+        var updatePr = prCheck.Tasks.Single(t => t.Id == "check:update-pr");
+        Assert.Equal("mohist/create-pull-request", updatePr.Uses);
+        Assert.Equal("${{ workspace.branch }}", ReadStringWith(updatePr, "source"));
+        Assert.Equal("${{ repository.baseBranch }}", ReadStringWith(updatePr, "target"));
+        Assert.Equal("issue.title", ReadStringWith(updatePr, "titleFrom"));
+        Assert.Equal("issue.body", ReadStringWith(updatePr, "bodyFrom"));
+        Assert.NotNull(updatePr.SetVars);
+        Assert.Equal("output.prNumber", updatePr.SetVars!["github.pr.number"]);
+        Assert.Equal("output.prUrl", updatePr.SetVars!["github.pr.url"]);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void PrWorkflowDefinition_FinalMutatingCheckPathsAreFollowedByPrUpdateBeforeMerge()
+    {
+        var pr = MohistWorkflow.PrWorkflowDefinition;
+        var build = pr.Stages.Single(s => s.Stage == "build");
+        var check = pr.Stages.Single(s => s.Stage == "check");
+        var integrate = pr.Stages.Single(s => s.Stage == "integrate");
+
+        AssertStageEndsWithCreatePullRequest(build, "build:update-pr");
+        AssertStageEndsWithCreatePullRequest(check, "check:update-pr");
+
+        AssertRepairPathHasStageTailUpdateBeforeApproval(build, "health", "fix-build-health", "build:update-pr");
+        AssertRepairPathHasStageTailUpdateBeforeApproval(build, "verify", "fix-tests", "build:update-pr");
+        AssertRepairPathHasStageTailUpdateBeforeApproval(check, "review-passed", "fix-review-findings", "check:update-pr");
+        AssertRepairPathHasStageTailUpdateBeforeApproval(check, "merge-ready", "rebase-onto-base", "check:update-pr");
+
+        var mergePr = integrate.Tasks.Single(t => t.Id == "integrate:merge-pr");
+        Assert.Equal("mohist/merge-pull-request", mergePr.Uses);
+        Assert.Equal("${{ vars.github.pr.number }}", ReadStringWith(mergePr, "prNumber"));
+        Assert.DoesNotContain(integrate.Tasks, t => t.Uses == "mohist/create-pull-request");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -370,6 +422,10 @@ public class MohistPrIssueWorkflowProfileSpecs
         Assert.Contains("create-pull-request", buildTasks);
         Assert.Contains("build:open-pr", buildTasks);
         Assert.Contains("build:update-pr", buildTasks);
+
+        var checkTasks = JsonSerializer.Serialize(definition.Stages[2].Tasks);
+        Assert.Contains("create-pull-request", checkTasks);
+        Assert.Contains("check:update-pr", checkTasks);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -395,7 +451,7 @@ public class MohistPrIssueWorkflowProfileSpecs
             // PR description tail mentions the PR-first task list and "PR record"
             // suitability; default describes the simple push pipeline.
             (
-                "  Stages: plan (proposal, specs, design, tasks, self-review) → build (open PR, load tasks, update PR) → check (AI review, merge readiness) → integrate (spec sync, archive, merge).\n",
+                "  Stages: plan (proposal, specs, design, tasks, self-review) → build (open PR, load tasks, update PR) → check (AI review, update PR, merge readiness) → integrate (spec sync, archive, merge).\n",
                 "  Stages: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (spec sync, archive, merge, push).\n"
             ),
             (
@@ -486,6 +542,54 @@ public class MohistPrIssueWorkflowProfileSpecs
                 "                  oneOf:\n" +
                 "                    - <promise>done</promise>\n" +
                 "                    - <promise>unfinished</promise>"
+            ),
+            // Check-stage PR-first: after AI review, update the same PR before
+            // check-stage checks can approve the candidate for integrate.
+            (
+                "      - id: ai-review\n" +
+                "        title: AI review\n" +
+                "        uses: mohist/acp-agent\n" +
+                "        with:\n" +
+                "          session: check\n" +
+                "          prompt: ${{ prompts.review }}\n" +
+                "          agent: ${{ vars.agent }}\n" +
+                "          expect:\n" +
+                "            markers:\n" +
+                "              - path: ${{ openspecChangeDir }}/review.md\n" +
+                "                oneOf:\n" +
+                "                  - <promise>PASS</promise>\n" +
+                "                  - <promise>FAIL</promise>\n" +
+                "        artifacts:\n" +
+                "          files:\n" +
+                "            - path: ${{ openspecChangeDir }}/review.md\n" +
+                "      - id: check:update-pr\n" +
+                "        title: Update GitHub PR with check results\n" +
+                "        uses: mohist/create-pull-request\n" +
+                "        with:\n" +
+                "          source: ${{ workspace.branch }}\n" +
+                "          target: ${{ repository.baseBranch }}\n" +
+                "          remote: origin\n" +
+                "          titleFrom: issue.title\n" +
+                "          bodyFrom: issue.body\n" +
+                "        setVars:\n" +
+                "          github.pr.number: output.prNumber\n" +
+                "          github.pr.url: output.prUrl",
+                "      - id: ai-review\n" +
+                "        title: AI review\n" +
+                "        uses: mohist/acp-agent\n" +
+                "        with:\n" +
+                "          session: check\n" +
+                "          prompt: ${{ prompts.review }}\n" +
+                "          agent: ${{ vars.agent }}\n" +
+                "          expect:\n" +
+                "            markers:\n" +
+                "              - path: ${{ openspecChangeDir }}/review.md\n" +
+                "                oneOf:\n" +
+                "                  - <promise>PASS</promise>\n" +
+                "                  - <promise>FAIL</promise>\n" +
+                "        artifacts:\n" +
+                "          files:\n" +
+                "            - path: ${{ openspecChangeDir }}/review.md"
             ),
             // Delivery: default rebases+squashes then pushes; PR's integrate happy
             // path is only merge-pull-request, with rebase+create-pull-request kept
@@ -636,6 +740,35 @@ public class MohistPrIssueWorkflowProfileSpecs
         Mohist.Server.Workflow.Domain.Definition.TaskDefinition actual)
     {
         Assert.Equal(JsonSerializer.Serialize(expected.With), JsonSerializer.Serialize(actual.With));
+    }
+
+    private static void AssertStageEndsWithCreatePullRequest(
+        Mohist.Server.Workflow.Domain.Definition.StageDefinition stage,
+        string expectedTaskId)
+    {
+        var tail = stage.Tasks.Last();
+        Assert.Equal(expectedTaskId, tail.Id);
+        Assert.Equal("mohist/create-pull-request", tail.Uses);
+        Assert.Equal("${{ workspace.branch }}", ReadStringWith(tail, "source"));
+        Assert.Equal("${{ repository.baseBranch }}", ReadStringWith(tail, "target"));
+        Assert.NotNull(tail.SetVars);
+        Assert.Equal("output.prNumber", tail.SetVars!["github.pr.number"]);
+        Assert.Equal("output.prUrl", tail.SetVars!["github.pr.url"]);
+    }
+
+    private static void AssertRepairPathHasStageTailUpdateBeforeApproval(
+        Mohist.Server.Workflow.Domain.Definition.StageDefinition stage,
+        string checkName,
+        string repairTaskId,
+        string tailUpdateTaskId)
+    {
+        var check = stage.Checks.Single(c => c.Name == checkName);
+        Assert.NotNull(check.OnFailure?.Repair);
+        Assert.Equal(repairTaskId, check.OnFailure!.Repair!.Task.Id);
+
+        var tail = stage.Tasks.Last();
+        Assert.Equal(tailUpdateTaskId, tail.Id);
+        Assert.Equal("mohist/create-pull-request", tail.Uses);
     }
 
     private static string ReadResourceYaml(string fileName)

@@ -74,6 +74,14 @@ integrate 收尾只剩 `merge-pull-request`：
         github.pr.number: output.prNumber
         github.pr.url: output.prUrl
 
+- stage: check
+  tasks:
+    - id: ai-review
+    - id: check:update-pr       # mohist/create-pull-request
+      setVars:
+        github.pr.number: output.prNumber
+        github.pr.url: output.prUrl
+
 - stage: integrate
   tasks:
     - id: integrate:merge-pr    # mohist/merge-pull-request
@@ -93,10 +101,11 @@ integrate 收尾只剩 `merge-pull-request`：
 当前语义是正常路径不预先 rebase。`build:open-pr` 在 build 一开始就推送
 workflow branch，按 head/base 打开或复用 open PR，并把 `prNumber`/`prUrl`
 写入 workflow runtime variables；`build:update-pr` 在 build 的 load-tasks
-完成后再次推送同一个 head/base，让 GitHub 更新 PR。integrate 的 happy path
-只跑 `integrate:merge-pr`：它读取 `vars.github.pr.number`，在真正 merge 前
-等待 GitHub PR checks，通过后调用 `gh pr merge --squash`，并确认
-`state=MERGED` 才视为集成完成。
+完成后再次推送同一个 head/base，让 GitHub 更新 PR；`check:update-pr` 在
+check 的 AI review 及其 auto-fix 路径收敛后再次推送同一个 PR。integrate
+的 happy path 只跑 `integrate:merge-pr`：它读取 `vars.github.pr.number`，在
+真正 merge 前等待 GitHub PR checks，通过后调用 `gh pr merge --squash`，并
+确认 `state=MERGED` 才视为集成完成。
 
 只有 GitHub PR mergeability 返回 base moved、branch out-of-date 或不可合并
 时，integrate:merge-pr 才会触发 `base-moved` recovery，依次执行
