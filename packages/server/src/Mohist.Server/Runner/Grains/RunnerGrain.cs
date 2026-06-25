@@ -178,21 +178,20 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (string.IsNullOrWhiteSpace(workflowRunId))
             return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow", WorkDispatchOwnerKinds.Workflow, workflowRunId);
 
-        var key = WorkflowWorkKey(workflowRunId, workId);
-        if (!_outstandingWorkflowWorks.TryGetValue(key, out var tracked))
-        {
-            // Untracked reports are dropped — the workflow grain already
-            // accepted or invalidated this work item.
-            return new RunnerWorkReportResult(workflowRunId, null, false, "untracked", WorkDispatchOwnerKinds.Workflow, workflowRunId);
-        }
-
         var run = await _workflowRuns.LoadAsync(workflowRunId);
         if (run is null)
             return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow", WorkDispatchOwnerKinds.Workflow, workflowRunId);
 
+        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+        var key = WorkflowWorkKey(workflowRunId, workId);
+        var tracked = _outstandingWorkflowWorks.TryGetValue(key, out var existing)
+            ? existing
+            : await RecoverActiveWorkflowWorkAsync(workflow, workflowRunId, workId, run);
+        if (tracked is null)
+            return new RunnerWorkReportResult(workflowRunId, null, false, "untracked", WorkDispatchOwnerKinds.Workflow, workflowRunId);
+
         var outcome = await _translator.TranslateResultAsync(tracked.Item, result, workflowRunId, run);
 
-        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
         switch (outcome)
         {
             case WorkflowItemTranslator.InboundOutcome.Task task:
@@ -213,6 +212,51 @@ public class RunnerGrain : Grain, IRunnerGrain
             "reported",
             WorkDispatchOwnerKinds.Workflow,
             workflowRunId);
+    }
+
+    private async Task<RunnerWorkflowWork?> RecoverActiveWorkflowWorkAsync(
+        IWorkflowGrain workflow,
+        string workflowRunId,
+        string workId,
+        WorkflowRun run)
+    {
+        var active = await workflow.GetActiveWorkAsync(workId);
+        if (active is null || !string.Equals(active.WorkId, workId, StringComparison.Ordinal))
+            return null;
+
+        WorkItem? item = active.WorkType switch
+        {
+            WorkItemTypes.Task => RecoverActiveTaskWorkItem(run, active),
+            WorkItemTypes.Checks => RecoverActiveChecksWorkItem(run, active),
+            _ => null,
+        };
+        if (item is null)
+            return null;
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
+        return new RunnerWorkflowWork(item, dispatch, DateTimeOffset.UtcNow);
+    }
+
+    private static WorkItem? RecoverActiveTaskWorkItem(WorkflowRun run, WorkflowActiveWorkView active)
+    {
+        var stage = run.Stages.FirstOrDefault(s => string.Equals(s.Id, active.Stage, StringComparison.Ordinal));
+        var task = stage?.Tasks.FirstOrDefault(t => string.Equals(t.WorkId ?? t.Id, active.WorkId, StringComparison.Ordinal));
+        return task is null
+            ? null
+            : WorkItem.Task(active.Stage, active.WorkId, task.Title, task.Uses, task.WithInput, task.Artifacts, task.SetVars);
+    }
+
+    private static WorkItem? RecoverActiveChecksWorkItem(WorkflowRun run, WorkflowActiveWorkView active)
+    {
+        var stage = run.Stages.FirstOrDefault(s => string.Equals(s.Id, active.Stage, StringComparison.Ordinal));
+        if (stage is null)
+            return null;
+
+        var pendingChecks = stage.Checks
+            .Where(c => c.Status == StageCheckStatus.Pending)
+            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
+            .ToList();
+        return WorkItem.Checks(active.Stage, active.WorkId, pendingChecks);
     }
 
     public async Task<RunnerWorkReportResult> ReportAgentJobResultAsync(string agentJobId, string workId, WorkResult result)
@@ -326,6 +370,12 @@ public class RunnerGrain : Grain, IRunnerGrain
     public Task<int> GetSlotsAsync()
     {
         return Task.FromResult(MaxWorkflowSlots);
+    }
+
+    public Task DeactivateForTestAsync()
+    {
+        DeactivateOnIdle();
+        return Task.CompletedTask;
     }
 
     public async Task UpdateAsync(int slots)

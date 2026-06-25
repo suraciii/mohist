@@ -19,6 +19,27 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
 {
     public RunnerOutstandingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    private async Task DeactivateRunnerAsync(string runnerId)
+    {
+        await Grains.GetGrain<IRunnerGrain>(runnerId).DeactivateForTestAsync();
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var activations = await management.GetDetailedGrainStatistics();
+            if (!activations.Any(stat => stat.GrainType.Contains(nameof(RunnerGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(runnerId, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail($"Runner grain '{runnerId}' did not deactivate in time.");
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
@@ -46,6 +67,31 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         var runtimeAfterReport = await runner.GetRuntimeStateAsync();
         Assert.DoesNotContain(runtimeAfterReport.ActiveWorks, w =>
             w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.OwnerId == work.WorkflowRunId && w.WorkId == work.WorkId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task ReportWorkflowResultAsync_AfterRunnerReactivation_ReconstructsActiveWorkAndReports()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var (work, _) = await PollWorkAnyAsync();
+
+        await DeactivateRunnerAsync(runnerId);
+
+        var reactivatedRunner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var result = await reactivatedRunner.ReportWorkflowResultAsync(
+            work.WorkflowRunId,
+            work.WorkId,
+            new WorkResult("completed"));
+
+        Assert.Equal("reported", result.Reason);
+        Assert.Equal("Completed", await workflow.GetRunStatusAsync());
+
+        var run = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal(TaskRunStatus.Completed, run.Stages.Single().Tasks.Single().Status);
+        Assert.Equal(WorkflowRunStatus.Completed, run.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

@@ -184,7 +184,19 @@ public sealed class WorkflowItemTranslator : IScopedService
         if (workType == "task")
         {
             var stageRun = run.Stages.FirstOrDefault(s => s.Id == stage);
-            var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == workId);
+            var task = stageRun?.Tasks.FirstOrDefault(t => t.WorkId == workId || t.Id == workId);
+            if (task?.CausedByFailedTaskId is { } failedTaskId)
+            {
+                var failedTask = FindFailedTask(run, failedTaskId);
+                if (failedTask?.Output is { } failedOutput && failedOutput.ValueKind == JsonValueKind.Object)
+                {
+                    var failureObj = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+                    {
+                        ["output"] = failedOutput.Clone(),
+                    };
+                    payload["failure"] = JSON.SerializeToElement(failureObj);
+                }
+            }
             if (task?.CausedByFeedbackId is { } feedbackId)
             {
                 var feedback = run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
@@ -275,6 +287,16 @@ public sealed class WorkflowItemTranslator : IScopedService
     {
         value = "";
         return run.Metadata?.Annotations?.TryGetValue(key, out value!) == true;
+    }
+
+    private static TaskRun? FindFailedTask(WorkflowRun run, string taskId)
+    {
+        foreach (var stage in run.Stages)
+        {
+            var task = stage.Tasks.FirstOrDefault(t => t.Id == taskId || t.WorkId == taskId);
+            if (task is not null && task.Output.HasValue) return task;
+        }
+        return null;
     }
 
     // =========================================================================

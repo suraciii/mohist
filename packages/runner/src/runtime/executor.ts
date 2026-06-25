@@ -1,6 +1,6 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, JsonValue, RecoveryTaskInput, WorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
@@ -95,7 +95,7 @@ export class WorkExecutor {
     this.acpConnection = acp
   }
 
-  async execute(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
+  async execute(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== "agent-job") {
       const precheck = await this.prepareWorkspace(work, signal)
@@ -109,7 +109,7 @@ export class WorkExecutor {
     return await this.executeOne(work, resolvedWorkspace, signal)
   }
 
-  private async prepareWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async prepareWorkspace(work: RenderedWorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
       const info = await this.workspaceManager.prepare(work, signal)
       return { kind: "ok", workspace: infoToResolved(info) }
@@ -118,7 +118,7 @@ export class WorkExecutor {
     }
   }
 
-  private async executeOne(work: WorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
+  private async executeOne(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
     const action = this.actions.resolve(work.uses)
     if (!action) return failure(work, `No action found for '${work.uses}'`)
 
@@ -139,8 +139,6 @@ export class WorkExecutor {
       const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
       const normalized = normalize(work, result)
       if (normalized.status !== "completed") {
-        const recoveryResult = tryRecovery(work, renderedWith, normalized)
-        if (recoveryResult) return recoveryResult
         return attachBranchStabilityEvidence(normalized, startCheck.evidence)
       }
       const endCheck = await this.checkBranchStability(work, workDir, expectedBranch, "end", signal)
@@ -176,7 +174,7 @@ export class WorkExecutor {
    * integration's contract; we only assert the boundary.
    */
   private async checkBranchStability(
-    work: WorkItem,
+    work: RenderedWorkItem,
     workDir: string,
     expectedBranch: string | null,
     boundary: "start" | "end",
@@ -271,7 +269,7 @@ export class WorkExecutor {
    * immediately with structured evidence.
    */
   private async enforceCleanWorktree(
-    work: WorkItem,
+    work: RenderedWorkItem,
     workDir: string,
     result: WorkItemResult,
     renderedWith: JsonObject | null,
@@ -307,7 +305,7 @@ export class WorkExecutor {
   }
 
   private async runAgentCleanupAttempt(
-    work: WorkItem,
+    work: RenderedWorkItem,
     workDir: string,
     renderedWith: JsonObject | null,
     variables: JsonObject,
@@ -335,7 +333,7 @@ export class WorkExecutor {
     return "ok"
   }
 
-  private async executeChecks(work: WorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
+  private async executeChecks(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<WorkItemResult> {
     const variables = await this.variables(work, resolvedWorkspace, signal)
     const checks = Array.isArray(work.with?.checks) ? work.with.checks.filter(isCheck) : []
     if (checks.length === 0) return failure(work, "No checks found in dispatch")
@@ -375,7 +373,7 @@ export class WorkExecutor {
     return { status: "pass", output }
   }
 
-  private async variables(work: WorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
+  private async variables(work: RenderedWorkItem, resolvedWorkspace: ResolvedWorkspace, signal: AbortSignal): Promise<JsonObject> {
     const workspace = resolvedWorkspaceToVariables(resolvedWorkspace)
     const userVariables = work.variables ?? {}
     const userRunner = userVariables.runner
@@ -390,7 +388,7 @@ export class WorkExecutor {
   // the dispatch's variables. Used by agent-job dispatches whose
   // workspace is caller-owned and must NOT be re-cloned or verified by
   // the runner (issue #126 standalone-workspace contract).
-  private workspaceFromVariables(work: WorkItem): ResolvedWorkspace {
+  private workspaceFromVariables(work: RenderedWorkItem): ResolvedWorkspace {
     const variables = work.variables ?? {}
     const ws = variables["workspace"]
     if (!ws || typeof ws !== "object" || Array.isArray(ws)) {
@@ -425,7 +423,7 @@ export class WorkExecutor {
    * failures are reported on the message but do not fail the task.
    */
   private async captureAndUploadArtifacts(
-    work: WorkItem,
+    work: RenderedWorkItem,
     workspaceRoot: string,
     workDir: string,
     result: WorkItemResult,
@@ -536,7 +534,7 @@ export class WorkExecutor {
     }
   }
 
-  private async applySetVars(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<WorkItemResult> {
+  private async applySetVars(work: RenderedWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<WorkItemResult> {
     if (result.status !== "completed") return result
     if (!work.setVars || Object.keys(work.setVars).length === 0) return result
 
@@ -558,7 +556,7 @@ export class WorkExecutor {
     return result
   }
 
-  private captureDeclaredOutputs(work: WorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
+  private captureDeclaredOutputs(work: RenderedWorkItem, result: WorkItemResult, actionResult: ActionResult): WorkItemResult {
     if (result.status !== "completed") return result
     const capturedOutputs = captureOutputs(work.outputs, actionResult)
     return capturedOutputs ? { ...result, capturedOutputs } : result
@@ -575,7 +573,7 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
   return { path: workspace.path, branch: workspace.branch, changeDir: workspace.changeDir }
 }
 
-function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
+function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
   return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, projectId: work.projectId, issueNumber: work.issueNumber, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
 }
 
@@ -583,7 +581,7 @@ function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal,
 // workflow workspace (clone failed, base branch missing, checkout could
 // not be restored). The `kind` is the structured `output.kind` so the
 // CLI / API / UI can render it distinctly from ordinary task failures.
-function workspaceSetupFailure(work: WorkItem, error: unknown): WorkItemResult {
+function workspaceSetupFailure(work: RenderedWorkItem, error: unknown): WorkItemResult {
   const message = error instanceof Error ? error.message : String(error)
   return {
     status: work.workType === "check" || work.workType === "checks" ? "fail" : "failed",
@@ -592,8 +590,7 @@ function workspaceSetupFailure(work: WorkItem, error: unknown): WorkItemResult {
   }
 }
 
-
-function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {
+function normalize(work: RenderedWorkItem, result: WorkItemResult): WorkItemResult {
   const status = result.status.toLowerCase()
   if (work.workType === "check") {
     if (["pass", "passed", "success", "succeeded", "completed"].includes(status)) return { ...result, status: "pass" }
@@ -604,7 +601,7 @@ function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {
   return { ...result, status: "failed" }
 }
 
-function failure(work: WorkItem, message: string): WorkItemResult {
+function failure(work: RenderedWorkItem, message: string): WorkItemResult {
   return { status: work.workType === "check" || work.workType === "checks" ? "fail" : "failed", message }
 }
 
@@ -628,7 +625,7 @@ function resolveWorkspacePath(workspaceRoot: string, requested: string) {
   return resolved
 }
 
-function formatUnresolvedError(work: WorkItem, unresolved: string[]): string {
+function formatUnresolvedError(work: RenderedWorkItem, unresolved: string[]): string {
   const label = work.title?.trim() || work.uses || work.workId
   const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
   return "Task " + work.workId + " (" + label + ") references undefined variable(s): " + refs + ". " +
@@ -856,7 +853,7 @@ function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): string {
   return parts.join("; ")
 }
 
-function worktreeProbeFailure(work: WorkItem, error: WorktreeProbeError): WorkItemResult {
+function worktreeProbeFailure(work: RenderedWorkItem, error: WorktreeProbeError): WorkItemResult {
   const evidence: DirtyWorktreeEvidence = {
     kind: "dirty-worktree",
     staged: [],
@@ -944,7 +941,7 @@ async function readCurrentBranch(workDir: string, signal: AbortSignal): Promise<
 }
 
 function branchInvariantViolationFailure(
-  work: WorkItem,
+  work: RenderedWorkItem,
   evidence: BranchInvariantViolationEvidence,
 ): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
@@ -985,132 +982,4 @@ function branchStabilityToJson(evidence: BranchStabilityEvidence): JsonObject {
   }
   if (evidence.observedRef !== undefined) value["observedRef"] = evidence.observedRef
   return value
-}
-
-interface RecoveryHandler {
-  when: string
-  tasks: RecoveryTaskInput[]
-  retrySelf: boolean
-}
-
-interface RecoveryConfig {
-  budget: number
-  handlers: RecoveryHandler[]
-}
-
-/**
- * Attempt task recovery. When an action returns a failure that carries
- * an `errorCode` in its output JSON, and the rendered `with` declares a
- * matching `recovery.handlers[].when` with budget remaining, the task is
- * converted to `completed` and the handler's recovery tasks (plus an
- * optional self-retry with budget-1) are returned for the engine to
- * insert. Returns null when the failure is not recoverable so the caller
- * falls through to the normal failure path.
- */
-function tryRecovery(
-  work: WorkItem,
-  renderedWith: JsonObject | null,
-  result: WorkItemResult,
-): WorkItemResult | null {
-  const recovery = readRecoveryConfig(renderedWith)
-  if (!recovery) return null
-
-  const errorCode = readErrorCode(result.output)
-  if (!errorCode) return null
-
-  const handler = recovery.handlers.find((h) => h.when === errorCode)
-  if (!handler) return null
-
-  if (recovery.budget <= 0) return null
-
-  const recoveryTasks: RecoveryTaskInput[] = [...handler.tasks]
-
-  if (handler.retrySelf) {
-    const retryId = work.workId.includes(".") ? work.workId.substring(0, work.workId.lastIndexOf(".")) : work.workId
-    recoveryTasks.push({
-      id: retryId,
-      title: work.title ?? work.workId,
-      uses: work.uses ?? null,
-      with: decrementRecoveryBudget(renderedWith, recovery.budget),
-    })
-  }
-
-  const label = work.title?.trim() || work.uses || work.workId
-  return {
-    status: "completed",
-    message: `${label} failed (${errorCode}); recovery scheduled`,
-    output: result.output,
-    recoveryTasks,
-  }
-}
-
-function readRecoveryConfig(renderedWith: JsonObject | null): RecoveryConfig | null {
-  if (!renderedWith) return null
-  const recovery = renderedWith["recovery"]
-  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return null
-  const recoveryObj = recovery as JsonObject
-  const rawBudget = recoveryObj["budget"]
-  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.floor(rawBudget) : 0
-  const rawHandlers = recoveryObj["handlers"]
-  if (!Array.isArray(rawHandlers)) return null
-  const handlers: RecoveryHandler[] = []
-  for (const raw of rawHandlers) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue
-    const h = raw as JsonObject
-    const when = typeof h["when"] === "string" ? h["when"] : null
-    if (!when) continue
-    handlers.push({
-      when,
-      tasks: readRecoveryTasks(h["tasks"]),
-      retrySelf: h["retrySelf"] === true,
-    })
-  }
-  return { budget, handlers }
-}
-
-function readRecoveryTasks(raw: unknown): RecoveryTaskInput[] {
-  if (!Array.isArray(raw)) return []
-  const tasks: RecoveryTaskInput[] = []
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
-    const t = entry as JsonObject
-    const id = typeof t["id"] === "string" ? t["id"] : null
-    if (!id) continue
-    const withValue = t["with"]
-    tasks.push({
-      id,
-      title: typeof t["title"] === "string" ? t["title"] : id,
-      uses: typeof t["uses"] === "string" ? t["uses"] : null,
-      with: withValue && typeof withValue === "object" && !Array.isArray(withValue) ? (withValue as JsonObject) : null,
-    })
-  }
-  return tasks
-}
-
-function readErrorCode(output: string | null | undefined): string | null {
-  if (!output) return null
-  try {
-    const parsed = JSON.parse(output) as unknown
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const obj = parsed as JsonObject
-      const code = obj["errorCode"] ?? obj["failureKind"]
-      return typeof code === "string" && code.length > 0 ? code : null
-    }
-  } catch {
-    // output is not JSON or parseable — not recoverable
-  }
-  return null
-}
-
-function decrementRecoveryBudget(renderedWith: JsonObject | null, currentBudget: number): JsonObject | null {
-  if (!renderedWith) return null
-  const recovery = renderedWith["recovery"]
-  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return renderedWith
-  return {
-    ...renderedWith,
-    recovery: {
-      ...(recovery as JsonObject),
-      budget: currentBudget - 1,
-    },
-  }
 }

@@ -20,7 +20,7 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server/Workflow/Services/WorkflowProfileManager.cs 新增窄 API；WorkflowGrain.cs 六处 over-fetch 改写；相关测试更新与新增",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "设计 D6。此阶段不改对外协议签名（PollWorkAsync/ReportResultAsync），是行为保持的内部重构，可独立提交回滚。级联仍全量跑，省的是概念耦合而非 DB 查询。"
     },
     {
@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "WorkflowRun.Work.cs 删 StageInit；WorkflowRun.Stage.cs 不变；WorkflowGrain.cs 新增 InitializeFreshStagesAsync 并改 PrepareWorkAsync；相关测试",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "设计 D3。依赖 T-001 的 LoadStageSpecsAsync。此阶段仍不改对外协议签名，stage-init 对调用方不可见是行为保持的（原本 PrepareWorkAsync 递归吸收后也只返 task/checks）。"
     },
     {
@@ -65,7 +65,7 @@
       "type": "WRITE",
       "output": "Workflow/Domain/Run/ 新增 WorkItem/TaskOutcome/CheckOutcome；IWorkflowGrain.cs 协议改；WorkflowGrain.cs 去渲染/解析；RunnerGrain.cs + 新建 WorkflowItemTranslator；runner TS types.ts/connection.ts；测试",
       "dependsOn": ["T-002"],
-      "passes": false,
+      "passes": true,
       "notes": "设计 D1/D2/D4/D7，BREAKING 协议变更，blast radius 跨控制/执行面。artifact 绑定倾向调用方绑定后引用入 TaskOutcome，实施时确认 _artifactBindService.BindAsync 无 grain 独占态依赖（当前依赖 profileManager vars，非独占）。server 与 runner 必须同 PR 改。"
     },
     {
@@ -89,7 +89,7 @@
       "type": "WRITE",
       "output": "WorkflowGrainOptions.cs 删除；WorkflowGrain.cs 删监督路径；RunnerGrain.cs 加 outstanding 记账与合成失败；域删 FailTaskForRunnerLost；测试改写与新增",
       "dependsOn": ["T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "设计 D5。依赖 T-003 的入方向域结果协议（合成 failed 需 TaskOutcome）。runner-loss reminder 化本轮不强制实现，验收接受 follow-up。删除监督会移除 On() 里所有 EnsureWorkHeartbeatAsync 分支。"
     },
     {
@@ -110,7 +110,7 @@
       "type": "WRITE",
       "output": "WorkflowGrain.cs 读模型提取与 On() 清理；新建 WorkflowReadModel；锁释放 bus 订阅 handler；删除 RequeueWorkflowIdAsync；测试",
       "dependsOn": ["T-004"],
-      "passes": false,
+      "passes": true,
       "notes": "设计 D8。依赖 T-004（On() 分发表在 T-004 删监督后已大幅简化，此时迁 bus 与提取读模型更干净）。锁迁 bus 与 WorkflowRunStopped 走 bus 的现有模式一致。"
     }
   ]

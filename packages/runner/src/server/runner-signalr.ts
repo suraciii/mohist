@@ -2,7 +2,7 @@ import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve, relative, isAbsolute } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
-import type { JsonObject, WorkItem } from "../core/types.js"
+import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { deleteDirectory, runCommand as defaultRunCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
@@ -454,7 +454,7 @@ export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined):
   return { workDir: query.workspacePath, baseBranch: query.baseBranch, head }
 }
 
-export function normalizeMaterializePayload(payload: unknown): WorkItem {
+export function normalizeMaterializePayload(payload: unknown): RenderedWorkItem {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("MaterializeWorkspace payload must be an object")
   const source = payload as Record<string, unknown>
   const workflowRunId = readString(source, "workflowRunId")

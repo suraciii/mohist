@@ -1,18 +1,13 @@
 import { hostname } from "node:os"
-import type { CleanupPolicy, JsonObject, RecoveryTaskInput, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
+import type { JsonObject, RenderedWorkItem, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
-  private lastCleanupPolicy: CleanupPolicy | null = null
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
-  }
-
-  getLastCleanupPolicy(): CleanupPolicy | null {
-    return this.lastCleanupPolicy
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
@@ -27,41 +22,14 @@ export class ServerConnection {
     await this.post("unregister", undefined, signal)
   }
 
-  async poll(signal: AbortSignal): Promise<WorkItem | null> {
+  async poll(signal: AbortSignal): Promise<RenderedWorkItem | null> {
     const response = await fetch(this.url("poll"), { method: "POST", signal })
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    const dispatch = (await response.json()) as WorkDispatchResponse
-    this.lastCleanupPolicy = dispatch.cleanupPolicy ?? null
-    return toWorkItem(dispatch)
+    return toWorkItem((await response.json()) as WorkDispatchResponse)
   }
 
-  /**
-   * Batch status query for the runner's convergence backstop. The runner
-   * only asks about workflow runs it still tracks in its local active
-   * workspace registry; the server returns the current lifecycle status of
-   * every requested run id that exists, dropping unknown ones (per design
-   * D2 of issue-268 — never enumerate or query runs the runner did not
-   * request).
-   *
-   * The response is a partial map: keys absent from the response mean the
-   * server has no record of the run (the runner treats these as "drop
-   * the registry entry").
-   */
-  async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
-    if (workflowRunIds.length === 0) return {}
-    const response = await fetch(this.url("workflow-runs/status"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workflowRunIds }),
-      signal,
-    })
-    if (!response.ok) throw new Error(`workflowRunsStatus failed: ${response.status} ${await response.text()}`)
-    const payload = await response.json() as { statuses?: Record<string, string> }
-    return payload.statuses ?? {}
-  }
-
-  async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
+  async report(work: RenderedWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
     const ownerKind = work.ownerKind?.trim().toLowerCase()
     const body: Record<string, unknown> = {
       workId: work.workId,
@@ -72,7 +40,6 @@ export class ServerConnection {
       exitCode: result.exitCode,
       artifactUploadIds: result.artifactUploadIds ?? null,
       cleanupAttempts: result.cleanupAttempts ?? null,
-      recoveryTasks: serializeRecoveryTasks(result.recoveryTasks),
     }
     if (ownerKind) {
       body.ownerKind = ownerKind
@@ -226,7 +193,7 @@ export interface WorkflowAgentSession {
   resolvedModel?: string | null
 }
 
-function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
+function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
   return {
     workflowRunId: dispatch.workflowRunId,
     workId: dispatch.workId,
@@ -286,16 +253,6 @@ function readNumber(value: unknown, path: string[]): number | null {
 function readBoolean(value: unknown, path: string[]): boolean | null {
     const found = getSegments(value, path)
   return typeof found === "boolean" ? found : null
-}
-
-function serializeRecoveryTasks(tasks: RecoveryTaskInput[] | null | undefined): Array<{ id: string; title: string; uses: string | null; with: string | null }> | null {
-  if (!tasks || tasks.length === 0) return null
-  return tasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    uses: t.uses ?? null,
-    with: t.with ? JSON.stringify(t.with) : null,
-  }))
 }
 
 function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {

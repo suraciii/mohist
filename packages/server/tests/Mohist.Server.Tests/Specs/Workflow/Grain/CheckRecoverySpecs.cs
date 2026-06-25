@@ -62,6 +62,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var (taskWork, runnerId) = await PollWorkAnyAsync();
         await ReportAsync(runnerId, taskWork.WorkId, "completed");
         var (checkWork, _) = await PollWorkAnyAsync();
+        await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         var otherRunnerId = await RegisterRunnerAsync();
 
         // The runner-grain identity is the runner itself, so a runner that

@@ -400,7 +400,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private string MarkChecksRunning(string stage, IReadOnlyList<CheckItem> items)
     {
-        var checksWorkId = $"checks-{stage}";
+        var checksWorkId = $"checks-{stage}:{Guid.NewGuid():N}";
         _dispatchedWorkId = checksWorkId;
         _dispatchedWorkStartedAt ??= DateTimeOffset.UtcNow;
         _run!.WorkDelivery = new WorkflowWorkDelivery(

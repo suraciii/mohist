@@ -31,11 +31,11 @@ export interface TaskArtifactDeclaration {
  * `variables`, `prompts`, `projectId`, `issueNumber`, etc. without
  * smuggling them into the domain protocol.
  */
-export type DomainWorkItem =
-  | TaskDomainWorkItem
-  | ChecksDomainWorkItem
+export type WorkItem =
+  | TaskWorkItem
+  | ChecksWorkItem
 
-export interface TaskDomainWorkItem {
+export interface TaskWorkItem {
   workType: "task"
   stage: string
   id: string
@@ -46,7 +46,7 @@ export interface TaskDomainWorkItem {
   setVars?: Record<string, string> | null
 }
 
-export interface ChecksDomainWorkItem {
+export interface ChecksWorkItem {
   workType: "checks"
   stage: string
   id: string
@@ -59,7 +59,7 @@ export interface TaskArtifactCapture {
 
 /**
  * HTTP envelope returned by the runner poll endpoint. The server's
- * runner-grain renders a domain `WorkItem` (see `DomainWorkItem`) into
+ * runner-grain renders a domain `WorkItem` into
  * a `WorkDispatch` and serializes the rendered envelope here so the
  * runner process can execute without re-rendering. The fields include
  * the pre-rendered `with`/`artifacts`, `variables`/`prompts`, issue
@@ -105,11 +105,11 @@ export interface CleanupPolicy {
  * `outputs`, `setVars`) are decoded into structured objects/arrays so
  * the runtime can traverse them without re-parsing. This is the
  * runner's internal "work item" — it is NOT a mirror of the server
- * domain `WorkItem` (see `DomainWorkItem`). The runner process only
+ * domain `WorkItem`. The runner process only
  * ever sees this rendered envelope; the unrendered domain shape lives
  * on the server.
  */
-export interface WorkItem {
+export interface RenderedWorkItem {
   workflowRunId: string
   workId: string
   workType: string
