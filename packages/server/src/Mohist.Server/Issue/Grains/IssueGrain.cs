@@ -99,7 +99,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (!string.IsNullOrWhiteSpace(repositoryRef))
             return repositoryRef;
-        
+
         var projectGrain = GrainFactory.GetGrain<IProjectGrain>(projectId);
         var project = await projectGrain.GetAsync();
         return _repositoryResolver.Resolve(project, repositoryRef: null).Repository?.Name;
