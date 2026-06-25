@@ -168,7 +168,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(result.Structure);
         Assert.Contains("system-template:mohist/pr", result.Id ?? "");
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:open-pr");
+        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "integrate:merge-pr");
+        Assert.Equal("mohist/merge-pull-request", mergePr.Uses);
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
@@ -210,7 +211,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(result.Structure);
         Assert.Contains("system-template:mohist/pr", result.Id ?? "");
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        Assert.Contains(integrate.Tasks, t => t.Id == "integrate:open-pr");
+        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "integrate:merge-pr");
+        Assert.Equal("mohist/merge-pull-request", mergePr.Uses);
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
