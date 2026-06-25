@@ -56,8 +56,8 @@ describe('isValidLabelKey', () => {
 describe('getLabelCatalog', () => {
   it('GETs /api/projects/{id}/labels/catalog and returns the list', async () => {
     const definitions = [
-      { key: 'module', description: 'subsystem', origin: 'user' },
-      { key: 'refactor', description: 'cleanup', origin: 'system' },
+      { key: 'module', description: 'subsystem' },
+      { key: 'kind', description: 'change type' },
     ]
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(okJson(definitions))
     vi.stubGlobal('fetch', fetchMock)
@@ -81,7 +81,7 @@ describe('getLabelCatalog', () => {
 describe('createLabelDefinition', () => {
   it('POSTs key/description/supportedValues to the catalog endpoint', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'subsystem', origin: 'user' }, 201),
+      okJson({ key: 'module', description: 'subsystem' }, 201),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -102,7 +102,7 @@ describe('createLabelDefinition', () => {
 
   it('omits supportedValues when not provided', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'freeform', description: 'no values', origin: 'user' }, 201),
+      okJson({ key: 'freeform', description: 'no values' }, 201),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -127,7 +127,7 @@ describe('createLabelDefinition', () => {
 describe('updateLabelDefinition', () => {
   it('PATCHes only the description field when supportedValues is omitted', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'new', origin: 'user', supportedValues: ['auth'] }),
+      okJson({ key: 'module', description: 'new', supportedValues: ['auth'] }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -141,7 +141,7 @@ describe('updateLabelDefinition', () => {
 
   it('PATCHes only supportedValues when description is omitted', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'same', origin: 'user', supportedValues: ['a', 'b'] }),
+      okJson({ key: 'module', description: 'same', supportedValues: ['a', 'b'] }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -153,7 +153,7 @@ describe('updateLabelDefinition', () => {
 
   it('PATCHes both fields when both are provided', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'module', description: 'd', origin: 'user', supportedValues: ['v'] }),
+      okJson({ key: 'module', description: 'd', supportedValues: ['v'] }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -168,7 +168,7 @@ describe('updateLabelDefinition', () => {
 
   it('encodes the key segment', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      okJson({ key: 'a/b', description: 'x', origin: 'user' }),
+      okJson({ key: 'a/b', description: 'x' }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -178,21 +178,15 @@ describe('updateLabelDefinition', () => {
     expect(calledPath).toBe('/api/projects/proj-1/labels/catalog/a%2Fb')
   })
 
-  it('surfaces server error messages on 404 / 409', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(errorJson("Key 'missing' not found", 404, 'not_found'))
-      .mockResolvedValueOnce(
-        errorJson("Definition 'refactor' is immutable", 409, 'conflict'),
-      )
+  it('surfaces the server-provided error on 404', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      errorJson("Key 'missing' not found", 404, 'not_found'),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(
       updateLabelDefinition('proj-1', 'missing', { description: 'x' }),
     ).rejects.toThrow('not found')
-    await expect(
-      updateLabelDefinition('proj-1', 'refactor', { description: 'x' }),
-    ).rejects.toThrow('immutable')
   })
 })
 
@@ -208,17 +202,6 @@ describe('deleteLabelDefinition', () => {
     const [calledPath, init] = fetchMock.mock.calls[0]
     expect(calledPath).toBe('/api/projects/proj-1/labels/catalog/module')
     expect(init?.method).toBe('DELETE')
-  })
-
-  it('surfaces the server-provided error on 409', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      errorJson("Definition 'refactor' is immutable", 409, 'conflict'),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(deleteLabelDefinition('proj-1', 'refactor')).rejects.toThrow(
-      'immutable',
-    )
   })
 
   it('surfaces the server-provided error on 404', async () => {

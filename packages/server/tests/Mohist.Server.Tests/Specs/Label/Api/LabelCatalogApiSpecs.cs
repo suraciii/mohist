@@ -19,22 +19,20 @@ public class LabelCatalogApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, "Label")]
     [Fact]
-    public async Task GetCatalog_EmptyProject_ReturnsSystemDefinitions()
+    public async Task GetCatalog_EmptyProject_ReturnsEmpty()
     {
         var project = await CreateProjectAsync("empty-catalog");
 
         var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
             $"/api/projects/{project.Id}/labels/catalog");
 
-        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == "system");
-        var refactor = Assert.Single(definitions, d => d.Key == "refactor");
-        Assert.Contains("without changing observable behavior", refactor.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(definitions);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, "Label")]
     [Fact]
-    public async Task GetCatalog_WithUserDefinitions_ReturnsMergedDefinitions()
+    public async Task GetCatalog_WithUserDefinitions_ReturnsThem()
     {
         var project = await CreateProjectAsync("merged-catalog");
 
@@ -45,8 +43,6 @@ public class LabelCatalogApiSpecs
         var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
             $"/api/projects/{project.Id}/labels/catalog");
 
-        Assert.Contains(definitions, d => d.Key == "refactor" && d.Origin == "system");
-        Assert.Contains(definitions, d => d.Key == "module" && d.Origin == "user");
         var module = Assert.Single(definitions, d => d.Key == "module");
         Assert.Equal("Classifies the subsystem", module.Description);
         Assert.NotNull(module.SupportedValues);
@@ -57,7 +53,7 @@ public class LabelCatalogApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, "Label")]
     [Fact]
-    public async Task PostCatalog_CreatesUserDefinition_Returns201()
+    public async Task PostCatalog_CreatesDefinition_Returns201()
     {
         var project = await CreateProjectAsync("create-catalog");
 
@@ -73,7 +69,6 @@ public class LabelCatalogApiSpecs
         Assert.NotNull(envelope.Data);
         Assert.Equal("module", envelope.Data.Key);
         Assert.Equal("Classifies the subsystem", envelope.Data.Description);
-        Assert.Equal("user", envelope.Data.Origin);
         Assert.NotNull(envelope.Data.SupportedValues);
         Assert.Equal(2, envelope.Data.SupportedValues.Count);
     }
@@ -96,27 +91,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("already exists", body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task PostCatalog_SystemKey_Returns409()
-    {
-        var project = await CreateProjectAsync("sys-key");
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/labels/catalog",
-            new { key = "refactor", description = "Custom refactor desc" });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("reserved", body, StringComparison.OrdinalIgnoreCase);
-
-        var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
-            $"/api/projects/{project.Id}/labels/catalog");
-        var refactorDef = Assert.Single(definitions, d => d.Key == "refactor");
-        Assert.Equal("system", refactorDef.Origin);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -173,7 +147,6 @@ public class LabelCatalogApiSpecs
         Assert.True(envelope.Success);
         Assert.Equal("module", envelope.Data!.Key);
         Assert.Equal("Updated description", envelope.Data.Description);
-        Assert.Equal("user", envelope.Data.Origin);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -292,28 +265,7 @@ public class LabelCatalogApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, "Label")]
     [Fact]
-    public async Task PatchCatalog_SystemKey_Returns409()
-    {
-        var project = await CreateProjectAsync("patch-system");
-
-        using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/labels/catalog/refactor",
-            new { description = "Modified" });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("immutable", body, StringComparison.OrdinalIgnoreCase);
-
-        var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
-            $"/api/projects/{project.Id}/labels/catalog");
-        var refactorDef = Assert.Single(definitions, d => d.Key == "refactor");
-        Assert.Contains("without changing observable behavior", refactorDef.Description, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task DeleteCatalog_RemovesUserDefinition_Returns204()
+    public async Task DeleteCatalog_RemovesDefinition_Returns204()
     {
         var project = await CreateProjectAsync("del-catalog");
 
@@ -329,25 +281,6 @@ public class LabelCatalogApiSpecs
         var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
             $"/api/projects/{project.Id}/labels/catalog");
         Assert.DoesNotContain(definitions, d => d.Key == "module");
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, "Label")]
-    [Fact]
-    public async Task DeleteCatalog_SystemKey_Returns409()
-    {
-        var project = await CreateProjectAsync("del-system");
-
-        using var response = await _client.DeleteAsync(
-            $"/api/projects/{project.Id}/labels/catalog/refactor");
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("immutable", body, StringComparison.OrdinalIgnoreCase);
-
-        var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
-            $"/api/projects/{project.Id}/labels/catalog");
-        Assert.Contains(definitions, d => d.Key == "refactor");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -468,7 +401,6 @@ public class LabelCatalogApiSpecs
     private sealed record LabelDefinitionDto(
         string Key,
         string Description,
-        string Origin,
         IReadOnlyList<string>? SupportedValues = null);
 
     private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null, object? Details = null);

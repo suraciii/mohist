@@ -81,7 +81,7 @@ mo issue workflow [subcommand]
 | `--body-file <path>` | create, update | body 从文件读（推荐长 body） |
 | `--body-stdin` | create, update | body 从 stdin 读 |
 | `--priority p0-p4` | create, update | 优先级 |
-| `--label <name>` | create, update | 标签（可多次） |
+| `--label <key=value>` | create, update | 标签：`key=value` 设置、`-key` 移除，可多次 |
 | `--model <id>` | create | 指定 AI 模型 |
 | `--workflow-profile <id>` | create | 指定 workflow profile |
 | `--project <name>` | 所有 | 指定 project |

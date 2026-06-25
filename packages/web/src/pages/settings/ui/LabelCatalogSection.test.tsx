@@ -35,16 +35,14 @@ function renderSection() {
   )
 }
 
-const systemRefactor: LabelDefinition = {
+const refactorDef: LabelDefinition = {
   key: 'refactor',
   description: 'A refactoring task',
-  origin: 'system',
 }
 
-const userModule: LabelDefinition = {
+const moduleDef: LabelDefinition = {
   key: 'module',
   description: 'Classifies the subsystem',
-  origin: 'user',
   supportedValues: ['auth', 'ui'],
 }
 
@@ -87,9 +85,9 @@ describe('LabelCatalogSection', () => {
     expect(screen.getAllByText(/No label definitions yet/i).length).toBeGreaterThan(0)
   })
 
-  it('lists every catalog entry with key, description, supportedValues, and origin', () => {
+  it('lists every catalog entry with key, description, and supportedValues', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [systemRefactor, userModule],
+      data: [refactorDef, moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -99,32 +97,16 @@ describe('LabelCatalogSection', () => {
 
     expect(screen.getByTestId('label-catalog-key-refactor')).toHaveTextContent('refactor')
     expect(screen.getByTestId('label-catalog-description-refactor')).toHaveTextContent('A refactoring task')
-    expect(screen.getByTestId('label-catalog-origin-refactor')).toHaveTextContent('system')
 
     expect(screen.getByTestId('label-catalog-key-module')).toHaveTextContent('module')
     expect(screen.getByTestId('label-catalog-description-module')).toHaveTextContent('Classifies the subsystem')
-    expect(screen.getByTestId('label-catalog-origin-module')).toHaveTextContent('user')
     expect(screen.getByTestId('label-catalog-value-module-auth')).toBeInTheDocument()
     expect(screen.getByTestId('label-catalog-value-module-ui')).toBeInTheDocument()
   })
 
-  it('hides edit and delete actions for system-origin entries', () => {
+  it('shows edit and delete actions for entries', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [systemRefactor],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
-
-    renderSection()
-
-    expect(screen.queryByTestId('label-catalog-edit-button-refactor')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('label-catalog-delete-button-refactor')).not.toBeInTheDocument()
-  })
-
-  it('shows edit and delete actions for user-origin entries', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -136,7 +118,7 @@ describe('LabelCatalogSection', () => {
     expect(screen.getByTestId('label-catalog-delete-button-module')).toBeInTheDocument()
   })
 
-  it('adds a user-origin definition via POST when the form is submitted', () => {
+  it('adds a definition via POST when the form is submitted', () => {
     useLabelCatalogMock.mockReturnValue({ data: [], isLoading: false, isError: false, refetch: vi.fn() })
 
     renderSection()
@@ -254,7 +236,7 @@ describe('LabelCatalogSection', () => {
 
   it('opens the edit form with the key field read-only and pre-filled values', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -279,7 +261,7 @@ describe('LabelCatalogSection', () => {
 
   it('PATCHes the description and supportedValues on save', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -308,7 +290,7 @@ describe('LabelCatalogSection', () => {
 
   it('rejects a whitespace-only description in edit form before sending PATCH', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -328,7 +310,7 @@ describe('LabelCatalogSection', () => {
 
   it('rejects supportedValues with blank newline entries before editing', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -348,7 +330,7 @@ describe('LabelCatalogSection', () => {
 
   it('sends PATCH with supportedValues:[] to clear values when the textarea is emptied', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -367,23 +349,9 @@ describe('LabelCatalogSection', () => {
     expect(payload.patch).toEqual({ description: 'Classifies the subsystem', supportedValues: [] })
   })
 
-  it('does not allow editing system-origin entries (no edit button + no edit form rendered)', () => {
+  it('deletes an entry via DELETE when the delete button is clicked', () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [systemRefactor],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
-
-    renderSection()
-
-    expect(screen.queryByTestId('label-catalog-edit-button-refactor')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('label-catalog-edit-refactor')).not.toBeInTheDocument()
-  })
-
-  it('deletes a user-origin entry via DELETE when the delete button is clicked', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
@@ -398,21 +366,6 @@ describe('LabelCatalogSection', () => {
     expect(key).toBe('module')
     expect(typeof opts.onSettled).toBe('function')
     expect(typeof opts.onError).toBe('function')
-  })
-
-  it('does not render delete buttons for system-origin entries', () => {
-    useLabelCatalogMock.mockReturnValue({
-      data: [systemRefactor],
-      isLoading: false,
-      isError: false,
-      refetch: vi.fn(),
-    })
-
-    renderSection()
-
-    expect(screen.queryByTestId('label-catalog-delete-button-refactor')).not.toBeInTheDocument()
-    fireEvent.click(screen.queryByTestId('label-catalog-delete-button-refactor') ?? document.body)
-    expect(removeMutateMock).not.toHaveBeenCalled()
   })
 
   it('surfaces server errors from create mutation as an in-page alert', async () => {
@@ -444,13 +397,13 @@ describe('LabelCatalogSection', () => {
 
   it('surfaces server errors from update mutation inside the edit form', async () => {
     useLabelCatalogMock.mockReturnValue({
-      data: [userModule],
+      data: [moduleDef],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
     })
     updateMutateMock.mockImplementation((_payload: unknown, opts: { onError?: (err: Error) => void }) => {
-      opts.onError?.(new Error("Definition 'module' is immutable and cannot be modified."))
+      opts.onError?.(new Error("Key 'module' not found in the project catalog."))
     })
     useUpdateLabelDefinitionMock.mockReturnValue({
       mutate: updateMutateMock,
@@ -463,7 +416,7 @@ describe('LabelCatalogSection', () => {
     fireEvent.click(screen.getByTestId('label-catalog-edit-save-module'))
 
     await waitFor(() => {
-      expect(screen.getByTestId('label-catalog-edit-error-module')).toHaveTextContent('immutable')
+      expect(screen.getByTestId('label-catalog-edit-error-module')).toHaveTextContent('not found')
     })
   })
 

@@ -1,9 +1,6 @@
-export type LabelOrigin = 'system' | 'user'
-
 export interface LabelDefinition {
   key: string
   description: string
-  origin: LabelOrigin
   supportedValues?: string[] | null
 }
 
