@@ -1,10 +1,11 @@
 description: |
   Full Mohist pipeline for shipping user-visible changes end-to-end.
-  Stages: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (spec sync, archive, merge, push).
-  Requires human approval at the plan and check stages, with the workflow merging and pushing the working branch into the repository base branch on completion.
+  Stages: plan (proposal, specs, design, tasks, self-review) → build (open PR, load tasks, update PR) → check (AI review, repair-aware update PR, merge readiness) → integrate (spec sync, archive, merge).
+  Requires human approval at the plan and check stages, with the workflow merging the working branch into the repository base branch through a GitHub PR.
   Typical duration: 20-60 minutes for a focused change.
-  Best suited for: new features, user-visible behavior changes, changes that need a design document or spec delta.
+  Best suited for: new features, user-visible behavior changes, changes that need a design document or spec delta, work that needs a traceable GitHub PR record.
   Not suited for: simple bug fixes, exploration or throwaway prototypes, or pure refactors with no behavior change.
+  Requires the `gh` CLI on the runner host and `gh auth login` against the target repository.
 
 variables:
   agent:
@@ -136,6 +137,18 @@ stages:
 
   - stage: build
     tasks:
+      - id: build:open-pr
+        title: Open or update GitHub PR
+        uses: mohist/create-pull-request
+        with:
+          source: ${{ workspace.branch }}
+          target: ${{ repository.baseBranch }}
+          remote: origin
+          titleFrom: issue.title
+          bodyFrom: issue.body
+        setVars:
+          github.pr.number: output.prNumber
+          github.pr.url: output.prUrl
       - id: load-tasks
         title: Load tasks from plan
         uses: mohist/openspec-tasks
@@ -151,6 +164,18 @@ stages:
                   file: ${{ openspecChangeDir }}/tasks.json
                   items: tasks
                   base: ${{ prompts.build }}
+      - id: build:update-pr
+        title: Update GitHub PR with build results
+        uses: mohist/create-pull-request
+        with:
+          source: ${{ workspace.branch }}
+          target: ${{ repository.baseBranch }}
+          remote: origin
+          titleFrom: issue.title
+          bodyFrom: issue.body
+        setVars:
+          github.pr.number: output.prNumber
+          github.pr.url: output.prUrl
     checks:
       - name: health
         title: Health
@@ -228,6 +253,19 @@ stages:
               Fix the check-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
             agent: ${{ vars.agent }}
+        verifyTask:
+          id: check:update-pr
+          title: Update GitHub PR with check results
+          uses: mohist/create-pull-request
+          with:
+            source: ${{ workspace.branch }}
+            target: ${{ repository.baseBranch }}
+            remote: origin
+            titleFrom: issue.title
+            bodyFrom: issue.body
+          setVars:
+            github.pr.number: output.prNumber
+            github.pr.url: output.prUrl
       - name: review-passed
         title: Review passed
         uses: core/marker
@@ -244,19 +282,18 @@ stages:
             prompt: ${{ prompts.auto-fix }}
             agent: ${{ vars.agent }}
         verifyTask:
-          id: ai-review
-          title: AI review
-          uses: mohist/acp-agent
+          id: check:update-pr
+          title: Update GitHub PR with check results
+          uses: mohist/create-pull-request
           with:
-            session: check
-            prompt: ${{ prompts.review }}
-            agent: ${{ vars.agent }}
-            expect:
-              markers:
-                - path: ${{ openspecChangeDir }}/review.md
-                  oneOf:
-                    - <promise>PASS</promise>
-                    - <promise>FAIL</promise>
+            source: ${{ workspace.branch }}
+            target: ${{ repository.baseBranch }}
+            remote: origin
+            titleFrom: issue.title
+            bodyFrom: issue.body
+          setVars:
+            github.pr.number: output.prNumber
+            github.pr.url: output.prUrl
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
@@ -272,6 +309,19 @@ stages:
               title: Resolve rebase conflicts
               with:
                 description: "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes."
+        verifyTask:
+          id: check:update-pr
+          title: Update GitHub PR with check results
+          uses: mohist/create-pull-request
+          with:
+            source: ${{ workspace.branch }}
+            target: ${{ repository.baseBranch }}
+            remote: origin
+            titleFrom: issue.title
+            bodyFrom: issue.body
+          setVars:
+            github.pr.number: output.prNumber
+            github.pr.url: output.prUrl
 
   - stage: integrate
     lockBehavior: sequential
@@ -290,18 +340,6 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
-      - id: integrate:open-pr
-        title: Open or update GitHub PR
-        uses: mohist/create-pull-request
-        with:
-          source: ${{ workspace.branch }}
-          target: ${{ repository.baseBranch }}
-          remote: origin
-          titleFrom: issue.title
-          bodyFrom: issue.body
-        setVars:
-          github.pr.number: output.prNumber
-          github.pr.url: output.prUrl
       - id: integrate:merge-pr
         title: Merge GitHub PR
         uses: mohist/merge-pull-request

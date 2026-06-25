@@ -35,6 +35,28 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
                         new TaskDefinition("ai-review", "AI review", "spec/review"))))])
         ]);
 
+    private static WorkflowDefinition StageWithPrUpdateAfterReviewRepair() =>
+        new("spec/workflow", [
+            new StageDefinition("check",
+                [new("ai-review", "AI review", "spec/review")],
+                [new("review-passed", "Review passed", "spec/marker",
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(
+                        2,
+                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"),
+                        new TaskDefinition("check:update-pr", "Update PR", "spec/create-pull-request"))))])
+        ]);
+
+    private static WorkflowDefinition StageWithPrUpdateAfterMergeReadyRepair() =>
+        new("spec/workflow", [
+            new StageDefinition("check",
+                [new("ai-review", "AI review", "spec/review")],
+                [new("merge-ready", "Merge ready", "spec/merge-ready",
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(
+                        1,
+                        new TaskDefinition("rebase-onto-base", "Rebase onto base branch", "spec/rebase"),
+                        new TaskDefinition("check:update-pr", "Update PR", "spec/create-pull-request"))))])
+        ]);
+
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
@@ -92,6 +114,62 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 
         var runner = Grains.GetGrain<IRunnerGrain>(r5);
         Assert.Null(await runner.PollAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task ReviewRepair_RunsPrUpdateBeforeRecheck()
+    {
+        await StartWorkflowAsync(StageWithPrUpdateAfterReviewRepair());
+
+        var (review1, r1) = await PollWorkAnyAsync();
+        Assert.Equal("ai-review.1", review1.WorkId);
+        await ReportAsync(r1, review1.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        Assert.Equal("checks", checks1.WorkType);
+        await ReportChecksFailAsync(r2, checks1, "review-passed", "review failed");
+
+        var (fix, r3) = await PollWorkAnyAsync();
+        Assert.Equal("fix-review-findings:1.1", fix.WorkId);
+        await ReportAsync(r3, fix.WorkId, "completed");
+
+        var (updatePr, r4) = await PollWorkAnyAsync();
+        Assert.Equal("check:update-pr.1", updatePr.WorkId);
+        Assert.Equal("spec/create-pull-request", updatePr.Uses);
+        await ReportAsync(r4, updatePr.WorkId, "completed");
+
+        var (checks2, _) = await PollWorkAnyAsync();
+        Assert.Equal("checks", checks2.WorkType);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task MergeReadyRepair_RunsPrUpdateBeforeRecheck()
+    {
+        await StartWorkflowAsync(StageWithPrUpdateAfterMergeReadyRepair());
+
+        var (review, r1) = await PollWorkAnyAsync();
+        Assert.Equal("ai-review.1", review.WorkId);
+        await ReportAsync(r1, review.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        Assert.Equal("checks", checks1.WorkType);
+        await ReportChecksFailAsync(r2, checks1, "merge-ready", "base moved");
+
+        var (rebase, r3) = await PollWorkAnyAsync();
+        Assert.Equal("rebase-onto-base:1.1", rebase.WorkId);
+        await ReportAsync(r3, rebase.WorkId, "completed");
+
+        var (updatePr, r4) = await PollWorkAnyAsync();
+        Assert.Equal("check:update-pr.1", updatePr.WorkId);
+        Assert.Equal("spec/create-pull-request", updatePr.Uses);
+        await ReportAsync(r4, updatePr.WorkId, "completed");
+
+        var (checks2, _) = await PollWorkAnyAsync();
+        Assert.Equal("checks", checks2.WorkType);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

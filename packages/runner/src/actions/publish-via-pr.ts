@@ -25,6 +25,7 @@ export type PublishViaPrFailureKind =
   | "config-error"
   | "protection-conflict"
   | "pr-state-conflict"
+  | "pr-checks-failed"
 
 export interface PublishViaPrStep {
   name: string
@@ -375,6 +376,26 @@ export async function mergeOrConfirmPr(
     }
   }
 
+  const checksWait = await waitForPrChecks(gh, workDir, prNumber, signal, record)
+  if (checksWait.kind === "failure") {
+    return {
+      kind: "failure",
+      failureKind: "pr-checks-failed",
+      message: checksWait.message,
+      prUrl: view.url ?? null,
+      output: checksWait.output,
+    }
+  }
+  if (checksWait.kind === "cancelled") {
+    return {
+      kind: "failure",
+      failureKind: "retry-safe",
+      message: checksWait.message,
+      prUrl: view.url ?? null,
+      output: checksWait.output,
+    }
+  }
+
   const mergeArgs = ["pr", "merge", String(prNumber), "--squash", "--subject", subject, "--body", ""]
   const mergeResult = await gh("gh", mergeArgs, workDir, signal)
   const mergeOutput = combinedGhOutput(mergeResult)
@@ -421,6 +442,141 @@ export async function mergeOrConfirmPr(
     prUrl: confirmed.url ?? null,
     output: `Merged PR #${prNumber} via squash with subject "${subject}"`,
   }
+}
+
+type PrChecksWaitResult =
+  | { kind: "ok" }
+  | { kind: "failure"; message: string; output: string }
+  | { kind: "cancelled"; message: string; output: string }
+
+const PR_CHECKS_POLL_INTERVAL_MS = 15_000
+
+async function waitForPrChecks(
+  gh: GhRunner,
+  workDir: string,
+  prNumber: number,
+  signal: AbortSignal,
+  record: (name: string, command: string, exitCode: number, output: string) => void,
+): Promise<PrChecksWaitResult> {
+  for (;;) {
+    if (signal.aborted) {
+      return {
+        kind: "cancelled",
+        message: `Cancelled while waiting for PR #${prNumber} checks to settle: ${signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? "aborted")}`,
+        output: "cancelled before next poll",
+      }
+    }
+    const checksResult = await gh(
+      "gh",
+      ["pr", "checks", String(prNumber), "--json", "bucket,name,state"],
+      workDir,
+      signal,
+    )
+    const checksOutput = combinedGhOutput(checksResult)
+    record("gh-pr-checks", `pr checks ${prNumber} --json bucket,name,state`, checksResult.exitCode, checksOutput)
+    if (checksResult.exitCode !== 0) {
+      return {
+        kind: "failure",
+        message: `gh pr checks ${prNumber} failed: ${checksOutput}`,
+        output: checksOutput,
+      }
+    }
+    const classification = classifyPrChecks(parsePrChecks(checksResult.stdout))
+    if (classification.kind === "failed") {
+      return {
+        kind: "failure",
+        message: `PR #${prNumber} checks failed: ${classification.message}`,
+        output: classification.message,
+      }
+    }
+    if (classification.kind === "passed") {
+      return { kind: "ok" }
+    }
+    try {
+      await delayWithSignal(PR_CHECKS_POLL_INTERVAL_MS, signal)
+    } catch (error) {
+      return {
+        kind: "cancelled",
+        message: `Cancelled while waiting for PR #${prNumber} checks to settle: ${errorMessage(error)}`,
+        output: `cancelled during wait: ${errorMessage(error)}`,
+      }
+    }
+  }
+}
+
+function delayWithSignal(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason ?? new Error("aborted"))
+      return
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason ?? new Error("aborted"))
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+export interface PrCheckEntry {
+  name: string
+  bucket: string
+  state: string
+}
+
+export function parsePrChecks(stdout: string): PrCheckEntry[] {
+  const trimmed = stdout.trim()
+  if (!trimmed) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const out: PrCheckEntry[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const obj = item as Record<string, unknown>
+    const name = typeof obj["name"] === "string" ? (obj["name"] as string) : ""
+    const bucket = typeof obj["bucket"] === "string" ? (obj["bucket"] as string) : ""
+    const state = typeof obj["state"] === "string" ? (obj["state"] as string) : ""
+    out.push({ name, bucket, state })
+  }
+  return out
+}
+
+type PrChecksClassification =
+  | { kind: "pending" }
+  | { kind: "passed" }
+  | { kind: "failed"; message: string }
+
+export function classifyPrChecks(entries: PrCheckEntry[]): PrChecksClassification {
+  if (entries.length === 0) return { kind: "passed" }
+  const failed: string[] = []
+  for (const entry of entries) {
+    if (entry.bucket === "PENDING" || entry.bucket === "") {
+      return { kind: "pending" }
+    }
+    if (entry.bucket === "FAIL") {
+      failed.push(formatFailedCheck(entry))
+    }
+  }
+  if (failed.length > 0) {
+    return { kind: "failed", message: failed.join("; ") }
+  }
+  return { kind: "passed" }
+}
+
+function formatFailedCheck(entry: PrCheckEntry): string {
+  const label = entry.name || "unknown check"
+  const bucket = entry.bucket || "FAIL"
+  const state = entry.state && entry.state !== bucket ? ` (state=${entry.state})` : ""
+  return `${label} [bucket=${bucket}]${state}`
 }
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
