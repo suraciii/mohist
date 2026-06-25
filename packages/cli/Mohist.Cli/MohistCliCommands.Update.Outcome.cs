@@ -1,3 +1,5 @@
+using System.Net.Http.Json;
+
 namespace Mohist.Cli;
 
 internal sealed partial class SourceCodeUpdater
