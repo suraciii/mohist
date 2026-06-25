@@ -134,26 +134,18 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        // Idempotency at the grain boundary: if the epic is already in
-        // the target state (or any other "no transition" condition the
-        // domain enforces), return the current DTO instead of bubbling
-        // the domain exception. Pause/Resume/Start all require a real
-        // status change, so the same pattern is applied to each.
-        try
-        {
-            var now = DateTimeOffset.UtcNow;
-            domain.Pause(reason, now.UtcDateTime);
-            MapToRow(domain, row, now);
-            ApplyPendingEvents(db, domain, projectId, epicId);
-            await db.SaveChangesAsync();
-            domain.ClearPendingEvents();
-        }
-        catch (Exception ex) when (IsLifecycleIdempotencyException(ex))
-        {
-            _log.LogDebug(
-                "Pause on epic {EpicId} ({ProjectId}) is a no-op: {Reason}",
-                epicId, projectId, ex.Message);
-        }
+        // Idempotency at the boundary is owned by the domain's status
+        // checks (e.g. Pause-from-Paused short-circuits without throwing).
+        // Invalid non-target transitions (Pause-from-Idle raises
+        // EpicPauseRequiresRunningException; Pause-from-Terminal raises
+        // EpicAlreadyTerminalException) propagate so the HTTP layer can
+        // surface them as 409 EPIC_NOT_RUNNING / 409 EPIC_ALREADY_TERMINAL.
+        var now = DateTimeOffset.UtcNow;
+        domain.Pause(reason, now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
         return ToDto(row);
     }
 
@@ -171,21 +163,18 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        try
-        {
-            var now = DateTimeOffset.UtcNow;
-            domain.Start(now.UtcDateTime);
-            MapToRow(domain, row, now);
-            ApplyPendingEvents(db, domain, projectId, epicId);
-            await db.SaveChangesAsync();
-            domain.ClearPendingEvents();
-        }
-        catch (Exception ex) when (IsLifecycleIdempotencyException(ex))
-        {
-            _log.LogDebug(
-                "Start on epic {EpicId} ({ProjectId}) is a no-op: {Reason}",
-                epicId, projectId, ex.Message);
-        }
+        // Idempotency at the boundary is owned by the domain's status
+        // checks (Start-from-Running short-circuits without throwing).
+        // Invalid non-target transitions (Start-from-Paused raises
+        // EpicStartRequiresIdleException; Start-from-Terminal raises
+        // EpicAlreadyTerminalException) propagate so the HTTP layer can
+        // surface them as 409 EPIC_START_REQUIRES_IDLE / 409 EPIC_ALREADY_TERMINAL.
+        var now = DateTimeOffset.UtcNow;
+        domain.Start(now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
 
         if (row.Status == EpicStatusName.Running)
         {
@@ -208,21 +197,18 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        try
-        {
-            var now = DateTimeOffset.UtcNow;
-            domain.Resume(now.UtcDateTime);
-            MapToRow(domain, row, now);
-            ApplyPendingEvents(db, domain, projectId, epicId);
-            await db.SaveChangesAsync();
-            domain.ClearPendingEvents();
-        }
-        catch (Exception ex) when (IsLifecycleIdempotencyException(ex))
-        {
-            _log.LogDebug(
-                "Resume on epic {EpicId} ({ProjectId}) is a no-op: {Reason}",
-                epicId, projectId, ex.Message);
-        }
+        // Idempotency at the boundary is owned by the domain's status
+        // checks (Resume-from-Running short-circuits without throwing).
+        // Invalid non-target transitions (Resume-from-Idle raises
+        // EpicResumeRequiresPausedException; Resume-from-Terminal raises
+        // EpicAlreadyTerminalException) propagate so the HTTP layer can
+        // surface them as 409 EPIC_RESUME_REQUIRES_PAUSED / 409 EPIC_ALREADY_TERMINAL.
+        var now = DateTimeOffset.UtcNow;
+        domain.Resume(now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
 
         if (row.Status == EpicStatusName.Running)
         {
@@ -415,12 +401,6 @@ public class EpicGrain : Grain, IEpicGrain
 
         return ToDto(row);
     }
-
-    private static bool IsLifecycleIdempotencyException(Exception ex) =>
-        ex is EpicStartRequiresIdleException
-            or EpicPauseRequiresRunningException
-            or EpicResumeRequiresPausedException
-            or EpicAlreadyTerminalException;
 
     private async Task<EpicDto> TryAutoMarkDoneAsync(MohistDbContext db, string projectId, string epicId, EpicRow row)
     {

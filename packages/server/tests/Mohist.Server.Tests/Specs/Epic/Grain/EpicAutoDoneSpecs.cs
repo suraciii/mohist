@@ -265,22 +265,67 @@ public class EpicAutoDoneSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ResumeAsync_IdleEpicIsIdempotentNoOpAtGrainBoundary()
+    public async Task ResumeAsync_IdleEpic_ThrowsEpicResumeRequiresPaused()
     {
-        // T-002 enforces idempotency at the grain boundary: the
-        // domain still throws EpicResumeRequiresPausedException for
-        // an idle epic, but the grain catches it and returns the
-        // current DTO so API/CLI callers see a stable 200.
+        // Resume only short-circuits (no-op) at the domain level when
+        // the epic is already Running. For Idle, the precondition
+        // isn't met and the exception propagates so the HTTP layer
+        // can map it to 409 EPIC_RESUME_REQUIRES_PAUSED.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         var grain = CreateGrain(database.Factory, "project_1:epic_1");
 
-        var result = await grain.ResumeAsync();
+        var ex = await Assert.ThrowsAsync<EpicResumeRequiresPausedException>(
+            () => grain.ResumeAsync());
+        Assert.Equal("idle", ex.CurrentStatus);
 
-        Assert.Equal("idle", result.Status);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("idle", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ResumeAsync_DoneEpic_ThrowsEpicAlreadyTerminal()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "done");
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var ex = await Assert.ThrowsAsync<EpicAlreadyTerminalException>(
+            () => grain.ResumeAsync());
+        Assert.Equal("done", ex.CurrentStatus);
+        Assert.Equal("running", ex.RequestedStatus);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartAsync_DoneEpic_ThrowsEpicAlreadyTerminal()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "done");
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var ex = await Assert.ThrowsAsync<EpicAlreadyTerminalException>(
+            () => grain.StartAsync());
+        Assert.Equal("done", ex.CurrentStatus);
+        Assert.Equal("running", ex.RequestedStatus);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task StartAsync_PausedEpic_ThrowsEpicStartRequiresIdle()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "paused", pauseReason: "on hold");
+        var grain = CreateGrain(database.Factory, "project_1:epic_1");
+
+        var ex = await Assert.ThrowsAsync<EpicStartRequiresIdleException>(
+            () => grain.StartAsync());
+        Assert.Equal("paused", ex.CurrentStatus);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

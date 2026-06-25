@@ -367,24 +367,41 @@ public class EpicProgressionSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task PauseAsync_IdleEpic_IsIdempotentNoOpAtGrainBoundary()
+    public async Task PauseAsync_IdleEpic_ThrowsEpicPauseRequiresRunning()
     {
-        // Grain boundary: domain throws EpicPauseRequiresRunningException
-        // when pausing a non-running epic, but the grain catches it and
-        // returns the current DTO so API/CLI callers see a stable 200
-        // for an already-not-running epic. (HTTP layer still surfaces
-        // the failure via EPIC_NOT_RUNNING; see T-004.)
+        // The grain lets EpicPauseRequiresRunningException propagate so
+        // the HTTP layer can map it to 409 EPIC_NOT_RUNNING. Pause only
+        // short-circuits (no-op) at the domain level when the epic is
+        // already Paused — for Idle, the precondition isn't met and the
+        // caller MUST be told.
         var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         var grains = new RecordingGrainFactory(database.Factory);
         var grain = grains.GetEpicGrain("project_1:epic_1");
 
-        var result = await grain.PauseAsync("on hold");
+        var ex = await Assert.ThrowsAsync<EpicPauseRequiresRunningException>(
+            () => grain.PauseAsync("on hold"));
+        Assert.Equal("idle", ex.CurrentStatus);
 
-        Assert.Equal("idle", result.Status);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("idle", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task PauseAsync_DoneEpic_ThrowsEpicAlreadyTerminal()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "done");
+        var grains = new RecordingGrainFactory(database.Factory);
+        var grain = grains.GetEpicGrain("project_1:epic_1");
+
+        var ex = await Assert.ThrowsAsync<EpicAlreadyTerminalException>(
+            () => grain.PauseAsync("on hold"));
+        Assert.Equal("done", ex.CurrentStatus);
+        Assert.Equal("paused", ex.RequestedStatus);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
