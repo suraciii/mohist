@@ -43,7 +43,21 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   const landedCommit = sourceResolve.stdout.trim()
 
   const pushArgs = ["push"]
-  if (forceWithLease) pushArgs.push("--force-with-lease")
+  if (forceWithLease) {
+    // Dynamic working branches (e.g. mohist/run-<runId>) carry no configured
+    // remote-tracking ref, so the bare `--force-with-lease` form always fails
+    // with "(stale info)" — even on a trivial fast-forward. Resolve the remote
+    // tip and use the explicit lease form, which git trusts regardless of
+    // tracking-ref state. If the probe itself fails, fall back to the bare
+    // form (best-effort, prior behavior).
+    const remoteTip = await resolveRemoteTip(workDir, remote, target, context.signal)
+    if (remoteTip === null) {
+      pushArgs.push("--force-with-lease")
+    } else if (remoteTip) {
+      pushArgs.push(`--force-with-lease=${target}:${remoteTip}`)
+    }
+    // remoteTip === "" → branch absent on remote; a plain push creates it, no force needed.
+  }
   pushArgs.push(remote, refspec)
   const push = await git(workDir, pushArgs, context.signal)
   if (!push.success) {
@@ -104,4 +118,17 @@ function looksLikeNonFastForward(text: string) {
   // explicit "non-fast-forward" / "fetch first" hint.
   return /non[-\s]?fast-forward|fetch first/i.test(text)
     || /!\s*\[rejected\][^\n]*\((stale info|stale|fetch first|non[-\s]?fast-forward|behind[^\)]*)\)/i.test(text)
+}
+
+/**
+ * Resolves the current tip of `target` on `remote` via `ls-remote`.
+ *   - tip sha when the branch exists on the remote,
+ *   - "" when the branch is absent (a plain push creates it, no force needed),
+ *   - null when the probe itself failed (caller falls back to bare --force-with-lease).
+ */
+async function resolveRemoteTip(workDir: string, remote: string, target: string, signal: AbortSignal): Promise<string | null> {
+  const probe = await git(workDir, ["ls-remote", remote, `refs/heads/${target}`], signal)
+  if (!probe.success) return null
+  const firstLine = probe.stdout.split(/\r?\n/)[0] ?? ""
+  return firstLine.trim().split(/\s+/)[0] ?? ""
 }

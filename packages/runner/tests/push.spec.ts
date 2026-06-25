@@ -358,13 +358,15 @@ describe("mohist/push", () => {
     expect(result.status).toBe("success")
   })
 
-  it("ForceWithLease_AppendsLeaseFlagToGitPushInvocation", async () => {
+  it("ForceWithLease_UsesExplicitLeaseAgainstResolvedRemoteTip", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
           return ok("rewritten-sha\n")
-        case "push --force-with-lease origin mo/issue-99:master":
+        case "ls-remote origin refs/heads/master":
+          return ok("remote-tip-sha\trefs/heads/master\n")
+        case "push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master":
           return ok("To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)")
         default:
           return fail(`unexpected git call: ${command}`)
@@ -377,9 +379,11 @@ describe("mohist/push", () => {
     expect(result.status).toBe("success")
     expect(workspaceCalls(calls)).toEqual([
       "rev-parse mo/issue-99",
-      "push --force-with-lease origin mo/issue-99:master",
+      "ls-remote origin refs/heads/master",
+      "push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master",
     ])
     expect(workspaceCalls(calls).some((cmd) => cmd === "push origin mo/issue-99:master")).toBe(false)
+    expect(workspaceCalls(calls).some((cmd) => cmd === "push --force-with-lease origin mo/issue-99:master")).toBe(false)
     expect(output).toMatchObject({
       forceWithLease: true,
       pushed: true,
@@ -388,13 +392,63 @@ describe("mohist/push", () => {
     })
   })
 
+  it("ForceWithLease_RemoteBranchAbsent_PushesWithoutForceToCreateIt", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("new-sha\n")
+        case "ls-remote origin refs/heads/master":
+          return ok("")
+        case "push origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n * [new branch]      mo/issue-99 -> master")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ forceWithLease: true }))
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse mo/issue-99",
+      "ls-remote origin refs/heads/master",
+      "push origin mo/issue-99:master",
+    ])
+    expect(workspaceCalls(calls).some((cmd) => cmd.includes("--force-with-lease"))).toBe(false)
+  })
+
+  it("ForceWithLease_RemoteProbeFails_FallsBackToBareLease", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "ls-remote origin refs/heads/master":
+          return fail("fatal: unable to access 'https://example.com/repo.git': Could not resolve host")
+        case "push --force-with-lease origin mo/issue-99:master":
+          return ok("ok\n")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ forceWithLease: true }))
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
+    expect(workspaceCalls(calls)).toContain("push --force-with-lease origin mo/issue-99:master")
+  })
+
   it("ForceWithLease_AcceptsTruthyStringAndRejectsAbsent", async () => {
     const calls = installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
           return ok("a-sha\n")
-        case "push --force-with-lease origin mo/issue-99:master":
+        case "ls-remote origin refs/heads/master":
+          return ok("remote-tip\trefs/heads/master\n")
+        case "push --force-with-lease=master:remote-tip origin mo/issue-99:master":
           return ok("ok\n")
         case "push origin mo/issue-99:master":
           return ok("ok\n")
@@ -407,7 +461,8 @@ describe("mohist/push", () => {
     const stringTrueOutput = JSON.parse(stringTrue.output ?? "{}")
     expect(stringTrue.status).toBe("success")
     expect(stringTrueOutput.forceWithLease).toBe(true)
-    expect(workspaceCalls(calls)).toContain("push --force-with-lease origin mo/issue-99:master")
+    expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
+    expect(workspaceCalls(calls)).toContain("push --force-with-lease=master:remote-tip origin mo/issue-99:master")
 
     calls.length = 0
     const absent = await pushAction(context({ forceWithLease: "no" }))
@@ -418,17 +473,19 @@ describe("mohist/push", () => {
       "rev-parse mo/issue-99",
       "push origin mo/issue-99:master",
     ])
-    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("push --force-with-lease"))).toBe(false)
+    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("push --force-with-lease") || cmd.startsWith("ls-remote"))).toBe(false)
   })
 
-  it("ForceWithLease_RecordsFlagOnNonFastForwardFailure", async () => {
+  it("ForceWithLease_ExplicitLeaseRejected_ClassifiesAsBaseMoved", async () => {
     installGit(async (_call, history) => {
       const command = history[history.length - 1].args.join(" ")
       switch (command) {
         case "rev-parse mo/issue-99":
           return ok("rewritten-sha\n")
-        case "push --force-with-lease origin mo/issue-99:master":
-          return fail("To https://example.com/repo.git\n ! [rejected]        mo/issue-99 -> mo/issue-99 (stale info)\nerror: failed to push some refs")
+        case "ls-remote origin refs/heads/master":
+          return ok("remote-tip-sha\trefs/heads/master\n")
+        case "push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master":
+          return fail("To https://example.com/repo.git\n ! [rejected]        mo/issue-99 -> mo/issue-99 (non-fast-forward)\nerror: failed to push some refs")
         default:
           return fail(`unexpected git call: ${command}`)
       }
