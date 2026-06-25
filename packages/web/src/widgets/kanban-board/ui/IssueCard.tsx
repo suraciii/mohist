@@ -29,6 +29,8 @@ const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
   [WorkflowStage.Done]: 'Done',
 }
 
+const SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID = 'mohist/default'
+
 function getStatusIndicator(issue: Issue, isAgentRunning: boolean): StatusIndicator {
   if (issue.health === IssueHealth.Blocked) return 'blocked'
   if (issue.status === IssueStatus.Cancelled) return 'cancelled'
@@ -240,6 +242,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     !isDone &&
     (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted)
   const isDraft = issue.isDraft
+  const workflowProfileId = issue.workflowProfileId ?? SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID
   const waitingFor = !isDraft && issue.blocker?.kind === 'waiting-for' ? issue.blocker.issue : null
   const cardDeEmphasis = isDone
     ? 'opacity-70'
@@ -269,6 +272,14 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             #{issue.number}
           </span>
           <PriorityChip priority={issue.priority} />
+          <span
+            data-testid="issue-card-workflow-profile"
+            data-workflow-profile={workflowProfileId}
+            className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono bg-gray-100 text-gray-700"
+            title={`Workflow profile: ${workflowProfileId}`}
+          >
+            {workflowProfileId}
+          </span>
           {isDraft && <DraftPill />}
           {showWorkflowStagePill && <WorkflowStagePill issue={issue} />}
           <WorkflowStageProgressIndicator progress={issue.workflowStageProgress} />

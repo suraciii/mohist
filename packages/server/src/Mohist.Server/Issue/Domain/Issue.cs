@@ -17,6 +17,7 @@ public sealed partial class Issue
     private int[] _prerequisiteNumbers = [];
     private IssueRepositoryRef? _repositoryRef;
     private bool _isDraft;
+    private string? _workflowProfileId;
     private readonly List<IssueEvent> _pendingEvents = new();
 
     public required string Id { get; init; }
@@ -103,6 +104,17 @@ public sealed partial class Issue
     {
         get => _isDraft;
         init => _isDraft = value;
+    }
+
+    /// <summary>
+    /// Issue-level workflow profile selection. <c>null</c> means "no
+    /// issue-level selection; inherit default" and is the single source of
+    /// truth for the profile id projected by every read surface.
+    /// </summary>
+    public string? WorkflowProfileId
+    {
+        get => _workflowProfileId;
+        init => _workflowProfileId = NormalizeOptional(value);
     }
 
     public string? RepositoryRef

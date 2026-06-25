@@ -138,7 +138,13 @@ public static partial class IssueRoutes
         var variables = state.Variables;
         var template = state.Template;
         var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
-        var profileId = template?.Id ?? state.SourceTemplateId ?? "mohist/default";
+        // ProfileId is the unified effective profile id projected by the
+        // read model; advanced overrides (custom YAML / project template
+        // reference) remain visible via HasCustomTemplate / TemplateSource
+        // without rewriting the displayed selection. This is the single
+        // source of truth — the same value the issue detail and list
+        // surfaces return.
+        var profileId = info.WorkflowProfileId;
         var updateMode = template is not null ? "custom" : "reference";
         var templateSource = state.HasCustomTemplate || template is not null
             ? "custom"

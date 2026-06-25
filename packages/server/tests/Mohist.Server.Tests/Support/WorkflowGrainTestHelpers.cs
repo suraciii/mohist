@@ -121,9 +121,17 @@ public static class WorkflowGrainTestHelpers
             .UseSqlite(connectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        var promptLoader = new Mohist.Server.Workflow.Services.Prompts.FilePromptLoader();
+        var registry = new Mohist.Server.Issue.Services.WorkflowProfiles.IssueWorkflowProfileRegistry(promptLoader, factory);
         return new WorkflowQuerier(
             factory,
-            new WorkflowProfileManager(factory, null!, new PromptTemplateEngine(), CreateEmptyConfigService(), new WorkflowRunProfileManager(factory)),
+            new WorkflowProfileManager(
+                factory,
+                promptLoader,
+                new PromptTemplateEngine(),
+                CreateEmptyConfigService(),
+                new WorkflowRunProfileManager(factory),
+                new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry)),
             new WorkflowArtifactQuerier(factory));
     }
 

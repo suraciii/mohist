@@ -12,6 +12,7 @@ export type { RuntimeDecisionSurfaceProps } from './ui/RuntimeDecisionSurface'
 export { WorkflowConvergencePanel } from './ui/WorkflowConvergencePanel'
 export { WorkflowView } from './ui/WorkflowView'
 export { IssueWorkflowProfileEditor } from './ui/IssueWorkflowProfileEditor'
+export { WorkflowProfileControl } from './ui/WorkflowProfileControl'
 export {
   deriveRuntimeDecision,
 } from './model/derive-runtime-decision'

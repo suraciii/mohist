@@ -10,7 +10,7 @@ import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
 import { IssueModelSelector } from '../../../features/select-issue-model'
-import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata } from '../../../widgets/issue-workflow'
+import { BranchBar, RuntimeDecisionSurface, WorkflowView, TaskProgressPanel, WorkflowSessionsPanel, IssueWorkflowProfileEditor, LatestArtifactsPanel, PrDeliverySummary, findPublishViaPrMetadata, WorkflowProfileControl } from '../../../widgets/issue-workflow'
 import { ActivityDialog } from '../../../widgets/issue-event-timeline'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
@@ -807,6 +807,10 @@ export function IssueDetailPage() {
               </CardSection>
 
               <LatestArtifactsPanel issueNumber={issueNumber} workflowRunId={issue.workflowRunId} />
+
+              <div data-testid="issue-workflow-profile-control-frame">
+                <WorkflowProfileControl issue={issue} />
+              </div>
 
               {issue.drift?.drifted && (
                 <CardSection title="Base Drift Detected" tone="amber">

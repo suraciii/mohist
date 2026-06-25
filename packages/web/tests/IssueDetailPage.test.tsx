@@ -32,6 +32,10 @@ const mocks = vi.hoisted(() => {
     workflowProfileRefetch: vi.fn(),
     workflowProfileUpdateMutate: vi.fn(),
     workflowProfileDeleteMutate: vi.fn(),
+    workflowProfilesList: null as null | Array<{ id: string; displayName: string; description: string; isDefault: boolean }>,
+    updateIssueWorkflowProfileMutate: vi.fn(),
+    updateIssueWorkflowProfileMutateAsync: vi.fn(),
+    updateIssueWorkflowProfileIsPending: false,
   }
 })
 
@@ -66,10 +70,23 @@ vi.mock('../src/entities/issue/api/queries', async () => {
       mutate: mocks.workflowProfileUpdateMutate,
       isPending: false,
     }),
+    useUpdateIssueWorkflowProfile: () => ({
+      mutate: mocks.updateIssueWorkflowProfileMutate,
+      mutateAsync: mocks.updateIssueWorkflowProfileMutateAsync,
+      isPending: mocks.updateIssueWorkflowProfileIsPending,
+    }),
     useDeleteIssueWorkflowProfileTemplate: () => ({
       mutate: mocks.workflowProfileDeleteMutate,
       isPending: false,
     }),
+  }
+})
+
+vi.mock('../src/entities/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/entities/settings')>()
+  return {
+    ...actual,
+    useWorkflowProfiles: () => ({ data: mocks.workflowProfilesList }),
   }
 })
 
@@ -150,6 +167,10 @@ beforeEach(() => {
   mocks.workflowProfileRefetch = vi.fn()
   mocks.workflowProfileUpdateMutate = vi.fn()
   mocks.workflowProfileDeleteMutate = vi.fn()
+  mocks.workflowProfilesList = null
+  mocks.updateIssueWorkflowProfileMutate = vi.fn()
+  mocks.updateIssueWorkflowProfileMutateAsync = vi.fn(() => Promise.resolve({}))
+  mocks.updateIssueWorkflowProfileIsPending = false
   mocks.uploads = []
   queryClient = new QueryClient({
     defaultOptions: {
@@ -959,10 +980,119 @@ describe('IssueDetailPage workflow profile integration', () => {
     ).toBeInTheDocument()
 
     expect(
-      screen.queryByText(/Workflow Definition/i),
-    ).not.toBeInTheDocument()
-    expect(
       screen.queryByText(/workflow profile configuration/i, { selector: 'h2' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('displays the issue-level workflow profile on the detail page from the read model', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Plan,
+      workflowProfileId: 'mohist/pr',
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const control = await waitFor(() => screen.getByTestId('issue-workflow-profile-control'))
+    expect(control.dataset.effectiveProfile).toBe('mohist/pr')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/pr')
+  })
+
+  it('disables the profile change selector and explains why on a started issue', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Plan,
+      workflowProfileId: 'mohist/pr',
+      workflowRunId: 'run-123',
+    })
+    mocks.workflowProfile = referenceProfileData()
+    mocks.workflowProfilesList = [
+      { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+    ]
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
+    expect(select.disabled).toBe(true)
+    const reason = screen.getByTestId('issue-workflow-profile-locked-reason')
+    expect(reason).toHaveTextContent(/started/i)
+  })
+
+  it('sends the new profile id to the PATCH endpoint when the user changes profile on a backlog issue', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'backlog',
+      workflowProfileId: 'mohist/default',
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    })
+    mocks.workflowProfile = referenceProfileData()
+    mocks.workflowProfilesList = [
+      { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+    ]
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
+    expect(select.disabled).toBe(false)
+
+    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+
+    await waitFor(() => expect(mocks.updateIssueWorkflowProfileMutateAsync).toHaveBeenCalledTimes(1))
+    expect(mocks.updateIssueWorkflowProfileMutateAsync).toHaveBeenCalledWith({
+      issueNumber: 1,
+      workflowProfileId: 'mohist/pr',
+    })
+  })
+
+  it('surfaces the server error and keeps the previous profile when PATCH is rejected', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'backlog',
+      workflowProfileId: 'mohist/default',
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    })
+    mocks.workflowProfile = referenceProfileData()
+    mocks.workflowProfilesList = [
+      { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+    ]
+    mocks.updateIssueWorkflowProfileMutateAsync = vi.fn(() => Promise.reject(
+      new Error('Cannot change workflow profile: workflow run wr-1 is active'),
+    ))
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
+    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+
+    await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')
+  })
+
+  it('renders the inherited default when neither the read model nor the workflow-profile response carry a selection', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'backlog',
+      workflowProfileId: null,
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const control = await waitFor(() => screen.getByTestId('issue-workflow-profile-control'))
+    expect(control.dataset.effectiveProfile).toBe('mohist/default')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')
   })
 })
