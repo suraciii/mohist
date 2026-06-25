@@ -17,6 +17,8 @@ internal static class EpicCommands
         epic.Subcommands.Add(BuildLink(api));
         epic.Subcommands.Add(BuildUnlink(api));
         epic.Subcommands.Add(BuildStart(api));
+        epic.Subcommands.Add(BuildPause(api));
+        epic.Subcommands.Add(BuildResume(api));
         epic.Subcommands.Add(BuildDone(api));
         epic.Subcommands.Add(BuildClose(api));
 
@@ -318,7 +320,22 @@ internal static class EpicCommands
 
     private static Command BuildStart(MohistCliApi api)
     {
-        var cmd = new Command("start", "Start autonomous progression on an epic");
+        return BuildLifecyclePost(api, "start", "Start autonomous progression on an epic", "start");
+    }
+
+    private static Command BuildPause(MohistCliApi api)
+    {
+        return BuildLifecyclePost(api, "pause", "Pause autonomous progression on an epic", "pause");
+    }
+
+    private static Command BuildResume(MohistCliApi api)
+    {
+        return BuildLifecyclePost(api, "resume", "Resume autonomous progression on an epic", "resume");
+    }
+
+    private static Command BuildLifecyclePost(MohistCliApi api, string name, string description, string action)
+    {
+        var cmd = new Command(name, description);
         var idArg = IdArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
@@ -332,9 +349,9 @@ internal static class EpicCommands
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var output = ctx.GetValue(outputOpt);
-            return StartAsync();
+            return PostAsync();
 
-            async Task<int> StartAsync()
+            async Task<int> PostAsync()
             {
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
@@ -342,7 +359,7 @@ internal static class EpicCommands
                 var (mode, exit) = ValidateOutput(api, output);
                 if (exit != 0) return exit;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/start"),
+                    ProjectEpicsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(id!)}/{action}"),
                     new { },
                     mode,
                     nameof(MohistCliApi.TableShape.EpicShow));

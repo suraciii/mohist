@@ -335,7 +335,7 @@ public class CliEpicCommandSpecs
 
         var stdout = output.ToString();
         Assert.Equal(0, exitCode);
-        foreach (var command in new[] { "list", "create", "show", "update", "link", "unlink", "start", "done", "close" })
+        foreach (var command in new[] { "list", "create", "show", "update", "link", "unlink", "start", "pause", "resume", "done", "close" })
             Assert.Contains(command, stdout, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -526,6 +526,182 @@ public class CliEpicCommandSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["epic", "start", "8", "-o", "yaml"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task EpicPause_Success_PostsToPauseEndpointAndPrintsPausedState()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "epic_8", number = 8, title = "Labels", status = "paused", priority = "p2" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "pause", "epic_8", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/epic_8/pause", request.RequestUri?.PathAndQuery);
+        Assert.Equal("{}", request.Body);
+        Assert.Contains("status:     paused", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EpicPause_ByNumber_HitsEpicsPauseRoute()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "epic_8", number = 8, title = "Labels", status = "paused", priority = "p2" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "pause", "8"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/pause", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task EpicPause_OnIdle_Returns409EpicNotRunningCleanly()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "Epic is idle; pause requires running",
+                "EPIC_NOT_RUNNING",
+                HttpStatusCode.Conflict)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "pause", "8"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("EPIC_NOT_RUNNING", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task EpicPause_ProjectOverride_UsesProjectArgument()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "epic_8", number = 8, title = "Labels", status = "paused", priority = "p2" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "pause", "8", "--project", "proj_override"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_override/epics/8/pause", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task EpicPause_InvalidOutput_FailsWithoutCallingApi()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called when output mode is invalid"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "pause", "8", "-o", "yaml"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task EpicResume_Success_PostsToResumeEndpointAndPrintsRunningState()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "epic_8", number = 8, title = "Labels", status = "running", priority = "p2" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "resume", "epic_8", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/epic_8/resume", request.RequestUri?.PathAndQuery);
+        Assert.Equal("{}", request.Body);
+        Assert.Contains("status:     running", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EpicResume_ByNumber_HitsEpicsResumeRoute()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "epic_8", number = 8, title = "Labels", status = "running", priority = "p2" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "resume", "8"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/epics/8/resume", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task EpicResume_OnIdle_Returns409EpicResumeRequiresPausedCleanly()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "Epic is idle; resume requires paused",
+                "EPIC_RESUME_REQUIRES_PAUSED",
+                HttpStatusCode.Conflict)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "resume", "8"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("EPIC_RESUME_REQUIRES_PAUSED", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task EpicResume_ProjectOverride_UsesProjectArgument()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { id = "epic_8", number = 8, title = "Labels", status = "running", priority = "p2" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "resume", "8", "--project", "proj_override"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_override/epics/8/resume", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task EpicResume_InvalidOutput_FailsWithoutCallingApi()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called when output mode is invalid"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["epic", "resume", "8", "-o", "yaml"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);

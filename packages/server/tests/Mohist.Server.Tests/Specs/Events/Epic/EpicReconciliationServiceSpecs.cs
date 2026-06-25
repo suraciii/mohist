@@ -17,6 +17,14 @@ public class EpicReconciliationServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public void DefaultReconciliationPeriod_RecoversRunningEpicsPromptly()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(10), EpicReconciliationOptions.DefaultReconciliationPeriod);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task ReconcileOnceAsync_ReadyIdleEpicMissedEvent_TransitionsToDone()
     {
         // Simulates a missed com.mohist.issue.work-completed event: all

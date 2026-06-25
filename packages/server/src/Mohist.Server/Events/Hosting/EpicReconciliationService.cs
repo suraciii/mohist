@@ -20,9 +20,9 @@ namespace Mohist.Server.Events.Hosting;
 /// idempotent — covers both the auto-done readiness check (for
 /// <c>idle</c> candidates) and the next-issue advance (for
 /// <c>running</c> candidates), and short-circuits on
-/// terminal/paused epics. The cadence mirrors
-/// <c>IssueWorkflowReconciliationService</c>: runs once a day by
-/// default, tunable through <see cref="EpicReconciliationOptions"/>.
+/// terminal/paused epics. The default cadence is short enough to recover
+/// running epics promptly after a missed terminal event, and remains
+/// tunable through <see cref="EpicReconciliationOptions"/>.
 ///
 /// Lives outside the <c>Epic</c> feature slice to honor the
 /// "feature directories only contain Domain/Grains/Services"
@@ -150,7 +150,7 @@ public sealed class EpicReconciliationService : BackgroundService
 
 public sealed class EpicReconciliationOptions
 {
-    public static readonly TimeSpan DefaultReconciliationPeriod = TimeSpan.FromDays(1);
+    public static readonly TimeSpan DefaultReconciliationPeriod = TimeSpan.FromMinutes(10);
 
     public TimeSpan ReconciliationPeriod { get; set; } = DefaultReconciliationPeriod;
 }
