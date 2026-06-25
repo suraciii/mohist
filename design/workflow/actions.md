@@ -132,8 +132,8 @@ vars.change.url
 
 ## GitHub PR Actions
 
-`mohist/create-github-pr`、`mohist/ready-github-pr` 和
-`mohist/merge-github-pr` 都是普通 workflow task action。PR 相关副作用
+`mohist/create-github-pr`、`mohist/mark-github-pr-ready`、`mohist/push`
+和 `mohist/merge-github-pr` 都是普通 workflow task action。PR 相关副作用
 必须显式出现在 task graph 里，不通过 stage hook 或隐藏的 stage boundary
 side effect 执行。
 
@@ -143,11 +143,10 @@ side effect 执行。
   的 draft PR。
 - `create-github-pr` 输出稳定 PR 身份，profile 可用 `setVars` 投影
   `vars.github.pr.number` / `vars.github.pr.url`。
-- `ready-github-pr` 负责推送 workflow branch，更新同一个 PR 的 title/body，
-  并把 draft PR 标记为 ready。
-- `ready-github-pr` 必须复用 `vars.github.pr.number` 指向的 PR；如果该
-  PR 不存在、已关闭或不是同一个 head/base，应以可编排错误失败，不擅自新开
-  替代 PR。
+- `mark-github-pr-ready` 只负责把 `prNumber` 指向的 draft PR 标记为 ready。
+  它不推送 branch，不更新 title/body，PR 已经 ready 时幂等成功。
+- `push` 负责把本地 workflow branch 显式同步到远程 PR head；rebase 后可
+  使用 `forceWithLease` 更新同一条线性分支。
 - `merge-github-pr` 负责把 PR 合入 base branch。
 - `merge-github-pr` 在真正 merge 前必须先等待 GitHub PR checks。
 - PR checks 是 merge action 的内部前置条件，不建模成 stage-level check。
@@ -216,10 +215,7 @@ action type，不判断 task id。
               baseBranch: ${{ repository.baseBranch }}
               remote: origin
               squash: false
-          - id: recover:deliver
-            uses: example/deliver
-            with:
-              target: ${{ repository.baseBranch }}
+        retry: self
 ```
 
 执行规则：
@@ -227,6 +223,8 @@ action type，不判断 task id。
 - task failed 后，engine 解析该 task 的 output。
 - 按 `cases` 顺序做动态字段匹配。
 - 命中 case 时，把 case.tasks 插入当前 stage，workflow 回到 running。
+- case 声明 `retry: self` 时，engine 在 recovery tasks 之后追加原失败 task
+  的新 attempt，并保留原 task 的 `onFailure`。
 - 超过 `limit` 或无 case 命中时，保留普通 task failure，用户仍可 retry/rerun。
 
 边界：
