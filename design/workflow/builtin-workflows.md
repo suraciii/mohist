@@ -62,78 +62,62 @@ integrate：
 目标：每次集成都通过一个可追踪的 GitHub PR 完成。PR 是 workflow
 branch 到 base branch 的集成通道，PR 成功 merge 才表示集成完成。
 
-目标 integrate：
+profile 走 PR-first 形态：plan 批准后立刻通过显式 task 创建/复用 PR，
+后续 stage 需要把最新工作推到 GitHub 时在该 stage 尾部追加显式 update
+PR task，integrate 收尾只剩 `merge-pull-request`。
 
 ```yaml
-- integrate:spec-sync       # mohist/acp-agent
-- integrate:archive-change  # mohist/archive-change
-- integrate:open-pr         # mohist/create-pull-request
-- integrate:merge-pr        # mohist/merge-pull-request
+- stage: build
+  tasks:
+    - id: build:open-pr        # mohist/create-pull-request
+    - id: load-tasks
+    - id: build:update-pr      # mohist/create-pull-request
+
+- stage: check
+  tasks:
+    - id: ai-review
+  checks:
+    - repair/verify paths append check:update-pr  # mohist/create-pull-request
+
+- stage: integrate
+  tasks:
+    - integrate:spec-sync       # mohist/acp-agent
+    - integrate:archive-change  # mohist/archive-change
+    - integrate:merge-pr        # mohist/merge-pull-request
 ```
 
 语义：
 
-- 正常路径不预先 rebase。
-- `integrate:open-pr` force-with-lease 推送同一个 `workspace.branch`。
-- 如果同 head/base 已有 open PR，则复用并更新该 PR。
-- 如果没有 open PR，则创建 PR。
-- PR title/body 由 `titleFrom: issue.title` 和 `bodyFrom: issue.body` 指示 `mohist/create-pull-request` 在运行时通过 `mo issue show` 读取；workflow 也可用 literal `title` / `body` 显式覆盖。
-- `integrate:open-pr` 只把稳定 PR 身份投影到 run profile：`vars.github.pr.number` 和 `vars.github.pr.url`。
-- GitHub PR mergeability 是集成裁判；只有 GitHub 返回不可合并、base 已移动、branch out-of-date 等失败时，才进入 recovery rebase。
-- `integrate:merge-pr` 读取 `vars.github.pr.number`，先等待 GitHub PR checks，再由 `gh pr merge --squash` 合并。
-- merge 语义是把当前 workflow branch 合入 base branch；不要求 expected head SHA 或 `--match-head-commit`。
-- PR merge 成功并确认 `state=MERGED` 后，workflow 完成。
-- PR checks pending 时，`integrate:merge-pr` 继续等待，直到 checks 成功或失败。
-- PR checks failed/cancelled/action_required 时，`integrate:merge-pr` 以 `errorCode: pr-checks-failed` 失败；当前不自动修复，保留普通 task failure，由用户介入后 retry/rerun。
-
-## PR-first Target
-
-下一步目标是把 PR 从 integrate 最后一刻前移到 workflow 开始后的显式 task，
-让 PR 成为整个 run 的集成容器。
+- plan 批准后第一个 task 是 `build:open-pr`，它在 build 一开始就
+  force-with-lease 推送同一个 `workspace.branch`，并按 head/base 创建或
+  复用 open PR；PR 身份通过 `setVars` 投影到
+  `vars.github.pr.number` / `vars.github.pr.url`。
+- `build:update-pr` 显式声明在 build stage 的尾部，等 build 的
+  load-tasks 跑完后再推送一次 head/base 同样的 PR，更新 title/body。
+- check stage 的 `health` / `review-passed` / `merge-ready` repair 路径会在
+  修复或 rebase 之后追加 `check:update-pr`，再重新运行 checks，从而把最终
+  check 结果推到同一个 PR。
+- 正常路径不预先 rebase；integrate 的 happy path 只有 `integrate:merge-pr`。
+- GitHub PR mergeability 是集成裁判；只有 GitHub 返回不可合并、base 已移动、
+  branch out-of-date 等失败时，才进入 recovery rebase。
+- `integrate:merge-pr` 读取 `vars.github.pr.number`，先等待 GitHub PR
+  checks，再由 `gh pr merge --squash` 合并；merge 成功后确认 PR
+  `state=MERGED` 才视为集成完成。
+- merge 语义是把当前 workflow branch 合入 base branch；不要求 expected
+  head SHA 或 `--match-head-commit`。
+- PR checks pending 时，`integrate:merge-pr` 继续等待，直到 checks
+  passed/skipped 或 failed。
+- PR checks failed/cancelled/action_required 时，`integrate:merge-pr` 以
+  `errorCode: pr-checks-failed` 失败；当前不自动修复，保留普通 task
+  failure，由用户介入后 retry/rerun。
 
 约束：
 
 - 不新增 stage hook。
 - 不新增隐藏的 stage boundary side effect。
 - 不新增 workflow completion/finalize task。
-- 不改变 stage、tasks、checks 的整体架构。
-
-目标 task graph 仍由普通 task 表达：
-
-```yaml
-- id: start:open-pr
-  uses: mohist/create-pull-request
-
-- stage: build
-  tasks:
-    - id: build:...
-      uses: ...
-    - id: build:update-pr
-      uses: mohist/create-pull-request
-
-- stage: check
-  tasks:
-    - id: check:...
-      uses: ...
-    - id: check:update-pr
-      uses: mohist/create-pull-request
-
-- stage: integrate
-  tasks:
-    - id: integrate:merge-pr
-      uses: mohist/merge-pull-request
-```
-
-语义：
-
-- 创建/更新 PR 是普通 task，必须显式出现在 profile 里。
-- 每个 stage 需要把最新工作推到 PR 时，在该 stage 的 task 尾部声明一个
-  `create-pull-request` / update PR task。
-- `merge-pull-request` 是 integrate 的结束 task；它先等待 PR checks，通过后
-  merge，merge 成功才表示 integrate 完成。
-- PR checks 是 merge action 的内部前置条件，不是 stage-level check。
-- PR checks 失败时 workflow 失败，不进入自动修复。后续如要自动修复，应作为
-  `pr-checks-failed` 的显式 recovery task 设计。
+- PR checks 不建模为 stage-level check；它们只是 `merge-pull-request`
+  action 的内部前置条件。
 
 前置条件：
 

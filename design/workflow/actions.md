@@ -145,7 +145,7 @@ stage hook 或隐藏的 stage boundary side effect 执行。
 - `merge-pull-request` 在真正 merge 前必须先等待 GitHub PR checks。
 - PR checks 是 merge action 的内部前置条件，不建模成 stage-level check。
 
-`merge-pull-request` 的目标流程：
+`merge-pull-request` 的现行流程：
 
 ```text
 resolve PR
@@ -157,6 +157,14 @@ resolve PR
   -> gh pr merge --squash
   -> confirm state=MERGED
 ```
+
+PR checks 等待阶段在 `mergeOrConfirmPr`（`packages/runner/src/actions/publish-via-pr.ts`）
+中通过轮询 `gh pr checks <prNumber> --json bucket,name,state` 实现：
+
+- 轮询间隔固定 15s；每次轮询记录一条 `PullRequestStep`（`name=gh-pr-checks`）以保留审计轨迹。
+- 任何 check 的 `bucket` 为 `PENDING` 时继续等待；不存在 PENDING 且存在 `FAIL`（gh `bucket` 把 CANCELLED / ACTION_REQUIRED 也归为 `FAIL`）时返回 `pr-checks-failed`。
+- 全部 `PASS`/`SKIP` 或 `gh pr checks` 返回空列表（仓库无 checks 报告）时直接进入 merge，与既有默认行为等价。
+- 等待期间尊重 `context.signal`：signal 触发时取消等待并以 `retry-safe` 失败，由 runner 决定是否 retry。
 
 这样保持现有 workflow 架构：
 

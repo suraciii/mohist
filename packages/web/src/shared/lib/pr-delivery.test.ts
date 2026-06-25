@@ -71,4 +71,57 @@ describe('extractPrDeliveryMetadata', () => {
     expect(extractPrDeliveryMetadata(true)).toBeNull()
     expect(extractPrDeliveryMetadata([])).toBeNull()
   })
+
+  it('extracts metadata from a PR-first create-pull-request output', () => {
+    const output = JSON.stringify({
+      kind: 'create-pull-request',
+      prNumber: 17,
+      prUrl: 'https://github.com/acme/widgets/pull/17',
+      targetBranch: 'main',
+    })
+    expect(extractPrDeliveryMetadata(output)).toEqual({
+      prNumber: 17,
+      prUrl: 'https://github.com/acme/widgets/pull/17',
+      mergeCommitSha: null,
+      targetBranch: 'main',
+    })
+  })
+
+  it('extracts metadata from a PR-first merge-pull-request output', () => {
+    const output = JSON.stringify({
+      kind: 'merge-pull-request',
+      prNumber: 17,
+      prUrl: 'https://github.com/acme/widgets/pull/17',
+      mergeCommitSha: 'final-sha',
+      targetBranch: 'main',
+    })
+    expect(extractPrDeliveryMetadata(output)).toEqual({
+      prNumber: 17,
+      prUrl: 'https://github.com/acme/widgets/pull/17',
+      mergeCommitSha: 'final-sha',
+      targetBranch: 'main',
+    })
+  })
+
+  it('returns the same PR identity across create and merge output kinds (stable identity)', () => {
+    const createOutput = JSON.stringify({
+      kind: 'create-pull-request',
+      prNumber: 21,
+      prUrl: 'https://github.com/acme/widgets/pull/21',
+      targetBranch: 'main',
+    })
+    const mergeOutput = JSON.stringify({
+      kind: 'merge-pull-request',
+      prNumber: 21,
+      prUrl: 'https://github.com/acme/widgets/pull/21',
+      mergeCommitSha: 'final-sha',
+      targetBranch: 'main',
+    })
+    const create = extractPrDeliveryMetadata(createOutput)
+    const merge = extractPrDeliveryMetadata(mergeOutput)
+    expect(create).not.toBeNull()
+    expect(merge).not.toBeNull()
+    expect(create!.prNumber).toBe(merge!.prNumber)
+    expect(create!.prUrl).toBe(merge!.prUrl)
+  })
 })
