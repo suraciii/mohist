@@ -21,9 +21,10 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
-    Task<WorkDispatch?> PollWorkAsync(string runnerId);
+    Task<WorkItem?> PollWorkAsync(string runnerId);
     Task NotifyRunnerLostAsync(string runnerId);
-    Task ReportResultAsync(string runnerId, string workId, WorkResult result);
+    Task ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome);
+    Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome);
     Task<string?> GetRunStatusAsync();
     Task<bool> IsStoppedOrTerminalAsync();
     Task<string?> GetAssignedRunnerIdAsync();

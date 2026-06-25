@@ -101,3 +101,82 @@
 
 - T-003 (work item protocol): after T-002 the only thing the runner ever sees is `Task`/`Checks` work items. The runner-facing `WorkItem` shape, translator, and the new `TaskOutcome`/`CheckOutcome` types are all that remain in D1/D2/D4/D7.
 - T-004 (supervision): the `EnsureWorkHeartbeatAsync` / `ArmWorkCompletionTimer` / `FailTimedOutWorkAsync` paths still exist; they are scheduled for deletion in T-004 alongside the whole work-completion timeout supervision.
+## T-003 Notes (work item protocol + translator + runner shape alignment)
+
+### Implementation
+
+- **Domain (`Workflow/Domain/Run/WorkItem.cs`)**:
+  - New `WorkItem` record (sealed, `[GenerateSerializer]`): discriminated by `WorkType` ("task" | "checks") with nullable fields for both variants. Polymorphism encoded as a single record with a discriminator because Orleans requires a concrete serializable type for grain-interface return values.
+  - `TaskWorkItem` factory: `WorkItem.Task(stage, id, title, uses, with, artifacts, setVars)` — carries the declaration + unrendered templates only.
+  - `ChecksWorkItem` factory: `WorkItem.Checks(stage, workId, items)` — uses the same `Id` field for the work id, mirroring the task variant's shape.
+  - `TaskOutcome(WorkId, Status, Output, Artifacts, Detail?)` — `Status` is `OutcomeStatus.Passed | Failed` (exactly two enum values). Timeout/runner-lost collapse into `Failed` + `Detail` (e.g. `"work-timeout"`, `"runner-lost"`).
+  - `CheckOutcome(Stage, Results)` — check results parsed by the runner-side translator.
+  - `ArtifactRef(Path, ContentType?, ContentHash?, Size?, UploadId?)` — the bound artifact reference the runner hands to the grain.
+  - Made `TaskArtifactCapture`, `TaskArtifactDeclaration`, `CheckItem`, `CheckResult` `[GenerateSerializer]` because they cross the grain boundary via `WorkItem`.
+- **Grain interface (`Workflow/Grains/IWorkflowGrain.cs`)**:
+  - `PollWorkAsync(runnerId) → WorkItem?` (was `WorkDispatch?`).
+  - `ReportResultAsync` split into `ReportTaskOutcomeAsync(runnerId, workId, TaskOutcome)` and `ReportCheckOutcomeAsync(runnerId, workId, CheckOutcome)`. The split is more honest than a single overloaded method (the two outcomes have different shapes; callers must distinguish).
+  - `NotifyRunnerLostAsync` and `FailLostRunningTasksAsync` kept for T-003 (T-004 deletes them as part of D5).
+- **Grain (`Workflow/Grains/WorkflowGrain.cs`)**:
+  - Removed all rendering logic from the grain: `PrepareWorkAsync`/`MakeDispatchAsync` cases for "task" and "checks" return only `WorkItem` after `StartTask` marks the work running. The grain no longer calls `WorkflowDispatchBuilder`, `LoadPromptsAsync`, `ResolveLayeredVariablesAsync`, `ExpandTaskWith` (grep-verified clean).
+  - `ProcessTaskOutcomeAsync(TaskOutcome, ...)` consumes the runner-supplied artifacts (`outcome.Artifacts`) and writes `WorkflowArtifactRecorded` events directly. No binding call (binding is now runner-side).
+  - `ProcessCheckOutcomeAsync(CheckOutcome)` calls `ResolveRepairTasks` (which remains control-plane) to decide repair actions, then `ProcessCheckResults` to commit events.
+  - `InitializeFreshStagesAsync` (from T-002) still runs on every commit, so `StageStarted ⟹ Initialized` holds.
+- **Translation (`Runner/Services/WorkflowItemTranslator.cs`, new)**:
+  - Out-direction `TranslateToDispatchAsync(item, workflowRunId, run, runnerId) → WorkDispatch`: assembles the payload (`vars`, `workflow`, `stage`, `work`, `tasks`), loads prompts, expands `with` templates, and emits a `WorkDispatch`. The work id flows from `item.Id`; the translator never invents a dispatch id of its own.
+  - In-direction `TranslateResultAsync(item, result, workflowRunId, run) → InboundOutcome.Task | .Checks`: parses runner output into `CheckResult`s, calls `_artifactBindService.BindAsync` (the move from grain-side to runner-side was the implementation pivot for the artifact binding concern), collapses `WorkResult.Status` aliases (`completed`/`pass` → `Passed`, anything else → `Failed`) and surfaces `Message` as `Detail`.
+  - `InboundOutcome` discriminated record (`Task(TaskOutcome) | Checks(CheckOutcome)`) lets `RunnerGrain.ReportWorkflowResultAsync` switch on the variant.
+- **Runner grain (`Runner/Grains/RunnerGrain.cs`)**:
+  - `PollOneWorkflowAsync` calls `WorkflowGrain.PollWorkAsync` → `WorkflowItemTranslator.TranslateToDispatchAsync` and tracks the resulting `RunnerWorkflowWork(item, dispatch, polledAt)` in `_outstandingWorkflowWorks` (keyed by `workflowRunId\u001fworkId`).
+  - `ReportWorkflowResultAsync` looks up the tracked item, calls `_translator.TranslateResultAsync`, then dispatches to `IWorkflowGrain.ReportTaskOutcomeAsync` or `ReportCheckOutcomeAsync` based on the outcome variant. Removes the entry from `_outstandingWorkflowWorks` on accepted report.
+- **Helpers (`Workflow/Services/WorkflowDispatchHelpers.cs`, moved from `Workflow/Grains/`)**:
+  - Pure formatting helpers (`JsonElementToObject`, `BuildIssueRef`, `TryReadNestedString`, `TryReadStageAgentModel`, `TaskAttempt`, `ParseCheckResults`, `ParseWith`, `MergeTaskOutputsIntoPayload`) extracted to `Workflow/Services` so both the control plane and the runner-side translator can reuse them without taking a dependency on the old grain-side builder.
+- **Runner TS (`runner/src/core/types.ts`)**:
+  - Added `DomainWorkItem` (`TaskDomainWorkItem | ChecksDomainWorkItem`) mirroring the server `WorkItem` shape: task variant carries `stage`, `id`, `title?`, `uses?`, `with?` (unrendered `JsonObject`), `artifacts?`, `setVars?`; checks variant carries `stage`, `id` (work id), `items`. Comments clarify that runtime execution still consumes the rendered `WorkItem` (dispatch envelope) — the new `DomainWorkItem` is for the protocol surface, mirroring tests, and boundary checks.
+- **Runner TS connection (`runner/src/server/connection.ts`)**:
+  - `poll()` still returns the rendered `WorkItem` (parsed `JsonObject` fields via `toWorkItem(dispatch: WorkDispatchResponse)`). The helper is preserved because the runtime executor operates on parsed fields.
+- **Runner TS signalR (`runner/src/server/runner-signalr.ts`)**:
+  - `normalizeMaterializePayload` now returns `WorkItem` (parsed JsonObject fields) instead of `WorkDispatchResponse` (raw JSON strings). The `MaterializeWorkspace` handler passes it directly to `WorkspaceManager.materialize`, which expects parsed fields. Test `ParsesStringVariablesIntoObject_SignalRWireFormat` pinned this regression contract.
+
+### Gotchas
+
+- **Orleans serialization constraint**: `WorkItem` is a sealed record (not an abstract record with derived variants) because Orleans grain-interface return types need a concrete serializable type. The discriminator (`WorkType`) plus nullable fields works around this; both variants fit a single record.
+- **`CheckItem`/`CheckResult` serialization**: the existing records lacked `[GenerateSerializer]` because they previously only flowed inside a single grain. They now cross the grain boundary in `WorkItem`, so the attribute was added.
+- **Polymorphic translator return**: `WorkflowItemTranslator.TranslateResultAsync` returns a discriminated `InboundOutcome` record (`Task(TaskOutcome) | Checks(CheckOutcome)`) so `RunnerGrain.ReportWorkflowResultAsync` can switch on the variant type and route to the right grain method.
+- **Artifact binding moved to runner side**: the `IWorkflowArtifactBindService.BindAsync` call moved out of the grain (`WorkflowGrain.BindArtifactUploadsAsync`) and into the translator's inbound path. Confirmed safe: the bind service consumes `profileManager` vars + the artifact upload row + declared artifacts — no grain-exclusive state. This was the implementation pivot that makes "artifact binding is execution-plane concern" true.
+- **`ResolveRepairTasks` stays in grain**: the control plane still owns the "given a failed check, which repair tasks to insert" decision (read stage def + repair limit + modify run). Only the runner-format → domain parsing moved out.
+- **`ReportResultAsync` was split into two methods** (`ReportTaskOutcomeAsync` + `ReportCheckOutcomeAsync`) rather than overloaded: the two outcomes have different shapes, and a single overloaded method would force the runner-side translator to smuggle a discriminator through the call. The split is more honest and the runner switches on the `InboundOutcome` variant.
+- **Runner TS shape parity**: `DomainWorkItem` is a new type added alongside the existing `WorkItem` (which is the post-render parsed envelope the runtime executor consumes). The two are intentionally distinct: `DomainWorkItem` mirrors the server `WorkItem`; `WorkItem` carries the rendered envelope fields (`variables`, `prompts`, `issueId`, `agentJobId`, etc.). The runner process only ever sees the rendered envelope over the wire — `DomainWorkItem` is for protocol documentation, mirroring tests, and boundary assertions.
+- **Runner TS signalr regression**: an earlier draft tried to make `normalizeMaterializePayload` return a `WorkDispatchResponse` (raw strings) — that broke `WorkspaceManager.materialize`, which reads `work.variables.workspace.path` as a parsed object. The function now returns a parsed `WorkItem`, and the existing test `ParsesStringVariablesIntoObject_SignalRWireFormat` pinned this contract.
+- **Runner TS executor stays on `WorkItem` (parsed)**: the runtime executor functions take `WorkItem` (with `with: JsonObject`); the dispatch-rendering pipeline passes parsed envelopes only. There was an intermediate draft where executor functions were switched to `WorkDispatchResponse` — that was wrong (template rendering operates on objects, not strings) and was reverted.
+
+### Test coverage
+
+- 15 new unit tests in `Runner.Services.WorkflowItemTranslatorSpecs`:
+  - Out-direction:
+    - `TranslateToDispatch_TaskItem_ProducesDispatchWithResolvedVariablesAndPrompts` — payload, prompts, with, artifacts, setVars all populated.
+    - `TranslateToDispatch_ChecksItem_ProducesDispatchWithChecksPayload` — checks work item renders as a dispatch with checks payload.
+    - `TranslateToDispatch_TaskItem_DoesNotInjectDispatchId` — work id flows from `item.Id`, not invented.
+    - `TranslateToDispatch_UnknownWorkType_Throws` — error path.
+  - In-direction:
+    - `TranslateResult_PassedTaskWithoutDeclaredArtifacts_PassesWithOutput` — happy path.
+    - `TranslateResult_FailedTaskWithDetail_FailsWithDetailPreserved` — failure carries the message.
+    - `TranslateResult_PassedTaskMissingDeclaredArtifacts_FailsWithDeterministicDetail` — required-declared contract.
+    - `TranslateResult_PassedTaskWithUploadIds_RecordsArtifactReferences` — bind path produces `ArtifactRef`s.
+    - `TranslateResult_ChecksItem_ParsesRunnerOutputIntoCheckResults` — runner-format check JSON → `CheckResult`s.
+    - `TranslateResult_TimeoutLikeFailedTask_ReportsAsFailed_NotAsDistinctState` — timeout/runner-lost collapse to `Failed` + `Detail`.
+    - `TranslateResult_AllStatusAliases_CollapseToPassed` — `completed`/`pass`/`Completed`/etc. all → `Passed`.
+    - `TranslateResult_AllFailureAliases_CollapseToFailed_WithMessageAsDetail` — `failed` + message → `Detail`.
+  - Protocol contract (work item shape & outcome states):
+    - `WorkItem_TaskVariant_ExposesOnlyDeclarationFields` — pins the public field set.
+    - `WorkItem_ChecksVariant_ExposesStageAndItems` — checks variant shape.
+    - `OutcomeStatus_HasExactlyTwoStates_PassedAndFailed` — two-state invariant for the protocol.
+- 0 regressions. Full server suite: **2616 passed, 12 skipped, 0 failed** (was 2602 before; +14 new translator tests; +2 protocol contract tests = +15 with one overlapping count from a previously-existing skip-not-related change). Workflow subset unchanged from T-002 (696 passing).
+- Runner TS: 482 tests pass (unchanged from T-002).
+- Existing workflow integration tests (`HappyPathSpecs`, `AdvanceSpecs`, `StageInitEagerSpecs`, `WorkflowRetrySpecs`, `VariableScopeSpecs`, `WorkflowArtifactBindingSpecs`, `RunnerFailureSpecs`, etc.) all pass against the new protocol without test changes — `PollWorkAnyAsync` returns the rendered `WorkDispatch` from `RunnerGrain.PollAsync`, which now goes through the translator. The grain-interface contract is exercised by every grain spec that calls `runner.PollAsync` + `runner.ReportWorkflowResultAsync`.
+- The previously-skipped `RunningTask_WithoutReport_TimesOutWithoutQueryingRunner` remains skipped (T-004 territory).
+
+### Open items for follow-up tasks
+
+- T-004 (supervision): the `WorkflowGrainOptions.WorkCompletionTimeout` + `ArmWorkCompletionTimer` + `FailTimedOutWorkAsync` + `IRemindable` + `EnsureWorkHeartbeatAsync` + `DisableWorkHeartbeatAsync` + `NotifyRunnerLostAsync` + `FailLostRunningTasksAsync` + `WorkflowRun.FailTaskForRunnerLost` paths still exist. T-004 deletes them, switches `RunnerGrain.NotifyTrackedWorkflowRunnersLostAsync` to synthesizing `TaskOutcome(WorkId, Failed, Detail:"runner-lost")` and reporting it via the normal channel (which now works because the protocol accepts `TaskOutcome` in `ReportTaskOutcomeAsync`). runner-loss reminder + persistent heartbeat detection is independent follow-up territory (open new issue).
+- T-005 (cleanup): `WorkflowGrain.On` `StageCompleted/Failed → ReleaseStageLocksAsync` (still inline) → migrate to eventbus `[Subscription]` handler. `WorkflowGrain.GetFeedbackAsync`/`ListFeedbackAsync`/`GetActiveWorkAsync`/`ToSnapshot` still inline → extract to `WorkflowReadModel`. `RequeueWorkflowIdAsync` still no-op stub (already identified in T-002 cleanup list).

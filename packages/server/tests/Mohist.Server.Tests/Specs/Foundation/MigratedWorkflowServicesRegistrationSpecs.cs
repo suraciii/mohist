@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
@@ -30,7 +31,7 @@ public class MigratedWorkflowServicesRegistrationSpecs
         yield return new object[] { typeof(WorkflowQuerier), ServiceLifetime.Scoped };
         yield return new object[] { typeof(WorkflowProfileManager), ServiceLifetime.Scoped };
         yield return new object[] { typeof(WorkflowRunProfileManager), ServiceLifetime.Scoped };
-        yield return new object[] { typeof(WorkflowDispatchBuilder), ServiceLifetime.Scoped };
+        yield return new object[] { typeof(WorkflowItemTranslator), ServiceLifetime.Scoped };
         yield return new object[] { typeof(ProjectWorkflowProfileManager), ServiceLifetime.Scoped };
         yield return new object[] { typeof(IssueWorkflowProfileManager), ServiceLifetime.Scoped };
     }

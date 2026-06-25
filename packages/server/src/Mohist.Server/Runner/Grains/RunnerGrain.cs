@@ -3,6 +3,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Agent.Grains;
@@ -18,6 +19,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerInfo? _info;
     private string? _pendingBuildGitHash;
     private readonly Dictionary<string, RunnerTrackedWork> _agentJobs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RunnerWorkflowWork> _outstandingWorkflowWorks = new(StringComparer.Ordinal);
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
 
@@ -29,6 +31,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
+    private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<RunnerGrain> _log;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
@@ -37,10 +40,12 @@ public class RunnerGrain : Grain, IRunnerGrain
     public RunnerGrain(
         WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
+        WorkflowItemTranslator translator,
         ILogger<RunnerGrain> log)
     {
         _workflowRuns = workflowRuns;
         _definitions = definitions;
+        _translator = translator;
         _log = log;
     }
 
@@ -48,11 +53,6 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        // Reload persisted slots on every activation so the in-memory cache
-        // survives grain deactivation followed by reacquisition. This is the
-        // structural fix for the capacity-volatility issue: a runner's slots
-        // are now sourced from the persisted definition, not from in-memory
-        // heartbeat state.
         _slots = await _definitions.GetOrInitAsync(RunnerId, ct);
     }
 
@@ -66,10 +66,6 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task RegisterAsync(RunnerInfo info)
     {
         var effectiveHash = info.BuildGitHash ?? _pendingBuildGitHash;
-        // The runner-reported MaxWorkflowSlots field is intentionally NOT
-        // written into the persisted definition state. Persisted slots are
-        // the sole authoritative source; this field is preserved on the
-        // RunnerInfo record for runner-line compatibility only.
         _info = info with
         {
             BuildGitHash = effectiveHash,
@@ -77,9 +73,6 @@ public class RunnerGrain : Grain, IRunnerGrain
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
         _pendingBuildGitHash = null;
-        // Hydrate the slots cache from the persisted definition state on
-        // every register (covers both first-time register and post-restart
-        // re-register). A runner-reported slots value is ignored.
         _slots = await _definitions.GetOrInitAsync(RunnerId);
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.RegisterAsync(_info);
@@ -169,12 +162,6 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (string.IsNullOrWhiteSpace(work.AgentJobId) || string.IsNullOrWhiteSpace(work.WorkId))
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work"));
 
-        // Note: unlike the workflow arm above, the agent-job arm does not perform
-        // "stale key" cleanup for the same AgentJobId. The AgentJobGrain model is
-        // single-shot per AgentJobId (one work per job, see design Decision 4), so
-        // there is no legitimate retry/upgrade path that would generate stale work
-        // keys to remove. If a future contributor adds a multi-shot agent-job
-        // model, they should re-introduce the workflow arm's stale-key cleanup.
         var key = WorkKey(work.OwnerKind, OwnerIdentityFor(work), work.WorkId);
         if (_agentJobs.ContainsKey(key))
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
@@ -191,8 +178,32 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (string.IsNullOrWhiteSpace(workflowRunId))
             return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow", WorkDispatchOwnerKinds.Workflow, workflowRunId);
 
+        var key = WorkflowWorkKey(workflowRunId, workId);
+        if (!_outstandingWorkflowWorks.TryGetValue(key, out var tracked))
+        {
+            // Untracked reports are dropped — the workflow grain already
+            // accepted or invalidated this work item.
+            return new RunnerWorkReportResult(workflowRunId, null, false, "untracked", WorkDispatchOwnerKinds.Workflow, workflowRunId);
+        }
+
+        var run = await _workflowRuns.LoadAsync(workflowRunId);
+        if (run is null)
+            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow", WorkDispatchOwnerKinds.Workflow, workflowRunId);
+
+        var outcome = await _translator.TranslateResultAsync(tracked.Item, result, workflowRunId, run);
+
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.ReportResultAsync(RunnerId, workId, result);
+        switch (outcome)
+        {
+            case WorkflowItemTranslator.InboundOutcome.Task task:
+                await workflow.ReportTaskOutcomeAsync(RunnerId, workId, task.Value);
+                break;
+            case WorkflowItemTranslator.InboundOutcome.Checks checks:
+                await workflow.ReportCheckOutcomeAsync(RunnerId, workId, checks.Value);
+                break;
+        }
+
+        _outstandingWorkflowWorks.Remove(key);
         var workflowStatus = await workflow.GetRunStatusAsync();
 
         return new RunnerWorkReportResult(
@@ -294,7 +305,6 @@ public class RunnerGrain : Grain, IRunnerGrain
         var normalized = string.IsNullOrWhiteSpace(buildGitHash) ? null : buildGitHash.Trim();
         if (_info is null)
         {
-            // Buffer the hash so a subsequent RegisterAsync can pick it up.
             _pendingBuildGitHash = normalized;
             return;
         }
@@ -323,10 +333,6 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (slots <= 0)
             throw new ArgumentOutOfRangeException(nameof(slots), slots, "slots must be a positive integer");
 
-        // Write-through: persist first so the next dispatch cycle is
-        // guaranteed to observe the new value even if a subsequent caller
-        // hits a freshly reactivated grain before the cache update is
-        // visible. The cache update is best-effort within the same call.
         await _definitions.UpdateSlotsAsync(RunnerId, slots);
         _slots = slots;
         _log.LogInformation("Runner {Id} slots updated to {Slots}", RunnerId, slots);
@@ -389,9 +395,9 @@ public class RunnerGrain : Grain, IRunnerGrain
             if (!string.IsNullOrWhiteSpace(currentWorkId))
                 continue;
 
-            var work = await workflow.PollWorkAsync(RunnerId);
-            if (work is not null)
-                return work;
+            var dispatch = await PollOneWorkflowAsync(workflow, workflowRunId);
+            if (dispatch is not null)
+                return dispatch;
         }
 
         foreach (var workflowRunId in await _workflowRuns.FindAssignableAsync(_info?.ProjectId))
@@ -401,12 +407,26 @@ public class RunnerGrain : Grain, IRunnerGrain
             if (assigned.Status != WorkflowAssignmentStatus.Assigned)
                 continue;
 
-            var work = await workflow.PollWorkAsync(RunnerId);
-            if (work is not null)
-                return work;
+            var dispatch = await PollOneWorkflowAsync(workflow, workflowRunId);
+            if (dispatch is not null)
+                return dispatch;
         }
 
         return null;
+    }
+
+    private async Task<WorkDispatch?> PollOneWorkflowAsync(IWorkflowGrain workflow, string workflowRunId)
+    {
+        var item = await workflow.PollWorkAsync(RunnerId);
+        if (item is null) return null;
+
+        var run = await _workflowRuns.LoadAsync(workflowRunId);
+        if (run is null) return null;
+
+        var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
+        var key = WorkflowWorkKey(workflowRunId, item);
+        _outstandingWorkflowWorks[key] = new RunnerWorkflowWork(item, dispatch, DateTimeOffset.UtcNow);
+        return dispatch;
     }
 
     private async Task<WorkDispatch?> DequeueAssignedAgentJobAsync()
@@ -469,6 +489,12 @@ public class RunnerGrain : Grain, IRunnerGrain
     };
 
     private static string WorkKey(string ownerKind, string ownerId, string workId) => $"{ownerKind}\u001f{ownerId}\u001f{workId}";
+
+    private static string WorkflowWorkKey(string workflowRunId, string workId) =>
+        $"{workflowRunId}\u001f{workId}";
+
+    private static string WorkflowWorkKey(string workflowRunId, WorkItem item) =>
+        $"{workflowRunId}\u001f{item.Id}";
 }
 
 internal enum RunnerWorkState
@@ -486,3 +512,18 @@ internal sealed record RunnerTrackedWork(
     public RunnerTrackedWork MarkRunning(DateTimeOffset now) =>
         this with { Status = RunnerWorkState.Running, StartedAt = StartedAt ?? now };
 }
+
+/// <summary>
+/// Tracks a workflow work item the runner pulled from the control plane.
+/// Mirrors <see cref="RunnerTrackedWork"/> (agent-job accounting) but for
+/// workflow work. The grain returns domain <see cref="WorkItem"/>s; the
+/// runner translates them into <see cref="WorkDispatch"/> and remembers
+/// the original <see cref="WorkItem"/> so the inbound <see cref="WorkResult"/>
+/// can be matched to <see cref="TaskWorkItem"/> / <see cref="ChecksWorkItem"/>
+/// when the runner process reports back. Removing the entry on successful
+/// report keeps the set authoritative for runner-loss closeout (T-004).
+/// </summary>
+internal sealed record RunnerWorkflowWork(
+    WorkItem Item,
+    WorkDispatch Dispatch,
+    DateTimeOffset PolledAt);

@@ -76,7 +76,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
+    [Fact(Skip = "Tech debt: work-timeout supervision is deleted in T-004 (design D5); this test is replaced by RunnerGrain-driven timeout coverage")]
     public async Task RunningTask_WithoutReport_TimesOutWithoutQueryingRunner()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));

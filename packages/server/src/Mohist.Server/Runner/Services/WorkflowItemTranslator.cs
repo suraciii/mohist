@@ -1,0 +1,408 @@
+using System.Text.Json;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Artifacts;
+
+namespace Mohist.Server.Runner.Services;
+
+/// <summary>
+/// Translator that owns the boundary between the control plane's
+/// domain-semantic work items and the runner-process execution envelopes.
+/// The control plane (WorkflowGrain) now only exposes
+/// <see cref="WorkItem"/> / <see cref="TaskOutcome"/> / <see cref="CheckOutcome"/>;
+/// this service renders work items into <see cref="WorkDispatch"/> for the
+/// runner process and converts the runner's raw <see cref="WorkResult"/> into
+/// domain outcomes the grain consumes.
+///
+/// Moving the translation out of <c>WorkflowGrain</c> removes the rendering
+/// and parsing responsibilities from the control-plane grain (variables,
+/// prompts, with-template expansion, payload assembly on the way out;
+/// runner-format check parsing + artifact binding on the way in). The
+/// inputs are sourced from <c>WorkflowProfileManager</c> / persisted
+/// projections, not from grain-exclusive memory.
+/// </summary>
+public sealed class WorkflowItemTranslator : IScopedService
+{
+    private readonly WorkflowProfileManager _profileManager;
+    private readonly IWorkflowArtifactBindService _artifactBindService;
+    private readonly ILogger<WorkflowItemTranslator> _log;
+
+    public WorkflowItemTranslator(
+        WorkflowProfileManager profileManager,
+        IWorkflowArtifactBindService artifactBindService,
+        ILogger<WorkflowItemTranslator> log)
+    {
+        _profileManager = profileManager;
+        _artifactBindService = artifactBindService;
+        _log = log;
+    }
+
+    /// <summary>
+    /// Renders a domain <see cref="WorkItem"/> into the runner-process
+    /// <see cref="WorkDispatch"/> envelope. Resolves layered variables,
+    /// loads prompts, expands <c>with</c> templates, and assembles the
+    /// payload the action will consume. The work id is supplied by the
+    /// grain (<see cref="WorkItem.Id"/> for tasks or
+    /// <see cref="WorkItem.Items"/> for checks); this translator never
+    /// invents a dispatch id of its own.
+    /// </summary>
+    public async Task<WorkDispatch> TranslateToDispatchAsync(
+        WorkItem item,
+        string workflowRunId,
+        WorkflowRun run,
+        string runnerId)
+    {
+        if (item.IsTask)
+            return await BuildTaskDispatchAsync(item, workflowRunId, run, runnerId);
+        if (item.IsChecks)
+            return await BuildChecksDispatchAsync(item, workflowRunId, run, runnerId);
+        throw new InvalidOperationException(
+            $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
+    }
+
+    private async Task<WorkDispatch> BuildTaskDispatchAsync(
+        WorkItem item,
+        string workflowRunId,
+        WorkflowRun run,
+        string runnerId)
+    {
+        var workId = item.Id ?? throw new InvalidOperationException(
+            $"Task work item for workflow '{workflowRunId}' is missing work id");
+        var attempt = WorkflowDispatchHelpers.TaskAttempt(workId);
+
+        var (payload, effectiveVarsJson, resolved) =
+            await BuildPayloadAsync(item.Stage, workId, "task", item.Title ?? string.Empty, attempt, workflowRunId, run);
+
+        var prompts = await _profileManager.LoadPromptsAsync(workflowRunId);
+        if (prompts.Count > 0)
+        {
+            var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (var p in prompts)
+                promptsMap[p.Key] = p.Body;
+            payload["prompts"] = JSON.SerializeToElement(promptsMap);
+        }
+
+        var variables = JSON.Serialize(payload);
+        var withStr = ResolveWith(effectiveVarsJson, resolved, item.With, item.Stage, workId, workflowRunId);
+
+        return new WorkDispatch(
+            WorkflowRunId: workflowRunId,
+            WorkId: workId,
+            Uses: item.Uses,
+            With: withStr,
+            Variables: variables,
+            WorkType: "task",
+            Stage: item.Stage,
+            Title: item.Title,
+            Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
+            Artifacts: item.Artifacts is not null && !item.Artifacts.IsEmpty ? JSON.Serialize(item.Artifacts) : null,
+            SetVars: item.SetVars is not null && item.SetVars.Count > 0 ? JSON.Serialize(item.SetVars) : null,
+            OwnerKind: WorkDispatchOwnerKinds.Workflow,
+            AgentJobId: null);
+    }
+
+    private async Task<WorkDispatch> BuildChecksDispatchAsync(
+        WorkItem item,
+        string workflowRunId,
+        WorkflowRun run,
+        string runnerId)
+    {
+        var workId = item.Id ?? throw new InvalidOperationException(
+            $"Checks work item for workflow '{workflowRunId}' is missing work id");
+        var items = item.Items ?? new List<CheckItem>();
+        var checksPayload = items.Select(i => new Dictionary<string, JsonElement?>
+        {
+            ["name"] = JSON.SerializeToElement(i.Name),
+            ["title"] = JSON.SerializeToElement(i.Title),
+            ["uses"] = i.Uses is not null ? JSON.SerializeToElement(i.Uses) : null,
+            ["with"] = i.With is not null ? JSON.SerializeToElement(i.With) : null,
+        }).ToList();
+
+        var with = new Dictionary<string, JsonElement?>
+        {
+            ["checks"] = JSON.SerializeToElement(checksPayload),
+        };
+
+        var (payload, effectiveVarsJson, resolved) =
+            await BuildPayloadAsync(item.Stage, workId, "checks", "Stage checks", 1, workflowRunId, run);
+
+        var prompts = await _profileManager.LoadPromptsAsync(workflowRunId);
+        if (prompts.Count > 0)
+        {
+            var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (var p in prompts)
+                promptsMap[p.Key] = p.Body;
+            payload["prompts"] = JSON.SerializeToElement(promptsMap);
+        }
+
+        var variables = JSON.Serialize(payload);
+        var withStr = ResolveWith(effectiveVarsJson, resolved, with, item.Stage, workId, workflowRunId);
+
+        return new WorkDispatch(
+            WorkflowRunId: workflowRunId,
+            WorkId: workId,
+            Uses: null,
+            With: withStr,
+            Variables: variables,
+            WorkType: "checks",
+            Stage: item.Stage,
+            Title: "Stage checks",
+            Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
+            OwnerKind: WorkDispatchOwnerKinds.Workflow,
+            AgentJobId: null);
+    }
+
+    private async Task<(Dictionary<string, JsonElement?> Payload, JsonElement EffectiveVars, VariableBundle Resolved)>
+        BuildPayloadAsync(string stage, string workId, string workType, string title, int attempt,
+            string workflowRunId, WorkflowRun run)
+    {
+        var resolved = await _profileManager.ResolveLayeredVariablesAsync(workflowRunId);
+
+        var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        var effectiveVarsJson = resolved.ResolveStageVars(stage)
+            ?? JSON.DeserializeElement("{}");
+
+        if (effectiveVarsJson.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in effectiveVarsJson.EnumerateObject())
+                payload[property.Name] = property.Value.Clone();
+        }
+
+        payload["vars"] = effectiveVarsJson;
+        payload["workflow"] = JSON.SerializeToElement(new { runId = workflowRunId });
+        payload["stage"] = JSON.SerializeToElement(new { name = stage });
+        payload["work"] = JSON.SerializeToElement(new { id = workId, type = workType, title, attempt });
+
+        WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
+
+        if (workType == "task")
+        {
+            var stageRun = run.Stages.FirstOrDefault(s => s.Id == stage);
+            var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == workId);
+            if (task?.CausedByFeedbackId is { } feedbackId)
+            {
+                var feedback = run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
+                if (feedback is not null)
+                {
+                    var issueNumber = TryGetAnnotation(run, "issueNumber", out var numStr) && int.TryParse(numStr, out var n) ? (int?)n : null;
+                    var projectId = TryGetAnnotation(run, "projectId", out var pid) ? pid : "";
+
+                    payload["approvalFeedback"] = JSON.SerializeToElement(new
+                    {
+                        id = feedback.Id,
+                        stage = feedback.Stage,
+                        createdAt = feedback.CreatedAt.ToString("O"),
+                        summary = WorkflowRunExtensions.BuildFeedbackSummary(feedback.Body),
+                        command = WorkflowRunExtensions.BuildFeedbackShowCommand(issueNumber, feedback.Id, projectId),
+                    });
+                }
+            }
+        }
+
+        return (payload, effectiveVarsJson, resolved);
+    }
+
+    private string? ResolveWith(
+        JsonElement effectiveVarsJson,
+        VariableBundle resolved,
+        Dictionary<string, JsonElement?>? with,
+        string stage,
+        string workId,
+        string workflowRunId)
+    {
+        var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
+            ? new VariableBundle(effectiveVarsJson)
+            : VariableBundle.Empty;
+
+        var dispatchWith = with is not null
+            ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
+            : null;
+        dispatchWith = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, dispatchWith);
+
+        if ((dispatchWith is null || !dispatchWith.ContainsKey("agent"))
+            && effectiveVarsJson.ValueKind == JsonValueKind.Object
+            && effectiveVarsJson.TryGetProperty("agent", out var effectiveAgentEl)
+            && effectiveAgentEl.ValueKind == JsonValueKind.Object)
+        {
+            dispatchWith ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+            dispatchWith["agent"] = effectiveAgentEl.Clone();
+        }
+
+        var withStr = dispatchWith is not null ? JSON.Serialize(dispatchWith) : null;
+        LogAgentDiagnostics(stage, workId, dispatchWith, effectiveVarsJson, resolved, workflowRunId);
+        return withStr;
+    }
+
+    private void LogAgentDiagnostics(
+        string stage,
+        string workId,
+        Dictionary<string, JsonElement?>? dispatchWith,
+        JsonElement effectiveVarsJson,
+        VariableBundle resolved,
+        string workflowRunId)
+    {
+        var withModel = WorkflowDispatchHelpers.TryReadNestedString(dispatchWith, "agent", "model");
+        var varsModel = WorkflowDispatchHelpers.TryReadNestedString(effectiveVarsJson, "agent", "model");
+        var stageModel = WorkflowDispatchHelpers.TryReadStageAgentModel(resolved, stage);
+        var source = !string.IsNullOrWhiteSpace(withModel)
+            ? "with.agent.model"
+            : !string.IsNullOrWhiteSpace(varsModel)
+                ? "vars.agent.model"
+                : !string.IsNullOrWhiteSpace(stageModel.Value)
+                    ? "stage.vars.agent.model"
+                    : "none";
+
+        _log.LogInformation(
+            "Workflow {WorkflowId} dispatch {WorkId} stage={Stage} agent model diagnostics: with={WithModel}, vars={VarsModel}, stageOverride={StageModel}, source={Source}",
+            workflowRunId,
+            workId,
+            stage,
+            withModel ?? "(null)",
+            varsModel ?? "(null)",
+            stageModel.Present
+                ? stageModel.Value ?? "(null override)"
+                : "(missing)",
+            source);
+    }
+
+    private static bool TryGetAnnotation(WorkflowRun run, string key, out string value)
+    {
+        value = "";
+        return run.Metadata?.Annotations?.TryGetValue(key, out value!) == true;
+    }
+
+    // =========================================================================
+    // Inbound translation — runner raw WorkResult → domain outcome
+    // =========================================================================
+
+    /// <summary>
+    /// Result of inbound translation. Either a <see cref="TaskOutcome"/>
+    /// (single task result) or a <see cref="CheckOutcome"/> (checks batch).
+    /// </summary>
+    public abstract record InboundOutcome
+    {
+        public sealed record Task(TaskOutcome Value) : InboundOutcome;
+        public sealed record Checks(CheckOutcome Value) : InboundOutcome;
+    }
+
+    /// <summary>
+    /// Translates a raw <see cref="WorkResult"/> from the runner process
+    /// into the corresponding domain outcome for the grain. The original
+    /// <see cref="WorkItem"/> carries the context (work id, stage, type,
+    /// declared artifacts) needed to assemble the outcome. Timeouts and
+    /// runner-loss do not appear here — the runner process reports them
+    /// as <see cref="WorkResult"/> with <c>status="failed"</c>; the
+    /// translator collapses them into <see cref="OutcomeStatus.Failed"/>
+    /// + <see cref="TaskOutcome.Detail"/>.
+    /// </summary>
+    public async Task<InboundOutcome> TranslateResultAsync(
+        WorkItem item,
+        WorkResult result,
+        string workflowRunId,
+        WorkflowRun run)
+    {
+        if (item.IsTask)
+            return await TranslateTaskResultAsync(item, result, workflowRunId, run);
+        if (item.IsChecks)
+            return TranslateChecksResult(item, result);
+        throw new InvalidOperationException(
+            $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
+    }
+
+    private async Task<InboundOutcome> TranslateTaskResultAsync(
+        WorkItem item,
+        WorkResult result,
+        string workflowRunId,
+        WorkflowRun run)
+    {
+        var workId = item.Id ?? throw new InvalidOperationException(
+            $"Task work item for workflow '{workflowRunId}' is missing work id");
+        var status = ResolveOutcomeStatus(result);
+        var detail = NormalizeDetail(result, status);
+        IReadOnlyList<ArtifactRef>? artifacts = null;
+
+        if (status == OutcomeStatus.Passed
+            && item.Artifacts is { IsEmpty: false }
+            && (result.ArtifactUploadIds is null || result.ArtifactUploadIds.Length == 0))
+        {
+            // Declared artifacts are required for a passing task — drop to
+            // failed with a deterministic detail so the grain treats it
+            // uniformly with other failures.
+            return new InboundOutcome.Task(new TaskOutcome(
+                WorkId: workId,
+                Status: OutcomeStatus.Failed,
+                Output: result.Output,
+                Artifacts: null,
+                Detail: "Required declared artifacts were not uploaded"));
+        }
+
+        if (result.ArtifactUploadIds is { Length: > 0 })
+        {
+            var bindResult = await _artifactBindService.BindAsync(
+                workflowRunId,
+                workId,
+                workId,
+                result.ArtifactUploadIds,
+                item.Artifacts,
+                variables: await ResolveBindVariablesAsync(workflowRunId, run, item.Stage),
+                projectId: run.Metadata?.Annotations?.GetValueOrDefault("projectId"),
+                issueId: run.Metadata?.Annotations?.GetValueOrDefault("issueId"));
+
+            if (!bindResult.IsSuccess)
+            {
+                _log.LogWarning(
+                    "Workflow {Id} task {TaskId} artifact binding failed: {Error}",
+                    workflowRunId, workId, bindResult.Error);
+                return new InboundOutcome.Task(new TaskOutcome(
+                    WorkId: workId,
+                    Status: OutcomeStatus.Failed,
+                    Output: result.Output,
+                    Artifacts: null,
+                    Detail: bindResult.Error ?? "artifact binding failed"));
+            }
+
+            artifacts = bindResult.ArtifactRecordedEvents
+                .Select(e => new ArtifactRef(Path: e.Path))
+                .ToList();
+        }
+
+        return new InboundOutcome.Task(new TaskOutcome(
+            WorkId: workId,
+            Status: status,
+            Output: result.Output,
+            Artifacts: artifacts,
+            Detail: detail));
+    }
+
+    private static InboundOutcome TranslateChecksResult(WorkItem item, WorkResult result)
+    {
+        var results = WorkflowDispatchHelpers.ParseCheckResults(result.Output);
+        return new InboundOutcome.Checks(new CheckOutcome(item.Stage, results));
+    }
+
+    private static OutcomeStatus ResolveOutcomeStatus(WorkResult result) =>
+        string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
+                ? OutcomeStatus.Passed
+                : OutcomeStatus.Failed;
+
+    private static string? NormalizeDetail(WorkResult result, OutcomeStatus status)
+    {
+        if (status == OutcomeStatus.Passed) return null;
+        if (!string.IsNullOrWhiteSpace(result.Message)) return result.Message;
+        return result.Status;
+    }
+
+    private async Task<JsonElement?> ResolveBindVariablesAsync(
+        string workflowRunId, WorkflowRun run, string stage)
+    {
+        var resolved = await _profileManager.ResolveLayeredVariablesAsync(workflowRunId);
+        return resolved.ResolveStageVars(stage);
+    }
+}

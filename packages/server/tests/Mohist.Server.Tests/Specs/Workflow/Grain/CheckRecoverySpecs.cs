@@ -64,7 +64,16 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var (checkWork, _) = await PollWorkAnyAsync();
         var otherRunnerId = await RegisterRunnerAsync();
 
-        await workflow.ReportResultAsync(otherRunnerId, checkWork.WorkId, new WorkResult("pass", Output: "[]"));
+        // The runner-grain identity is the runner itself, so a runner that
+        // did not pull this work item has no entry in its outstanding set
+        // and rejects the report as "untracked". The workflow grain never
+        // sees it, mirroring the previous "ignored" behavior.
+        var otherRunner = Grains.GetGrain<IRunnerGrain>(otherRunnerId);
+        var report = await otherRunner.ReportWorkflowResultAsync(
+            checkWork.WorkflowRunId, checkWork.WorkId,
+            new WorkResult("pass", Output: "[]"));
+        Assert.False(report.Tracked);
+        Assert.Equal("untracked", report.Reason);
 
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();

@@ -2,8 +2,10 @@ using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Definition;
 
+[GenerateSerializer]
 public sealed record TaskArtifactDeclaration(string Path);
 
+[GenerateSerializer]
 public sealed record TaskArtifactCapture(List<TaskArtifactDeclaration> Files)
 {
     public bool IsEmpty => Files is null || Files.Count == 0;
