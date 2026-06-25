@@ -10,18 +10,18 @@ None.
 
 - [ID: item-1]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-pr.workflow.yaml:167`
-  Evidence: `build:update-pr` is the last build task, but it runs before build checks and their repair tasks. The same profile then has check-stage review/auto-fix and merge-ready rebase repair paths at `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-pr.workflow.yaml:239`, `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-pr.workflow.yaml:256`, and `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-pr.workflow.yaml:285`, while integrate now merges the previously pushed PR directly at `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-pr.workflow.yaml:318` with no final `create-pull-request` update. If `fix-build-health`, `fix-tests`, `fix-review-findings`, or `rebase-onto-base` changes the workspace after `build:update-pr`, a successful run can merge the stale GitHub PR head and omit locally verified repairs. This violates acceptance criteria 3/4/6: stage results that need remote sync are not guaranteed to be pushed by an explicit update task before checks-gated merge. [disallowed:behavior-change]
-  SuggestedAction: Add an explicit PR update after any stage path that can mutate the workspace after `build:update-pr` and before `integrate:merge-pr`, or otherwise move the update to a point that runs after build/check repairs and merge-ready rebase. Add profile tests for build repair, review repair, and merge-ready rebase paths showing that the last mutating step is followed by `mohist/create-pull-request` before merge.
-  Verification: Re-run server profile tests and an end-to-end profile simulation where a build/check repair commits after the initial update; assert the merge action sees the updated PR head. Current verification: `npm run typecheck -w packages/runner` passed, but it does not cover this profile sequencing gap.
+  Scope: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-pr.workflow.yaml:238`
+  Evidence: The repair added `check:update-pr` as a normal check-stage task immediately after `ai-review`, but check repair tasks are appended later by the engine after a check fails. `WorkflowRun.Stage.cs:181` appends each repair task to `stage.Tasks` via `stage.Tasks.Add(repairRun)` and `WorkflowRun.Check.cs:107` builds `repairTask` plus optional `verifyTask` for checks. Therefore if `review-passed` fails, the actual order is `ai-review -> check:update-pr -> checks -> fix-review-findings:* -> ai-review.* -> checks`, with no `mohist/create-pull-request` after the repair/verify review. The same applies to `merge-ready` recovery: `rebase-onto-base` is appended after `check:update-pr`, so a successful retry can still merge a PR head that predates the rebase. This still violates acceptance criteria 3/4/6 because final check-stage mutations are not guaranteed to be pushed to the PR before `integrate:merge-pr`. [disallowed:behavior-change]
+  SuggestedAction: Ensure every check repair path that can mutate the workspace is followed by an explicit `mohist/create-pull-request` before checks can pass and before integrate merge. One profile-level option is to include a PR update in relevant `repairTask`/`verifyTask` sequences; another is to introduce an explicit post-repair task mechanism if that is the chosen architecture. Do not rely on a static check-stage task placed before checks.
+  Verification: Add an engine-level or profile simulation test for `mohist/pr` where `review-passed` fails, `fix-review-findings` and verify `ai-review` run, then assert a `mohist/create-pull-request` task runs after those repair tasks and before integrate. Add the same for `merge-ready` rebase. Re-run the focused server workflow/profile tests.
   Status: open
 
 - [ID: item-2]
   Severity: test-gap
-  Scope: `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs:153`
-  Evidence: The server profile tests assert the static happy-path ordering `build:open-pr -> load-tasks -> build:update-pr` and `integrate:merge-pr`, but do not cover mutation paths introduced by checks/repair tasks after `build:update-pr`. This let item-1 pass despite the PR no longer being guaranteed to contain the final candidate snapshot. [disallowed:requires behavior test design]
-  SuggestedAction: Add regression coverage for repaired build/check paths and merge-ready rebase recovery ensuring an explicit PR update occurs after the repair and before merge.
-  Verification: Run `npm test` after adding the profile sequencing tests.
+  Scope: `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs:284`
+  Evidence: `PrWorkflowDefinition_FinalMutatingCheckPathsAreFollowedByPrUpdateBeforeMerge` only asserts the static stage tail is `check:update-pr` and that checks have repair definitions. It does not model `ScheduleCheckRepair`, which appends repairs after the static tail. The test name claims repaired paths are followed by PR update before merge, but the asserted behavior does not prove that runtime order. This allowed item-1 to remain after the attempted repair.
+  SuggestedAction: Replace or supplement the static assertion with a workflow runtime test that schedules check repairs and verifies the actual task polling/order includes a PR update after the repair sequence.
+  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter <new-runtime-test-filter>` and the existing profile test class.
   Status: open
 
 ## Follow-up Items
@@ -33,8 +33,8 @@ None.
 - [ID: item-3]
   Severity: info
   Scope: verification
-  Evidence: During review I only ran `npm run typecheck -w packages/runner`, which passed. I did not run the full server/web/runner test matrix, so there may be additional failures outside the inspected sequencing issue.
-  SuggestedAction: Run `npm test`, `npm run typecheck -w packages/web`, `npm run test:run -w packages/web`, `npm run typecheck -w packages/runner`, and `npm test -w packages/runner` before integrating.
+  Evidence: Review verification ran `git diff --check 6ffb9599b..HEAD` and `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter FullyQualifiedName~MohistPrIssueWorkflowProfileSpecs`; both passed. The full server/web/runner test matrix was not run during this review.
+  SuggestedAction: Run the full package verification before final integration.
   Status: out-of-scope
 
 <promise>FAIL</promise>
