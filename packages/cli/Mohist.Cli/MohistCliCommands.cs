@@ -132,16 +132,50 @@ internal static class MohistCliCommands
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
+        services.AddSingleton(http);
         services.AddSingleton<IServiceInstaller>(sp => OperatingSystem.IsWindows() ? new WindowsScheduledTaskInstaller(output, error, fileSystem, commandExecutor) : new SystemdServiceInstaller(output, error, fileSystem, commandExecutor));
+        services.AddSingleton(sp => new UpdateOperations(output, error, sp.GetRequiredService<IServiceInstaller>(), commandExecutor, fileSystem, environment));
+        services.AddSingleton(new RuntimeConsistencyValidator(http, commandExecutor, fileSystem, environment, output));
+        services.AddSingleton(new ServiceReadinessProbe(http, output));
+        services.AddSingleton(new RunnerRefreshVerifier(http, commandExecutor, fileSystem));
+        services.AddSingleton(new UpdateOutcomeReporter(http, output));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
         var provider = services.BuildServiceProvider();
         var root = Build(api, provider);
         var config = new InvocationConfiguration { Output = output, Error = error };
         var parseConfig = new ParserConfiguration { ResponseFileTokenReplacer = null };
         return CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config);
+    }
+
+    internal static SourceCodeUpdater ResolveSourceCodeUpdater(IServiceProvider provider)
+    {
+        try
+        {
+            var registered = provider.GetService<SourceCodeUpdater>();
+            if (registered is not null)
+                return registered;
+        }
+        catch (InvalidOperationException)
+        {
+            // Some help-rendering tests intentionally build a minimal provider.
+            // Keep command tree construction independent from update internals.
+        }
+
+        var api = provider.GetRequiredService<MohistCliApi>();
+        var installer = provider.GetRequiredService<IServiceInstaller>();
+        return SourceCodeUpdater.CreateWithDefaults(
+            api.Output,
+            api.Error,
+            installer,
+            provider.GetService<ICommandExecutor>() ?? api.CommandExecutor,
+            provider.GetService<IFileSystem>() ?? api.FileSystem,
+            provider.GetService<IEnvironmentVariableProvider>(),
+            api.Http);
     }
 
     internal static string Query(

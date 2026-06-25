@@ -43,11 +43,19 @@ public sealed class SkillsCommandRegistrationSpecs
         services.AddSingleton<TextWriter>(TextWriter.Null);
         services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
+        services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, sp.GetRequiredService<ICommandExecutor>()));
+        services.AddSingleton(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), RealFileSystem.Instance, sp.GetRequiredService<IEnvironmentVariableProvider>()));
+        services.AddSingleton(new RuntimeConsistencyValidator(new HttpClient(), new SystemCommandExecutor(), RealFileSystem.Instance, SystemEnvironmentVariableProvider.Instance, TextWriter.Null));
+        services.AddSingleton(new ServiceReadinessProbe(new HttpClient(), TextWriter.Null));
+        services.AddSingleton(new RunnerRefreshVerifier(new HttpClient(), new SystemCommandExecutor(), RealFileSystem.Instance));
+        services.AddSingleton(new UpdateOutcomeReporter(new HttpClient(), TextWriter.Null));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();

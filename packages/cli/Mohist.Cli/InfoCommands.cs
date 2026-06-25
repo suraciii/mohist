@@ -19,22 +19,28 @@ internal static class InfoCommands
         };
         info.Options.Add(verboseOption);
         info.Options.Add(jsonOption);
-        var collector = provider.GetRequiredService<InfoCollector>();
+        var collector = provider.GetService<InfoCollector>();
+        var renderer = provider.GetService<InfoRenderer>() ?? new InfoRenderer();
 
         info.SetAction(ctx =>
         {
             var verbose = ctx.GetValue(verboseOption);
             var json = ctx.GetValue(jsonOption);
+            if (collector is null)
+            {
+                ctx.InvocationConfiguration.Error.WriteLine("info command is unavailable: InfoCollector service is not registered.");
+                return 1;
+            }
             var result = collector.CollectAsync(verbose).GetAwaiter().GetResult();
             var writer = ctx.InvocationConfiguration.Output;
             if (json)
             {
-                collector.RenderJson(writer, result);
+                renderer.RenderJson(writer, result);
                 return 0;
             }
-            collector.RenderDefault(writer, result);
+            renderer.RenderDefault(writer, result);
             if (verbose && result.Verbose is not null)
-                collector.RenderVerbose(writer, result.Verbose);
+                renderer.RenderVerbose(writer, result.Verbose);
             return 0;
         });
 

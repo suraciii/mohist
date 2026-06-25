@@ -363,13 +363,14 @@ public class InfoCollectorSpecs
 
         Assert.NotNull(result.Server.Status);
         Assert.NotNull(result.Runner.Status);
-        Assert.Equal(InfoCollector.NotInstalled, result.Server.Status!.State);
-        Assert.Equal(InfoCollector.NotInstalled, result.Runner.Status!.State);
+        Assert.Equal(SystemdUnitParser.NotInstalled, result.Server.Status!.State);
+        Assert.Equal(SystemdUnitParser.NotInstalled, result.Runner.Status!.State);
 
         var writer = new StringWriter();
-        collector.RenderDefault(writer, result);
+        var renderer = new InfoRenderer();
+        renderer.RenderDefault(writer, result);
         var text = writer.ToString();
-        Assert.Contains(InfoCollector.NotInstalled, text);
+        Assert.Contains(SystemdUnitParser.NotInstalled, text);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -392,7 +393,8 @@ public class InfoCollectorSpecs
         Assert.Null(result.Runner.Source);
 
         var writer = new StringWriter();
-        collector.RenderDefault(writer, result);
+        var renderer = new InfoRenderer();
+        renderer.RenderDefault(writer, result);
         var text = writer.ToString();
 
         Assert.Contains("Server", text);
@@ -446,7 +448,7 @@ public class InfoCollectorSpecs
     {
         var content = "[Service]\n# This is a comment\nWorkingDirectory=/repo  \nExecStart=dotnet run  \n";
 
-        var fields = InfoCollector.ParseSystemdUnit(content);
+        var fields = SystemdUnitParser.ParseSystemdUnit(content);
 
         Assert.Equal("/repo", fields.WorkingDirectory);
         Assert.Equal("dotnet run", fields.ExecStart);
@@ -459,7 +461,7 @@ public class InfoCollectorSpecs
     {
         var content = "[Unit]\nDescription=Minimal\n";
 
-        var fields = InfoCollector.ParseSystemdUnit(content);
+        var fields = SystemdUnitParser.ParseSystemdUnit(content);
 
         Assert.Null(fields.WorkingDirectory);
         Assert.Null(fields.ExecStart);
@@ -470,15 +472,15 @@ public class InfoCollectorSpecs
     [Fact]
     public void ResolveSourcePath_PrefersWorkingDirectory_ThenProjectFlag_ThenBinaryDir()
     {
-        Assert.Equal("/workdir", InfoCollector.ResolveSourcePath(new SystemdUnitFields("/workdir", "dotnet run --project /proj")));
+        Assert.Equal("/workdir", InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields("/workdir", "dotnet run --project /proj")));
 
-        var fromProject = InfoCollector.ResolveSourcePath(new SystemdUnitFields(null, "dotnet run --project /proj/Mohist.Server.csproj"));
-        Assert.Equal(Path.GetDirectoryName("/proj/Mohist.Server.csproj"), fromProject);
+        var fromProject = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "dotnet run --project /proj/Mohist.Server.csproj"));
+        Assert.Equal("/proj", fromProject);
 
-        var fromBinary = InfoCollector.ResolveSourcePath(new SystemdUnitFields(null, "node /binary/script.js"));
-        Assert.Equal(Path.GetDirectoryName("/binary/script.js"), fromBinary);
+        var fromBinary = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "node /binary/script.js"));
+        Assert.Equal("/binary", fromBinary);
 
-        var noPath = InfoCollector.ResolveSourcePath(new SystemdUnitFields(null, "dotnet run"));
+        var noPath = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "dotnet run"));
         Assert.Null(noPath);
     }
 
@@ -487,11 +489,11 @@ public class InfoCollectorSpecs
     [Fact]
     public void FormatUptime_RendersHumanReadable()
     {
-        Assert.Equal("0s", InfoCollector.FormatUptime(TimeSpan.FromSeconds(0)));
-        Assert.Equal("30s", InfoCollector.FormatUptime(TimeSpan.FromSeconds(30)));
-        Assert.Equal("5m", InfoCollector.FormatUptime(TimeSpan.FromMinutes(5)));
-        Assert.Equal("1h30m", InfoCollector.FormatUptime(TimeSpan.FromMinutes(90)));
-        Assert.Equal("2d4h", InfoCollector.FormatUptime(TimeSpan.FromHours(52)));
+        Assert.Equal("0s", SystemdUnitParser.FormatUptime(TimeSpan.FromSeconds(0)));
+        Assert.Equal("30s", SystemdUnitParser.FormatUptime(TimeSpan.FromSeconds(30)));
+        Assert.Equal("5m", SystemdUnitParser.FormatUptime(TimeSpan.FromMinutes(5)));
+        Assert.Equal("1h30m", SystemdUnitParser.FormatUptime(TimeSpan.FromMinutes(90)));
+        Assert.Equal("2d4h", SystemdUnitParser.FormatUptime(TimeSpan.FromHours(52)));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -499,7 +501,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void TryParseSystemdTimestamp_ParsesCommonFormat()
     {
-        Assert.True(InfoCollector.TryParseSystemdTimestamp("Mon 2026-01-01 10:00:00 UTC", out var ts));
+        Assert.True(SystemdUnitParser.TryParseSystemdTimestamp("Mon 2026-01-01 10:00:00 UTC", out var ts));
         Assert.Equal(2026, ts.Year);
         Assert.Equal(1, ts.Month);
         Assert.Equal(1, ts.Day);
@@ -512,7 +514,7 @@ public class InfoCollectorSpecs
     {
         var output = "ActiveState=active\nMainPID=1234\nFragmentPath=/etc/foo\n";
 
-        var map = InfoCollector.ParseSystemdShow(output);
+        var map = SystemdUnitParser.ParseSystemdShow(output);
 
         Assert.Equal("active", map["ActiveState"]);
         Assert.Equal("1234", map["MainPID"]);
@@ -524,7 +526,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildCliLine_FormatsVersionAndPath()
     {
-        var line = InfoCollector.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo"));
+        var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo"));
         Assert.Contains("1.0.0", line);
         Assert.Contains("/usr/bin/mo", line);
     }
@@ -534,7 +536,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildCliLine_PrefixesVersionWithV()
     {
-        var line = InfoCollector.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo", null));
+        var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo", null));
         Assert.Contains("v1.0.0", line);
     }
 
@@ -543,7 +545,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildCliLine_AppendsBuildDateWhenPresent()
     {
-        var line = InfoCollector.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo", "2026-06-14"));
+        var line = InfoRenderer.BuildCliLine(new InfoCli("1.0.0", "/usr/bin/mo", "2026-06-14"));
         Assert.Contains("(built 2026-06-14)", line);
     }
 
@@ -552,7 +554,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildServiceLine_ActiveState_IncludesPidAndUptime()
     {
-        var line = InfoCollector.BuildServiceLine("Server",
+        var line = InfoRenderer.BuildServiceLine("Server",
             new InfoService(new InfoServiceStatus("active", 1234, "5m"), null),
             includeSource: true);
         Assert.Contains("active", line);
@@ -565,10 +567,10 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildServiceLine_InactiveState_ShowsNotRunning()
     {
-        var line = InfoCollector.BuildServiceLine("Server",
+        var line = InfoRenderer.BuildServiceLine("Server",
             new InfoService(new InfoServiceStatus("inactive", 0, null), null),
             includeSource: false);
-        Assert.Contains(InfoCollector.NotRunning, line);
+        Assert.Contains(SystemdUnitParser.NotRunning, line);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -576,10 +578,10 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildSourceLine_NoGitRepo_ShowsNotAGitRepoSentinel()
     {
-        var line = InfoCollector.BuildSourceLine("  source",
+        var line = InfoRenderer.BuildSourceLine("  source",
             new InfoSource("/repo", null, null));
         Assert.Contains("/repo", line);
-        Assert.Contains(InfoCollector.NotAGitRepo, line);
+        Assert.Contains(SystemdUnitParser.NotAGitRepo, line);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -587,7 +589,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildSourceLine_CommitAvailable_IncludesShaAndSubject()
     {
-        var line = InfoCollector.BuildSourceLine("  source",
+        var line = InfoRenderer.BuildSourceLine("  source",
             new InfoSource("/repo", "a1b2c3d", "Add info command"));
         Assert.Contains("/repo", line);
         Assert.Contains("a1b2c3d", line);
@@ -599,7 +601,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildProjectLine_FormatsIssueCounts()
     {
-        var line = InfoCollector.BuildProjectLine(new InfoProject("proj_1", "mohist-local", 96, 22));
+        var line = InfoRenderer.BuildProjectLine(new InfoProject("proj_1", "mohist-local", 96, 22));
         Assert.Contains("mohist-local", line);
         Assert.Contains("96", line);
         Assert.Contains("22", line);
@@ -610,7 +612,7 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildDataDirLine_FormatsPathAndSize()
     {
-        var line = InfoCollector.BuildDataDirLine(new InfoDataDir("/home/.mohist", "412 MB"));
+        var line = InfoRenderer.BuildDataDirLine(new InfoDataDir("/home/.mohist", "412 MB"));
         Assert.Contains("/home/.mohist", line);
         Assert.Contains("412 MB", line);
     }
@@ -620,9 +622,9 @@ public class InfoCollectorSpecs
     [Fact]
     public void BuildDataDirLine_UnknownSize_ShowsSentinel()
     {
-        var line = InfoCollector.BuildDataDirLine(new InfoDataDir("/home/.mohist", null));
+        var line = InfoRenderer.BuildDataDirLine(new InfoDataDir("/home/.mohist", null));
         Assert.Contains("/home/.mohist", line);
-        Assert.Contains(InfoCollector.Unknown, line);
+        Assert.Contains(SystemdUnitParser.Unknown, line);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -647,7 +649,8 @@ public class InfoCollectorSpecs
             BuildApi(new FakeFileSystem(), new NoopCommandExecutor(), HttpStatusCode.OK, "{}"),
             new MockEnvironmentVariableProvider());
 
-        collector.RenderDefault(writer, result);
+        var renderer = new InfoRenderer();
+        renderer.RenderDefault(writer, result);
 
         var text = writer.ToString();
         Assert.Contains("CLI", text);
@@ -755,10 +758,37 @@ public class InfoCommandRegistrationSpecs
         services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironmentVariableProvider());
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), sp.GetRequiredService<ICommandExecutor>()));
+        services.AddSingleton<HttpClient>(sp =>
+{
+    var env = sp.GetRequiredService<IEnvironmentVariableProvider>();
+    return new HttpClient
+    {
+        BaseAddress = new Uri(env.GetEnvironmentVariable(SourceCodeUpdater.ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
+        Timeout = TimeSpan.FromSeconds(5),
+    };
+});
+        services.AddSingleton<RuntimeConsistencyValidator>(sp => new RuntimeConsistencyValidator(
+            sp.GetRequiredService<HttpClient>(),
+            sp.GetRequiredService<ICommandExecutor>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IEnvironmentVariableProvider>(),
+            TextWriter.Null));
+        services.AddSingleton<ServiceReadinessProbe>(sp => new ServiceReadinessProbe(
+            sp.GetRequiredService<HttpClient>(),
+            TextWriter.Null));
+        services.AddSingleton<RunnerRefreshVerifier>(sp => new RunnerRefreshVerifier(
+            sp.GetRequiredService<HttpClient>(),
+            sp.GetRequiredService<ICommandExecutor>(),
+            sp.GetRequiredService<IFileSystem>()));
+        services.AddSingleton<UpdateOperations>(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IEnvironmentVariableProvider>()));
+        services.AddSingleton<UpdateOutcomeReporter>(sp => new UpdateOutcomeReporter(sp.GetRequiredService<HttpClient>(), TextWriter.Null));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
+        services.AddSingleton<InfoRenderer>();
         var provider = services.BuildServiceProvider();
 
         var root = MohistCliCommands.Build(api, provider);
@@ -779,10 +809,37 @@ public class InfoCommandRegistrationSpecs
         services.AddSingleton<ICommandExecutor>(new NoopCommandExecutor());
         services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironmentVariableProvider());
         services.AddSingleton<IServiceInstaller>(sp => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, new FakeFileSystem(), sp.GetRequiredService<ICommandExecutor>()));
+        services.AddSingleton<HttpClient>(sp =>
+{
+    var env = sp.GetRequiredService<IEnvironmentVariableProvider>();
+    return new HttpClient
+    {
+        BaseAddress = new Uri(env.GetEnvironmentVariable(SourceCodeUpdater.ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
+        Timeout = TimeSpan.FromSeconds(5),
+    };
+});
+        services.AddSingleton<RuntimeConsistencyValidator>(sp => new RuntimeConsistencyValidator(
+            sp.GetRequiredService<HttpClient>(),
+            sp.GetRequiredService<ICommandExecutor>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IEnvironmentVariableProvider>(),
+            TextWriter.Null));
+        services.AddSingleton<ServiceReadinessProbe>(sp => new ServiceReadinessProbe(
+            sp.GetRequiredService<HttpClient>(),
+            TextWriter.Null));
+        services.AddSingleton<RunnerRefreshVerifier>(sp => new RunnerRefreshVerifier(
+            sp.GetRequiredService<HttpClient>(),
+            sp.GetRequiredService<ICommandExecutor>(),
+            sp.GetRequiredService<IFileSystem>()));
+        services.AddSingleton<UpdateOperations>(sp => new UpdateOperations(TextWriter.Null, TextWriter.Null, sp.GetRequiredService<IServiceInstaller>(), sp.GetRequiredService<ICommandExecutor>(), sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IEnvironmentVariableProvider>()));
+        services.AddSingleton<UpdateOutcomeReporter>(sp => new UpdateOutcomeReporter(sp.GetRequiredService<HttpClient>(), TextWriter.Null));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
+        services.AddSingleton<InfoVerboseCollector>();
         services.AddSingleton<InfoCollector>();
+        services.AddSingleton<InfoRenderer>();
+        services.AddSingleton<InfoRenderer>();
         var provider = services.BuildServiceProvider();
 
         var root = MohistCliCommands.Build(api, provider);
