@@ -1,0 +1,175 @@
+# Issue 268 — Build Stage Progress
+
+This file is the working memory for the build stage. Each completed task
+appends its key discoveries (patterns, decisions, gotchas) so the next
+tasks (and the check/repair/merge stages) can rely on accumulated context.
+
+## Codebase Patterns
+
+- **Server route surface lives under `packages/server/src/Mohist.Server/Api/`.** Runner routes
+  are in `RunnerRoutes.cs`. Helpers used by other routes (e.g. `NormalizeBuildGitHash`,
+  `ToCleanupPolicyDto`) live as private/internal static members of the route class so they are
+  reachable from unit tests via `internal` access without exposing them publicly.
+
+- **DI for new server options/services is wired in
+  `MohistServiceRegistration.AddMohistServerCore`.** Add `services.Configure<TOption>(...)`
+  and `services.AddSingleton<IDep, Dep>()` next to peers there. The test
+  `MohistWebApplicationFactory.ConfigureWebHost` only overrides test-time
+  replacements; production wiring still needs to be added explicitly.
+
+- **Workflow lifecycle facts come from `WorkflowGrain.GetRunStatusAsync()` and
+  `GetAssignedRunnerIdAsync()`** — both return `Task<string?>` (status as canonical enum name,
+  runner id from `_run.Assignment.RunnerId ?? _lastKnownRunnerId`). The runner id can be
+  non-null while the runner is offline — the runner-side signalr `RunnerConnectionTracker`
+  (in `Runner/Services/SignalR/RunnerConnectionTracker.cs`) is the authority for "is this runner
+  actually reachable right now". A non-empty connection id ⇒ push, otherwise skip.
+
+- **CloudEvents terminal subscriptions are pipe-separated string lists in the
+  `[Subscription(Type = "a|b|c")]` attribute.** The runtime in
+  `CloudEventBusServiceCollectionExtensions` does not support `.*` wildcards over
+  reverse-DNS names, so use `com.mohist.workflow.run.completed|com.mohist.workflow.run.stopped|com.mohist.workflow.run.failed`
+  and resolve the status inside the handler.
+
+- **The workflow grain is non-reentrant; publishing from inside a grain call and then
+  resolving the same grain synchronously will deadlock.** The
+  `RunnerWorkflowTerminalStatusHandler` fires the router on a detached background task
+  (`_ = RouteDetachedAsync(...)`) for exactly this reason. Any new handler that reads from
+  the same workflow grain it just published to must follow the same pattern.
+
+- **`RunnerConnectionTracker` is a `ConcurrentDictionary<string, string>` singleton**
+  (`ISingletonService`). Hub `OnConnectedAsync` calls `Register(runnerId, connectionId)` from
+  the query string; the test fixture replaces `IHubContext<RunnerHub>` with
+  `RecordingRunnerHubContext` so integration tests can assert on the messages list.
+
+- **Server test fixture pattern**: `MohistIntegrationFixture` provides an in-memory SQLite +
+  Orleans silo. The `RecordingRunnerHubContext` is wired via `RemoveAll<IHubContext<RunnerHub>>()`
+  followed by an `AddSingleton<RecordingRunnerHubContext>` *and* a forwarder
+  `AddSingleton<IHubContext<RunnerHub>>(sp => sp.GetRequiredService<RecordingRunnerHubContext>())`.
+  New hub-dependent tests should resolve the recorder from
+  `_fixture.Services.GetRequiredService<IHubContext<RunnerHub>>()` and cast to
+  `RecordingRunnerHubContext`.
+
+- **Architecture test enforces Feature directories (`Agent`, `Epic`, `Issue`, `Project`,
+  `Runner`, `Sessions`, `Workflow`) only contain `Domain`, `Grains`, `Services` segments.**
+  Don't add new top-level subdirectories inside those features.
+
+## T-001 — Server exposes cleanup policy and routes workflow terminal status to the owning runner
+
+Status: complete.
+
+### Files changed / added
+
+- `packages/server/src/Mohist.Server/Api/RunnerRoutes.cs` — added
+  `Microsoft.Extensions.Options.IOptions<CleanupPolicyOptions>` parameter to the `/poll`
+  route, added `CleanupPolicyDto` argument to `WorkDispatchResponse`, added the new
+  `/api/runner/{runnerId}/workflow-runs/status` POST endpoint with empty-array 400
+  validation + dedup + whitespace filtering, added `RunnerWorkflowStatusRequest` and
+  `RunnerWorkflowStatusResponse` records, added `internal static CleanupPolicyDto
+  ToCleanupPolicyDto(CleanupPolicyOptions)` projector.
+- `packages/server/src/Mohist.Server/Infrastructure/Config/CleanupPolicyOptions.cs` (new) —
+  configuration section `Mohist:WorkspaceCleanup` with `RetentionDays`,
+  `StorageBudgetBytes`, `StorageTargetWatermarkBytes`, all nullable; sentinel semantics
+  defined here.
+- `packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs` —
+  registered `CleanupPolicyOptions` configuration binding and the
+  `IRunnerWorkflowStatusRouter` singleton.
+- `packages/server/src/Mohist.Server/Runner/Services/SignalR/RunnerWorkflowStatusRouter.cs`
+  (new) — implements `IRunnerWorkflowStatusRouter.RouteAsync(workflowRunId, status, ct)`:
+  resolves the workflow grain, reads assigned runner id, looks up connection id via
+  `RunnerConnectionTracker`, and pushes `ReceiveWorkflowRunStatus` with the
+  `WorkflowRunStatusNotification` payload. 5s push timeout; logs and swallows transport
+  failures. Drops the push when there is no assignment or no connection.
+- `packages/server/src/Mohist.Server/Events/Subscriptions/RunnerWorkflowTerminalStatusHandler.cs`
+  (new) — `[Subscription(Type = "com.mohist.workflow.run.completed|...stopped|...failed")]`
+  handler that resolves the status from the event type and detaches a background
+  `_router.RouteAsync(...)` call so the publishing workflow grain is not blocked.
+- `packages/runner/src/core/types.ts` — added optional `cleanupPolicy?: CleanupPolicy`
+  field on `WorkDispatchResponse` and the `CleanupPolicy` interface (all three fields
+  nullable). Runners built before this change ignore unknown fields, so the additive
+  contract holds.
+- Tests:
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Config/CleanupPolicyOptionsSpecs.cs`
+    (new) — unit tests for option defaults, `HasAnyEnabled`, configuration binding, and the
+    full DTO projection matrix (positive, null, non-positive sentinels).
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Api/RunnerCleanupPolicyAndStatusApiSpecs.cs`
+    (new) — DTO projection integration unit; endpoint behavior for unknown run ids, empty
+    array (400), whitespace filtering, dedup.
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/SignalR/RunnerWorkflowStatusRouterSpecs.cs`
+    (new) — unit tests for the router using stub `IWorkflowGrain`, `RecordingRunnerHubContext`,
+    and `ThrowingHubContext`. Covers: connected runner pushes, offline runner drops,
+    no-assignment drops, failed status forwarded, hub exceptions swallowed, empty run id no-op.
+  - `packages/server/tests/Mohist.Server.Tests/Specs/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerSpecs.cs`
+    (new) — integration tests through the full bus + Orleans + SignalR stack: terminal event
+    on connected runner reaches the runner with the canonical status, no connection ⇒ no push,
+    no assignment ⇒ no push. Uses the seeded workflow row + StopAsync path to produce a real
+    `WorkflowRunStopped` event.
+
+### Decisions taken during implementation
+
+- **Server config scope = system-wide** (under `Mohist:WorkspaceCleanup`). Per-project
+  configuration was considered (design Open Question) but adds a projectId resolution step on
+  every poll without a real-world runner-isolation use case. Runners already bind to a single
+  project; system-wide keeps the wire shape flat and the runner code single-path. If we need
+  per-project later, `Mohist:Projects:{id}:WorkspaceCleanup` is a non-breaking addition.
+
+- **Cleanup policy field semantics**: every field is nullable, and a value `<= 0` is coerced
+  to `null` by `ToCleanupPolicyDto`. This makes "disabled" and "missing" indistinguishable
+  on the wire by design — the runner doesn't have to learn a separate sentinel. The runner
+  treates `null` as "do not evict by this strategy". This avoids accidentally treating a
+  misconfigured `0` as "evict everything zero days old".
+
+- **Status endpoint deduplication**: the handler dedupes by `HashSet<string>(Ordinal)` and
+  silently drops whitespace entries. This protects the workflow grain from being hit N times
+  for the same id, and the runner can be sloppy with its active-registry snapshot.
+
+- **Run-id not found**: the endpoint returns `{ statuses: {} }` (omits the key) rather than
+  404. The runner treats a missing key as "I don't know about this anymore" and can drop
+  the registry entry; 404 would force every caller to special-case the absent id.
+
+- **Push routing uses detached tasks**: terminal event handlers cannot synchronously call the
+  workflow grain they're inside (non-reentrancy). The current handler detaches the router
+  call with `_ = RouteDetachedAsync(...)`. This is a deliberate trade — push failures are
+  logged, never propagated, and the runner's convergence query is the authoritative
+  catch-all.
+
+- **Receiving on the runner side**: the runner code is the source of truth for whether the
+  status is terminal; the runner accepts the canonical `WorkflowRunStatus` name as a string
+  (`Completed`, `Stopped`, `Failed`) and treats anything else as non-terminal. No schema
+  version bump required.
+
+### Verification
+
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~RunnerCleanupPolicyAndStatusApiSpecs|FullyQualifiedName~CleanupPolicyOptionsSpecs|FullyQualifiedName~RunnerWorkflowStatusRouterSpecs|FullyQualifiedName~RunnerWorkflowTerminalStatusHandlerSpecs"` —
+  23/23 passed.
+- Full server test suite: 2659 passed / 0 failed / 10 skipped (pre-existing skips unrelated).
+- `npm run typecheck -w packages/runner` — clean.
+- `npm run typecheck -w packages/web` — clean.
+
+### Gotchas for the next tasks
+
+- **`RunnerWorkflowStatusRouter.RouteAsync` is reentrancy-safe but the workflow grain is
+  not.** Future tasks that read `GetAssignedRunnerIdAsync` or `GetRunStatusAsync` from inside
+  a `WorkflowGrain` method MUST NOT do so synchronously after a publish — use the same
+  detach pattern as `RunnerWorkflowTerminalStatusHandler`. The Orleans grain state model
+  documentation is in `Workflow/Grains/WorkflowGrain.cs`.
+
+- **Status string contract**: server returns the enum name verbatim (e.g. `AwaitingApproval`,
+  not `awaiting_approval`). The runner-side convergence code (T-003) should match these
+  strings case-sensitively against `WorkflowRunStatus.*`. The runner codebase already has
+  `packages/runner/src/core/types.ts` defining `WorkDispatchResponse.cleanupPolicy` — no
+  further server changes are needed for the policy wire shape.
+
+- **`RunnerConnectionTracker.GetConnectionId(runnerId)` is `string?`.** Treat null/empty as
+  "not connected" and let the convergence query do the work.
+
+- **Workflow grain `GetAssignedRunnerIdAsync` returns the last-known assignment, not the
+  currently-connected one.** This is correct for routing terminal events to the runner that
+  owns the workspace — even if that runner later disconnected and was replaced, the
+  workspace-cleanup notification should still reach the last runner that had it. If the
+  next task needs the currently-connected runner, look up `RunnerRegistryGrain` instead.
+
+- **The runner type addition is intentionally additive.** Old runners ignore
+  `cleanupPolicy`; new runners without policy config receive `{retentionDays: null,
+  storageBudgetBytes: null, storageTargetWatermarkBytes: null}` and skip both evictions.
+  This is the safe rollout posture — the new code path is unreachable without operator
+  opt-in.

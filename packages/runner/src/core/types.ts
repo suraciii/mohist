@@ -18,6 +18,19 @@ export interface WorkDispatchResponse {
   setVars?: string | null
   ownerKind?: string | null
   agentJobId?: string | null
+  cleanupPolicy?: CleanupPolicy | null
+}
+
+/**
+ * Workspace cleanup policy delivered by the server on every poll.
+ * Each nullable field is an explicit unlimited/disabled sentinel — the
+ * runner treats `null` as "do not evict by this strategy". The server
+ * never scans runner filesystems; this is policy, not actions.
+ */
+export interface CleanupPolicy {
+  retentionDays?: number | null
+  storageBudgetBytes?: number | null
+  storageTargetWatermarkBytes?: number | null
 }
 
 export interface WorkItem {
