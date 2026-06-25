@@ -11,6 +11,7 @@ import {
   usePauseEpic,
   useRemoveEpicIssue,
   useResumeEpic,
+  useStartEpic,
   useStartIssue,
 } from '../../../entities/epic'
 import { canInlineStartRow, EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
@@ -50,7 +51,8 @@ function PriorityBadge({ priority }: { priority: string }) {
 
 function StatusBadge({ status }: { status: EpicStatus }) {
   const colors: Record<EpicStatus, string> = {
-    [EpicStatus.Active]: 'bg-green-100 text-green-700',
+    [EpicStatus.Idle]: 'bg-green-100 text-green-700',
+    [EpicStatus.Running]: 'bg-emerald-100 text-emerald-700',
     [EpicStatus.Paused]: 'bg-amber-100 text-amber-700',
     [EpicStatus.Done]: 'bg-blue-100 text-blue-700',
     [EpicStatus.Closed]: 'bg-gray-100 text-gray-700',
@@ -389,6 +391,7 @@ export function EpicDetailPage() {
   const closeEpic = useCloseEpic()
   const pauseEpic = usePauseEpic()
   const resumeEpic = useResumeEpic()
+  const startEpic = useStartEpic()
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
@@ -444,7 +447,10 @@ export function EpicDetailPage() {
   const submitDisabled = !selectedIssueId || addEpicIssue.isPending
   const unfinishedCount = Math.max(epic.progress.totalIssueCount - epic.progress.deliveredCount, 0)
   const isPaused = epic.status === EpicStatus.Paused
-  const markDoneBlocked = isPaused || (epic.status === EpicStatus.Active && !epic.progress.readyToMarkDone)
+  const isIdle = epic.status === EpicStatus.Idle
+  const isRunning = epic.status === EpicStatus.Running
+  const isSelfDriving = isIdle || isRunning
+  const markDoneBlocked = isPaused || (isSelfDriving && !epic.progress.readyToMarkDone)
   const markDoneTooltip = isPaused
     ? 'Resume this Epic before marking it done'
     : markDoneBlocked
@@ -545,7 +551,17 @@ export function EpicDetailPage() {
             >
               Edit
             </Button>
-            {!isDone && !isClosed && !isPaused && (
+            {isIdle && (
+              <Button
+                type="button"
+                onClick={() => startEpic.mutate(epicId)}
+                disabled={startEpic.isPending}
+                data-testid="start-epic-trigger"
+              >
+                {startEpic.isPending ? 'Starting...' : 'Start Epic'}
+              </Button>
+            )}
+            {isRunning && (
               <Button
                 type="button"
                 variant="outline"
@@ -605,20 +621,13 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next Issue</div>
             {epic.progress.nextIssue ? (
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <Link to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)} className="min-w-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
-                  #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
-                </Link>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => handleStartIssue(epic.progress.nextIssue!.number)}
-                  disabled={pendingStartIssueNumber === epic.progress.nextIssue.number}
-                  data-testid="epic-detail-next-start"
-                >
-                  {pendingStartIssueNumber === epic.progress.nextIssue.number ? 'Starting...' : 'Start'}
-                </Button>
-              </div>
+              <Link
+                to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)}
+                data-testid="next-issue"
+                className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
+              </Link>
             ) : epic.progress.readyToMarkDone ? (
               <div className="mt-2 text-sm font-medium text-green-700">Ready to mark done</div>
             ) : epic.progress.nextIssueReason ? (

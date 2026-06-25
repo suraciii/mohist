@@ -557,3 +557,184 @@ The existing `EpicHelp_ListsAllSubcommands` test was updated
 to include `start` in the expected subcommand list.
 
 All 214 CLI tests pass (205 baseline + 9 new).
+
+## Codebase Patterns (T-006)
+
+- **Web tests use `vi.hoisted` mocks**: All hook mocks in
+  `EpicDetailPage.test.tsx` and the entity-level `queries.test.tsx`
+  live in a top-level `vi.hoisted(() => ({ ... }))` block so the
+  same `mocks` reference is shared between the test cases and the
+  `vi.mock(...)` factory passed to vitest. Per-describe `const
+  addMutate = vi.fn()` etc. are local re-bindings wired into the
+  shared mock via `mocks.useFoo.mockReturnValue({ mutate: addMutate,
+  isPending: false })`.
+- **Header `StatusBadge` color map**: The `Record<EpicStatus, string>`
+  mapping in `StatusBadge` is the source of truth for status
+  colors. Adding a new enum value (e.g. `Running`) requires
+  updating this map AND the parallel `labels` map in
+  `EpicListPage.StatusBadge`.
+- **Lifecycle action buttons in the header** are emitted as
+  independent `Button` elements keyed off `isIdle` / `isRunning` /
+  `isPaused` flags. The new `start-epic-trigger` testid sits
+  alongside the existing `pause-epic-trigger` /
+  `resume-epic-trigger` testids. The default button variant is
+  primary (`bg-primary`), matching the spec's "primary action"
+  requirement for `idle`.
+- **Mark Done "blocked" tooltip**: The existing `markDoneBlocked`
+  guard was previously `isPaused || (epic.status ===
+  EpicStatus.Active && !epic.progress.readyToMarkDone)`. The
+  `Active`-renamed-to-`Idle` refactor generalizes it to
+  `isSelfDriving = isIdle || isRunning` so the mark-done hint
+  surfaces for both idle and running epics.
+- **Epic list / dashboard "active" filter**: `EpicListPage` and
+  `EpicProgressList` previously filtered by `status ===
+  EpicStatus.Active`. After the rename, they both filter by
+  `status === EpicStatus.Idle || status === EpicStatus.Running`
+  (with `isInProgressEpic(epic)` as a named helper in
+  `EpicProgressList.tsx`).
+- **Legacy `'active'` server-side values are defensively mapped
+  to `Idle`** via `parseEpicStatus(value)` in
+  `packages/web/src/entities/epic/model/types.ts`. Any caller
+  that needs to consume a server-supplied epic status string
+  should go through this helper rather than casting to
+  `EpicStatus`.
+- **`useStartEpic` invalidates two query keys on success**:
+  `['epics']` (the list) and `['epics', projectId, id]` (the
+  project-scoped detail). The pattern matches `usePauseEpic` /
+  `useResumeEpic`. `useStartIssue` is the only one that
+  additionally invalidates `['issues']`.
+
+## Key implementation decisions (T-006)
+
+- **`EpicStatus.Active` was renamed to `EpicStatus.Idle`** and
+  the enum is now `{ Idle, Running, Paused, Done, Closed }`. The
+  `Active` value is gone; any code or test that referenced it
+  was migrated to `Idle`. The order in the source matches the
+  lifecycle ordering (Idle first → Closed last) which the new
+  `types.test.ts` snapshot tests.
+- **Web enum migration touched all consumers**, not just
+  `EpicDetailPage`: `EpicListPage`, `EpicProgressList`, the
+  detail page header, the linked-issues toggle, and the lifecycle
+  guards all had `EpicStatus.Active` references that became
+  `EpicStatus.Idle` (or were widened to `isIdle || isRunning`).
+- **Next Issue card is info-only**: the `epic-detail-next-start`
+  `Button` block was removed from the "Next Issue" card; only
+  the issue link (`next-issue` testid) and the `next-issue-reason`
+  text remain. Per-row `linked-issue-start` buttons are unchanged.
+- **`Start Epic` is the only primary action in the header for
+  `idle` epics**. `Pause` and `Resume` keep `variant="outline"`
+  to preserve the prior visual hierarchy. The default
+  `Button` variant (`bg-primary`) is what makes `Start Epic`
+  the primary action — no explicit `variant` prop needed.
+- **The mutation hook `useStartEpic`** was added to
+  `queries.ts` mirroring the `useResumeEpic` shape: same two-key
+  invalidation, same toast-success message, same `string`
+  variable. The client wrapper `startEpic(id, projectId)` POSTs
+  to `/epics/{id}/start` with no body, matching the
+  `startEpic` route added in T-004.
+- **Test setup hygiene**: every new `describe` block in
+  `EpicDetailPage.test.tsx` declares its own `const
+  startEpicMutate = vi.fn()` AND wires `mocks.useStartEpic`
+  in `beforeEach`. The unused `startEpicMutate` declaration in
+  the `linked issues view toggle` block was removed — it had
+  no test reference because that describe block doesn't exercise
+  the epic lifecycle.
+
+## Gotchas (T-006)
+
+- **Mocked mutate calls don't trigger React Query
+  invalidation.** When `vi.mock('../../../entities/epic', ...)`
+  replaces `useStartEpic` with `{ mutate: vi.fn() }`, the
+  `onSuccess` registered in the real `useMutation` is bypassed.
+  The mocked `mutate` function receives only what the caller
+  passed (`mutate(epicId)`), so any "refresh after success"
+  test pattern needs to either:
+    1. Call `options?.onSuccess?.()` from inside the mocked
+       mutate (the existing edit-flow test pattern), OR
+    2. Rely on the `queries.test.tsx` tests to verify
+       invalidation behavior separately.
+  Without this, the component never re-renders with the new
+  data, so the post-mutation UI state assertion times out.
+  We use approach (2) for the Start Epic refresh tests; the
+  mutation call shape is verified in `EpicDetailPage.test.tsx`,
+  the invalidation behavior is verified in
+  `queries.test.tsx`.
+- **`'active'` literal in epic test fixtures** is intentionally
+  kept in some `Record<string, unknown>` typed epic test
+  objects (it bypasses the enum typing because the object
+  shape is open). The `parseEpicStatus` helper is what reads
+  these strings at runtime; the enum value `EpicStatus.Active`
+  was the only place this name could leak into types.
+- **The `linked issues view toggle` describe block doesn't set
+  `mocks.useStartEpic`** because none of its tests exercise the
+  lifecycle header. Adding a stub `useStartEpic` mock there is
+  not needed (the global `vi.mock` factory handles the import).
+  The unused-variable lint warning surfaced the redundant
+  `const startEpicMutate = vi.fn()` declaration that was added
+  by an earlier draft.
+- **`parseEpicStatus('active')` returning `Idle` is what keeps
+  the web UI from breaking on any leftover server rows** that
+  may still have the legacy `active` status — even though the
+  T-001 migration updated the DB rows, the helper is the
+  belt-and-suspenders for any cached/queued event payloads that
+  might still carry the old string.
+
+## Test coverage added (T-006)
+
+`queries.test.tsx` (4 new tests, alongside the existing pause/
+resume tests):
+- `calls startEpic(id, projectId) when useStartEpic is mutated`
+  asserts the mutation function calls the `startEpic` client
+  with `(id, projectId)`.
+- `invalidates the project-scoped epic detail query after
+  starting an epic` asserts the two-key invalidation pattern
+  (`['epics']` and `['epics', 'proj-1', 'epic-1']`) matches
+  the pause/resume shape, and that the non-project-scoped
+  `['epics', id]` form is NOT used.
+- `forwards a null projectId when useProject returns none`
+  matches the existing pause/resume null-project assertion.
+- `surfaces start failures through toast.error when starting
+  an epic` mirrors the existing `useStartIssue` error-surfacing
+  test.
+
+`EpicDetailPage.test.tsx` (10 new tests across two new
+describe blocks):
+- `EpicDetailPage lifecycle header actions` (7 tests):
+  - `renders Start Epic as the only lifecycle action when the
+    epic is idle` — `idle` → `start-epic-trigger` only.
+  - `invokes the start mutation with the epic id when Start
+    Epic is clicked` — fires `startEpicMutate('epic-...')`.
+  - `renders Pause as the only lifecycle action when the
+    epic is running` — `running` → `pause-epic-trigger` only.
+  - `renders Resume as the only lifecycle action when the
+    epic is paused` — `paused` → `resume-epic-trigger` only.
+  - `renders no lifecycle action when the epic is done` —
+    `done` → no start/pause/resume/mark-done/close.
+  - `renders no lifecycle action when the epic is closed` —
+    `closed` → no start/pause/resume/mark-done/close.
+  - `shows the Start Epic label with Starting... and disables
+    the trigger while pending` — pending state surfaces the
+    "Starting..." text and disables the button.
+- `EpicDetailPage Start Epic refresh on success` (3 tests):
+  - `submits the start mutation with the epic id and no extra
+    options` — mutation is called with exactly one argument
+    (the epic id), no onSuccess callback passed inline.
+  - `does not invoke the start mutation when Start Epic is
+    not clicked` — confirms the click is the trigger.
+  - `keeps the Start Epic trigger stable across multiple idle
+    renders (header does not flicker)` — confirms the
+    `idle` rendering is deterministic.
+
+`types.test.ts` (new file, 12 tests):
+- `EpicStatus` enum membership test (no `Active` member; the
+  values match `Idle`, `Running`, `Paused`, `Done`, `Closed`).
+- `parseEpicStatus` round-trips all five valid statuses.
+- `parseEpicStatus('active')` returns `Idle` (legacy mapping).
+- Case-insensitive parsing (`'IDLE'`, `'Running'`, `'PAUSED'`).
+- Null / undefined / empty-string fallbacks return `Idle`.
+- Unrecognized values fall back to `Idle`.
+
+All 2314 web tests pass; full server suite (2670 passed,
+10 pre-existing skips, 1 unrelated flake in
+`UpdateServer_WhenReadinessDoesNotBecomeReady` which passes
+on re-run).
