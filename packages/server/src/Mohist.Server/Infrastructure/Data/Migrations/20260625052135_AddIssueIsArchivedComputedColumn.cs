@@ -15,16 +15,14 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 table: "Issues",
                 type: "TEXT",
                 nullable: true,
-                computedColumnSql: "COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))",
-                stored: true);
+                computedColumnSql: "COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
 
             migrationBuilder.AddColumn<bool>(
                 name: "IsArchived",
                 table: "Issues",
                 type: "INTEGER",
                 nullable: true,
-                computedColumnSql: "json_extract(State, '$.archivedAt') IS NOT NULL",
-                stored: true);
+                computedColumnSql: "json_extract(State, '$.archivedAt') IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Issues_Status",
