@@ -212,6 +212,219 @@ function runBranchName(runId: string | null | undefined) {
   return safe ? `mohist/run-${safe}` : "mohist/run"
 }
 
+interface IssueWorkspaceMarker {
+  issueId: string | null
+  issueNumber: number
+  workflowRunId: string | null
+}
+
+function issueWorkspaceMarker(variables: JsonObject): IssueWorkspaceMarker {
+  return {
+    issueId: stringAt(variables, ["issue", "id"]) ?? null,
+    issueNumber: numberAt(variables, ["issue", "number"]) ?? 0,
+    workflowRunId: stringAt(variables, ["mohist", "runId"]) ?? null,
+  }
+}
+
+// Read the workspace marker from disk. Returns `null` when the marker
+// is missing or unreadable; the caller decides what kind of failure
+// that is (corrupt vs missing). Used by both `verify()` (which needs
+// to distinguish missing / corrupt / mismatch) and `planResolution()`
+// (which just needs a yes/no answer).
+async function readMarker(workspacePath: string): Promise<Partial<IssueWorkspaceMarker> | null> {
+  const path = markerPath(workspacePath)
+  if (!exists(path)) return null
+  try {
+    const raw = await readText(path)
+    return JSON.parse(raw) as Partial<IssueWorkspaceMarker>
+  } catch {
+    return null
+  }
+}
+
+export async function readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
+  const marker = await readMarker(workspacePath)
+  return marker?.workflowRunId
+}
+
+function markerMatches(actual: Partial<IssueWorkspaceMarker>, expected: IssueWorkspaceMarker): boolean {
+  return actual.issueId === expected.issueId
+    && actual.issueNumber === expected.issueNumber
+    && actual.workflowRunId === expected.workflowRunId
+}
+
+function isSameIssueDifferentRun(actual: Partial<IssueWorkspaceMarker> | null, expected: IssueWorkspaceMarker): boolean {
+  if (!actual) return false
+  return actual.issueId === expected.issueId
+    && actual.issueNumber === expected.issueNumber
+    && actual.workflowRunId !== expected.workflowRunId
+}
+
+function formatIdentity(marker: Partial<IssueWorkspaceMarker> | IssueWorkspaceMarker): string {
+  return `issueId=${marker.issueId ?? "<null>"}, issueNumber=${marker.issueNumber ?? "<null>"}, workflowRunId=${marker.workflowRunId ?? "<null>"}`
+}
+
+async function hasSameMarker(workspacePath: string, expected: IssueWorkspaceMarker) {
+  const path = markerPath(workspacePath)
+  if (!exists(path)) return false
+  try {
+    const actual = JSON.parse(await readText(path)) as Partial<IssueWorkspaceMarker>
+    return actual.issueId === expected.issueId
+      && actual.issueNumber === expected.issueNumber
+      && actual.workflowRunId === expected.workflowRunId
+  } catch {
+    return false
+  }
+}
+
+async function verifyWorkspaceBranch(workspacePath: string, expectedBranch: string, signal: AbortSignal) {
+  const branch = await runCommand("git", ["-C", workspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
+  if (branch.exitCode !== 0) {
+    throw new WorkspaceBranchMismatchError(
+      `Workflow workspace ${workspacePath} branch probe failed; expected ${expectedBranch}.`,
+      workspacePath,
+      expectedBranch,
+      null,
+      null,
+      branch.stderr || branch.stdout || `exit ${branch.exitCode}`,
+    )
+  }
+  const observed = branch.stdout.trim()
+  if (observed === expectedBranch) return
+  if (observed === "HEAD") {
+    const ref = await runCommand("git", ["-C", workspacePath, "rev-parse", "HEAD"], ".", signal)
+    throw new WorkspaceBranchMismatchError(
+      `Workflow workspace ${workspacePath} is detached; expected branch ${expectedBranch}.`,
+      workspacePath,
+      expectedBranch,
+      null,
+      ref.exitCode === 0 ? ref.stdout.trim() : null,
+    )
+  }
+  throw new WorkspaceBranchMismatchError(
+    `Workflow workspace ${workspacePath} is on branch ${observed}; expected ${expectedBranch}.`,
+    workspacePath,
+    expectedBranch,
+    observed,
+  )
+}
+
+function markerPath(workspacePath: string) {
+  return join(workspacePath, ".mohist", "workspace.json")
+}
+
+async function ensureMarkerExcluded(workspacePath: string) {
+  const excludePath = join(workspacePath, ".git", "info", "exclude")
+  const markerRule = ".mohist/"
+  let raw = ""
+  try {
+    raw = await readText(excludePath)
+  } catch {
+    // ignore
+  }
+  if (raw.split(/\r?\n/).some((line) => line.trim() === markerRule || line.trim() === ".mohist")) return
+  const suffix = raw.endsWith("\n") || raw.length === 0 ? "" : "\n"
+  await writeText(excludePath, `${raw}${suffix}${markerRule}\n`)
+}
+
+// Read the configured `origin` URL of a bare repository cache. Returns
+// `undefined` if the cache is unreadable / unconfigured rather than
+// throwing, so the caller can decide how to surface an unreadable cache
+// (treat as identity mismatch → replacement candidate).
+async function readCacheOrigin(cachePath: string, signal: AbortSignal) {
+  const result = await runCommand("git", ["-C", cachePath, "remote", "get-url", "origin"], ".", signal)
+  if (result.exitCode !== 0) return undefined
+  return result.stdout.trim() || undefined
+}
+
+// Decide whether the cache's object store is still referenced by an
+// active workflow workspace clone under `<projectRoot>/workspaces/`.
+// The scan follows transitive alternates so deleting the cache cannot
+// corrupt active workspace object stores.
+async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot: string, signal: AbortSignal) {
+  const target = resolve(join(cachePath, "objects"))
+  const cloneRoots = [join(projectRoot, "workspaces")]
+
+  async function readAlternates(objectsDir: string): Promise<string[]> {
+    const gitDir = objectsDir.replace(/[\\/]objects$/, "")
+    const alternatesPath = join(gitDir, "objects", "info", "alternates")
+    if (!exists(alternatesPath)) return []
+    let raw: string
+    try {
+      raw = await readText(alternatesPath)
+    } catch {
+      return []
+    }
+    const out: string[] = []
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith("#")) continue
+      try {
+        out.push(resolve(trimmed))
+      } catch {
+        // skip
+      }
+    }
+    return out
+  }
+
+  for (const dir of cloneRoots) {
+    if (!exists(dir)) continue
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const gitDir = join(dir, entry.name, ".git")
+      if (!exists(gitDir)) continue
+      // BFS the alternates chain rooted at this clone. An alternates
+      // entry is a `<git_dir>/objects` path; if it equals the target,
+      // this clone references the cache. If it does not, but it is
+      // itself a `.git/objects` path belonging to another clone, we
+      // enqueue that clone's alternates to follow the chain further.
+      const visited = new Set<string>()
+      const queue: string[] = await readAlternates(join(gitDir, "objects"))
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        if (visited.has(current)) continue
+        visited.add(current)
+        if (current === target) return true
+        // Only follow when the current entry looks like another clone's
+        // `.git/objects` (i.e., ends with `.git/objects`). Other paths
+        // (e.g., environment-provided object dirs) are leaf nodes.
+        if (/(^|[\\/])\.git[\\/]objects$/.test(current)) {
+          const next = await readAlternates(current)
+          for (const n of next) if (!visited.has(n)) queue.push(n)
+        }
+      }
+    }
+  }
+  return false
+}
+
+// `git fsck` based corruption detector. Runs an unconnected fsck
+// against the bare cache; returns true when fsck reports any corrupt /
+// missing object. Used as an alternate justification for cache
+// replacement (per the spec's "origin URL mismatch OR verified
+// corruption" rule).
+async function isCacheCorrupt(cachePath: string, baseBranch: string, signal: AbortSignal) {
+  const result = await runCommand("git", ["-C", cachePath, "fsck", "--full", "--no-progress"], ".", signal)
+  if (result.exitCode !== 0) return true
+  const base = await runCommand("git", ["-C", cachePath, "rev-parse", "--verify", `refs/heads/${baseBranch}^{commit}`], ".", signal)
+  if (base.exitCode !== 0) return true
+  const baseType = await runCommand("git", ["-C", cachePath, "cat-file", "-t", base.stdout.trim()], ".", signal)
+  if (baseType.exitCode !== 0) return true
+  const refs = await runCommand("git", ["-C", cachePath, "show-ref", "--heads", "--dereference"], ".", signal)
+  if (refs.exitCode !== 0) return true
+  for (const line of refs.stdout.split(/\r?\n/)) {
+    const oid = line.trim().split(/\s+/)[0]
+    if (!oid) continue
+    const object = await runCommand("git", ["-C", cachePath, "cat-file", "-e", `${oid}^{object}`], ".", signal)
+    if (object.exitCode !== 0) return true
+    const tree = await runCommand("git", ["-C", cachePath, "ls-tree", "-r", oid], ".", signal)
+    if (tree.exitCode !== 0) return true
+  }
+  return false
+}
+
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project"
 }

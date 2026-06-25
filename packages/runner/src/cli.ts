@@ -16,6 +16,7 @@ await new RunnerHost({
   heartbeatIntervalMs: numberEnv("HEARTBEAT_INTERVAL_MS") ?? 15_000,
   dispatchLivenessProbeIntervalMs: numberEnv("DISPATCH_LIVENESS_PROBE_INTERVAL_MS") ?? 10_000,
   cleanupConvergenceIntervalMs: positiveNumberEnv("CLEANUP_CONVERGENCE_INTERVAL_MS") ?? 5 * 60_000,
+  cleanupLoopIntervalMs: positiveNumberEnv("CLEANUP_LOOP_INTERVAL_MS") ?? 2 * 60_000,
 }).run(controller.signal)
 
 function env(name: string) {

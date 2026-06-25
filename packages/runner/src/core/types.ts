@@ -108,6 +108,13 @@ export interface RunnerOptions {
   // to effectively disable the periodic tick while keeping startup /
   // reconnect convergence. Used by tests to drive ticks deterministically.
   cleanupConvergenceIntervalMs?: number
+
+  // Optional override for the cleanup loop cadence (T-004).
+  // Defaults to 2 minutes inside RunnerHost. The cleanup loop runs
+  // retention + budget eviction with pre-delete guards. Set to a very
+  // large value to effectively disable the periodic tick. Used by tests
+  // to drive ticks deterministically.
+  cleanupLoopIntervalMs?: number
 }
 
 export interface RunnerRegistration {

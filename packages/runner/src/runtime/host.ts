@@ -6,6 +6,7 @@ import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
 import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
+import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
@@ -34,7 +35,9 @@ export class RunnerHost {
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
   private readonly convergence: ConvergenceBackstop
+  private readonly cleanupLoop: CleanupLoop
   private readonly cleanupConvergenceIntervalMs: number
+  private readonly cleanupLoopIntervalMs: number
   private readonly maxConcurrentWorkflows: number
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
@@ -57,6 +60,7 @@ export class RunnerHost {
   constructor(private readonly options: RunnerOptions) {
     this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
+    this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     const build = loadBuildInfo()
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash)
@@ -72,6 +76,11 @@ export class RunnerHost {
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
+    )
+    this.cleanupLoop = new CleanupLoop(
+      this.workspaceRegistry,
+      new DefaultCleanupRunner(),
+      options.runnerRoot,
     )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.signalR = new RunnerSignalRClient(
@@ -123,6 +132,7 @@ export class RunnerHost {
         const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
         const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
         const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
+        const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
         try {
           await this.runWorkerPool(signal)
         } catch (error) {
@@ -133,6 +143,7 @@ export class RunnerHost {
           clearInterval(heartbeat)
           clearInterval(selfCheck)
           clearInterval(convergenceTimer)
+          clearInterval(cleanupTimer)
           await this.shutdownSharedConnection()
           await this.shutdownConnection()
         }
@@ -148,6 +159,21 @@ export class RunnerHost {
     } catch (error) {
       // Convergence is best-effort; the next tick or reconnect retries.
       console.error("workspace cleanup convergence pass failed:", error)
+    }
+  }
+
+  private async runCleanupOnce(signal: AbortSignal): Promise<void> {
+    try {
+      const policy = this.connection.getLastCleanupPolicy()
+      const result = await this.cleanupLoop.runOnce(policy, signal)
+      if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0) {
+        console.log(
+          `workspace cleanup: retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} usage=${result.workspaceUsageBytes ?? "unknown"}`,
+        )
+      }
+    } catch (error) {
+      // Cleanup is best-effort; the next tick retries.
+      console.error("workspace cleanup loop failed:", error)
     }
   }
 
@@ -174,6 +200,7 @@ export class RunnerHost {
     const signal = this.activeSignal
     if (signal) {
       void this.runConvergenceOnce(signal)
+      void this.runCleanupOnce(signal)
     }
   }
 

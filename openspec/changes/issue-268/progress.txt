@@ -481,3 +481,133 @@ Status: complete.
   runners.** T-004's cleanup loop should pick a different cadence (e.g.
   the design suggests 2–5 min) so eviction runs at a different
   schedule from convergence. The two timers do not need to be aligned.
+
+## T-004 — Runner automatic cleanup: retention, storage-budget eviction, and pre-delete guards
+
+Status: complete.
+
+### Files changed / added
+
+- `packages/runner/src/runtime/workspace.ts` — exported `readMarkerWorkflowRunId(workspacePath)`
+  which wraps the existing private `readMarker` and returns only the `workflowRunId` field
+  (null when the marker is missing, undefined when the field is absent). Reused unchanged by
+  `safeRemove` per design D5.
+- `packages/runner/src/runtime/cleanup-loop.ts` (new) — `CleanupLoop` class that, on each
+  `runOnce(policy, signal)` call:
+  - Filters registry to `phase === "eligible"` only (active entries are never touched).
+  - **Retention eviction:** when `policy.retentionDays` is positive, removes eligible
+    entries where `now - terminalAt > retentionDays`. Disabled when null or ≤0.
+  - **Budget eviction:** when `policy.storageBudgetBytes` is positive, computes total
+    workspace usage under `runnerRoot` (cached with 5-min TTL), and if usage exceeds the
+    budget, evicts eligible entries in ascending `terminalAt` order until estimated usage
+    drops to or below the target watermark. Defaults target to 70% of budget when
+    `storageTargetWatermarkBytes` is null.
+  - `safeRemove(entry)` runs two pre-delete guards before any deletion:
+    1. `isUnderRunnerRoot(runnerRoot, entry.workspacePath)` — reused unchanged from
+       `runner-signalr.ts`.
+    2. `readMarkerWorkflowRunId(entry.workspacePath)` + check `=== entry.workflowRunId`
+       — reused unchanged from `workspace.ts`.
+    Both guards abort on mismatch/missing/out-of-root and leave the directory + registry
+    entry intact. Only if both pass → `deleteDirectory` → `registry.remove`.
+  - `CleanupRunner` interface provides injection seams for testing (isUnderRunnerRoot,
+    readMarkerWorkflowRunId, deleteDirectory, computeDirectorySize).
+  - `DefaultCleanupRunner` is the production implementation: `computeDirectorySize`
+    spawns `du -sb <path>` and parses the byte count (returns null on error).
+- `packages/runner/src/server/connection.ts` — `ServerConnection` now stores the
+  `cleanupPolicy` from every non-204 poll response in `lastCleanupPolicy`. Exposed
+  via `getLastCleanupPolicy(): CleanupPolicy | null`. Idle polls (204) do not reset
+  the last-seen policy — the runner keeps the most-recent non-null policy.
+- `packages/runner/src/runtime/host.ts` — `RunnerHost` now owns a single
+  `CleanupLoop` bound to the shared registry + `DefaultCleanupRunner`. The `run()`
+  method stands up a `cleanupTimer` with `setInterval` on the configured cadence
+  (default 2 min, configurable via `cleanupLoopIntervalMs`). `onDispatchReconnected`
+  fires one cleanup pass alongside the convergence pass. The timer is cleared in
+  `finally` alongside heartbeat/selfCheck/convergence timers so a failed connect
+  cycle does not leak.
+- `packages/runner/src/core/types.ts` — added optional `cleanupLoopIntervalMs` to
+  `RunnerOptions` (defaults to 2 min inside `RunnerHost`).
+- `packages/runner/src/cli.ts` — wired `CLEANUP_LOOP_INTERVAL_MS` env override
+  following the same pattern as `CLEANUP_CONVERGENCE_INTERVAL_MS`.
+- Tests:
+  - `packages/runner/tests/cleanup-loop.spec.ts` (new) — 33 unit tests covering:
+    - Retention eviction: past-window removed, within-window kept, disabled (null/0)
+      disables eviction, mixed old+recent, only entries with `terminalAt` can be
+      measured.
+    - Budget eviction: earliest-terminalAt-first ordering, stops when usage drops
+      below target watermark, stops at watermark mid-stream, budget disabled
+      (null/0) disables, usage already under budget no-op, never evicts active
+      entries.
+    - Pre-delete guards: out-of-root aborts, marker-missing aborts,
+      marker-mismatch aborts, guard-aborted entry remains for next tick
+      re-evaluation.
+    - Active-entry protection: active entries never removed by retention or
+      budget.
+    - Policy defaults: null/undefined/empty-all-null policies return zeroed
+      results, only-retention evicts for age only, only-budget evicts for
+      budget only.
+    - safeRemove isolation: successful removal deletes both directory and entry,
+      failed deleteDirectory leaves entry intact, out-of-root/marker-
+      mismatch/missing-marker all abort before deletion.
+    - Budget ordering detail: ascending terminalAt verified via stub.deletedPaths,
+      mid-stream stop when watermark crossed.
+    - Empty registry: no eligible entries ⇒ zeroed result.
+    - Abort signal: already-aborted signal returns zeroed result.
+- Mock updates:
+  - `packages/runner/tests/runner-host.spec.ts` — added `getLastCleanupPolicy = () => null`
+    to the `ServerConnection` mock.
+  - `packages/runner/tests/runner-host-convergence.spec.ts` — same.
+
+### Decisions taken during implementation
+
+- **cleanupLoopIntervalMs default = 2 min.** Design suggests 2–5 min range.
+  Convergence runs at 5 min; choosing 2 min for cleanup means eviction keeps pace
+  with new eligible entries and the two timers are not aligned.
+
+- **Policy consumed via ServerConnection.getLastCleanupPolicy().** The
+  `WorkDispatchResponse.cleanupPolicy` from T-001 is captured on every non-204 poll
+  response inside `ServerConnection.poll()` and exposed through a getter. The
+  `RunnerHost.runCleanupOnce` reads it each tick. Idle polls (204) preserve the
+  last-seen policy. This avoids threading the policy through WorkItem/worker pool.
+
+- **Usage cache with 5-min TTL.** `CleanupLoop` caches `computeDirectorySize(root)`
+  for 5 minutes. The cache is per-instance (not shared across `CleanupLoop`
+  instances). Tests create fresh instances per test so stale caches don't bleed.
+  Budget eviction computes individual workspace sizes on-the-fly from the same
+  `CleanupRunner.computeDirectorySize` hook, keeping the pre-eviction size estimate
+  accurate.
+
+- **Budget eviction estimates post-removal usage.** After computing total root
+  usage once, the budget loop computes individual eligible workspace sizes
+  (one `computeDirectorySize` call each) and subtracts before each removal.
+  The next tick's `runOnce` recomputes root usage fresh (from the now-removed
+  state), so the estimate converges to reality within one tick cadence.
+
+- **guardAborted counter for observability.** Both retention and budget loops
+  increment `guardAborted` when `safeRemove` returns false. The host logs the
+  counts so operators can detect persistent guard failures (e.g., a workspace
+  stuck out-of-root forever). The entry remains eligible and is re-evaluated
+  next tick — the guard may pass or fail again.
+
+- **`readMarkerWorkflowRunId` exported from workspace.ts** instead of exporting
+  the full `readMarker` function. Only the `workflowRunId` field is needed for
+  the identity check; exporting just that avoids exposing the `IssueWorkspaceMarker`
+  type and keeps the public API minimal.
+
+- **DefaultCleanupRunner.computeDirectorySize uses `du -sb`.** The `du -sb` command
+  reports bytes without traversing subdirectory headers, giving a fast single-number
+  result. In the test stub, sizes are injected directly so no real `du` execution
+  occurs.
+
+- **No in-flight work collision prevention needed beyond `phase === "eligible"`.**
+  By the time a registry entry transitions to `eligible`, the server has confirmed
+  the workflow run is terminal. No in-flight work item can be associated with a
+  terminal run — dispatch only happens for non-terminal runs. Active entries are
+  never on the cleanup path.
+
+### Verification
+
+- `npm run typecheck -w packages/runner` — clean.
+- `npm run typecheck -w packages/web` — clean.
+- Focused regression (11 test files, 191 tests): all passed.
+- Full runner suite: 657/659 passed (2 pre-existing flaky ACP session tests).
+- Server T-001 tests: 23/23 passed (unchanged server code).

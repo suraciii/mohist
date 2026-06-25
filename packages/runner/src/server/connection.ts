@@ -1,13 +1,18 @@
 import { hostname } from "node:os"
-import type { JsonObject, RecoveryTaskInput, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
+import type { CleanupPolicy, JsonObject, RecoveryTaskInput, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  private lastCleanupPolicy: CleanupPolicy | null = null
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
+  }
+
+  getLastCleanupPolicy(): CleanupPolicy | null {
+    return this.lastCleanupPolicy
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
@@ -26,7 +31,9 @@ export class ServerConnection {
     const response = await fetch(this.url("poll"), { method: "POST", signal })
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    return toWorkItem((await response.json()) as WorkDispatchResponse)
+    const dispatch = (await response.json()) as WorkDispatchResponse
+    this.lastCleanupPolicy = dispatch.cleanupPolicy ?? null
+    return toWorkItem(dispatch)
   }
 
   /**

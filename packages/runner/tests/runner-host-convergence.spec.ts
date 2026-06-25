@@ -43,6 +43,7 @@ vi.mock("../src/server/connection.js", () => ({
     disconnect = disconnect
     poll = poll
     workflowRunsStatus = workflowRunsStatus
+    getLastCleanupPolicy = () => null
   },
 }))
 
