@@ -221,7 +221,7 @@ function InputField({
       {disabled && disabledReason && (
         <p className="text-xs text-muted-foreground">{disabledReason}</p>
       )}
-      {!disabled && error && <p className="text-xs text-red-700">{error}</p>}
+      {!disabled && error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }

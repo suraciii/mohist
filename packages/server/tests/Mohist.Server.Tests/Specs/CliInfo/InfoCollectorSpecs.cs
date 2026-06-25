@@ -472,15 +472,15 @@ public class InfoCollectorSpecs
     [Fact]
     public void ResolveSourcePath_PrefersWorkingDirectory_ThenProjectFlag_ThenBinaryDir()
     {
-        Assert.Equal("/workdir", InfoCollector.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields("/workdir", "dotnet run --project /proj")));
+        Assert.Equal("/workdir", InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields("/workdir", "dotnet run --project /proj")));
 
-        var fromProject = InfoCollector.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "dotnet run --project /proj/Mohist.Server.csproj"));
+        var fromProject = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "dotnet run --project /proj/Mohist.Server.csproj"));
         Assert.Equal("/proj", fromProject);
 
-        var fromBinary = InfoCollector.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "node /binary/script.js"));
+        var fromBinary = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "node /binary/script.js"));
         Assert.Equal("/binary", fromBinary);
 
-        var noPath = InfoCollector.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "dotnet run"));
+        var noPath = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(null, "dotnet run"));
         Assert.Null(noPath);
     }
 

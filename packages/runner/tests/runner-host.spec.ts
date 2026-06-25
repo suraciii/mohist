@@ -72,7 +72,6 @@ beforeEach(() => {
   acpShutdown.mockResolvedValue(undefined)
   shutdownSharedAcpConnection.mockResolvedValue(undefined)
 })
-
 describe("RunnerHost", () => {
   it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
     vi.clearAllMocks()

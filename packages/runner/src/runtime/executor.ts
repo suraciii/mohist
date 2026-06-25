@@ -98,7 +98,7 @@ export class WorkExecutor {
   async execute(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     let resolvedWorkspace: ResolvedWorkspace
     if (work.ownerKind !== "agent-job") {
-      const precheck = await this.ensureBoundWorkspace(work, signal)
+      const precheck = await this.verifyBoundWorkspace(work, signal)
       if (precheck.kind === "failure") return precheck.result
       resolvedWorkspace = precheck.workspace
     } else {
@@ -109,9 +109,9 @@ export class WorkExecutor {
     return await this.executeOne(work, resolvedWorkspace, signal)
   }
 
-  private async ensureBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
+  private async verifyBoundWorkspace(work: WorkItem, signal: AbortSignal): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
-      const info = await this.workspaceManager.ensure(work, signal)
+      const info = await this.workspaceManager.verify(work, signal)
       return { kind: "ok", workspace: infoToResolved(info) }
     } catch (error) {
       return { kind: "failure", result: workspaceMaterializationFailureFromError(work, error) }

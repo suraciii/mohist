@@ -1,11 +1,10 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-internal sealed partial class InfoCollector
+internal sealed class InfoCollector
 {
     internal const string ServerUnit = SystemdUnitParser.ServerUnit;
     internal const string RunnerUnit = SystemdUnitParser.RunnerUnit;
@@ -219,14 +218,14 @@ internal sealed partial class InfoCollector
         var execStart = properties.TryGetValue("ExecStart", out var es) ? es : null;
         var fragmentPath = properties.TryGetValue("FragmentPath", out var fp) ? fp : null;
 
-        var resolved = ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(workingDirectory, execStart));
+        var resolved = InfoSourcePathResolver.ResolveSourcePath(new SystemdUnitParser.SystemdUnitFields(workingDirectory, execStart));
         if (string.IsNullOrWhiteSpace(resolved))
         {
             if (!string.IsNullOrWhiteSpace(fragmentPath) && _fileSystem.Exists(fragmentPath))
             {
                 var content = await _fileSystem.ReadAllTextAsync(fragmentPath);
                 var unit = SystemdUnitParser.ParseSystemdUnit(content);
-                resolved = ResolveSourcePath(unit);
+                resolved = InfoSourcePathResolver.ResolveSourcePath(unit);
             }
         }
 
@@ -444,4 +443,5 @@ internal sealed partial class InfoCollector
             return default!;
         }
     }
+
 }

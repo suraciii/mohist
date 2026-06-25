@@ -1,7 +1,6 @@
 using System.CommandLine;
 using System.Net;
 using System.Text;
-using EnvironmentAbstractions.TestHelpers;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
 using Mohist.Server.Tests.Support;
@@ -435,36 +434,12 @@ public class IssueCliBodyInputSpecs
         services.AddSingleton<TextWriter>(TextWriter.Null);
         services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<IEnvironmentVariableProvider>(new MockEnvironmentVariableProvider());
         services.AddSingleton<IServiceInstaller>(_ => new SystemdServiceInstaller(TextWriter.Null, TextWriter.Null, RealFileSystem.Instance, new SystemCommandExecutor()));
         services.AddSingleton<SystemdServiceInstaller>();
-        services.AddSingleton<HttpClient>(sp =>
-{
-    var env = sp.GetRequiredService<IEnvironmentVariableProvider>();
-    return new HttpClient
-    {
-        BaseAddress = new Uri(env.GetEnvironmentVariable(SourceCodeUpdater.ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
-        Timeout = TimeSpan.FromSeconds(5),
-    };
-});
-        services.AddSingleton<RuntimeConsistencyValidator>(sp => new RuntimeConsistencyValidator(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ICommandExecutor>(),
-            sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IEnvironmentVariableProvider>(),
-            TextWriter.Null));
-        services.AddSingleton<ServiceReadinessProbe>(sp => new ServiceReadinessProbe(
-            sp.GetRequiredService<HttpClient>(),
-            TextWriter.Null));
-        services.AddSingleton<RunnerRefreshVerifier>(sp => new RunnerRefreshVerifier(
-            sp.GetRequiredService<HttpClient>(),
-            sp.GetRequiredService<ICommandExecutor>(),
-            sp.GetRequiredService<IFileSystem>()));
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
         services.AddSingleton<InfoCollector>();
-        services.AddSingleton<InfoRenderer>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();
