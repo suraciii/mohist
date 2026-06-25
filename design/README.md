@@ -18,7 +18,7 @@ style: ["短索引，只说明入口。"]
 ## Workflow 核心域
 
 - [workflow/actions.md](workflow/actions.md) — action input/output 接口、errorCode、失败恢复编排。
-- [workflow/builtin-workflows.md](workflow/builtin-workflows.md) — `mohist/default` 与 `mohist/pr` 两条内置 workflow。
+- [workflow/builtin-workflows/](workflow/builtin-workflows/) — 内置 workflow；一个 workflow 一个文件。
 - [workflow/profile.md](workflow/profile.md) — profile = template + variables 的加载与合并。
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — task.with 模板展开和 dispatch 输入。
 - [workflow/scheduling.md](workflow/scheduling.md) — runner claim、pull、report、supervision。
