@@ -10,15 +10,23 @@ import {
 
 export interface RequestedModel {
   model?: string
+  variant?: string
   source: "agent.model" | "with.model" | "none"
 }
 
-export function resolveRequestedModel(context: ActionContext, agentConfig?: { model?: string }): RequestedModel {
+export function resolveRequestedModel(context: ActionContext, agentConfig?: { model?: string; variant?: string }): RequestedModel {
   const agentModel = agentConfig?.model
-  if (agentModel?.trim()) return { model: agentModel, source: "agent.model" }
+  if (agentModel?.trim()) return composeRequestedModel(agentModel, agentConfig?.variant, "agent.model")
   const withModel = stringInput(context.with, "model")
-  if (withModel?.trim()) return { model: withModel, source: "with.model" }
+  if (withModel?.trim()) return composeRequestedModel(withModel, stringInput(context.with, "variant"), "with.model")
   return { source: "none" }
+}
+
+function composeRequestedModel(model: string, variant: string | undefined, source: "agent.model" | "with.model"): RequestedModel {
+  const trimmedModel = model.trim()
+  const trimmedVariant = variant?.trim()
+  if (!trimmedVariant) return { model: trimmedModel, source }
+  return { model: `${trimmedModel}/${trimmedVariant}`, variant, source }
 }
 
 export async function applyRequestedModel(
@@ -29,28 +37,23 @@ export async function applyRequestedModel(
   notify: (activityType?: string) => void,
 ) {
   if (!requested.model?.trim()) {
-    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested))
+    console.warn("mohist acp model not configured; using provider default", modelDiagnosticContext(context, requested, null))
     return
   }
 
-  console.info("mohist acp setting requested model", modelDiagnosticContext(context, requested))
+  console.info("mohist acp setting requested model", modelDiagnosticContext(context, requested, null))
+  let variantDelivered = false
   try {
-    await connection.setSessionConfigOption({ sessionId, configId: "model", value: requested.model })
-    recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
-    console.info("mohist acp set model via config option", modelDiagnosticContext(context, requested))
-  } catch (configError) {
-    console.warn("mohist acp set model via config option failed; trying set_session_model", { ...modelDiagnosticContext(context, requested), error: errorMessage(configError) })
-    try {
-      await connection.unstable_setSessionModel({ sessionId, modelId: requested.model })
-      recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
-      console.info("mohist acp set model via set_session_model", modelDiagnosticContext(context, requested))
-    } catch (modelError) {
-      console.warn("mohist acp set requested model failed; provider default may be used", { ...modelDiagnosticContext(context, requested), error: errorMessage(modelError) })
-    }
+    await connection.unstable_setSessionModel({ sessionId, modelId: requested.model })
+    variantDelivered = true
+    recordLivenessActivity(notify, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
+    console.info("mohist acp set model via set_session_model", modelDiagnosticContext(context, requested, variantDelivered))
+  } catch (modelError) {
+    console.warn("mohist acp set requested model failed; provider default may be used", { ...modelDiagnosticContext(context, requested, variantDelivered), error: errorMessage(modelError) })
   }
 }
 
-export function modelDiagnosticContext(context: ActionContext, requested: RequestedModel) {
+export function modelDiagnosticContext(context: ActionContext, requested: RequestedModel, variantDelivered: boolean | null) {
   return {
     workflowRunId: context.workflowRunId,
     workId: context.workId,
@@ -58,6 +61,8 @@ export function modelDiagnosticContext(context: ActionContext, requested: Reques
     sessionName: sessionNameFromContext(context),
     requestedModel: requested.model ?? null,
     requestedModelSource: requested.source,
+    ...(requested.variant !== undefined ? { requestedVariant: requested.variant } : {}),
+    ...(variantDelivered === null ? {} : { variantDelivered }),
   }
 }
 

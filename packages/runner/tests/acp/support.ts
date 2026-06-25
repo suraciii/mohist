@@ -144,6 +144,7 @@ export class FakeAcpAgent {
         return { configOptions: [] }
       },
       async unstable_setSessionModel(params) {
+        self.timeline?.push({ event: "unstable_setSessionModel" })
         self.calls.push({ event: "unstable_setSessionModel", ...params })
         if (self.scenario === "model-config-fails") throw new Error("set model unsupported")
         return {}
@@ -430,6 +431,10 @@ export class FakeSharedAcpAgent {
       async setSessionConfigOption(params) {
         self.calls.push({ event: "setSessionConfigOption", ...params })
         return { configOptions: [] }
+      },
+      async unstable_setSessionModel(params) {
+        self.calls.push({ event: "unstable_setSessionModel", ...params })
+        return {}
       },
       async prompt(params) {
         self.calls.push({ event: "prompt", sessionId: params.sessionId, text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })

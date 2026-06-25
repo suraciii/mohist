@@ -6,6 +6,7 @@ import { resolveCompactionConfigFromInput } from "./compaction.js"
 
 export interface AgentConfig {
   model?: string
+  variant?: string
   timeoutMs?: number
   sessionStartTimeoutMs?: number
   livenessQuietThresholdMs?: number
@@ -19,6 +20,7 @@ export function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | und
   if (agent && typeof agent === "object") {
     return {
       model: stringInput(agent as JsonObject, "model") ?? undefined,
+      variant: stringInput(agent as JsonObject, "variant") ?? undefined,
       timeoutMs: numberInput(agent as JsonObject, "timeout") ?? undefined,
       sessionStartTimeoutMs: numberInput(agent as JsonObject, "sessionStartTimeout") ?? undefined,
       livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
@@ -28,6 +30,7 @@ export function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | und
   }
   return {
     model: stringInput(with_, "model") ?? undefined,
+    variant: stringInput(with_, "variant") ?? undefined,
     timeoutMs: numberInput(with_, "timeout") ?? undefined,
     sessionStartTimeoutMs: numberInput(with_, "sessionStartTimeout") ?? undefined,
     livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
