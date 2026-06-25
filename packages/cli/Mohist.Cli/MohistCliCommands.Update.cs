@@ -10,7 +10,7 @@ internal static class UpdateCommands
     public static Command Build(IServiceProvider provider)
     {
         var update = new Command("update", "Update mohist components from source");
-        var updater = provider.GetRequiredService<SourceCodeUpdater>();
+        var updater = MohistCliCommands.ResolveSourceCodeUpdater(provider);
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
         var cliPathOpt = new Option<string?>("--cli-path") { Description = "mo executable path" };
         var dryRunOpt = MohistCliCommands.DryRunOption();

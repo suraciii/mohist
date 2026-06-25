@@ -53,7 +53,7 @@ internal static class SkillsCommands
     private static Command BuildSync(IServiceProvider provider)
     {
         var sync = new Command("sync", "Sync working-tree skill-data into the managed cache so `mo skills get` reflects local edits");
-        var updater = provider.GetRequiredService<SourceCodeUpdater>();
+        var updater = MohistCliCommands.ResolveSourceCodeUpdater(provider);
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
         var sourceOpt = new Option<string?>("--source") { Description = "Source skill-data directory (default: <repo-root>/packages/cli/Mohist.Cli/skill-data)" };
         var dryRunOpt = MohistCliCommands.DryRunOption();

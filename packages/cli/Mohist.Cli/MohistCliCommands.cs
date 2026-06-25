@@ -152,6 +152,32 @@ internal static class MohistCliCommands
         return CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config);
     }
 
+    internal static SourceCodeUpdater ResolveSourceCodeUpdater(IServiceProvider provider)
+    {
+        try
+        {
+            var registered = provider.GetService<SourceCodeUpdater>();
+            if (registered is not null)
+                return registered;
+        }
+        catch (InvalidOperationException)
+        {
+            // Some help-rendering tests intentionally build a minimal provider.
+            // Keep command tree construction independent from update internals.
+        }
+
+        var api = provider.GetRequiredService<MohistCliApi>();
+        var installer = provider.GetRequiredService<IServiceInstaller>();
+        return SourceCodeUpdater.CreateWithDefaults(
+            api.Output,
+            api.Error,
+            installer,
+            provider.GetService<ICommandExecutor>() ?? api.CommandExecutor,
+            provider.GetService<IFileSystem>() ?? api.FileSystem,
+            provider.GetService<IEnvironmentVariableProvider>(),
+            api.Http);
+    }
+
     internal static string Query(
         string? ProjectId = null,
         string? Stage = null,

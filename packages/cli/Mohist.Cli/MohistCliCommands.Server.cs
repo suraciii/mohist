@@ -10,14 +10,7 @@ internal static class ServerCommands
     {
         var server = new Command("server", "Server management");
         var installer = provider.GetRequiredService<IServiceInstaller>();
-        var updater = provider.GetService<SourceCodeUpdater>() ?? SourceCodeUpdater.CreateWithDefaults(
-            api.Output,
-            api.Error,
-            installer,
-            api.CommandExecutor,
-            api.FileSystem,
-            provider.GetService<IEnvironmentVariableProvider>(),
-            api.Http);
+        var updater = MohistCliCommands.ResolveSourceCodeUpdater(provider);
 
         server.Subcommands.Add(BuildHealth(api));
         server.Subcommands.Add(BuildInstall(installer));
