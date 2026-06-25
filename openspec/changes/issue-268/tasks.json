@@ -62,7 +62,7 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Push is a latency optimization only; correctness must not depend on it — the convergence query is the authoritative catch-all for missed events."
     },
     {
