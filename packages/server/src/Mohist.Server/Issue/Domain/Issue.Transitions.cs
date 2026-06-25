@@ -15,6 +15,7 @@ public sealed partial class Issue
         string? repositoryRef = null,
         string? risk = null,
         bool isDraft = true,
+        string? workflowProfileId = null,
         DateTime? now = null)
     {
         var createdAt = now ?? DateTime.UtcNow;
@@ -29,6 +30,7 @@ public sealed partial class Issue
             Risk = risk,
             RepositoryRef = repositoryRef,
             IsDraft = isDraft,
+            WorkflowProfileId = workflowProfileId,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
@@ -39,6 +41,10 @@ public sealed partial class Issue
             Labels: issue.SnapshotLabels(),
             Risk: risk,
             RepositoryRef: repositoryRef));
+        if (!string.IsNullOrWhiteSpace(workflowProfileId))
+        {
+            issue.RecordEvent(new IssueWorkflowProfileChanged(issue.WorkflowProfileId));
+        }
         return issue;
     }
 
@@ -78,6 +84,22 @@ public sealed partial class Issue
             }
         }
         if (changed && !labelsChanged) Touch(now);
+    }
+
+    /// <summary>
+    /// Replace the issue-level workflow profile selection. <c>null</c>
+    /// clears the selection so reads fall back to project/system default.
+    /// Caller is responsible for validating that <paramref name="profileId"/>
+    /// (when non-null) refers to a known workflow profile; the aggregate
+    /// only stores the value.
+    /// </summary>
+    public void ReplaceWorkflowProfile(string? profileId, DateTime? now = null)
+    {
+        var next = NormalizeOptional(profileId);
+        if (string.Equals(_workflowProfileId, next, StringComparison.Ordinal)) return;
+        _workflowProfileId = next;
+        Touch(now);
+        RecordEvent(new IssueWorkflowProfileChanged(_workflowProfileId));
     }
 
     public void SetDraft(bool isDraft, DateTime? now = null)

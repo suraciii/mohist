@@ -54,6 +54,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<WorkflowDispatchBuilder>();
         siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
+        siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
         siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();
         siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
         siloBuilder.Services.AddSingleton(eventBus);

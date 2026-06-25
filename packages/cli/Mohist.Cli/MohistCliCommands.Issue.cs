@@ -171,6 +171,7 @@ internal static class IssueCommands
             var stageModelVariants = ctx.GetValue(stageModelVariantsOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
+            var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             return CreateAsync();
 
             async Task<int> CreateAsync()
@@ -239,10 +240,13 @@ internal static class IssueCommands
                     ["priority"] = priority ?? "p2",
                     ["model"] = model,
                     ["modelVariant"] = modelVariant,
-                    ["workflowProfileId"] = effectiveWorkflow,
                     ["risk"] = effectiveRisk,
                     ["isDraft"] = isDraft,
                 };
+                if (workflowProfileProvided || effectiveWorkflow is not null)
+                    payload["workflowProfileId"] = workflowProfileProvided
+                        ? (string.IsNullOrWhiteSpace(workflowProfile) ? null : workflowProfile)
+                        : effectiveWorkflow;
                 if (ctx.GetResult(repositoryOpt) is not null)
                     payload["repositoryName"] = repository;
                 if (stageModelsPayload is not null)
@@ -365,6 +369,7 @@ internal static class IssueCommands
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
+        var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID; pass an empty string to clear and inherit the default" };
         var repositoryOpt = new Option<string?>("--repository") { Description = "(Not allowed) Repository ownership is immutable after creation" };
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON or @<file> (e.g. '{\"plan\":\"anthropic/claude-sonnet\"}')" };
         var stageModelVariantsOpt = new Option<string?>("--stage-model-variants") { Description = "Per-stage model variant map as inline JSON or @<file> (e.g. '{\"plan\":\"max\"}')" };
@@ -380,6 +385,7 @@ internal static class IssueCommands
         cmd.Options.Add(projectIdOpt);
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(modelVariantOpt);
+        cmd.Options.Add(workflowProfileOpt);
         cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(stageModelsOpt);
         cmd.Options.Add(stageModelVariantsOpt);
@@ -398,6 +404,7 @@ internal static class IssueCommands
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             var modelVariant = ctx.GetValue(modelVariantOpt);
+            var workflowProfile = ctx.GetValue(workflowProfileOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
             var stageModels = ctx.GetValue(stageModelsOpt);
@@ -409,6 +416,7 @@ internal static class IssueCommands
             var labelsProvided = ctx.GetResult(labelOpt) is not null;
             var priorityProvided = ctx.GetResult(priorityOpt) is not null;
             var modelProvided = ctx.GetResult(modelOpt) is not null;
+            var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             var stageModelsProvided = ctx.GetResult(stageModelsOpt) is not null;
             var stageModelVariantsProvided = ctx.GetResult(stageModelVariantsOpt) is not null;
             var readyProvided = IsOptionProvided(ctx, readyOpt);
@@ -461,6 +469,11 @@ internal static class IssueCommands
                     payload["priority"] = priority;
                 if (modelProvided)
                     payload["model"] = model;
+
+                if (workflowProfileProvided)
+                {
+                    payload["workflowProfileId"] = string.IsNullOrWhiteSpace(workflowProfile) ? null : workflowProfile;
+                }
 
                 if (stageModelsProvided)
                 {

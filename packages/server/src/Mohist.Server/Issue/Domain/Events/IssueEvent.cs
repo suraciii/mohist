@@ -7,6 +7,7 @@ public union IssueEvent(
     IssueDraftChanged,
     IssuePrerequisiteAdded,
     IssuePrerequisiteRemoved,
+    IssueWorkflowProfileChanged,
     IssueWorkStarted,
     IssueWorkCompleted,
     IssueClosed,
@@ -38,6 +39,9 @@ public sealed record IssuePrerequisiteAdded(
 
 public sealed record IssuePrerequisiteRemoved(
     int PrerequisiteNumber);
+
+public sealed record IssueWorkflowProfileChanged(
+    string? WorkflowProfileId);
 
 public sealed record IssueWorkStarted(
     string WorkflowRunId);

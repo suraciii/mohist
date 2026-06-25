@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
@@ -40,6 +41,7 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             IssueRepositoryResolver repositoryResolver,
+            IssueWorkflowProfileRegistry profileRegistry,
             IssueWorkflowProfileManager issueProfileManager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
@@ -52,6 +54,9 @@ public static partial class IssueRoutes
 
             if (TryValidateModelMetadata(req, out var modelError) is false)
                 return ApiResults.BadRequest(modelError!, "invalid_model_metadata");
+
+            if (!string.IsNullOrWhiteSpace(req.WorkflowProfileId) && !profileRegistry.Exists(req.WorkflowProfileId))
+                return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
             if (resolution.HasProblem)
@@ -74,7 +79,8 @@ public static partial class IssueRoutes
                     issueId,
                     req.Risk,
                     req.IsDraft ?? true,
-                    req.AttachmentIds);
+                    req.AttachmentIds,
+                    req.WorkflowProfileId);
             }
             catch (AttachmentLimitException ex)
             {
@@ -83,6 +89,10 @@ public static partial class IssueRoutes
             catch (AttachmentValidationException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
+            }
+            catch (IssueDomain.UnknownWorkflowProfileException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "unknown_workflow_profile");
             }
 
             await ApplyCreateModelMetadataAsync(issueProfileManager, issueId, req);
@@ -110,6 +120,7 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
             IssueQuerier issuesQuery,
+            IssueWorkflowProfileRegistry profileRegistry,
             IssueWorkflowProfileManager issueProfileManager) =>
         {
             var project = GetRequiredProject(ctx);
@@ -124,6 +135,16 @@ public static partial class IssueRoutes
             if (TryValidateModelMetadataRawTypes(req.Raw, out var rawTypeError) is false)
                 return ApiResults.BadRequest(rawTypeError!, "invalid_model_metadata");
 
+            // Workflow profile id: any present non-null value must refer to a
+            // known registered profile. Null means "clear to inherit default"
+            // and is part of the established three-state semantics.
+            if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
+                && !string.IsNullOrWhiteSpace(req.WorkflowProfileId)
+                && !profileRegistry.Exists(req.WorkflowProfileId))
+            {
+                return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
+            }
+
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
             try
@@ -135,7 +156,12 @@ public static partial class IssueRoutes
                     Priority: req.Priority,
                     IsDraft: req.IsDraft,
                     AttachmentIds: req.AttachmentIds,
-                    PresentFields: req.Fields));
+                    PresentFields: req.Fields,
+                    WorkflowProfileId: req.WorkflowProfileId));
+            }
+            catch (IssueDomain.WorkflowProfileLockedException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_profile_locked");
             }
             catch (InvalidOperationException ex)
             {

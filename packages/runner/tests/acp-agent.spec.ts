@@ -599,7 +599,7 @@ describe("mohist/acp-agent", () => {
 
   it("UsesFormPrompt_ActionResolvesThroughRegisteredLoaderBeforeMohistContextWrapper", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<PromptLoader>(async () => "loader produced task prompt")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "loader produced task prompt")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/loader", loader)
     setPromptLoaderRegistryForTest(registry)
@@ -637,7 +637,7 @@ describe("mohist/acp-agent", () => {
 
   it("UsesFormPrompt_LoaderReceivesContextWithWorkflowVariablesWorkDirWorkIdTitleAndStage", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
@@ -666,7 +666,7 @@ describe("mohist/acp-agent", () => {
 
   it("UsesFormPrompt_LoaderReceivesContextWithNullTitleAndStageWhenAbsent", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
@@ -1303,14 +1303,14 @@ class FakeAcpAgent {
         self.timeline?.push({ event: "newSession" })
         self.calls.push({ event: "newSession", cwd: params.cwd, _meta: params._meta })
         if (self.scenario === "resolved-model") {
-          return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1" } }
+          return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1", availableModels: [] } }
         }
         return { sessionId: "fake-session-1" }
       },
       async resumeSession(params) {
         self.timeline?.push({ event: "resumeSession" })
         self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd })
-        return { sessionId: params.sessionId }
+        return {}
       },
       async setSessionConfigOption(params) {
         self.timeline?.push({ event: "setSessionConfigOption" })
@@ -1447,7 +1447,7 @@ class FakeAcpAgent {
   }
 
   private extractCwd() {
-    const newSession = this.calls.findLast?.((entry) => entry.event === "newSession") ?? [...this.calls].reverse().find((entry) => entry.event === "newSession")
+    const newSession = [...this.calls].reverse().find((entry) => entry.event === "newSession")
     return typeof newSession?.cwd === "string" ? newSession.cwd : tmpdir()
   }
 
@@ -1472,7 +1472,7 @@ function thoughtUpdate(sessionId: string, text: string) {
 }
 
 function createSharedSessionFixture(
-  scenario: "thought-liveness" | "probe-send-failed",
+  scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
   options?: {
     cachedModel?: string
     newSessionId?: string
@@ -1558,10 +1558,6 @@ class FakeServerConnection {
     this.calls.push({ event: "attachWorkflowAgentSession", sessionName, body })
   }
 
-  async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { runtimeEvents: Array<{ type: string; payload: unknown }> }) {
-    for (const event of payload.runtimeEvents) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
-  }
-
   async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
     const events = payload?.events ?? payload?.runtimeEvents ?? []
     for (const event of events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
@@ -1571,6 +1567,7 @@ class FakeServerConnection {
 class FakeSharedAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
+  cancelHangs = false
 
   constructor(
     private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
@@ -1594,7 +1591,7 @@ class FakeSharedAcpAgent {
         async resumeSession(params) {
           self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd, _meta: params._meta })
           if (self.scenario === "resolved-model") {
-            return { sessionId: params.sessionId, models: { currentModelId: "anthropic/claude-haiku-4-5" } }
+            return { models: { currentModelId: "anthropic/claude-haiku-4-5", availableModels: [] } }
           }
           return {}
         },
