@@ -226,7 +226,11 @@ internal sealed class RuntimeConsistencyValidator
                 return null;
 
             await using var stream = await response.Content.ReadAsStreamAsync(token);
-            return await JsonSerializer.DeserializeAsync<SystemInfoSnapshot>(stream, SystemInfoSnapshot.JsonOptions, token);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
+            var root = document.RootElement;
+            if (root.TryGetProperty("data", out var data))
+                return data.Deserialize<SystemInfoSnapshot>(SystemInfoSnapshot.JsonOptions);
+            return root.Deserialize<SystemInfoSnapshot>(SystemInfoSnapshot.JsonOptions);
         }
         catch
         {

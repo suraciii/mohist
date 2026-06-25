@@ -160,7 +160,7 @@ internal sealed partial class SourceCodeUpdater
             var becameActive = false;
             while (!activeCts.IsCancellationRequested)
             {
-                if (await _systemd.IsRunnerRunningAsync(activeCts.Token))
+                if (await _operations.IsRunnerRunningAsync(activeCts.Token))
                 {
                     becameActive = true;
                     break;

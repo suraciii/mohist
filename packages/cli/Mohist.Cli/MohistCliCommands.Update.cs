@@ -176,6 +176,11 @@ internal sealed partial class SourceCodeUpdater
     internal ServiceReadinessProbe ReadinessProbe => _readinessProbe;
     internal RunnerRefreshVerifier RunnerRefreshVerifier => _runnerRefreshVerifier;
 
+    public async Task<int> SyncSkillsAsync(string? repoRoot, string? sourceSkillData, bool dryRun, CancellationToken cancellationToken = default)
+    {
+        return await _operations.SyncSkillsAsync(repoRoot, sourceSkillData, dryRun, cancellationToken);
+    }
+
     public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
     {
         var resolvedCliPath = await ResolveCliPathAsync(cliPath);
@@ -251,6 +256,11 @@ internal sealed partial class SourceCodeUpdater
         });
 
         return await FinalizeAsync(context, outcome.Success ? 0 : outcome.ExitCode);
+    }
+
+    private async Task<string?> ResolveCliPathAsync(string? explicitPath)
+    {
+        return await _operations.ResolveCliPathAsync(explicitPath);
     }
 
 

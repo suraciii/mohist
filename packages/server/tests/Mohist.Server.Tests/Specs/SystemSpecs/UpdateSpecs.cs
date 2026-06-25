@@ -48,19 +48,17 @@ public class UpdateSpecs
 
             var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
-            var managedCli = Path.Combine(tempRoot, ".local", "share", "mohist", "cli", "mo").Replace('\\', '/');
+            var explicitCli = "/home/user/.local/bin/mo";
             var wrapper = Path.Combine(tempRoot, ".local", "bin", "mo").Replace('\\', '/');
             Assert.Equal(0, exitCode);
             Assert.Equal("dotnet", commands.ExecutedCommands[0].FileName);
             Assert.Equal("publish", commands.ExecutedCommands[0].Args[0]);
             Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
-            Assert.Equal(managedCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
+            Assert.Equal(explicitCli + ".tmp", commands.ExecutedCommands[1].Args[1]);
             Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
             Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
-            Assert.Equal(managedCli, commands.ExecutedCommands[3].Args[1]);
-            Assert.Equal("chmod", commands.ExecutedCommands[4].FileName);
-            Assert.Equal("+x", commands.ExecutedCommands[4].Args[0]);
-            Assert.Equal(wrapper, commands.ExecutedCommands[4].Args[1]);
+            Assert.Equal(explicitCli, commands.ExecutedCommands[3].Args[1]);
+            Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "chmod" && c.Args.SequenceEqual(["+x", wrapper]));
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
             Assert.Contains(commands.ExecutedCommands, c =>
