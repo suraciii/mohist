@@ -35,9 +35,9 @@ public class ProjectWorkflowProfileManager : IScopedService
             ? "No description provided"
             : defaultDefinition.Description!;
 
-        var prDescription = string.IsNullOrWhiteSpace(MohistPrIssueWorkflowProfile.PrDescription)
+        var githubPrDescription = string.IsNullOrWhiteSpace(MohistGithubPrIssueWorkflowProfile.GithubPrDescription)
             ? "No description provided"
-            : MohistPrIssueWorkflowProfile.PrDescription.TrimEnd();
+            : MohistGithubPrIssueWorkflowProfile.GithubPrDescription.TrimEnd();
 
         return
         [
@@ -47,9 +47,9 @@ public class ProjectWorkflowProfileManager : IScopedService
                 Description: defaultDescription,
                 IsDefault: true),
             new SystemTemplateInfo(
-                Id: IssueWorkflowProfiles.PrId,
-                Name: "Mohist PR",
-                Description: prDescription,
+                Id: IssueWorkflowProfiles.GithubPrId,
+                Name: "Mohist GitHub PR",
+                Description: githubPrDescription,
                 IsDefault: false),
         ];
     }
@@ -85,8 +85,8 @@ public class ProjectWorkflowProfileManager : IScopedService
     {
         if (string.Equals(templateId, IssueWorkflowProfiles.DefaultId, StringComparison.Ordinal))
             return MohistWorkflow.Definition;
-        if (string.Equals(templateId, IssueWorkflowProfiles.PrId, StringComparison.Ordinal))
-            return MohistWorkflow.PrWorkflowDefinition;
+        if (string.Equals(templateId, IssueWorkflowProfiles.GithubPrId, StringComparison.Ordinal))
+            return MohistWorkflow.GithubPrWorkflowDefinition;
         return null;
     }
 

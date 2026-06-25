@@ -989,15 +989,15 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
-      workflowProfileId: 'mohist/pr',
+      workflowProfileId: 'mohist/github-pr',
     })
     mocks.workflowProfile = referenceProfileData()
 
     renderWithQueryClient(<IssueDetailPage />)
 
     const control = await waitFor(() => screen.getByTestId('issue-workflow-profile-control'))
-    expect(control.dataset.effectiveProfile).toBe('mohist/pr')
-    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/pr')
+    expect(control.dataset.effectiveProfile).toBe('mohist/github-pr')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/github-pr')
   })
 
   it('disables the profile change selector and explains why on a started issue', async () => {
@@ -1005,13 +1005,13 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
-      workflowProfileId: 'mohist/pr',
+      workflowProfileId: 'mohist/github-pr',
       workflowRunId: 'run-123',
     })
     mocks.workflowProfile = referenceProfileData()
     mocks.workflowProfilesList = [
       { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-      { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+      { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
 
     renderWithQueryClient(<IssueDetailPage />)
@@ -1034,7 +1034,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     mocks.workflowProfile = referenceProfileData()
     mocks.workflowProfilesList = [
       { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-      { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+      { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
 
     renderWithQueryClient(<IssueDetailPage />)
@@ -1042,12 +1042,12 @@ describe('IssueDetailPage workflow profile integration', () => {
     const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
     expect(select.disabled).toBe(false)
 
-    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
     await waitFor(() => expect(mocks.updateIssueWorkflowProfileMutateAsync).toHaveBeenCalledTimes(1))
     expect(mocks.updateIssueWorkflowProfileMutateAsync).toHaveBeenCalledWith({
       issueNumber: 1,
-      workflowProfileId: 'mohist/pr',
+      workflowProfileId: 'mohist/github-pr',
     })
   })
 
@@ -1063,7 +1063,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     mocks.workflowProfile = referenceProfileData()
     mocks.workflowProfilesList = [
       { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-      { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+      { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
     mocks.updateIssueWorkflowProfileMutateAsync = vi.fn(() => Promise.reject(
       new Error('Cannot change workflow profile: workflow run wr-1 is active'),
@@ -1072,7 +1072,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     renderWithQueryClient(<IssueDetailPage />)
 
     const select = await waitFor(() => screen.getByTestId('issue-workflow-profile-select') as HTMLSelectElement)
-    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
     await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
     expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')

@@ -124,8 +124,8 @@ public class IssueApiSpecs
         Assert.Equal("Mohist Default", defaultProfile.Name);
         Assert.Contains("Mohist pipeline", defaultProfile.Description);
 
-        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/pr");
-        Assert.Equal("Mohist PR", prProfile.Name);
+        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/github-pr");
+        Assert.Equal("Mohist GitHub PR", prProfile.Name);
         Assert.Contains("Mohist pipeline", prProfile.Description);
     }
 
@@ -145,8 +145,8 @@ public class IssueApiSpecs
         Assert.NotEmpty(defaultProfile.SuitableFor);
         Assert.All(defaultProfile.SuitableFor, item => Assert.False(string.IsNullOrWhiteSpace(item)));
 
-        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/pr");
-        Assert.Equal("Mohist PR", prProfile.DisplayName);
+        var prProfile = Assert.Single(profiles, p => p.Id == "mohist/github-pr");
+        Assert.Equal("Mohist GitHub PR", prProfile.DisplayName);
         Assert.Contains("Mohist pipeline", prProfile.Description);
         Assert.NotNull(prProfile.SuitableFor);
         Assert.NotEmpty(prProfile.SuitableFor);

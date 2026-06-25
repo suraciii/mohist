@@ -6,11 +6,15 @@ import { stringAt } from "../core/json-path.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
 import { acpAgentAction } from "./acp-agent.js"
 import { resolveActionPath } from "./expectations.js"
-import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
+import {
+  createGitHubPrAction,
+  markGitHubPrReadyAction,
+  mergeGitHubPrAction,
+} from "./github-pr.js"
+import { githubPrStatusAction } from "./github-pr-status.js"
+import { archiveChangeAction, openspecArtifactsAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
 import { git as defaultGit } from "./git.js"
-import { publishViaPrAction } from "./publish-via-pr.js"
-import { createPullRequestAction, mergePullRequestAction } from "./pull-request.js"
 import { pushAction } from "./push.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
@@ -44,14 +48,16 @@ export function createDefaultRegistry() {
   registry.register("mohist/acp-agent", acpAgentAction)
   registry.register("mohist/openspec-tasks", openspecTasksAction)
   registry.register("mohist/openspec-sync", openspecSyncAction)
+  registry.register("mohist/openspec-artifacts", openspecArtifactsAction)
   registry.register("mohist/archive-change", archiveChangeAction)
   registry.register("mohist/rebase", rebaseAction)
   registry.register("mohist/rebase-status", rebaseStatusAction)
   registry.register("mohist/merge-ready", mergeReadyAction)
   registry.register("mohist/push", pushAction)
-  registry.register("mohist/publish-via-pr", publishViaPrAction)
-  registry.register("mohist/create-pull-request", createPullRequestAction)
-  registry.register("mohist/merge-pull-request", mergePullRequestAction)
+  registry.register("mohist/create-github-pr", createGitHubPrAction)
+  registry.register("mohist/mark-github-pr-ready", markGitHubPrReadyAction)
+  registry.register("mohist/merge-github-pr", mergeGitHubPrAction)
+  registry.register("mohist/github-pr-status", githubPrStatusAction)
   return registry
 }
 

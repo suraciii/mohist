@@ -1,19 +1,21 @@
+
+
 ### Requirement: Single source of truth for issue workflow profile
 
 An issue SHALL have exactly one workflow profile selection that is the single source of truth across every read surface. The issue detail read model, the issue list read model, the workflow-profile endpoint response, and `mo issue show` SHALL all project the identical effective `workflowProfileId`. When no issue-level selection is persisted, the effective profile SHALL be resolved by inheriting the project default and then the system default (`mohist/default`); no read surface SHALL independently invent or hardcode a default independent of this resolution.
 
-#### Scenario: All read surfaces agree after create with PR profile
+#### Scenario: All read surfaces agree after create with GitHub PR profile
 
-- **WHEN** an issue is created with workflow profile `mohist/pr`
-- **THEN** the issue detail read model SHALL report `workflowProfileId: "mohist/pr"`
-- **AND** the issue list read model SHALL report `workflowProfileId: "mohist/pr"`
+- **WHEN** an issue is created with workflow profile `mohist/github-pr`
+- **THEN** the issue detail read model SHALL report `workflowProfileId: "mohist/github-pr"`
+- **AND** the issue list read model SHALL report `workflowProfileId: "mohist/github-pr"`
 - **AND** the workflow-profile endpoint SHALL report the same profile id
-- **AND** `mo issue show <number>` SHALL display `mohist/pr`
+- **AND** `mo issue show <number>` SHALL display `mohist/github-pr`
 
-#### Scenario: Read surfaces agree after update to PR profile
+#### Scenario: Read surfaces agree after update to GitHub PR profile
 
-- **WHEN** a backlog issue whose profile is `mohist/default` is updated to `mohist/pr`
-- **THEN** the issue detail, list, and workflow-profile endpoint SHALL all report `workflowProfileId: "mohist/pr"` in the same response cycle
+- **WHEN** a backlog issue whose profile is `mohist/default` is updated to `mohist/github-pr`
+- **THEN** the issue detail, list, and workflow-profile endpoint SHALL all report `workflowProfileId: "mohist/github-pr"` in the same response cycle
 
 #### Scenario: No issue-level selection inherits default
 
@@ -27,9 +29,9 @@ An issue SHALL have exactly one workflow profile selection that is the single so
 
 #### Scenario: Create with explicit profile persists it
 
-- **WHEN** a client sends `POST /api/issues` with `workflowProfileId: "mohist/pr"`
-- **THEN** the created issue's stored workflow profile selection SHALL be `mohist/pr`
-- **AND** a subsequent `GET /api/issues/:number` SHALL return `workflowProfileId: "mohist/pr"`
+- **WHEN** a client sends `POST /api/issues` with `workflowProfileId: "mohist/github-pr"`
+- **THEN** the created issue's stored workflow profile selection SHALL be `mohist/github-pr`
+- **AND** a subsequent `GET /api/issues/:number` SHALL return `workflowProfileId: "mohist/github-pr"`
 
 #### Scenario: Create without profile inherits default
 
@@ -43,13 +45,13 @@ A backlog or ready issue (an issue with no active workflow run) SHALL support ch
 
 #### Scenario: Update profile on backlog issue
 
-- **WHEN** a backlog issue's workflow profile is changed from `mohist/default` to `mohist/pr`
-- **THEN** the issue detail, list, and workflow-profile endpoint SHALL report `mohist/pr`
+- **WHEN** a backlog issue's workflow profile is changed from `mohist/default` to `mohist/github-pr`
+- **THEN** the issue detail, list, and workflow-profile endpoint SHALL report `mohist/github-pr`
 - **AND** the issue's configured workflow profile variables SHALL remain unchanged
 
 #### Scenario: Clearing issue-level selection falls back to default
 
-- **WHEN** a backlog issue with an issue-level `mohist/pr` selection is cleared
+- **WHEN** a backlog issue with an issue-level `mohist/github-pr` selection is cleared
 - **THEN** the issue SHALL have no issue-level selection
 - **AND** reads SHALL resolve the effective profile to the inherited default
 
@@ -69,15 +71,16 @@ An issue that has an active (started) workflow run SHALL reject any attempt to c
 - **THEN** the update SHALL be accepted as a run-scoped runtime override
 - **AND** the issue's original workflow profile selection SHALL remain unchanged
 
+
 ### Requirement: Startup uses the displayed workflow profile
 
-The workflow definition used when starting an issue SHALL be the one resolved from the issue's effective workflow profile selection — the same value displayed on the issue detail and `mo issue show`. A `mohist/pr` profile SHALL enter the PR publish/merge execution path, and a `mohist/default` profile SHALL enter the default merge/push execution path. The startup resolution SHALL NOT consult a divergent source from the read models.
+The workflow definition used when starting an issue SHALL be the one resolved from the issue's effective workflow profile selection — the same value displayed on the issue detail and `mo issue show`. A `mohist/github-pr` profile SHALL enter the GitHub PR draft/ready/merge execution path, and a `mohist/default` profile SHALL enter the default merge/push execution path. The startup resolution SHALL NOT consult a divergent source from the read models.
 
-#### Scenario: PR profile starts the PR workflow
+#### Scenario: GitHub PR profile starts the GitHub PR workflow
 
-- **WHEN** an issue whose effective profile is `mohist/pr` is started
-- **THEN** the started workflow run SHALL use the PR workflow definition
-- **AND** the run SHALL enter the PR publish/merge path
+- **WHEN** an issue whose effective profile is `mohist/github-pr` is started
+- **THEN** the started workflow run SHALL use the GitHub PR workflow definition
+- **AND** the run SHALL enter the draft PR → ready → merge execution path
 
 #### Scenario: Default profile starts the default workflow
 

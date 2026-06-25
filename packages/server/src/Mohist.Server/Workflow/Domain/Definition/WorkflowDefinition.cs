@@ -20,9 +20,12 @@ public sealed record TaskDefinition(
 
 public sealed record TaskFailureAction(int Limit, List<TaskFailureCase> Cases);
 
-public sealed record TaskFailureCase(Dictionary<string, JsonElement?> When, List<TaskDefinition> Tasks);
+public sealed record TaskFailureCase(
+    Dictionary<string, JsonElement?> When,
+    List<TaskDefinition> Tasks,
+    bool RetrySelf = false);
 
-public sealed record CheckFailureRepair(int Limit, TaskDefinition Task, TaskDefinition? VerifyTask = null);
+public sealed record CheckFailureRepair(int Limit, TaskDefinition Task);
 
 public sealed record CheckFailureAction(CheckFailureRepair? Repair = null);
 

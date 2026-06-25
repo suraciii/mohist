@@ -109,10 +109,7 @@ public static partial class WorkflowRunExtensions
             CheckFailureRepair repair,
             CheckResult? result = null)
         {
-            var tasks = new List<TaskDefinition> { BuildRepairTask(run, checkName, repair.Task, result) };
-            if (repair.VerifyTask is not null)
-                tasks.Add(repair.VerifyTask);
-            return tasks;
+            return [BuildRepairTask(run, checkName, repair.Task, result)];
         }
     }
 

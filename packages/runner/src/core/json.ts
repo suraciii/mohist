@@ -25,6 +25,16 @@ export function numberInput(input: JsonObject | null | undefined, key: string) {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+export function booleanInput(input: JsonObject | null | undefined, key: string): boolean | undefined {
+  const value = input?.[key]
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    if (/^(true|1|yes|on)$/i.test(value)) return true
+    if (/^(false|0|no|off)$/i.test(value)) return false
+  }
+  return undefined
+}
+
 export function objectInput(input: JsonObject | null | undefined, key: string) {
   const value = input?.[key]
   return isObject(value) ? value : undefined

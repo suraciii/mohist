@@ -487,6 +487,42 @@ public class MohistDefaultWorkflowProfileSpecs
                   uses: mohist/acp-agent
                   with:
                     prompt: Fix it
+        """);
+
+        var check = definition.Stages.Single().Checks.Single();
+        Assert.Equal("core/script", check.Uses);
+        Assert.Equal(1, check.OnFailure?.Repair?.Limit);
+        Assert.Equal("fix-health", check.OnFailure?.Repair?.Task.Id);
+        Assert.Contains("\"timeout\":300000", JsonSerializer.Serialize(check.With));
+        Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.Task.With));
+    }
+
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void WorkflowYamlParser_TreatsVerifyTaskAsUnknownKey()
+    {
+        // VerifyTask was removed in the onFailure-only recovery model.
+        // A YAML profile that still carries a `verifyTask:` block on a
+        // check is parsed as if the key were unknown — the deserializer's
+        // IgnoreUnmatchedProperties behavior is preserved and the
+        // resulting CheckFailureRepair carries only the repair task.
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks: []
+            checks:
+              - name: health
+                title: Health
+                uses: core/script
+                with:
+                  run: git diff --check
+                repairLimit: 2
+                repairTask:
+                  id: fix-health
+                  title: Fix health
+                  uses: mohist/acp-agent
+                  with:
+                    prompt: Fix it
                 verifyTask:
                   id: verify-health
                   title: Verify health
@@ -496,13 +532,13 @@ public class MohistDefaultWorkflowProfileSpecs
         """);
 
         var check = definition.Stages.Single().Checks.Single();
-        Assert.Equal("core/script", check.Uses);
-        Assert.Equal(1, check.OnFailure?.Repair?.Limit);
-        Assert.Equal("fix-health", check.OnFailure?.Repair?.Task.Id);
-        Assert.Equal("verify-health", check.OnFailure?.Repair?.VerifyTask?.Id);
-        Assert.Contains("\"timeout\":300000", JsonSerializer.Serialize(check.With));
-        Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.Task.With));
-        Assert.Contains("\"run\":\"git diff --check\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.VerifyTask?.With));
+        Assert.NotNull(check.OnFailure?.Repair);
+        var repair = check.OnFailure!.Repair!;
+        Assert.Equal(2, repair.Limit);
+        Assert.Equal("fix-health", repair.Task.Id);
+        // The CheckFailureRepair record has exactly two fields; assert
+        // that no extra task is exposed via reflection.
+        Assert.Equal(2, typeof(CheckFailureRepair).GetProperties().Length);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -517,16 +553,17 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
         Assert.Contains("repairTask:", yaml);
-        Assert.Contains("verifyTask:", yaml);
         Assert.Contains("id: fix-review-findings", yaml);
         Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
+        // The serializer must not emit a verifyTask key. VerifyTask is
+        // removed from the check-repair model; the serialized check
+        // carries only the repair task.
+        Assert.DoesNotContain("verifyTask:", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
         var reviewRepair = reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Repair;
-        Assert.Equal(2, reviewRepair?.Limit);
-        Assert.Equal("fix-review-findings", reviewRepair?.Task.Id);
-        Assert.Equal("ai-review", reviewRepair?.VerifyTask?.Id);
-        Assert.Contains("\"expect\"", JsonSerializer.Serialize(reviewRepair?.VerifyTask?.With));
-        Assert.DoesNotContain("\"expect\"", JsonSerializer.Serialize(reviewRepair?.Task.With));
+        Assert.NotNull(reviewRepair);
+        Assert.Equal(2, reviewRepair!.Limit);
+        Assert.Equal("fix-review-findings", reviewRepair.Task.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -775,6 +812,10 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void WorkflowYamlParser_RepairTaskArtifactsAreIsolated()
     {
+        // VerifyTask is gone. The check-repair path exposes only the
+        // repair task. The repair task's own `artifacts` declaration
+        // (none in this fixture) must remain isolated from the parent
+        // check task's `artifacts` declaration.
         var definition = MohistWorkflow.ParseYaml("""
         stages:
           - stage: check
@@ -801,15 +842,6 @@ public class MohistDefaultWorkflowProfileSpecs
                   uses: mohist/acp-agent
                   with:
                     prompt: fix
-                verifyTask:
-                  id: re-review
-                  title: Re review
-                  uses: mohist/acp-agent
-                  with:
-                    prompt: re
-                  artifacts:
-                    files:
-                      - path: review.md
         """);
 
         var stage = definition.Stages.Single();
@@ -818,10 +850,6 @@ public class MohistDefaultWorkflowProfileSpecs
 
         var repairCheck = stage.Checks.Single();
         Assert.Null(repairCheck.OnFailure?.Repair?.Task.Artifacts);
-        var verify = repairCheck.OnFailure?.Repair?.VerifyTask;
-        Assert.NotNull(verify);
-        Assert.NotNull(verify!.Artifacts);
-        Assert.Equal(new[] { "review.md" }, verify.Artifacts!.Files.Select(f => f.Path).ToArray());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -938,17 +966,27 @@ public class MohistDefaultWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void DefaultWorkflowDefinition_ReviewPassedRepairVerifyTaskDeclaresMarkerOneOf()
+    public void DefaultWorkflowDefinition_ReviewPassedRepairHasNoVerifyTask()
     {
-        // The repair-loop verify task reuses the ai-review task; its
-        // action input must also accept either verdict marker.
+        // VerifyTask is removed from the check-repair model. The
+        // review-passed check's repair path exposes only the named
+        // repair task (fix-review-findings); the check-repair path is
+        // exactly [repairTask] with no verify step. The marker oneof
+        // declaration is the responsibility of the original task, not
+        // the repair path; see DefaultWorkflowDefinition_AiReviewTaskDeclaresMarkerExpectationWithOneOf.
         var definition = MohistWorkflow.Definition;
         var check = definition.Stages[2];
         var reviewPassed = check.Checks.Single(c => c.Name == "review-passed");
-        var verify = reviewPassed.OnFailure?.Repair?.VerifyTask;
-        Assert.NotNull(verify);
-
-        AssertMarkerOneOf(verify!);
+        Assert.NotNull(reviewPassed.OnFailure?.Repair);
+        var repair = reviewPassed.OnFailure!.Repair!;
+        Assert.Equal(2, repair.Limit);
+        Assert.Equal("fix-review-findings", repair.Task.Id);
+        // The CheckFailureRepair record has exactly two fields, Limit and
+        // Task; the absent VerifyTask property name confirms the type.
+        var propertyNames = typeof(CheckFailureRepair).GetProperties()
+            .Select(p => p.Name)
+            .ToArray();
+        Assert.Equal(new[] { "Limit", "Task" }, propertyNames);
     }
 
     private static void AssertMarkerOneOf(TaskDefinition task)

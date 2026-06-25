@@ -1,0 +1,285 @@
+import { afterEach, describe, expect, it } from "vitest"
+import type { ActionContext, JsonObject } from "../src/core/types.js"
+import { createDefaultRegistry } from "../src/actions/registry.js"
+import {
+  markGitHubPrReadyAction,
+  setGitHubPrGhRunnerForTest,
+  setGitHubPrGitRunnerForTest,
+} from "../src/actions/github-pr.js"
+
+type CommandResult = { exitCode: number; stdout: string; stderr: string }
+
+const WORKSPACE_PATH = "/workspace"
+
+afterEach(() => {
+  setGitHubPrGitRunnerForTest(null)
+  setGitHubPrGhRunnerForTest(null)
+})
+
+function ghOk(stdout: string, stderr = ""): CommandResult {
+  return { exitCode: 0, stdout, stderr }
+}
+
+function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
+  return { exitCode, stdout, stderr }
+}
+
+function context(withOverrides: JsonObject = {}): ActionContext {
+  return {
+    workflowRunId: "wr-ready-1",
+    workId: "mark-pr-ready",
+    workType: "task",
+    stage: "check",
+    title: "Mark GitHub PR ready for review",
+    uses: "mohist/mark-github-pr-ready",
+    with: withOverrides,
+    variables: {
+      project: { id: "proj_1", path: WORKSPACE_PATH },
+      issue: { title: "Use GitHub PR workflow", body: "body", number: 248 },
+      repository: { gitUrl: "https://example.com/repo.git", baseBranch: "master" },
+      workspace: { path: WORKSPACE_PATH, branch: "mohist/run-wr-ready-1" },
+      vars: { github: { pr: { number: 42, url: "https://github.com/example/repo/pull/42" } } },
+    },
+    workDir: WORKSPACE_PATH,
+    projectId: "proj_1",
+    issueNumber: 248,
+    signal: new AbortController().signal,
+  }
+}
+
+function installGit(respond: () => never) {
+  setGitHubPrGitRunnerForTest(async () => await respond())
+}
+
+function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
+  setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
+}
+
+describe("mohist/mark-github-pr-ready registry", () => {
+  it("registers mark-github-pr-ready under its new id", () => {
+    const registry = createDefaultRegistry()
+    expect(registry.resolve("mohist/mark-github-pr-ready")).toBe(markGitHubPrReadyAction)
+  })
+})
+
+describe("mohist/mark-github-pr-ready action", () => {
+  it("requires prNumber and reports config-error when missing", async () => {
+    installGh(() => ghOk("never called"))
+
+    const result = await markGitHubPrReadyAction(context({}))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      errorCode: "config-error",
+      prNumber: null,
+      transitioned: false,
+    })
+    expect(output.message).toContain("requires prNumber")
+  })
+
+  it("is idempotent: a PR already marked READY returns success without gh pr ready", async () => {
+    const ghCalls: string[] = []
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      ghCalls.push(full)
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "OPEN", isDraft: false, url: "https://github.com/example/repo/pull/42" }))
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      status: "completed",
+      prNumber: 42,
+      prUrl: "https://github.com/example/repo/pull/42",
+      state: "READY",
+      previousState: "READY",
+      transitioned: false,
+      errorCode: null,
+    })
+    expect(output.message).toContain("already ready")
+    expect(ghCalls.some((call) => call === "gh pr ready 42")).toBe(false)
+  })
+
+  it("transitions a draft PR to READY when isDraft is true", async () => {
+    const ghCalls: string[] = []
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      ghCalls.push(full)
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/example/repo/pull/42" }))
+        case "gh pr ready 42":
+          return ghOk("https://github.com/example/repo/pull/42\n")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      status: "completed",
+      prNumber: 42,
+      prUrl: "https://github.com/example/repo/pull/42",
+      state: "READY",
+      previousState: "DRAFT",
+      transitioned: true,
+      errorCode: null,
+    })
+    expect(ghCalls).toContain("gh pr ready 42")
+  })
+
+  it("does not call git push or update title/body — the action is a state transition only", async () => {
+    const ghCalls: string[] = []
+    installGit(() => { throw new Error("git should not be called") })
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      ghCalls.push(full)
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/example/repo/pull/42" }))
+        case "gh pr ready 42":
+          return ghOk("ok\n")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    await markGitHubPrReadyAction(context({ prNumber: 42 }))
+
+    const forbiddenStarts = ["gh pr edit", "gh pr create", "gh pr merge", "gh pr close", "gh pr reopen"]
+    for (const call of ghCalls) {
+      for (const forbidden of forbiddenStarts) {
+        expect(call.startsWith(forbidden)).toBe(false)
+      }
+    }
+    expect(ghCalls).toContain("gh pr ready 42")
+    expect(ghCalls).toContain("gh pr view 42 --json state,isDraft,url")
+  })
+
+  it("reports config-error when the gh CLI precheck fails", async () => {
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      if (full === "gh --version") return ghFail("gh: command not found", "", 127)
+      return ghFail(`unexpected gh call: ${full}`)
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      errorCode: "config-error",
+      prNumber: 42,
+    })
+    expect(output.message).toContain("gh CLI is not installed")
+  })
+
+  it("returns errorCode pr-state-conflict if the PR is closed", async () => {
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "CLOSED", isDraft: true, url: "https://github.com/example/repo/pull/42" }))
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      errorCode: "pr-state-conflict",
+      prNumber: 42,
+      prUrl: "https://github.com/example/repo/pull/42",
+      transitioned: false,
+    })
+    expect(output.message).toContain("in state CLOSED")
+  })
+
+  it("classifies gh pr ready failures via the shared classifier", async () => {
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk(JSON.stringify({ state: "OPEN", isDraft: true, url: "https://github.com/example/repo/pull/42" }))
+        case "gh pr ready 42":
+          return ghFail("fatal: could not resolve host api.github.com")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      errorCode: "retry-safe",
+      prNumber: 42,
+      previousState: "DRAFT",
+      transitioned: false,
+    })
+    expect(output.message).toContain("gh pr ready 42 failed")
+  })
+
+  it("falls back to errorCode retry-safe when gh pr view returns unparseable JSON", async () => {
+    installGh((cmd, args) => {
+      const full = [cmd, ...args].join(" ")
+      switch (full) {
+        case "gh --version":
+        case "gh auth status":
+          return ghOk("ok\n")
+        case "gh pr view 42 --json state,isDraft,url":
+          return ghOk("not json")
+        default:
+          return ghFail(`unexpected gh call: ${full}`)
+      }
+    })
+
+    const result = await markGitHubPrReadyAction(context({ prNumber: 42 }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      kind: "mark-github-pr-ready",
+      errorCode: "retry-safe",
+      prNumber: 42,
+    })
+  })
+})

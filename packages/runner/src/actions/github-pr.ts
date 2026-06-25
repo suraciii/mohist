@@ -5,21 +5,21 @@ import { runCommand } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import { isIssueFieldSource, resolveIssueFields, type IssueFields } from "./issue-fields.js"
 
-export type GitRunner = typeof defaultGit
-export type GhRunner = typeof runCommand
+type GitRunner = typeof defaultGit
+type GhRunner = typeof runCommand
 
 let git: GitRunner = defaultGit
 let gh: GhRunner = runCommand
 
-export function setPublishViaPrGitRunnerForTest(runner: GitRunner | null) {
+export function setGitHubPrGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
 }
 
-export function setPublishViaPrGhRunnerForTest(runner: GhRunner | null) {
+export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
   gh = runner ?? runCommand
 }
 
-export type PublishViaPrFailureKind =
+export type GitHubPrErrorCode =
   | "base-moved"
   | "retry-safe"
   | "config-error"
@@ -27,105 +27,101 @@ export type PublishViaPrFailureKind =
   | "pr-state-conflict"
   | "pr-checks-failed"
 
-export interface PublishViaPrStep {
+export interface GitHubPrStep {
   name: string
   command: string
   exitCode: number
   output: string
 }
 
-export interface PublishViaPrOutput {
-  kind: "publish-via-pr"
+export interface CreateGitHubPrOutput {
+  kind: "create-github-pr"
   status: "completed" | "failed"
   source: string
   targetBranch: string
+  branch: string | null
+  prNumber: number | null
+  prUrl: string | null
+  operation: "created" | "updated" | "reused" | null
+  baseSha: string | null
+  pushed: boolean
+  draft: boolean
+  errorCode: GitHubPrErrorCode | null
+  message: string | null
+  output: string
+  steps: GitHubPrStep[]
+}
+
+export interface MergeGitHubPrOutput {
+  kind: "merge-github-pr"
+  status: "completed" | "failed"
   prNumber: number | null
   prUrl: string | null
   mergeCommitSha: string | null
-  baseSha: string | null
-  pushed: boolean
-  failureKind: PublishViaPrFailureKind | null
-  failureMessage: string | null
+  method: "squash"
+  errorCode: GitHubPrErrorCode | null
+  message: string | null
   output: string
-  steps: PublishViaPrStep[]
+  steps: GitHubPrStep[]
 }
 
-export async function publishViaPrAction(context: ActionContext): Promise<ActionResult> {
+export interface MarkGitHubPrReadyOutput {
+  kind: "mark-github-pr-ready"
+  status: "completed" | "failed"
+  prNumber: number | null
+  prUrl: string | null
+  state: "READY" | "DRAFT" | null
+  previousState: "READY" | "DRAFT" | null
+  transitioned: boolean
+  errorCode: GitHubPrErrorCode | null
+  message: string | null
+  output: string
+  steps: GitHubPrStep[]
+}
+
+export async function createGitHubPrAction(context: ActionContext): Promise<ActionResult> {
   const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
   const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
   const remote = stringInput(context.with, "remote") ?? "origin"
-  const issueNumber = resolveIssueNumber(context)
+  const draft = context.with?.["draft"] !== false
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
-  const steps: PublishViaPrStep[] = []
-  const record = (name: string, command: string, exitCode: number, output: string) => {
-    steps.push({ name, command, exitCode, output })
-  }
+  const steps: GitHubPrStep[] = []
+  const record = createRecorder(steps)
 
-  const fail = (kind: PublishViaPrFailureKind, failureMessage: string, payload: Partial<PublishViaPrOutput> = {}): ActionResult => {
-    return buildPublishViaPrOutput({
-      kind: "publish-via-pr",
-      status: "failed",
-      source,
-      targetBranch: target,
-      prNumber: payload.prNumber ?? null,
-      prUrl: payload.prUrl ?? null,
-      mergeCommitSha: payload.mergeCommitSha ?? null,
-      baseSha: payload.baseSha ?? null,
-      pushed: payload.pushed ?? false,
-      failureKind: kind,
-      failureMessage,
-      output: payload.output ?? failureMessage,
-      steps,
-    })
-  }
+  const fail = (
+    errorCode: GitHubPrErrorCode,
+    message: string,
+    payload: Partial<CreateGitHubPrOutput> = {},
+  ): ActionResult => buildCreateGitHubPrOutput({
+    kind: "create-github-pr",
+    status: "failed",
+    source,
+    targetBranch: target,
+    branch: payload.branch ?? null,
+    prNumber: payload.prNumber ?? null,
+    prUrl: payload.prUrl ?? null,
+    operation: payload.operation ?? null,
+    baseSha: payload.baseSha ?? null,
+    pushed: payload.pushed ?? false,
+    draft,
+    errorCode,
+    message,
+    output: payload.output ?? message,
+    steps,
+  })
 
-  const succeed = (payload: Partial<PublishViaPrOutput> & { output?: string }): ActionResult => {
-    return buildPublishViaPrOutput({
-      kind: "publish-via-pr",
-      status: "completed",
-      source,
-      targetBranch: target,
-      prNumber: payload.prNumber ?? null,
-      prUrl: payload.prUrl ?? null,
-      mergeCommitSha: payload.mergeCommitSha ?? null,
-      baseSha: payload.baseSha ?? null,
-      pushed: payload.pushed ?? true,
-      failureKind: null,
-      failureMessage: null,
-      output: payload.output ?? "PR published via GitHub",
-      steps,
-    })
-  }
-
-  // Phase 1: gh CLI precheck. Operator hosts MUST have `gh` installed and
-  // `gh auth login` completed; missing/unauthenticated gh fails fast with
-  // `config-error` and the action performs no remote mutation.
   const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal)
-  const precheckExitCode = ghPrecheck.ok ? 0 : ghPrecheck.exitCode
-  record("gh-precheck", "gh --version && gh auth status", precheckExitCode, ghPrecheck.output)
+  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
   if (!ghPrecheck.ok) {
     return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
 
-  const sourceValidationError = validateIssueFieldSources(context)
-  if (sourceValidationError) {
-    return fail("config-error", sourceValidationError, { output: sourceValidationError })
+  const text = await resolveCreatePrText(context)
+  if (text.kind === "failure") {
+    return fail("config-error", text.message, { output: text.message })
   }
-  const issueFieldsResult = await loadIssueFieldsIfNeeded(context)
-  if (issueFieldsResult.kind === "failure") {
-    return fail("config-error", issueFieldsResult.message, { output: issueFieldsResult.message })
-  }
-  const issueFields = issueFieldsResult.issueFields
-  const title = resolveTitle(context, issueNumber, issueFields)
-  const body = resolveBody(context, issueNumber, issueFields)
 
-  // Phase 2: resolve the head branch from the workflow workspace. The
-  // workflow workspace stays on `workspace.branch` for the entire action
-  // — we never `git checkout` the base branch here. The action accepts
-  // an explicit `source` (e.g. `${{ workspace.branch }}`) so the run
-  // branch is known up front and we only fall back to `rev-parse` when
-  // the source resolves to literal `HEAD`.
   const explicitSource = source !== "HEAD"
   const branchProbe = explicitSource
     ? { success: true as const, name: source }
@@ -139,98 +135,283 @@ export async function publishViaPrAction(context: ActionContext): Promise<Action
     return fail("retry-safe", `Could not resolve current branch: ${branchProbe.combinedOutput}`, { output: branchProbe.combinedOutput })
   }
 
-  // Phase 3: resolve the base SHA the branch was prepared against. PR
-  // delivery records `baseSha` on the task result alongside the landed
-  // commit and target branch, mirroring the direct delivery shape.
   const baseSha = await resolveBaseSha(git, workDir, remote, target, context.signal, record)
   if (baseSha.kind === "failure") {
-    return fail(baseSha.failureKind, baseSha.message, { output: baseSha.output })
+    return fail(baseSha.failureKind, baseSha.message, { output: baseSha.output, branch: branchProbe.name })
   }
 
-  // Phase 4: force-with-lease push. The action never checks out the base
-  // branch inside the workflow workspace; the workspace stays on
-  // `workspace.branch` and that branch is what we push.
   const pushResult = await git(workDir, ["push", "--force-with-lease", remote, branchProbe.name], context.signal)
   record("git-push", `push --force-with-lease ${remote} ${branchProbe.name}`, pushResult.exitCode, pushResult.combinedOutput)
   if (!pushResult.success) {
     return fail(
-      classifyPushFailure(pushResult.stdout, pushResult.stderr),
+      classifyGhFailure(pushResult.stdout, pushResult.stderr),
       `git push --force-with-lease ${remote} ${branchProbe.name} failed: ${pushResult.combinedOutput}`,
-      { output: pushResult.combinedOutput, baseSha: baseSha.sha },
+      { output: pushResult.combinedOutput, branch: branchProbe.name, baseSha: baseSha.sha },
     )
   }
 
-  // Phase 5: open or reuse the PR for `head:base`.
-  const prOpen = await openOrReusePr(gh, workDir, branchProbe.name, target, title, body, context.signal, record)
-  if (prOpen.kind === "failure") {
-    return fail(prOpen.failureKind, prOpen.message, { output: prOpen.output, baseSha: baseSha.sha })
-  }
-  const { prNumber, prUrl } = prOpen
-
-  // Phase 6: merge or confirm.
-  const merge = await mergeOrConfirmPr(gh, workDir, prNumber, title, context.signal, record)
-  if (merge.kind === "failure") {
-    return fail(merge.failureKind, merge.message, {
-      output: merge.output,
-      prNumber,
-      prUrl,
+  const opened = await openOrReusePr(gh, workDir, branchProbe.name, target, text.title, text.body, draft, context.signal, record)
+  if (opened.kind === "failure") {
+    return fail(opened.errorCode, opened.message, {
+      output: opened.output,
+      branch: branchProbe.name,
       baseSha: baseSha.sha,
+      pushed: true,
     })
   }
 
-  return succeed({
-    prNumber,
-    prUrl: merge.prUrl ?? prUrl,
-    mergeCommitSha: merge.mergeCommitSha,
+  return buildCreateGitHubPrOutput({
+    kind: "create-github-pr",
+    status: "completed",
+    source,
+    targetBranch: target,
+    branch: branchProbe.name,
+    prNumber: opened.prNumber,
+    prUrl: opened.prUrl,
+    operation: opened.operation,
     baseSha: baseSha.sha,
-    output: merge.output,
+    pushed: true,
+    draft,
+    errorCode: null,
+    message: null,
+    output: opened.output,
+    steps,
   })
 }
 
-function resolveTitle(context: ActionContext, issueNumber: number | null, issueFields: IssueFields | null): string {
-  const literal = stringInput(context.with, "title") ?? stringInput(context.with, "message")
-  if (literal !== undefined) return literal
-  const source = stringInput(context.with, "titleFrom")
-  if (source === "issue.title" && issueFields) return issueFields.title
-  if (source === "issue.body" && issueFields) return issueFields.body
-  return `Complete issue #${issueNumber ?? ""}`.trim()
-}
+export async function mergeGitHubPrAction(context: ActionContext): Promise<ActionResult> {
+  const method = stringInput(context.with, "method") ?? "squash"
+  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
-function resolveBody(context: ActionContext, issueNumber: number | null, issueFields: IssueFields | null): string {
-  const literal = stringInput(context.with, "body")
-  if (literal !== undefined) return literal
-  const source = stringInput(context.with, "bodyFrom")
-  if (source === "issue.title" && issueFields) return issueFields.title
-  if (source === "issue.body" && issueFields) return issueFields.body
-  return `Mohist issue #${issueNumber ?? ""}`.trim()
-}
+  const steps: GitHubPrStep[] = []
+  const record = createRecorder(steps)
 
-function needsIssueFields(context: ActionContext): boolean {
-  const titleLiteral = stringInput(context.with, "title") ?? stringInput(context.with, "message")
-  const bodyLiteral = stringInput(context.with, "body")
-  return (titleLiteral === undefined && isIssueFieldSource(stringInput(context.with, "titleFrom"))) ||
-    (bodyLiteral === undefined && isIssueFieldSource(stringInput(context.with, "bodyFrom")))
-}
+  const fail = (
+    errorCode: GitHubPrErrorCode,
+    message: string,
+    payload: Partial<MergeGitHubPrOutput> = {},
+  ): ActionResult => buildMergeGitHubPrOutput({
+    kind: "merge-github-pr",
+    status: "failed",
+    prNumber: payload.prNumber ?? null,
+    prUrl: payload.prUrl ?? null,
+    mergeCommitSha: payload.mergeCommitSha ?? null,
+    method: "squash",
+    errorCode,
+    message,
+    output: payload.output ?? message,
+    steps,
+  })
 
-function validateIssueFieldSources(context: ActionContext): string | null {
-  const titleLiteral = stringInput(context.with, "title") ?? stringInput(context.with, "message")
-  const bodyLiteral = stringInput(context.with, "body")
-  const titleFrom = stringInput(context.with, "titleFrom")
-  if (titleLiteral === undefined && titleFrom !== undefined && !isIssueFieldSource(titleFrom)) {
-    return `Unsupported titleFrom source '${titleFrom}'. Supported sources: issue.title, issue.body.`
+  if (method !== "squash") {
+    return fail("config-error", `Unsupported merge method '${method}'. Supported method: squash.`)
   }
-  const bodyFrom = stringInput(context.with, "bodyFrom")
-  if (bodyLiteral === undefined && bodyFrom !== undefined && !isIssueFieldSource(bodyFrom)) {
-    return `Unsupported bodyFrom source '${bodyFrom}'. Supported sources: issue.title, issue.body.`
+
+  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal)
+  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
+  if (!ghPrecheck.ok) {
+    return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
   }
-  return null
+
+  const subject = await resolveMergeSubject(context)
+  if (subject.kind === "failure") {
+    return fail("config-error", subject.message, { output: subject.message })
+  }
+
+  const resolvedPr = await resolvePrNumberForMerge(context, workDir, context.signal, record)
+  if (resolvedPr.kind === "failure") {
+    return fail(resolvedPr.errorCode, resolvedPr.message, { output: resolvedPr.output })
+  }
+
+  const merged = await waitChecksAndMergePr(gh, workDir, resolvedPr.prNumber, subject.subject, context.signal, record)
+  if (merged.kind === "failure") {
+    return fail(merged.errorCode, merged.message, {
+      output: merged.output,
+      prNumber: resolvedPr.prNumber,
+      prUrl: merged.prUrl ?? resolvedPr.prUrl,
+    })
+  }
+
+  return buildMergeGitHubPrOutput({
+    kind: "merge-github-pr",
+    status: "completed",
+    prNumber: resolvedPr.prNumber,
+    prUrl: merged.prUrl ?? resolvedPr.prUrl,
+    mergeCommitSha: merged.mergeCommitSha,
+    method: "squash",
+    errorCode: null,
+    message: null,
+    output: merged.output,
+    steps,
+  })
 }
 
-async function loadIssueFieldsIfNeeded(context: ActionContext): Promise<
-  | { kind: "ok"; issueFields: IssueFields | null }
+export async function markGitHubPrReadyAction(context: ActionContext): Promise<ActionResult> {
+  const prNumber = numberInput(context.with, "prNumber")
+  if (prNumber === undefined) {
+    return markReadyOutput({
+      kind: "mark-github-pr-ready",
+      status: "failed",
+      prNumber: null,
+      prUrl: null,
+      state: null,
+      previousState: null,
+      transitioned: false,
+      errorCode: "config-error",
+      message: "mark-github-pr-ready requires prNumber",
+      output: "mark-github-pr-ready requires prNumber",
+      steps: [],
+    })
+  }
+
+  const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
+  const steps: GitHubPrStep[] = []
+  const record = createRecorder(steps)
+
+  const fail = (
+    errorCode: GitHubPrErrorCode,
+    message: string,
+    payload: Partial<MarkGitHubPrReadyOutput> = {},
+  ): ActionResult => markReadyOutput({
+    kind: "mark-github-pr-ready",
+    status: "failed",
+    prNumber,
+    prUrl: payload.prUrl ?? null,
+    state: payload.state ?? null,
+    previousState: payload.previousState ?? null,
+    transitioned: payload.transitioned ?? false,
+    errorCode,
+    message,
+    output: payload.output ?? message,
+    steps,
+  })
+
+  const ghPrecheck = await runGhPrecheck(gh, workDir, context.signal)
+  record("gh-precheck", "gh --version && gh auth status", ghPrecheck.ok ? 0 : ghPrecheck.exitCode, ghPrecheck.output)
+  if (!ghPrecheck.ok) {
+    return fail("config-error", ghPrecheck.message, { output: ghPrecheck.output })
+  }
+
+  const viewResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,isDraft,url"], workDir, context.signal)
+  const viewOutput = combinedGhOutput(viewResult)
+  record("gh-pr-view", `pr view ${prNumber} --json state,isDraft,url`, viewResult.exitCode, viewOutput)
+  if (viewResult.exitCode !== 0) {
+    return fail(classifyGhFailure(viewResult.stdout, viewResult.stderr), `gh pr view ${prNumber} failed: ${viewOutput}`, { output: viewOutput })
+  }
+
+  const view = parsePrViewWithDraft(viewResult.stdout)
+  if (!view) {
+    return fail("retry-safe", `gh pr view ${prNumber} returned unparseable JSON: ${viewOutput}`, { output: viewOutput })
+  }
+
+  if (view.state === "CLOSED" || view.state === "MERGED") {
+    return fail("pr-state-conflict", `PR #${prNumber} is in state ${view.state}; refusing to mark ready.`, {
+      output: viewOutput,
+      prUrl: view.url ?? null,
+    })
+  }
+
+  const prUrl = view.url ?? null
+  const previousState: "READY" | "DRAFT" = view.isDraft ? "DRAFT" : "READY"
+  if (!view.isDraft) {
+    return markReadyOutput({
+      kind: "mark-github-pr-ready",
+      status: "completed",
+      prNumber,
+      prUrl,
+      state: "READY",
+      previousState: "READY",
+      transitioned: false,
+      errorCode: null,
+      message: `PR #${prNumber} is already ready for review`,
+      output: `PR #${prNumber} already READY; no mutation performed`,
+      steps,
+    })
+  }
+
+  const readyResult = await gh("gh", ["pr", "ready", String(prNumber)], workDir, context.signal)
+  const readyOutput = combinedGhOutput(readyResult)
+  record("gh-pr-ready", `pr ready ${prNumber}`, readyResult.exitCode, readyOutput)
+  if (readyResult.exitCode !== 0) {
+    return fail(classifyGhFailure(readyResult.stdout, readyResult.stderr), `gh pr ready ${prNumber} failed: ${readyOutput}`, {
+      output: readyOutput,
+      prUrl,
+      previousState,
+    })
+  }
+
+  return markReadyOutput({
+    kind: "mark-github-pr-ready",
+    status: "completed",
+    prNumber,
+    prUrl,
+    state: "READY",
+    previousState,
+    transitioned: true,
+    errorCode: null,
+    message: `Marked PR #${prNumber} as ready for review`,
+    output: readyOutput || `Marked PR #${prNumber} as ready for review`,
+    steps,
+  })
+}
+
+function createRecorder(steps: GitHubPrStep[]) {
+  return (name: string, command: string, exitCode: number, output: string) => {
+    steps.push({ name, command, exitCode, output })
+  }
+}
+
+async function resolveCreatePrText(context: ActionContext): Promise<
+  | { kind: "ok"; title: string; body: string }
   | { kind: "failure"; message: string }
 > {
-  if (!needsIssueFields(context)) return { kind: "ok", issueFields: null }
+  const titleLiteral = stringInput(context.with, "title") ?? stringInput(context.with, "message")
+  const bodyLiteral = stringInput(context.with, "body")
+  const titleSource = titleLiteral === undefined ? stringInput(context.with, "titleFrom") ?? "issue.title" : undefined
+  const bodySource = bodyLiteral === undefined ? stringInput(context.with, "bodyFrom") ?? "issue.body" : undefined
+
+  const sourceError = validateIssueFieldSource("titleFrom", titleSource) ?? validateIssueFieldSource("bodyFrom", bodySource)
+  if (sourceError) return { kind: "failure", message: sourceError }
+
+  let issueFields: IssueFields | null = null
+  if (titleSource || bodySource) {
+    const loaded = await loadIssueFields(context)
+    if (loaded.kind === "failure") return loaded
+    issueFields = loaded.issueFields
+  }
+
+  return {
+    kind: "ok",
+    title: titleLiteral ?? resolveIssueFieldValue(requiredIssueFields(issueFields), titleSource),
+    body: bodyLiteral ?? resolveIssueFieldValue(requiredIssueFields(issueFields), bodySource),
+  }
+}
+
+async function resolveMergeSubject(context: ActionContext): Promise<
+  | { kind: "ok"; subject: string }
+  | { kind: "failure"; message: string }
+> {
+  const literal = stringInput(context.with, "subject")
+  if (literal !== undefined) return { kind: "ok", subject: literal }
+
+  const source = stringInput(context.with, "subjectFrom") ?? "issue.title"
+  const sourceError = validateIssueFieldSource("subjectFrom", source)
+  if (sourceError) return { kind: "failure", message: sourceError }
+
+  const issueFields = await loadIssueFields(context)
+  if (issueFields.kind === "failure") return issueFields
+  return { kind: "ok", subject: resolveIssueFieldValue(issueFields.issueFields, source) }
+}
+
+function validateIssueFieldSource(name: string, source: string | undefined): string | null {
+  if (source === undefined || isIssueFieldSource(source)) return null
+  return `Unsupported ${name} source '${source}'. Supported sources: issue.title, issue.body.`
+}
+
+async function loadIssueFields(context: ActionContext): Promise<
+  | { kind: "ok"; issueFields: IssueFields }
+  | { kind: "failure"; message: string }
+> {
   try {
     return { kind: "ok", issueFields: await resolveIssueFields(context) }
   } catch (error) {
@@ -238,17 +419,14 @@ async function loadIssueFieldsIfNeeded(context: ActionContext): Promise<
   }
 }
 
-interface OpenOrReusePrOk {
-  kind: "ok"
-  prNumber: number
-  prUrl: string
+function resolveIssueFieldValue(issueFields: IssueFields, source: string | undefined): string {
+  if (source === "issue.body") return issueFields.body
+  return issueFields.title
 }
 
-interface OpenOrReusePrFailure {
-  kind: "failure"
-  failureKind: PublishViaPrFailureKind
-  message: string
-  output: string
+function requiredIssueFields(issueFields: IssueFields | null): IssueFields {
+  if (issueFields) return issueFields
+  throw new Error("issue fields were not loaded")
 }
 
 async function openOrReusePr(
@@ -258,38 +436,52 @@ async function openOrReusePr(
   base: string,
   title: string,
   body: string,
+  draft: boolean,
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
-): Promise<OpenOrReusePrOk | OpenOrReusePrFailure> {
-  const listResult = await gh("gh", ["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url"], workDir, signal)
+): Promise<
+  | { kind: "ok"; prNumber: number; prUrl: string; operation: "created" | "updated" | "reused"; output: string }
+  | { kind: "failure"; errorCode: GitHubPrErrorCode; message: string; output: string }
+> {
+  const listResult = await gh("gh", ["pr", "list", "--head", head, "--base", base, "--state", "open", "--json", "number,url,isDraft"], workDir, signal)
   const listOutput = combinedGhOutput(listResult)
-  record("gh-pr-list", `pr list --head ${head} --base ${base} --state open --json number,url`, listResult.exitCode, listOutput)
+  record("gh-pr-list", `pr list --head ${head} --base ${base} --state open --json number,url,isDraft`, listResult.exitCode, listOutput)
   if (listResult.exitCode !== 0) {
     return {
       kind: "failure",
-      failureKind: classifyGhFailure(listResult.stdout, listResult.stderr),
+      errorCode: classifyGhFailure(listResult.stdout, listResult.stderr),
       message: `gh pr list failed: ${listOutput}`,
       output: listOutput,
     }
   }
 
-  const existing = parsePrList(listResult.stdout)
+  const existing = parsePrListWithDraft(listResult.stdout)
   if (existing.length > 0) {
-    return { kind: "ok", prNumber: existing[0]!.number, prUrl: existing[0]!.url }
+    const pr = existing[0]!
+    const editArgs = ["pr", "edit", String(pr.number), "--title", title, "--body", body]
+    const editResult = await gh("gh", editArgs, workDir, signal)
+    const editOutput = combinedGhOutput(editResult)
+    record("gh-pr-edit", `pr edit ${pr.number} --title "${title}" --body "${body}"`, editResult.exitCode, editOutput)
+    if (editResult.exitCode !== 0) {
+      return {
+        kind: "failure",
+        errorCode: classifyGhFailure(editResult.stdout, editResult.stderr),
+        message: `gh pr edit ${pr.number} failed: ${editOutput}`,
+        output: editOutput,
+      }
+    }
+    return { kind: "ok", prNumber: pr.number, prUrl: pr.url, operation: "reused", output: editOutput || `Reused PR #${pr.number}` }
   }
 
-  const createResult = await gh(
-    "gh",
-    ["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body],
-    workDir,
-    signal,
-  )
+  const createArgs = ["pr", "create", "--head", head, "--base", base, "--title", title, "--body", body]
+  if (draft) createArgs.push("--draft")
+  const createResult = await gh("gh", createArgs, workDir, signal)
   const createOutput = combinedGhOutput(createResult)
-  record("gh-pr-create", `pr create --head ${head} --base ${base} --title "${title}" --body "${body}"`, createResult.exitCode, createOutput)
+  record("gh-pr-create", `pr create --head ${head} --base ${base} --title "${title}"${draft ? " --draft" : ""}`, createResult.exitCode, createOutput)
   if (createResult.exitCode !== 0) {
     return {
       kind: "failure",
-      failureKind: classifyGhFailure(createResult.stdout, createResult.stderr),
+      errorCode: classifyGhFailure(createResult.stdout, createResult.stderr),
       message: `gh pr create failed: ${createOutput}`,
       output: createOutput,
     }
@@ -301,45 +493,94 @@ async function openOrReusePr(
   if (!prNumber) {
     return {
       kind: "failure",
-      failureKind: "retry-safe",
+      errorCode: "retry-safe",
       message: `gh pr create did not return a PR URL: ${createOutput}`,
       output: createOutput,
     }
   }
 
-  return { kind: "ok", prNumber, prUrl: url }
+  return { kind: "ok", prNumber, prUrl: url, operation: "created", output: createOutput }
 }
 
-export interface MergeOrConfirmPrOk {
+async function resolvePrNumberForMerge(
+  context: ActionContext,
+  workDir: string,
+  signal: AbortSignal,
+  record: (name: string, command: string, exitCode: number, output: string) => void,
+): Promise<
+  | { kind: "ok"; prNumber: number; prUrl: string | null }
+  | { kind: "failure"; errorCode: GitHubPrErrorCode; message: string; output: string }
+> {
+  const explicit = numberInput(context.with, "prNumber")
+  if (explicit !== undefined) return { kind: "ok", prNumber: explicit, prUrl: null }
+
+  const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"])
+  const target = stringInput(context.with, "target") ?? stringAt(context.variables, ["repository", "baseBranch"]) ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
+  if (!source) {
+    return {
+      kind: "failure",
+      errorCode: "config-error",
+      message: "merge-github-pr requires prNumber or source branch.",
+      output: "merge-github-pr requires prNumber or source branch.",
+    }
+  }
+
+  const listResult = await gh("gh", ["pr", "list", "--head", source, "--base", target, "--state", "open", "--json", "number,url"], workDir, signal)
+  const listOutput = combinedGhOutput(listResult)
+  record("gh-pr-list", `pr list --head ${source} --base ${target} --state open --json number,url`, listResult.exitCode, listOutput)
+  if (listResult.exitCode !== 0) {
+    return {
+      kind: "failure",
+      errorCode: classifyGhFailure(listResult.stdout, listResult.stderr),
+      message: `gh pr list failed: ${listOutput}`,
+      output: listOutput,
+    }
+  }
+
+  const existing = parsePrList(listResult.stdout)
+  if (existing.length === 0) {
+    return {
+      kind: "failure",
+      errorCode: "pr-state-conflict",
+      message: `No open PR found for ${source} -> ${target}.`,
+      output: listOutput,
+    }
+  }
+  return { kind: "ok", prNumber: existing[0]!.number, prUrl: existing[0]!.url }
+}
+
+export interface WaitChecksAndMergeOk {
   kind: "ok"
   mergeCommitSha: string | null
   prUrl: string | null
   output: string
 }
 
-export interface MergeOrConfirmPrFailure {
+export interface WaitChecksAndMergeFailure {
   kind: "failure"
-  failureKind: PublishViaPrFailureKind
+  errorCode: GitHubPrErrorCode
   message: string
   prUrl: string | null
   output: string
 }
 
-export async function mergeOrConfirmPr(
+const PR_CHECKS_POLL_INTERVAL_MS = 15_000
+
+export async function waitChecksAndMergePr(
   gh: GhRunner,
   workDir: string,
   prNumber: number,
   subject: string,
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
-): Promise<MergeOrConfirmPrOk | MergeOrConfirmPrFailure> {
+): Promise<WaitChecksAndMergeOk | WaitChecksAndMergeFailure> {
   const viewResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number"], workDir, signal)
   const viewOutput = combinedGhOutput(viewResult)
   record("gh-pr-view", `pr view ${prNumber} --json state,mergeCommit,url,number`, viewResult.exitCode, viewOutput)
   if (viewResult.exitCode !== 0) {
     return {
       kind: "failure",
-      failureKind: classifyGhFailure(viewResult.stdout, viewResult.stderr),
+      errorCode: classifyGhFailure(viewResult.stdout, viewResult.stderr),
       message: `gh pr view ${prNumber} failed: ${viewOutput}`,
       prUrl: null,
       output: viewOutput,
@@ -350,7 +591,7 @@ export async function mergeOrConfirmPr(
   if (!view) {
     return {
       kind: "failure",
-      failureKind: "retry-safe",
+      errorCode: "retry-safe",
       message: `gh pr view ${prNumber} returned unparseable JSON: ${viewOutput}`,
       prUrl: null,
       output: viewOutput,
@@ -369,7 +610,7 @@ export async function mergeOrConfirmPr(
   if (view.state === "CLOSED") {
     return {
       kind: "failure",
-      failureKind: "pr-state-conflict",
+      errorCode: "pr-state-conflict",
       message: `PR #${prNumber} is closed; refusing to recreate. Re-open the PR or run workflow integrate retry from prepare.`,
       prUrl: view.url ?? null,
       output: viewOutput,
@@ -380,8 +621,8 @@ export async function mergeOrConfirmPr(
   if (checksWait.kind === "failure") {
     return {
       kind: "failure",
-      failureKind: "pr-checks-failed",
-      message: checksWait.message,
+      errorCode: "pr-checks-failed",
+      message: `PR #${prNumber} checks failed: ${checksWait.message}`,
       prUrl: view.url ?? null,
       output: checksWait.output,
     }
@@ -389,8 +630,8 @@ export async function mergeOrConfirmPr(
   if (checksWait.kind === "cancelled") {
     return {
       kind: "failure",
-      failureKind: "retry-safe",
-      message: checksWait.message,
+      errorCode: "retry-safe",
+      message: `Cancelled while waiting for PR #${prNumber} checks to settle: ${checksWait.message}`,
       prUrl: view.url ?? null,
       output: checksWait.output,
     }
@@ -403,7 +644,7 @@ export async function mergeOrConfirmPr(
   if (mergeResult.exitCode !== 0) {
     return {
       kind: "failure",
-      failureKind: classifyGhFailure(mergeResult.stdout, mergeResult.stderr),
+      errorCode: classifyGhFailure(mergeResult.stdout, mergeResult.stderr),
       message: `gh pr merge ${prNumber} --squash failed: ${mergeOutput}`,
       prUrl: view.url ?? null,
       output: mergeOutput,
@@ -416,7 +657,7 @@ export async function mergeOrConfirmPr(
   if (recheck.exitCode !== 0) {
     return {
       kind: "failure",
-      failureKind: classifyGhFailure(recheck.stdout, recheck.stderr),
+      errorCode: classifyGhFailure(recheck.stdout, recheck.stderr),
       message: `gh pr view ${prNumber} (post-merge confirm) failed: ${recheckOutput}`,
       prUrl: view.url ?? null,
       output: recheckOutput,
@@ -427,7 +668,7 @@ export async function mergeOrConfirmPr(
   if (!confirmed || confirmed.state !== "MERGED") {
     return {
       kind: "failure",
-      failureKind: confirmed ? "pr-state-conflict" : "retry-safe",
+      errorCode: confirmed ? "pr-state-conflict" : "retry-safe",
       message: confirmed
         ? `PR #${prNumber} is in state ${confirmed.state} after merge; expected MERGED.`
         : `gh pr view ${prNumber} returned unparseable JSON after merge: ${recheckOutput}`,
@@ -449,8 +690,6 @@ type PrChecksWaitResult =
   | { kind: "failure"; message: string; output: string }
   | { kind: "cancelled"; message: string; output: string }
 
-const PR_CHECKS_POLL_INTERVAL_MS = 15_000
-
 async function waitForPrChecks(
   gh: GhRunner,
   workDir: string,
@@ -462,7 +701,7 @@ async function waitForPrChecks(
     if (signal.aborted) {
       return {
         kind: "cancelled",
-        message: `Cancelled while waiting for PR #${prNumber} checks to settle: ${signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? "aborted")}`,
+        message: `Cancelled before polling checks: ${signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? "aborted")}`,
         output: "cancelled before next poll",
       }
     }
@@ -477,7 +716,7 @@ async function waitForPrChecks(
     if (checksResult.exitCode !== 0) {
       return {
         kind: "failure",
-        message: `gh pr checks ${prNumber} failed: ${checksOutput}`,
+        message: checksOutput,
         output: checksOutput,
       }
     }
@@ -485,7 +724,7 @@ async function waitForPrChecks(
     if (classification.kind === "failed") {
       return {
         kind: "failure",
-        message: `PR #${prNumber} checks failed: ${classification.message}`,
+        message: classification.message,
         output: classification.message,
       }
     }
@@ -497,7 +736,7 @@ async function waitForPrChecks(
     } catch (error) {
       return {
         kind: "cancelled",
-        message: `Cancelled while waiting for PR #${prNumber} checks to settle: ${errorMessage(error)}`,
+        message: errorMessage(error),
         output: `cancelled during wait: ${errorMessage(error)}`,
       }
     }
@@ -624,7 +863,7 @@ export interface BaseShaOk {
 
 export interface BaseShaFailure {
   kind: "failure"
-  failureKind: PublishViaPrFailureKind
+  failureKind: GitHubPrErrorCode
   message: string
   output: string
 }
@@ -650,20 +889,46 @@ export async function resolveBaseSha(
   return { kind: "ok", sha: resolve.stdout.trim() }
 }
 
-function buildPublishViaPrOutput(output: PublishViaPrOutput): ActionResult {
+function buildCreateGitHubPrOutput(output: CreateGitHubPrOutput): ActionResult {
   const json = JSON.stringify(output)
   if (output.status === "completed") {
-    return { status: "success", message: "Publish via PR completed", output: json }
+    return { status: "success", message: "GitHub pull request created or reused", output: json }
   }
   return {
     status: "failure",
-    message: `Publish via PR failed (${output.failureKind ?? "unknown"}): ${output.failureMessage ?? output.output}`,
+    message: `Create GitHub PR failed (${output.errorCode ?? "unknown"}): ${output.message ?? output.output}`,
     output: json,
     exitCode: 1,
   }
 }
 
-export function classifyGhFailure(stdout: string, stderr: string): PublishViaPrFailureKind {
+function buildMergeGitHubPrOutput(output: MergeGitHubPrOutput): ActionResult {
+  const json = JSON.stringify(output)
+  if (output.status === "completed") {
+    return { status: "success", message: "GitHub pull request merged", output: json }
+  }
+  return {
+    status: "failure",
+    message: `Merge GitHub PR failed (${output.errorCode ?? "unknown"}): ${output.message ?? output.output}`,
+    output: json,
+    exitCode: 1,
+  }
+}
+
+function markReadyOutput(output: MarkGitHubPrReadyOutput): ActionResult {
+  const json = JSON.stringify(output)
+  if (output.status === "completed") {
+    return { status: "success", message: output.message ?? "Mark GitHub PR ready", output: json }
+  }
+  return {
+    status: "failure",
+    message: `Mark GitHub PR ready failed (${output.errorCode ?? "unknown"}): ${output.message ?? output.output}`,
+    output: json,
+    exitCode: 1,
+  }
+}
+
+export function classifyGhFailure(stdout: string, stderr: string): GitHubPrErrorCode {
   const text = `${stdout}\n${stderr}`.toLowerCase()
   if (!text.trim()) return "retry-safe"
   if (looksLikeAuthFailure(text)) return "config-error"
@@ -674,7 +939,7 @@ export function classifyGhFailure(stdout: string, stderr: string): PublishViaPrF
   return "retry-safe"
 }
 
-export function classifyPushFailure(stdout: string, stderr: string): PublishViaPrFailureKind {
+export function classifyPushFailure(stdout: string, stderr: string): GitHubPrErrorCode {
   return classifyGhFailure(stdout, stderr)
 }
 
@@ -746,13 +1011,46 @@ export function parsePrList(stdout: string): { number: number; url: string }[] {
   return out
 }
 
+export function parsePrListWithDraft(stdout: string): { number: number; url: string; isDraft: boolean }[] {
+  const trimmed = stdout.trim()
+  if (!trimmed) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const out: { number: number; url: string; isDraft: boolean }[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue
+    const obj = item as Record<string, unknown>
+    const number = obj["number"]
+    const url = obj["url"]
+    const draft = obj["isDraft"]
+    if (typeof number === "number" && typeof url === "string") {
+      out.push({ number, url, isDraft: draft === true })
+    }
+  }
+  return out
+}
+
 interface PrViewState {
   state?: string
   url?: string
   mergeCommit?: { oid?: string } | null
+  isDraft?: boolean
 }
 
 export function parsePrView(stdout: string): PrViewState | null {
+  return parsePrViewInternal(stdout, false)
+}
+
+export function parsePrViewWithDraft(stdout: string): PrViewState | null {
+  return parsePrViewInternal(stdout, true)
+}
+
+function parsePrViewInternal(stdout: string, includeDraft: boolean): PrViewState | null {
   const trimmed = stdout.trim()
   if (!trimmed) return null
   let parsed: unknown
@@ -769,7 +1067,9 @@ export function parsePrView(stdout: string): PrViewState | null {
   const mergeCommit = rawMergeCommit && typeof rawMergeCommit === "object" && !Array.isArray(rawMergeCommit)
     ? { oid: typeof (rawMergeCommit as Record<string, unknown>)["oid"] === "string" ? ((rawMergeCommit as Record<string, unknown>)["oid"] as string) : undefined }
     : null
-  return { state, url, mergeCommit }
+  const result: PrViewState = { state, url, mergeCommit }
+  if (includeDraft) result.isDraft = obj["isDraft"] === true
+  return result
 }
 
 export function extractPrNumberFromUrl(url: string): number | null {
@@ -779,24 +1079,10 @@ export function extractPrNumberFromUrl(url: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-export function extractIssueNumberFromMessage(message: string): string | null {
-  const match = message.match(/(\d+)/)
-  return match && match[1] ? match[1] : null
-}
-
 export function combinedGhOutput(result: { stdout: string; stderr: string }): string {
   return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n")
 }
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function resolveIssueNumber(context: ActionContext): number | null {
-  if (typeof context.issueNumber === "number" && context.issueNumber > 0) {
-    return context.issueNumber
-  }
-  const fromVars = numberInput(context.variables, "issueNumber")
-  if (typeof fromVars === "number" && fromVars > 0) return fromVars
-  return null
 }

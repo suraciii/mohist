@@ -42,7 +42,7 @@ public class CliIssueWorkflowProfileSpecs
                         id = "issue_42",
                         number = 42,
                         title = "T",
-                        workflowProfileId = "mohist/pr",
+                        workflowProfileId = "mohist/github-pr",
                     },
                 });
             }
@@ -51,14 +51,14 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "create", "Use PR workflow", "--body", "Body content", "--workflow-profile", "mohist/pr"],
+            ["issue", "create", "Use PR workflow", "--body", "Body content", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);
         Assert.Equal("/api/projects/proj_abc/issues", postReq.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(postReq.Body!)!;
-        Assert.Equal("mohist/pr", body["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("mohist/github-pr", body["workflowProfileId"]?.GetValue<string>());
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class CliIssueWorkflowProfileSpecs
                         status = "active",
                         priority = "p2",
                         projectName = "demo",
-                        workflowProfileId = "mohist/pr",
+                        workflowProfileId = "mohist/github-pr",
                     },
                 });
             }
@@ -121,7 +121,7 @@ public class CliIssueWorkflowProfileSpecs
         var getReq = handler.Requests.Last(r => r.Method == HttpMethod.Get);
         Assert.Equal("/api/projects/proj_abc/issues/42", getReq.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
-        Assert.Contains("profile:  mohist/pr", stdout);
+        Assert.Contains("profile:  mohist/github-pr", stdout);
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public class CliIssueWorkflowProfileSpecs
                         id = "issue_42",
                         number = 42,
                         title = "T",
-                        workflowProfileId = "mohist/pr",
+                        workflowProfileId = "mohist/github-pr",
                     },
                 });
             }
@@ -191,7 +191,7 @@ public class CliIssueWorkflowProfileSpecs
                         status = "active",
                         priority = "p2",
                         projectName = "demo",
-                        workflowProfileId = "mohist/pr",
+                        workflowProfileId = "mohist/github-pr",
                     },
                 });
             }
@@ -200,7 +200,7 @@ public class CliIssueWorkflowProfileSpecs
 
         var createExit = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "create", "Round-trip", "--body", "Body content", "--workflow-profile", "mohist/pr"],
+            ["issue", "create", "Round-trip", "--body", "Body content", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, executor);
         Assert.Equal(0, createExit);
 
@@ -209,7 +209,7 @@ public class CliIssueWorkflowProfileSpecs
         Assert.Equal(0, showExit);
 
         var stdout = output.ToString();
-        Assert.Contains("profile:  mohist/pr", stdout);
+        Assert.Contains("profile:  mohist/github-pr", stdout);
     }
 
     [Fact]
@@ -219,14 +219,14 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/pr"],
+            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
         Assert.Equal("/api/projects/proj_abc/issues/42", patchReq.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(patchReq.Body!)!;
-        Assert.Equal("mohist/pr", body["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("mohist/github-pr", body["workflowProfileId"]?.GetValue<string>());
     }
 
     [Fact]
@@ -271,13 +271,13 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/pr", "--priority", "p1"],
+            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr", "--priority", "p1"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
         var body = JsonNode.Parse(patchReq.Body!)!;
-        Assert.Equal("mohist/pr", body["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("mohist/github-pr", body["workflowProfileId"]?.GetValue<string>());
         Assert.Equal("p1", body["priority"]?.GetValue<string>());
         Assert.False(body.AsObject().ContainsKey("title"));
         Assert.False(body.AsObject().ContainsKey("body"));
@@ -343,7 +343,7 @@ public class CliIssueWorkflowProfileSpecs
 
         var updateExit = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/pr"],
+            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, new FakeCommandExecutor());
         Assert.Equal(0, updateExit);
 
@@ -352,7 +352,7 @@ public class CliIssueWorkflowProfileSpecs
         Assert.Equal(0, showExit);
 
         var stdout = output.ToString();
-        Assert.Contains("profile:  mohist/pr", stdout);
+        Assert.Contains("profile:  mohist/github-pr", stdout);
     }
 
     [Fact]
@@ -372,13 +372,13 @@ public class CliIssueWorkflowProfileSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
-            ["issue", "update", "42", "--workflow-profile", "mohist/pr"],
+            ["issue", "update", "42", "--workflow-profile", "mohist/github-pr"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var patchReq = handler.Requests.Last(r => r.Method == HttpMethod.Patch);
         var body = JsonNode.Parse(patchReq.Body!)!;
-        Assert.Equal("mohist/pr", body["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("mohist/github-pr", body["workflowProfileId"]?.GetValue<string>());
         var stderr = error.ToString();
         Assert.Contains("Cannot change workflow profile", stderr);
         Assert.Contains("workflow_profile_locked", stderr);

@@ -33,14 +33,31 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const result = await runAcpWorkflowAgentSession(context, prompt)
   await restoreAgentToolNoise(context)
   const verification = result.expectation ?? await verifyExpectations(context)
-  const ok = result.success && verification.satisfied
+  const failIfMatch = verification.failIfMatches[0]
+  const failIfTriggered = !!failIfMatch
+  const ok = result.success && verification.satisfied && !failIfTriggered
   const agentConfig = resolveAgentConfig(context.with)
   const failureCategory = ok ? null : result.failureCategory ?? null
-  await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
+  const errorCode = failIfTriggered ? failIfMatch.errorCode : null
+  const failureReason = ok ? null : failIfTriggered
+    ? `failIf marker matched: ${failIfMatch.marker} (errorCode: ${failIfMatch.errorCode ?? "<none>"})`
+    : result.error ?? verification.message
+  await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
   return {
     status: ok ? "success" : "failure",
-    message: ok ? "ACP agent task completed" : result.error ?? verification.message,
-    output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: agentConfig?.model, text: result.text, error: result.error, providerError: result.providerError, expectation: verification }),
+    message: ok ? "ACP agent task completed" : failureReason,
+    output: JSON.stringify({
+      kind: "acp-agent",
+      status: ok ? "success" : "failure",
+      acpSessionId: result.acpSessionId,
+      model: agentConfig?.model,
+      text: result.text,
+      error: result.error,
+      providerError: result.providerError,
+      expectation: verification,
+      errorCode,
+      failIfMarker: failIfTriggered ? failIfMatch.marker : null,
+    }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
   }
 }

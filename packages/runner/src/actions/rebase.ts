@@ -35,7 +35,8 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   const remote = stringInput(context.with, "remote") ?? null
   const squash = booleanInput(context.with, "squash") === true
   const maxRetries = numberInput(context.with, "maxConflictRetries") ?? DEFAULT_MAX_CONFLICT_RETRIES
-  const conflictResolver = objectInput(context.with, "conflictResolver")
+  const conflictMode = resolveConflictMode(context.with)
+  const conflictResolver = conflictMode === "task" ? null : objectInput(context.with, "conflictResolver")
   const baseRef = remote ? `${remote}/${baseBranch}` : baseBranch
   const abortResult = await abortRebaseIfInProgress(context)
   if (!abortResult.success) {
@@ -82,12 +83,17 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
       rebaseOutput: result.combinedOutput,
       squash,
       squashMessage,
+      conflictMode,
     })
   }
 
   let conflicts = await conflictFiles(context)
   if (conflicts.length === 0) {
     return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, [], 0, result.combinedOutput, "retry-safe", result.exitCode)
+  }
+
+  if (conflictMode === "task") {
+    return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, 0, result.combinedOutput, "conflict", 1, "task")
   }
 
   if (!conflictResolver) {
@@ -127,6 +133,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
         rebaseOutput: combinedGitOutput(gitOutputs),
         squash,
         squashMessage,
+        conflictMode,
       })
     }
 
@@ -167,6 +174,7 @@ interface SquashRequest {
   rebaseOutput: string
   squash: boolean
   squashMessage: string | undefined
+  conflictMode: RebaseConflictMode
 }
 
 async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
@@ -184,6 +192,9 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       req.conflicts,
       req.resolveAttempts,
       req.rebaseOutput,
+      null,
+      null,
+      req.conflictMode,
     )
   }
   if (!req.squashMessage) {
@@ -202,6 +213,7 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       req.rebaseOutput,
       "squash-message-missing",
       1,
+      req.conflictMode,
     )
   }
   const softReset = await git(req.context.workDir, ["reset", "--soft", req.baseSha], req.context.signal)
@@ -221,6 +233,7 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       [req.rebaseOutput, softReset.combinedOutput].filter(Boolean).join("\n\n"),
       "retry-safe",
       softReset.exitCode,
+      req.conflictMode,
     )
   }
   const commit = await git(req.context.workDir, ["commit", "-m", req.squashMessage], req.context.signal)
@@ -240,6 +253,7 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
       [req.rebaseOutput, softReset.combinedOutput, commit.combinedOutput].filter(Boolean).join("\n\n"),
       "retry-safe",
       commit.exitCode,
+      req.conflictMode,
     )
   }
   const squashedHead = await git(req.context.workDir, ["rev-parse", "HEAD"], req.context.signal)
@@ -258,6 +272,9 @@ async function runSquashIfRequested(req: SquashRequest): Promise<ActionResult> {
     req.conflicts,
     req.resolveAttempts,
     squashOutput,
+    null,
+    null,
+    req.conflictMode,
   )
 }
 
@@ -278,7 +295,9 @@ function rebaseOutput(
   gitOutput: string,
   failureKind: RebaseFailureKind = null,
   exitCode: number | null = null,
+  conflictMode: RebaseConflictMode = "resolve",
 ): ActionResult {
+  const rebaseLeftInProgress = failureKind === "conflict" && conflictMode === "task"
   const output = JSON.stringify({
     kind: "rebase",
     status: rebased ? "completed" : "failed",
@@ -294,13 +313,17 @@ function rebaseOutput(
     conflicts,
     resolveAttempts,
     failureKind,
+    conflictMode,
+    rebaseLeftInProgress,
     output: gitOutput,
   })
   if (rebased) {
     return { status: "success", message: squashed ? "Rebase and squash completed" : "Rebase completed", output }
   }
   const label = failureKind === "conflict"
-    ? "Rebase failed: conflict could not be resolved"
+    ? rebaseLeftInProgress
+      ? "Rebase in progress: conflicts require task-level resolution"
+      : "Rebase failed: conflict could not be resolved"
     : failureKind === "squash-message-missing"
       ? "Rebase squashed: a commit 'message' is required when 'squash' is true"
       : `Rebase failed after ${resolveAttempts} conflict resolution attempts`
@@ -315,6 +338,22 @@ function booleanInput(input: JsonObject | null | undefined, key: string) {
     if (/^(false|0|no|off)$/i.test(value)) return false
   }
   return undefined
+}
+
+export type RebaseConflictMode = "resolve" | "task"
+
+export function resolveRebaseConflictMode(input: JsonObject | null | undefined): RebaseConflictMode {
+  return resolveConflictMode(input)
+}
+
+function resolveConflictMode(input: JsonObject | null | undefined): RebaseConflictMode {
+  const value = input?.["conflictMode"]
+  if (value === undefined || value === null) return "resolve"
+  if (typeof value === "string") {
+    if (/^resolve$/i.test(value)) return "resolve"
+    if (/^task$/i.test(value)) return "task"
+  }
+  return "resolve"
 }
 
 function errorMessage(error: unknown): string {

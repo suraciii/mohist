@@ -151,7 +151,7 @@ public class IssueGrain : Grain, IIssueGrain
         // default) and only the explicit advanced overrides (issue custom
         // YAML, project template reference) take precedence. Auto-seeding the
         // project default here would shadow an explicit issue-level profile
-        // selection (e.g. mohist/pr would lose to a freshly auto-seeded
+        // selection (e.g. mohist/github-pr would lose to a freshly auto-seeded
         // mohist/default), so the resolver's own fallback handles projects
         // without a configured default.
 
@@ -161,8 +161,9 @@ public class IssueGrain : Grain, IIssueGrain
         // Resolve the effective profile (issue selection → project default →
         // system default) so prompts are merged from the same profile that
         // drives the workflow definition. Previously this hardcoded the
-        // mohist/default profile, which meant a mohist/pr issue would inherit
-        // default prompts even though the run used the PR definition.
+        // mohist/default profile, which meant a mohist/github-pr issue would
+        // inherit default prompts even though the run used the GitHub PR
+        // definition.
         var projectDefaultTemplateId = await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id);
         var effectiveProfileId = EffectiveWorkflowProfileResolver.ResolveCore(
             issue.WorkflowProfileId,

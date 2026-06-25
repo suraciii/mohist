@@ -3,11 +3,19 @@ import type { ActionContext, JsonValue } from "../core/types.js"
 import { arrayInput, isObject, objectInput, stringInput } from "../core/json.js"
 import { exists, readText } from "../system/process.js"
 
+export interface FailIfMatch {
+  marker: string
+  failIf: string
+  path: string
+  errorCode: string | null
+}
+
 export interface TaskArtifactExpectation {
   satisfied: boolean
   matched?: string
   missingFiles: Array<{ path: string }>
   missingArtifactMarkers: Array<{ path: string; contains: string }>
+  failIfMatches: FailIfMatch[]
   message: string
 }
 
@@ -20,34 +28,69 @@ export async function verifyExpectations(context: ActionContext, agentText?: str
   const missingFiles = files.map((file) => resolveActionPath(context, stringValue(file.path))).filter((path): path is string => !!path && !exists(path)).map((path) => ({ path }))
 
   let matched: string | undefined
-  const missingArtifactMarkers = (await Promise.all(markers.map(async (marker) => {
+  const missingArtifactMarkers: Array<{ path: string; contains: string }> = []
+  const failIfMatches: FailIfMatch[] = []
+
+  for (const marker of markers) {
     const rawPath = stringValue(marker.path)
     const accepted = resolveAcceptedMarkers(marker)
-    if (accepted.length === 0) return null
+    const failIf = resolveFailIf(marker)
+    if (accepted.length === 0) continue
 
     if (rawPath === OUTPUT_MARKER_PATH) {
-      if (!agentText) return { path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) }
+      if (!agentText) {
+        missingArtifactMarkers.push({ path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) })
+        continue
+      }
       const last = parseLastMarker(agentText)
       if (last && accepted.includes(last)) {
         matched = last
-        return null
+        if (failIf && last === failIf) {
+          failIfMatches.push({ marker: last, failIf, path: OUTPUT_MARKER_PATH, errorCode: extractErrorCode(agentText) })
+        }
+        continue
       }
-      return { path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) }
+      missingArtifactMarkers.push({ path: OUTPUT_MARKER_PATH, contains: formatAcceptedMarkers(accepted) })
+      continue
     }
 
     const path = resolveActionPath(context, rawPath)
-    if (!path) return null
-    if (!exists(path)) return { path, contains: formatAcceptedMarkers(accepted) }
+    if (!path) continue
+    if (!exists(path)) {
+      missingArtifactMarkers.push({ path, contains: formatAcceptedMarkers(accepted) })
+      continue
+    }
     const content = await readText(path)
-    return accepted.some((value) => content.includes(value)) ? null : { path, contains: formatAcceptedMarkers(accepted) }
-  }))).filter((marker): marker is { path: string; contains: string } => marker !== null)
+    const hit = accepted.find((value) => content.includes(value))
+    if (hit) {
+      matched = hit
+      if (failIf && hit === failIf) {
+        failIfMatches.push({ marker: hit, failIf, path, errorCode: extractErrorCode(content) })
+      }
+      continue
+    }
+    missingArtifactMarkers.push({ path, contains: formatAcceptedMarkers(accepted) })
+  }
+
   return {
-    satisfied: missingFiles.length === 0 && missingArtifactMarkers.length === 0,
+    satisfied: missingFiles.length === 0 && missingArtifactMarkers.length === 0 && failIfMatches.length === 0,
     matched,
     missingFiles,
     missingArtifactMarkers,
-    message: missingFiles.length === 0 && missingArtifactMarkers.length === 0 ? "Agent completion requirements satisfied" : `Agent completion requirements were not satisfied: ${[...missingFiles.map((file) => `missing artifact file: ${file.path}`), ...missingArtifactMarkers.map((marker) => `missing artifact marker in ${marker.path}: ${marker.contains}`)].join("; ")}`,
+    failIfMatches,
+    message: buildMessage(missingFiles, missingArtifactMarkers, failIfMatches),
   }
+}
+
+function buildMessage(missingFiles: Array<{ path: string }>, missingArtifactMarkers: Array<{ path: string; contains: string }>, failIfMatches: FailIfMatch[]): string {
+  if (missingFiles.length === 0 && missingArtifactMarkers.length === 0 && failIfMatches.length === 0) {
+    return "Agent completion requirements satisfied"
+  }
+  const parts: string[] = []
+  for (const file of missingFiles) parts.push(`missing artifact file: ${file.path}`)
+  for (const marker of missingArtifactMarkers) parts.push(`missing artifact marker in ${marker.path}: ${marker.contains}`)
+  for (const fail of failIfMatches) parts.push(`failIf marker matched in ${fail.path}: ${fail.marker} (errorCode: ${fail.errorCode ?? "<none>"})`)
+  return `Agent completion requirements were not satisfied: ${parts.join("; ")}`
 }
 
 function parseLastMarker(text: string): string | null {
@@ -68,6 +111,13 @@ function resolveAcceptedMarkers(marker: JsonValue): string[] {
   return contains ? [contains] : []
 }
 
+function resolveFailIf(marker: JsonValue): string | null {
+  if (!isObject(marker)) return null
+  const value = marker.failIf
+  if (typeof value !== "string" || value.length === 0) return null
+  return value
+}
+
 function formatAcceptedMarkers(values: string[]): string {
   if (values.length === 1) return values[0]
   return `oneOf: ${values.join(" | ")}`
@@ -80,4 +130,26 @@ export function resolveActionPath(context: ActionContext, value?: string) {
 
 function stringValue(value: JsonValue | undefined) {
   return typeof value === "string" ? value : undefined
+}
+
+/**
+ * Extract an `errorCode: <value>` declaration from an artifact body. The
+ * convention mirrors how the action can publish its own errorCode alongside
+ * a verdict marker (e.g. `errorCode: review-failed` in a review file). The
+ * value must be a single line — no inline stripping of surrounding markdown.
+ */
+export function extractErrorCode(content: string): string | null {
+  if (!content) return null
+  const lines = content.split(/\r?\n/)
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line.startsWith("errorCode")) continue
+    const colon = line.indexOf(":")
+    if (colon < 0) continue
+    const value = line.slice(colon + 1).trim()
+    if (!value) continue
+    if (value.length > 256) continue
+    return value
+  }
+  return null
 }

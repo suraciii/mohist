@@ -161,15 +161,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
-            issueWorkflowProfileId: "mohist/pr");
+            issueWorkflowProfileId: "mohist/github-pr");
 
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/pr", result.Id ?? "");
+        Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "integrate:merge-pr");
-        Assert.Equal("mohist/merge-pull-request", mergePr.Uses);
+        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "merge-pr");
+        Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
@@ -204,15 +204,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "mohist/default",
-            issueWorkflowProfileId: "mohist/pr");
+            issueWorkflowProfileId: "mohist/github-pr");
 
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/pr", result.Id ?? "");
+        Assert.Contains("system-template:mohist/github-pr", result.Id ?? "");
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
-        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "integrate:merge-pr");
-        Assert.Equal("mohist/merge-pull-request", mergePr.Uses);
+        var mergePr = Assert.Single(integrate.Tasks, t => t.Id == "merge-pr");
+        Assert.Equal("mohist/merge-github-pr", mergePr.Uses);
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:rebase");
     }
 
@@ -226,7 +226,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             issueTemplateJson: SerializeDefinition("custom-override", stageCount: 1),
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
-            issueWorkflowProfileId: "mohist/pr");
+            issueWorkflowProfileId: "mohist/github-pr");
 
         var result = await _manager.LoadTemplateAsync(runId);
 

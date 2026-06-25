@@ -67,7 +67,9 @@ public sealed record WorkflowTaskRequiredFile(
     string Path,
     string Source,
     bool CanFetchContent,
-    string[]? Markers = null);
+    string[]? Markers = null,
+    string[]? OneOf = null,
+    string? FailIf = null);
 
 [GenerateSerializer]
 public sealed record WorkflowStageProgress(

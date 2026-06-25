@@ -68,15 +68,15 @@ describe('WorkflowProfileControl', () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
 
-    renderControl(makeIssue({ workflowProfileId: 'mohist/pr' }))
+    renderControl(makeIssue({ workflowProfileId: 'mohist/github-pr' }))
 
-    await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/pr'))
+    await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/github-pr'))
     const control = screen.getByTestId('issue-workflow-profile-control')
-    expect(control.dataset.effectiveProfile).toBe('mohist/pr')
+    expect(control.dataset.effectiveProfile).toBe('mohist/github-pr')
     expect(control.dataset.defaultProfile).toBe('mohist/default')
   })
 
@@ -96,23 +96,23 @@ describe('WorkflowProfileControl', () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
     mockUseIssueWorkflowProfileYaml.mockReturnValue({
-      data: { profileId: 'mohist/pr', hasCustomTemplate: false },
+      data: { profileId: 'mohist/github-pr', hasCustomTemplate: false },
     })
 
     renderControl(makeIssue({ workflowProfileId: undefined }))
 
-    await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/pr'))
+    await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/github-pr'))
   })
 
   it('sends a PATCH with the new profile id when a backlog issue changes profile', async () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
 
@@ -121,21 +121,21 @@ describe('WorkflowProfileControl', () => {
     const select = await screen.findByTestId('issue-workflow-profile-select') as HTMLSelectElement
     expect(select.disabled).toBe(false)
 
-    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
     await waitFor(() => expect(mockUpdateMutation).toHaveBeenCalledTimes(1))
-    expect(mockUpdateMutation).toHaveBeenCalledWith({ issueNumber: 14, workflowProfileId: 'mohist/pr' })
+    expect(mockUpdateMutation).toHaveBeenCalledWith({ issueNumber: 14, workflowProfileId: 'mohist/github-pr' })
   })
 
   it('disables the selector and shows a clear reason when the issue has started', async () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
 
-    renderControl(makeIssue({ workflowProfileId: 'mohist/pr', status: 'in_progress' as Issue['status'], workflowRunId: 'wr-1' }))
+    renderControl(makeIssue({ workflowProfileId: 'mohist/github-pr', status: 'in_progress' as Issue['status'], workflowRunId: 'wr-1' }))
 
     const select = await screen.findByTestId('issue-workflow-profile-select') as HTMLSelectElement
     expect(select.disabled).toBe(true)
@@ -148,11 +148,11 @@ describe('WorkflowProfileControl', () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
 
-    renderControl(makeIssue({ workflowProfileId: 'mohist/pr', status: 'in_progress' as Issue['status'], workflowRunId: 'wr-1' }))
+    renderControl(makeIssue({ workflowProfileId: 'mohist/github-pr', status: 'in_progress' as Issue['status'], workflowRunId: 'wr-1' }))
 
     await screen.findByTestId('issue-workflow-profile-select')
     expect(mockUpdateMutation).not.toHaveBeenCalled()
@@ -162,7 +162,7 @@ describe('WorkflowProfileControl', () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
     mockUpdateMutation.mockRejectedValue(new Error('Cannot change workflow profile: workflow run wr-1 is active'))
@@ -170,7 +170,7 @@ describe('WorkflowProfileControl', () => {
     renderControl(makeIssue({ workflowProfileId: 'mohist/default', status: 'backlog' as Issue['status'] }))
 
     const select = await screen.findByTestId('issue-workflow-profile-select') as HTMLSelectElement
-    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
     await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
 

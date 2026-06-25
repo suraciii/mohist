@@ -24,6 +24,14 @@ public class WorkflowProfileCatalogSpecs
         Assert.Equal("mohist/default", IssueWorkflowProfiles.DefaultId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void IssueWorkflowProfiles_ExposesGithubPrSystemId()
+    {
+        Assert.Equal("mohist/github-pr", IssueWorkflowProfiles.GithubPrId);
+    }
+
     // ===================== Registry =====================
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -37,7 +45,7 @@ public class WorkflowProfileCatalogSpecs
 
         Assert.Equal(2, list.Count);
         Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.DefaultId);
-        Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.PrId);
+        Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.GithubPrId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -78,7 +86,7 @@ public class WorkflowProfileCatalogSpecs
 
         Assert.Equal(2, templates.Count);
         Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.DefaultId);
-        Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.PrId);
+        Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.GithubPrId);
     }
 
     // ===================== GetSystemTemplateDefinition =====================

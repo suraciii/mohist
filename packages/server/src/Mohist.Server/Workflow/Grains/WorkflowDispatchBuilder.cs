@@ -108,6 +108,16 @@ public sealed class WorkflowDispatchBuilder(
         {
             var stageRun = run.Stages.FirstOrDefault(s => s.Id == req.Stage);
             var task = stageRun?.Tasks.FirstOrDefault(t => t.Id == req.LogicalId);
+            if (task?.CausedByFailedTaskId is { } failedTaskId)
+            {
+                var failedTask = FindFailedTask(run, failedTaskId);
+                if (failedTask?.Output is { } failedOutput && failedOutput.ValueKind == JsonValueKind.Object)
+                {
+                    var failureObj = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+                    failureObj["output"] = failedOutput.Clone();
+                    payload["failure"] = JSON.SerializeToElement(failureObj);
+                }
+            }
             if (task?.CausedByFeedbackId is { } feedbackId)
             {
                 var feedback = run.Feedback.FirstOrDefault(f => f.Id == feedbackId);
@@ -223,6 +233,16 @@ public sealed class WorkflowDispatchBuilder(
         {
             payload["tasks"] = JSON.SerializeToElement(tasksMap);
         }
+    }
+
+    private static TaskRun? FindFailedTask(WorkflowRun run, string taskId)
+    {
+        foreach (var stage in run.Stages)
+        {
+            var task = stage.Tasks.FirstOrDefault(t => t.Id == taskId);
+            if (task is not null && task.Output.HasValue) return task;
+        }
+        return null;
     }
 
     private static bool TryGetAnnotation(WorkflowRun run, string key, out string value)

@@ -192,6 +192,111 @@ describe("mohist/acp-agent", () => {
     }
   })
 
+  it("FailIf_PASSMarker_ActionReportsSuccess", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-failif-pass-"))
+    const fixture = createFixture("expectation-repair")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        session: "check",
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+              failIf: "<promise>FAIL</promise>",
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("success")
+      const output = JSON.parse(result.output ?? "{}")
+      expect(output.errorCode).toBeNull()
+      expect(output.failIfMarker).toBeNull()
+      expect(output.expectation.satisfied).toBe(true)
+      expect(output.expectation.failIfMatches).toHaveLength(0)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
+  it("FailIf_FAILMarkerWithErrorCode_ActionReportsFailureWithErrorCode", async () => {
+    // The agent writes <promise>FAIL</promise> to review.md along with an
+    // `errorCode: review-failed` line. The action must report the task as
+    // failed with the action's own errorCode (read from the marker file)
+    // and the engine's onFailure cases will then match
+    // output.errorCode: review-failed.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-failif-fail-"))
+    const fixture = createFixture("failif-fail")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        session: "check",
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+              failIf: "<promise>FAIL</promise>",
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("failure")
+      const output = JSON.parse(result.output ?? "{}")
+      expect(output.errorCode).toBe("review-failed")
+      expect(output.failIfMarker).toBe("<promise>FAIL</promise>")
+      expect(output.expectation.satisfied).toBe(false)
+      expect(output.expectation.failIfMatches).toHaveLength(1)
+      expect(output.expectation.failIfMatches[0].errorCode).toBe("review-failed")
+      expect(result.message).toContain("failIf marker matched")
+      expect(result.message).toContain("review-failed")
+      // The repair loop must NOT re-prompt the agent once failIf matched —
+      // the verdict is final, the agent cannot un-fail itself by re-running.
+      expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
+  it("FailIf_FAILMarkerNoErrorCode_ActionReportsFailureWithNullErrorCode", async () => {
+    // The agent emits a FAIL marker without an `errorCode:` line. The
+    // task still fails on account of the marker; the errorCode stays null
+    // because the action cannot synthesize one — the engine cannot match
+    // an onFailure case against an absent output.errorCode.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-acp-failif-no-code-"))
+    const fixture = createFixture("failif-fail-no-code")
+
+    try {
+      const result = await acpAgentAction(fixture.context({
+        prompt: "review the change",
+        session: "check",
+        expect: {
+          markers: [
+            {
+              path: "review.md",
+              oneOf: ["<promise>PASS</promise>", "<promise>FAIL</promise>"],
+              failIf: "<promise>FAIL</promise>",
+            },
+          ],
+        },
+      }, undefined, { workDir }))
+
+      expect(result.status).toBe("failure")
+      const output = JSON.parse(result.output ?? "{}")
+      expect(output.errorCode).toBeNull()
+      expect(output.failIfMarker).toBe("<promise>FAIL</promise>")
+      expect(output.expectation.failIfMatches).toHaveLength(1)
+      expect(output.expectation.failIfMatches[0].errorCode).toBeNull()
+    } finally {
+      await rm(workDir, { recursive: true, force: true })
+    }
+  })
+
   it.skip("ProbeTimesOutWithoutQualifyingActivity_LivenessMonitored_FailsSession [SKIPPED: physical wall-clock]", async () => {
     const fixture = createFixture("quiet-then-done")
 
@@ -1277,7 +1382,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction" | "expectation-repair" | "expectation-repair-usage-only" | "cancel-hangs"
+type Scenario = "basic" | "model-fallback" | "model-config-fails" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage" | "compaction" | "expectation-repair" | "expectation-repair-usage-only" | "cancel-hangs" | "failif-fail" | "failif-fail-no-code"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -1342,6 +1447,8 @@ class FakeAcpAgent {
         if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
         if (self.scenario === "expectation-repair") return await self.runExpectationRepairPrompt(params.sessionId, text)
         if (self.scenario === "expectation-repair-usage-only") return await self.runExpectationRepairUsageOnlyPrompt(params.sessionId, text)
+        if (self.scenario === "failif-fail") return await self.runFailIfFailPrompt(params.sessionId)
+        if (self.scenario === "failif-fail-no-code") return await self.runFailIfFailNoCodePrompt(params.sessionId)
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         if (self.scenario === "config-option-update") {
           await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "switching" } } } as never)
@@ -1443,6 +1550,23 @@ class FakeAcpAgent {
     }
 
     await this.connection.sessionUpdate(textUpdate(sessionId, "review complete"))
+    return { stopReason: "end_turn" as const }
+  }
+
+  private async runFailIfFailPrompt(sessionId: string) {
+    // The agent writes a verdict marker alongside an `errorCode:` line.
+    // This is the canonical shape for the mohist/github-pr profile: the
+    // review-task agent declares the error code in its own output, the
+    // engine then matches `output.errorCode: review-failed` against the
+    // task's onFailure cases.
+    await writeFile(join(this.extractCwd(), "review.md"), "errorCode: review-failed\nFound issues.\n<promise>FAIL</promise>\n")
+    await this.connection.sessionUpdate(textUpdate(sessionId, "wrote review.md"))
+    return { stopReason: "end_turn" as const }
+  }
+
+  private async runFailIfFailNoCodePrompt(sessionId: string) {
+    await writeFile(join(this.extractCwd(), "review.md"), "<promise>FAIL</promise>\n")
+    await this.connection.sessionUpdate(textUpdate(sessionId, "wrote review.md"))
     return { stopReason: "end_turn" as const }
   }
 

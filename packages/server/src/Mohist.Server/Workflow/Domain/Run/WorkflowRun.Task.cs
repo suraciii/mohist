@@ -81,7 +81,7 @@ public static partial class WorkflowRunExtensions
             var insertIndex = current.Tasks.IndexOf(task) + 1;
             foreach (var recoveryTask in recoveryTasks)
             {
-                var recoveryRun = TaskRun.MakeTask(current.Tasks, recoveryTask);
+                var recoveryRun = TaskRun.MakeTask(current.Tasks, recoveryTask, causedByFailedTaskId: task.Id);
                 current.Tasks.Insert(insertIndex, recoveryRun);
                 insertIndex++;
             }

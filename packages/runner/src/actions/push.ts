@@ -1,5 +1,5 @@
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { stringInput } from "../core/json.js"
+import { booleanInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { git as defaultGit } from "./git.js"
 
@@ -21,6 +21,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
     ?? stringAt(context.variables, ["project", "baseBranch"])
     ?? "main"
   const remote = stringInput(context.with, "remote") ?? "origin"
+  const forceWithLease = booleanInput(context.with, "forceWithLease") === true
   const refspec = `${source}:${target}`
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
@@ -33,6 +34,7 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
       workDir,
       null,
       false,
+      forceWithLease,
       sourceResolve.combinedOutput,
       "retry-safe",
       sourceResolve.exitCode,
@@ -40,13 +42,16 @@ export async function pushAction(context: ActionContext): Promise<ActionResult> 
   }
   const landedCommit = sourceResolve.stdout.trim()
 
-  const push = await git(workDir, ["push", remote, refspec], context.signal)
+  const pushArgs = ["push"]
+  if (forceWithLease) pushArgs.push("--force-with-lease")
+  pushArgs.push(remote, refspec)
+  const push = await git(workDir, pushArgs, context.signal)
   if (!push.success) {
     const failureKind = looksLikeNonFastForward(push.combinedOutput) ? "base-moved" : "retry-safe"
-    return pushOutput(source, target, remote, workDir, landedCommit, false, push.combinedOutput, failureKind, push.exitCode)
+    return pushOutput(source, target, remote, workDir, landedCommit, false, forceWithLease, push.combinedOutput, failureKind, push.exitCode)
   }
 
-  return pushOutput(source, target, remote, workDir, landedCommit, true, push.combinedOutput, null, push.exitCode)
+  return pushOutput(source, target, remote, workDir, landedCommit, true, forceWithLease, push.combinedOutput, null, push.exitCode)
 }
 
 type PushFailureKind = "base-moved" | "retry-safe" | null
@@ -58,6 +63,7 @@ function pushOutput(
   workDir: string,
   landedCommit: string | null,
   pushed: boolean,
+  forceWithLease: boolean,
   gitOutput: string,
   failureKind: PushFailureKind,
   exitCode: number | null,
@@ -66,7 +72,8 @@ function pushOutput(
   // Downstream renderers (CLI DeliveryFailureGuidance, web delivery-failure.ts)
   // detect the kind from the JSON `failureKind` field first. Push reports
   // `base-moved` (non-fast-forward; rebase and try again) and `retry-safe`
-  // (transient/network/auth).
+  // (transient/network/auth). `forceWithLease` is recorded so the integrate
+  // stage's rebase-then-push recovery path can be audited in the task output.
   const output = JSON.stringify({
     kind: "push",
     status: pushed ? "completed" : "failed",
@@ -77,6 +84,7 @@ function pushOutput(
     workDir,
     landedCommit,
     pushed,
+    forceWithLease,
     failureKind,
     output: gitOutput,
   })

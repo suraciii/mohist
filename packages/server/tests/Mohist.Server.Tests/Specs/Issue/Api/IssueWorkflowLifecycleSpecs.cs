@@ -127,7 +127,7 @@ public class IssueWorkflowLifecycleSpecs
 
         await Assert.ThrowsAsync<WorkflowProfileLockedException>(() =>
             issue.UpdateFullAsync(new UpdateIssueData(
-                WorkflowProfileId: "mohist/pr",
+                WorkflowProfileId: "mohist/github-pr",
                 PresentFields: new HashSet<string>(StringComparer.Ordinal) { nameof(UpdateIssueData.WorkflowProfileId) })));
 
         var final = await GetIssueInfoAsync(projectId, issueNumber);

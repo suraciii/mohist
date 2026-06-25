@@ -242,20 +242,6 @@ stages:
             session: check
             prompt: ${{ prompts.auto-fix }}
             agent: ${{ vars.agent }}
-        verifyTask:
-          id: ai-review
-          title: AI review
-          uses: mohist/acp-agent
-          with:
-            session: check
-            prompt: ${{ prompts.review }}
-            agent: ${{ vars.agent }}
-            expect:
-              markers:
-                - path: ${{ openspecChangeDir }}/review.md
-                  oneOf:
-                    - <promise>PASS</promise>
-                    - <promise>FAIL</promise>
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
