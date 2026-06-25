@@ -5,6 +5,7 @@ import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import { deleteDirectory, runCommand as defaultRunCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
+import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
 import type { JsonObject, WorkItem } from "../core/types.js"
 import type { ServerConnection } from "./connection.js"
 
@@ -20,6 +21,16 @@ export interface ReceiveFollowupPayload {
   workflowRunId: string
   sessionName: string
   text: string
+}
+
+// Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
+// method when a workflow run reaches a terminal state. The status string
+// is the canonical WorkflowRunStatus enum name (`Completed`, `Stopped`,
+// `Failed` for terminal; non-terminal statuses are not delivered by the
+// router — see RunnerWorkflowStatusRouter).
+export interface ReceiveWorkflowRunStatusPayload {
+  workflowRunId: string
+  status: string
 }
 
 export interface RunnerSignalRClientOptions {
@@ -302,6 +313,50 @@ export class RunnerSignalRClient {
     this.connection.on("ReceiveFollowup", (payload: ReceiveFollowupPayload | null | undefined) => {
       void this.handleFollowup(payload)
     })
+
+    this.connection.on("ReceiveWorkflowRunStatus", async (payload: ReceiveWorkflowRunStatusPayload | null | undefined) => {
+      await this.handleWorkflowRunStatus(payload)
+    })
+  }
+
+  // Server-pushed terminal workflow run status. Transitions the matching
+  // registry entry from `active` to `eligible` and stamps `terminalAt`.
+  // Idempotent: an already-eligible entry is returned unchanged and the
+  // on-disk file is not rewritten (per T-003 acceptance criteria).
+  //
+  // Push is a latency optimization. If the push is missed (runner offline
+  // at the moment of the event, transport drop, race with assignment),
+  // the convergence backstop wired into RunnerHost.startup / onReconnected
+  // / periodic timer is the authoritative catch-all — see
+  // `cleanup-convergence.ts`. This handler MUST NOT throw to the SignalR
+  // transport: lifecycle events must never crash the connection.
+  private async handleWorkflowRunStatus(payload: ReceiveWorkflowRunStatusPayload | null | undefined): Promise<void> {
+    if (!payload) return
+    const workflowRunId = payload.workflowRunId
+    const status = payload.status
+    if (!workflowRunId || typeof workflowRunId !== "string") return
+    if (!isTerminalWorkflowStatus(status)) {
+      // Server only pushes terminal statuses today (see
+      // RunnerWorkflowStatusRouter), but guard defensively: an unknown /
+      // non-terminal status leaves the entry active. Convergence will
+      // re-check on its next tick if needed.
+      return
+    }
+    if (!this.registry) return
+    try {
+      const updated = await this.registry.markEligible(workflowRunId)
+      if (!updated) {
+        // Push for a run the runner never materialized (e.g. an event for
+        // a workflow whose workspace lives on another runner). The runner
+        // only tracks workspaces it owns; nothing to do.
+        return
+      }
+      console.log(
+        `workspace cleanup: ${workflowRunId} transitioned to eligible (status=${status}, terminalAt=${updated.terminalAt})`,
+      )
+    } catch (error) {
+      console.error(`workspace cleanup: failed to mark ${workflowRunId} eligible from push:`, error)
+    }
   }
 
   // Drop the registry entry whose workspace path resolves to

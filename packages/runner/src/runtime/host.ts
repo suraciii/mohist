@@ -5,6 +5,7 @@ import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
+import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
@@ -32,6 +33,8 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
+  private readonly convergence: ConvergenceBackstop
+  private readonly cleanupConvergenceIntervalMs: number
   private readonly maxConcurrentWorkflows: number
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
@@ -53,6 +56,7 @@ export class RunnerHost {
 
   constructor(private readonly options: RunnerOptions) {
     this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
+    this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     const build = loadBuildInfo()
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash)
@@ -65,6 +69,10 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
+    this.convergence = new ConvergenceBackstop(
+      this.workspaceRegistry,
+      new ServerConnectionConvergenceAdapter(this.connection),
+    )
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
@@ -106,8 +114,15 @@ export class RunnerHost {
       while (!signal.aborted) {
         await this.connectRunner(signal)
         await this.initializeSharedConnection(signal)
+        // Startup convergence: pick up any terminal events the runner
+        // missed while it was offline (e.g. completed while the previous
+        // process was down). Runs once per connect cycle, immediately
+        // after SignalR is up so the push channel is available in
+        // parallel.
+        await this.runConvergenceOnce(signal)
         const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
         const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
+        const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
         try {
           await this.runWorkerPool(signal)
         } catch (error) {
@@ -117,12 +132,22 @@ export class RunnerHost {
         } finally {
           clearInterval(heartbeat)
           clearInterval(selfCheck)
+          clearInterval(convergenceTimer)
           await this.shutdownSharedConnection()
           await this.shutdownConnection()
         }
       }
     } finally {
       this.activeSignal = null
+    }
+  }
+
+  private async runConvergenceOnce(signal: AbortSignal): Promise<void> {
+    try {
+      await this.convergence.runOnce(signal)
+    } catch (error) {
+      // Convergence is best-effort; the next tick or reconnect retries.
+      console.error("workspace cleanup convergence pass failed:", error)
     }
   }
 
@@ -141,6 +166,15 @@ export class RunnerHost {
 
   private onDispatchReconnected() {
     void this.sendImmediateHeartbeat()
+    // Convergence on every reconnect: the SignalR transport just
+    // recovered, which is the cheapest moment to ask the server for the
+    // truth about every active registry entry. Push may also have queued
+    // events during the disconnect window; this catch-all reconciles
+    // whatever push did not cover (design D2 backstop).
+    const signal = this.activeSignal
+    if (signal) {
+      void this.runConvergenceOnce(signal)
+    }
   }
 
   private async sendImmediateHeartbeat() {

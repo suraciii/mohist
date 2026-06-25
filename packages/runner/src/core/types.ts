@@ -103,6 +103,11 @@ export interface RunnerOptions {
   pollIntervalMs: number
   heartbeatIntervalMs: number
   dispatchLivenessProbeIntervalMs: number
+  // Optional override for the convergence backstop cadence (T-003).
+  // Defaults to 5 minutes inside RunnerHost. Set to a very large value
+  // to effectively disable the periodic tick while keeping startup /
+  // reconnect convergence. Used by tests to drive ticks deterministically.
+  cleanupConvergenceIntervalMs?: number
 }
 
 export interface RunnerRegistration {

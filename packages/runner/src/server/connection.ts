@@ -29,6 +29,31 @@ export class ServerConnection {
     return toWorkItem((await response.json()) as WorkDispatchResponse)
   }
 
+  /**
+   * Batch status query for the runner's convergence backstop. The runner
+   * only asks about workflow runs it still tracks in its local active
+   * workspace registry; the server returns the current lifecycle status of
+   * every requested run id that exists, dropping unknown ones (per design
+   * D2 of issue-268 — never enumerate or query runs the runner did not
+   * request).
+   *
+   * The response is a partial map: keys absent from the response mean the
+   * server has no record of the run (the runner treats these as "drop
+   * the registry entry").
+   */
+  async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
+    if (workflowRunIds.length === 0) return {}
+    const response = await fetch(this.url("workflow-runs/status"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflowRunIds }),
+      signal,
+    })
+    if (!response.ok) throw new Error(`workflowRunsStatus failed: ${response.status} ${await response.text()}`)
+    const payload = await response.json() as { statuses?: Record<string, string> }
+    return payload.statuses ?? {}
+  }
+
   async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
     const ownerKind = work.ownerKind?.trim().toLowerCase()
     const body: Record<string, unknown> = {

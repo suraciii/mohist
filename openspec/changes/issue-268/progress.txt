@@ -306,3 +306,178 @@ Status: complete.
   terminal status, the runner handler must call `registry.markEligible(workflowRunId)`
   (not `remove`). The convergence query should call `markEligible` too. `remove` is
   reserved for the manual cleanup path.
+
+## T-003 — Runner terminal-state detection via event push and convergence backstop
+
+Status: complete.
+
+### Files changed / added
+
+- `packages/runner/src/server/connection.ts` — added
+  `ServerConnection.workflowRunsStatus(workflowRunIds, signal)` that POSTs the
+  runner-scoped batch endpoint and returns the partial `{ [runId]: status }`
+  map. Empty input short-circuits without a network call.
+- `packages/runner/src/runtime/workflow-terminal-status.ts` (new) —
+  `WorkflowRunStatusName` union + `TERMINAL_WORKFLOW_STATUSES` set +
+  `isTerminalWorkflowStatus(status)` type guard. Centralizes the runner's
+  view of the server enum (Completed / Stopped / Failed).
+- `packages/runner/src/runtime/cleanup-convergence.ts` (new) —
+  `ConvergenceBackstop` class + `ConvergenceRunner` interface +
+  `ServerConnectionConvergenceAdapter`. `runOnce(signal)` filters the
+  registry to `phase === "active"`, batches those ids into a single
+  `queryActiveStatuses` call, transitions server-reported-terminal entries
+  via `markEligible`, drops entries the server has no record of, and
+  swallows query failures (logs + returns zeroed counts).
+- `packages/runner/src/server/runner-signalr.ts` — added
+  `ReceiveWorkflowRunStatusPayload` type and the matching
+  `connection.on("ReceiveWorkflowRunStatus", ...)` handler in
+  `registerHandlers()`. The handler routes through
+  `isTerminalWorkflowStatus` + `registry.markEligible`; ignores null
+  payloads, missing ids, and non-terminal statuses. Push for an unknown
+  run id is a silent no-op (the runner only tracks its own
+  materializations).
+- `packages/runner/src/runtime/host.ts` — `RunnerHost` now owns a single
+  `ConvergenceBackstop` bound to the shared registry + a
+  `ServerConnectionConvergenceAdapter` over its existing
+  `ServerConnection`. `run()` fires one convergence pass immediately
+  after the first SignalR connect per connect cycle. A periodic
+  `setInterval` runs additional passes every `cleanupConvergenceIntervalMs`
+  (default 5 min, configurable via `CLEANUP_CONVERGENCE_INTERVAL_MS`).
+  `onDispatchReconnected` fires another pass on every SignalR reconnect.
+  All three trigger points reuse the same private `runConvergenceOnce`
+  helper; failures are logged and never propagated.
+- `packages/runner/src/core/types.ts` — added optional
+  `cleanupConvergenceIntervalMs` to `RunnerOptions` (defaults to 5 min
+  inside `RunnerHost`).
+- `packages/runner/src/cli.ts` — wired
+  `CLEANUP_CONVERGENCE_INTERVAL_MS` env override.
+- Tests:
+  - `packages/runner/tests/workflow-terminal-status.spec.ts` (new) — 13
+    unit tests for `isTerminalWorkflowStatus`: positive coverage for
+    Completed/Stopped/Failed, negative for Running/Paused/AwaitingApproval/Pending,
+    null/undefined/empty/unknown/case-mismatch, and a fixed-size
+    assertion on `TERMINAL_WORKFLOW_STATUSES`.
+  - `packages/runner/tests/cleanup-convergence.spec.ts` (new) — 15 unit
+    tests against a stub `ConvergenceRunner`: no-active-entries no-op,
+    only-active-queried, terminal transition (Completed/Stopped/Failed),
+    non-terminal leave-active, server-forgotten drops entry, mixed
+    statuses, already-eligible skipped, server-error tolerated,
+    terminalAt stamping, no-full-history-scan guarantee.
+  - `packages/runner/tests/server-connection-workflow-status.spec.ts`
+    (new) — 6 integration tests for `ServerConnection.workflowRunsStatus`:
+    POST URL + payload shape, empty-input no-call, response parsing,
+    missing-statuses empty-map, non-ok throws, abort-signal forwarding.
+  - `packages/runner/tests/runner-signalr-workflow-status.spec.ts` (new)
+    — 11 integration tests covering the
+    `ReceiveWorkflowRunStatus` SignalR handler: completed/stopped/failed
+    transitions, idempotent re-stamp, non-terminal leave-active, unknown
+    run id no-op, null/undefined/missing-field tolerance, persistence,
+    terminalAt stamping, multi-run independence.
+  - `packages/runner/tests/runner-host-convergence.spec.ts` (new) — 10
+    integration tests covering the host wiring: startup convergence
+    fires, transitions land on disk, only-active entries are queried
+    (no full-history scan), reconnect convergence, periodic timer fires
+    repeatedly, timer is cleared on shutdown, server-forgotten entries
+    are dropped, server errors log but don't block the worker pool,
+    empty registry skips the query.
+
+### Decisions taken during implementation
+
+- **Terminal status string contract = case-sensitive.** The server returns
+  the canonical `WorkflowRunStatus` enum name (`Completed`, `Stopped`,
+  `Failed`); the runner matches exactly. Lowercase is a wire contract
+  violation and is treated as non-terminal. The unit tests pin this.
+
+- **Push is silent on the unknown-id path.** If the server pushes a
+  terminal event for a run the runner never materialized (e.g. an event
+  for a workflow whose workspace lives on another runner), the handler
+  resolves to a `null` registry entry and returns. No log spam, no
+  error.
+
+- **Convergence queries are batched.** All active entries go into one
+  `workflowRunIds` array → one HTTP call per pass. The server-side
+  endpoint already dedupes and filters whitespace (T-001 contract).
+
+- **Server-forgotten entries are dropped on convergence.** When the
+  server omits a run id from the status response, the runner removes
+  the matching registry entry. The runner only tracks workspaces it
+  owns; if the server has forgotten the run, the runner should forget
+  the entry too. The on-disk directory is left alone (T-004's
+  pre-delete guards decide eviction).
+
+- **Convergence failures never crash the worker pool.** Both the
+  per-pass `try/catch` in `ConvergenceBackstop.runOnce` and the
+  detached `runConvergenceOnce` in `RunnerHost` swallow exceptions and
+  log. The next tick (or reconnect) retries.
+
+- **No new RunnerOptions field required.** `cleanupConvergenceIntervalMs`
+  is optional with a 5-min default inside `RunnerHost`. Existing
+  RunnerHost constructions in tests and the CLI don't need to change.
+  The CLI's `CLEANUP_CONVERGENCE_INTERVAL_MS` env override is opt-in.
+
+- **Push and convergence both call `markEligible`.** Neither pushes
+  `remove`. Manual cleanup is the only path that drops registry
+  entries (per the T-002 contract).
+
+### Verification
+
+- `npm run typecheck -w packages/runner` — clean.
+- `npm run typecheck -w packages/web` — clean.
+- Focused regression (`tests/workspace-registry.spec.ts`,
+  `tests/workspace-registry-integration.spec.ts`, `tests/workspace.spec.ts`,
+  `tests/runner-signalr.spec.ts`,
+  `tests/runner-signalr-workflow-status.spec.ts`,
+  `tests/runner-host.spec.ts`, `tests/runner-host-convergence.spec.ts`,
+  `tests/cleanup-convergence.spec.ts`,
+  `tests/workflow-terminal-status.spec.ts`,
+  `tests/server-connection-workflow-status.spec.ts`): 158/158 passed.
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --filter "FullyQualifiedName~RunnerCleanupPolicyAndStatusApiSpecs|FullyQualifiedName~CleanupPolicyOptionsSpecs|FullyQualifiedName~RunnerWorkflowStatusRouterSpecs|FullyQualifiedName~RunnerWorkflowTerminalStatusHandlerSpecs" --no-build`:
+  23/23 passed (T-001 server tests still green after no server
+  changes).
+- Full runner suite (`npx vitest run`): 625/626 passed in one run.
+  The single failing test is the pre-existing flake in
+  `tests/acp-agent.spec.ts` and `tests/acp/session-strategies-{resume,reuse}.spec.ts`
+  documented in the T-002 gotchas (passes in isolation, unrelated to
+  this change).
+
+### Gotchas for the next tasks
+
+- **`ConvergenceBackstop.runOnce` is best-effort and synchronous per
+  pass.** It batches all active entries into one HTTP call and applies
+  each server response in-memory. A pass that errors out partway does
+  NOT roll back earlier `markEligible` calls; those persist locally and
+  the next pass will simply find them already eligible. Idempotency is
+  the safety net here.
+
+- **`ServerConnectionConvergenceAdapter.queryActiveStatuses` is the
+  injection seam for tests.** Future tests that want to drive
+  convergence with a fake server should swap in a stub
+  `ConvergenceRunner` rather than mocking `ServerConnection` directly —
+  the `ConvergenceRunner` interface (`runner/src/runtime/cleanup-convergence.ts`)
+  is the public contract.
+
+- **The convergence timer is started AFTER the first SignalR connect
+  succeeds**, not in the constructor. This matches the heartbeat /
+  selfCheck timers. T-004's cleanup loop should follow the same
+  pattern: stand up the timer inside the `try` of the
+  `runWorkerPool` loop and `clearInterval` it in `finally` so a
+  failed connect cycle does not leak.
+
+- **No full-history scan enforcement.** `ConvergenceBackstop.runOnce`
+  filters to `phase === "active"` before building the request payload.
+  T-004's cleanup loop should similarly only touch entries with
+  `phase === "eligible"` — both invariants are tested explicitly.
+
+- **`workflowRunsStatus` accepts an empty input as a no-op.** T-004
+  should not special-case empty registries; an empty array returns
+  `{}` without making a network call.
+
+- **The runner code does not write any cleanupPolicy into the poll
+  request.** T-001's `WorkDispatchResponse.cleanupPolicy` is read by
+  T-004 (the cleanup loop) via `connection.poll()`. T-003 does not
+  consume the policy — convergence is policy-free.
+
+- **The `cleanupConvergenceIntervalMs` default (5 min) is shared across
+  runners.** T-004's cleanup loop should pick a different cadence (e.g.
+  the design suggests 2–5 min) so eviction runs at a different
+  schedule from convergence. The two timers do not need to be aligned.
