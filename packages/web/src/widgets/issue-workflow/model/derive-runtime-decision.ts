@@ -246,14 +246,25 @@ function buildActions(
         ? undefined
         : 'Rerun is not currently offered by the backend projection.',
     })
-    actions.push({
-      kind: 'stop',
-      label: 'Stop workflow',
-      enabled: !isClosed && !isDone && actionEnabled(allowed, 'stop'),
-      reason: actionEnabled(allowed, 'stop')
-        ? undefined
-        : 'Stop is not currently offered by the backend projection.',
-    })
+    if (summary === 'failed') {
+      actions.push({
+        kind: 'start',
+        label: 'Start new workflow',
+        enabled: !isClosed && !isDone && actionEnabled(allowed, 'start'),
+        reason: actionEnabled(allowed, 'start')
+          ? undefined
+          : 'Start is not currently offered by the backend projection.',
+      })
+    } else {
+      actions.push({
+        kind: 'stop',
+        label: 'Stop workflow',
+        enabled: !isClosed && !isDone && actionEnabled(allowed, 'stop'),
+        reason: actionEnabled(allowed, 'stop')
+          ? undefined
+          : 'Stop is not currently offered by the backend projection.',
+      })
+    }
     actions.push({
       kind: 'inspect',
       label: 'View transcript',
@@ -551,6 +562,8 @@ function buildNextAction(
     if (resume) return 'Resume from where the workflow stopped.'
     const rerun = actions.find((a) => a.kind === 'rerun' && a.enabled)
     if (rerun) return 'Rerun the current stage.'
+    const start = actions.find((a) => a.kind === 'start' && a.enabled)
+    if (start) return 'Start a new workflow run, discarding the failed one.'
     if (currentTask) return `Investigate ${currentTask.title}.`
     return 'Inspect the failure and take action.'
   }

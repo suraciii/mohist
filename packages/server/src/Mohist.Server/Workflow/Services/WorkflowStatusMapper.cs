@@ -177,6 +177,11 @@ public static class WorkflowStatusMapper
             actions.Add(new AvailableActionView("rerun", "Rerun stage", run.CurrentStageId));
         }
 
+        if (run.Status == WorkflowRunStatus.Failed)
+        {
+            actions.Add(new AvailableActionView("start", "Start new workflow", null));
+        }
+
         return actions;
     }
 
