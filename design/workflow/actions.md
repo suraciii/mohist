@@ -132,20 +132,31 @@ vars.change.url
 
 ## GitHub PR Actions
 
-`mohist/create-pull-request` 和 `mohist/merge-pull-request` 都是普通
-workflow task action。PR 相关副作用必须显式出现在 task graph 里，不通过
-stage hook 或隐藏的 stage boundary side effect 执行。
+`mohist/create-github-pr`、`mohist/ready-github-pr` 和
+`mohist/merge-github-pr` 都是普通 workflow task action。PR 相关副作用
+必须显式出现在 task graph 里，不通过 stage hook 或隐藏的 stage boundary
+side effect 执行。
 
 边界：
 
-- `create-pull-request` 负责推送 workflow branch，并创建或更新同 head/base 的 PR。
-- `create-pull-request` 输出稳定 PR 身份，profile 可用 `setVars` 投影
+- `create-github-pr` 负责推送 workflow branch，并创建或更新同 head/base
+  的 draft PR。
+- `create-github-pr` 输出稳定 PR 身份，profile 可用 `setVars` 投影
   `vars.github.pr.number` / `vars.github.pr.url`。
-- `merge-pull-request` 负责把 PR 合入 base branch。
-- `merge-pull-request` 在真正 merge 前必须先等待 GitHub PR checks。
+- `ready-github-pr` 负责推送 workflow branch，更新同一个 PR 的 title/body，
+  并把 draft PR 标记为 ready。
+- `ready-github-pr` 必须复用 `vars.github.pr.number` 指向的 PR；如果该
+  PR 不存在、已关闭或不是同一个 head/base，应以可编排错误失败，不擅自新开
+  替代 PR。
+- `merge-github-pr` 负责把 PR 合入 base branch。
+- `merge-github-pr` 在真正 merge 前必须先等待 GitHub PR checks。
 - PR checks 是 merge action 的内部前置条件，不建模成 stage-level check。
+- profile 只为预期中的 mergeability 错误声明 recovery。配置、认证、PR 状态
+  冲突和 GitHub API 异常保留普通 task failure。
 
-`merge-pull-request` 的现行流程：
+目标 task graph 见 [`builtin-workflows/github-pr.md`](builtin-workflows/github-pr.md)。
+
+`merge-github-pr` 流程：
 
 ```text
 resolve PR
@@ -158,26 +169,18 @@ resolve PR
   -> confirm state=MERGED
 ```
 
-PR checks 等待阶段在 `mergeOrConfirmPr`（`packages/runner/src/actions/publish-via-pr.ts`）
-中通过轮询 `gh pr checks <prNumber> --json bucket,name,state` 实现：
+PR checks 等待阶段轮询 `gh pr checks <prNumber> --json bucket,name,state`：
 
-- 轮询间隔固定 15s；每次轮询记录一条 `PullRequestStep`（`name=gh-pr-checks`）以保留审计轨迹。
-- 任何 check 的 `bucket` 为 `PENDING` 时继续等待；不存在 PENDING 且存在 `FAIL`（gh `bucket` 把 CANCELLED / ACTION_REQUIRED 也归为 `FAIL`）时返回 `pr-checks-failed`。
-- 全部 `PASS`/`SKIP` 或 `gh pr checks` 返回空列表（仓库无 checks 报告）时直接进入 merge，与既有默认行为等价。
-- 等待期间尊重 `context.signal`：signal 触发时取消等待并以 `retry-safe` 失败，由 runner 决定是否 retry。
+- `PENDING`：继续等待。
+- 全部 `PASS` / `SKIP` 或无 checks：继续 merge。
+- `FAIL` / cancelled / action_required：返回 `errorCode: pr-checks-failed`。
+- `context.signal` 触发：返回 `retry-safe`。
 
-这样保持现有 workflow 架构：
-
-- task 做事。
-- checks 验证 stage。
-- action 内部验证 action 自己的完成条件。
-- PR merge 成功才表示集成完成。
-
-PR checks 失败时，`merge-pull-request` 返回 action-owned JSON failure，例如：
+PR checks 失败时，`merge-github-pr` 返回 action-owned JSON failure，例如：
 
 ```json
 {
-  "kind": "merge-pull-request",
+  "kind": "merge-github-pr",
   "status": "failed",
   "errorCode": "pr-checks-failed",
   "message": "PR #42 checks failed: build failed",
@@ -186,38 +189,21 @@ PR checks 失败时，`merge-pull-request` 返回 action-owned JSON failure，�
 }
 ```
 
-`pr-checks-failed` 当前不触发 auto-fix recovery。workflow 保留普通 task
-failure，由用户介入修复后 retry/rerun。后续如果要自动修 PR checks，应通过
-profile 对 `output.errorCode: pr-checks-failed` 声明显式 recovery task，而不是让
-workflow engine 理解 GitHub checks。
+`pr-checks-failed` 不触发隐式 auto-fix。需要自动修复时，profile 必须对
+`output.errorCode: pr-checks-failed` 声明显式 recovery task。
 
 ## Failure Recovery
 
-task 可以声明失败恢复规则。规则只读取当前失败 task 的 output，不判断 action type，不判断 task id。
+task 可以声明失败恢复规则。规则只读取当前失败 task 的 output，不判断
+action type，不判断 task id。
 
-目标语义：
+示例：
 
 ```yaml
-- id: integrate:open-pr
-  title: Open or update GitHub PR
-  uses: mohist/create-pull-request
+- id: deliver
+  uses: example/deliver
   with:
-    source: ${{ workspace.branch }}
     target: ${{ repository.baseBranch }}
-    remote: origin
-    titleFrom: issue.title
-    bodyFrom: issue.body
-  setVars:
-    github.pr.number: output.prNumber
-    github.pr.url: output.prUrl
-
-- id: integrate:merge-pr
-  title: Merge GitHub PR
-  uses: mohist/merge-pull-request
-  with:
-    prNumber: ${{ vars.github.pr.number }}
-    method: squash
-    subjectFrom: issue.title
   onFailure:
     limit: 1
     cases:
@@ -225,35 +211,15 @@ task 可以声明失败恢复规则。规则只读取当前失败 task 的 outpu
           output.errorCode: base-moved
         tasks:
           - id: recover:rebase
-            title: Rebase after base moved
             uses: mohist/rebase
             with:
               baseBranch: ${{ repository.baseBranch }}
               remote: origin
               squash: false
-              conflictResolver:
-                title: Resolve rebase conflicts
-                with:
-                  description: Resolve rebase conflicts, stage resolved files, and continue the rebase.
-          - id: recover:open-pr
-            title: Update GitHub PR
-            uses: mohist/create-pull-request
+          - id: recover:deliver
+            uses: example/deliver
             with:
-              source: ${{ workspace.branch }}
               target: ${{ repository.baseBranch }}
-              remote: origin
-              titleFrom: issue.title
-              bodyFrom: issue.body
-            setVars:
-              github.pr.number: output.prNumber
-              github.pr.url: output.prUrl
-          - id: recover:merge-pr
-            title: Merge GitHub PR
-            uses: mohist/merge-pull-request
-            with:
-              prNumber: ${{ vars.github.pr.number }}
-              method: squash
-              subjectFrom: issue.title
 ```
 
 执行规则：
