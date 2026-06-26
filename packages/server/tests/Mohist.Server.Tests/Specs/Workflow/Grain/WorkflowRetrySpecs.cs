@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using System.Text.Json;
@@ -414,6 +415,76 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
         Assert.Null(retryAction);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task TaskWithOnFailureFailsTwice_UserRetries_RecoveryBudgetResets()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new TaskDefinition(
+                    "task-1",
+                    "Task 1",
+                    "spec/task",
+                    OnFailure: new TaskFailureAction(
+                        Limit: 1,
+                        Cases:
+                        [
+                            new TaskFailureCase(
+                                When: new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+                                {
+                                    ["output.errorCode"] = JsonSerializer.SerializeToElement("boom")
+                                },
+                                Tasks:
+                                [
+                                    new TaskDefinition("recover-task", "Recover task", "spec/task")
+                                ],
+                                RetrySelf: true)
+                        ]))
+            ],
+            checks: []));
+
+        // First failure: triggers recovery [recover-task.1, task-1.2].
+        var (task1, r1) = await PollWorkAnyAsync();
+        Assert.Equal("task-1.1", task1.WorkId);
+        await ReportAsync(r1, task1.WorkId, new WorkResult("failed", "boom", Output: """{"errorCode":"boom"}"""));
+
+        var (recover1, r2) = await PollWorkAnyAsync();
+        Assert.Equal("recover-task.1", recover1.WorkId);
+        await ReportAsync(r2, recover1.WorkId, "completed");
+
+        // Retry-self runs and fails again; limit=1 is exhausted, run fails.
+        var (task2, r3) = await PollWorkAnyAsync();
+        Assert.Equal("task-1.2", task2.WorkId);
+        await ReportAsync(r3, task2.WorkId, new WorkResult("failed", "boom", Output: """{"errorCode":"boom"}"""));
+
+        var statusBeforeRetry = await GetQuerier().GetStatusAsync(_workflowId!);
+        Assert.Equal("failed", statusBeforeRetry!.Status);
+
+        // Manual retry refills the onFailure recovery budget for task-1.
+        await workflow.RetryAsync();
+
+        var (task3, r4) = await PollWorkAnyAsync();
+        Assert.Equal("task-1.3", task3.WorkId);
+
+        // With the budget reset, task3 failing should trigger recovery again
+        // instead of failing the whole workflow.
+        await ReportAsync(r4, task3.WorkId, new WorkResult("failed", "boom", Output: """{"errorCode":"boom"}"""));
+
+        var (recover2, r5) = await PollWorkAnyAsync();
+        Assert.Equal("recover-task.2", recover2.WorkId);
+
+        var statusAfterRetryFailure = await GetQuerier().GetStatusAsync(_workflowId!);
+        Assert.Equal("running", statusAfterRetryFailure!.Status);
+
+        // The previous failed attempts remain in history (they just no longer
+        // consume recovery budget).
+        var buildStage = statusAfterRetryFailure.Stages.Find(s => s.Stage == "build")!;
+        Assert.Contains(buildStage.Tasks, t => t.Id == "task-1.1" && t.Status == "failed");
+        Assert.Contains(buildStage.Tasks, t => t.Id == "task-1.2" && t.Status == "failed");
     }
 
     private static string? SessionName(WorkDispatch dispatch)

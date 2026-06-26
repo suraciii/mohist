@@ -960,10 +960,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (task?.OnFailure is not { } onFailure)
             return null;
 
-        var failedAttempts = stage.Tasks.Count(t =>
-            string.Equals(t.DefinitionId, task.DefinitionId, StringComparison.Ordinal)
-            && t.Status == TaskRunStatus.Failed);
-        if (failedAttempts >= onFailure.Limit)
+        // Recovery budget is explicit per task definition and resets on manual retry.
+        // Lazy-create the budget entry on the first failure so recovery tasks that
+        // declare their own onFailure (e.g. recover:rebase) are also covered.
+        if (!stage.RecoveryBudget.TryGetValue(task.DefinitionId, out var budget))
+        {
+            budget = onFailure.Limit;
+            stage.RecoveryBudget[task.DefinitionId] = budget;
+        }
+        if (budget <= 0)
             return null;
 
         foreach (var failureCase in onFailure.Cases)
@@ -971,7 +976,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (!MatchesTaskFailureCase(task.Output, failureCase.When))
                 continue;
 
-            return BuildRecoverySequence(task, failureCase, failedAttempts, onFailure);
+            return BuildRecoverySequence(task, failureCase, onFailure);
         }
 
         return null;
@@ -980,7 +985,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private static List<TaskDefinition> BuildRecoverySequence(
         TaskRun task,
         TaskFailureCase matchedCase,
-        int failedAttempts,
         TaskFailureAction onFailure)
     {
         var sequence = new List<TaskDefinition>(matchedCase.Tasks.Count + 1);
