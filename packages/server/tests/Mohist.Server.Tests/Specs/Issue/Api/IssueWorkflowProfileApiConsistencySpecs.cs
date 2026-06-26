@@ -326,6 +326,98 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task GetWorkflowProfile_AfterStageVariableNullClear_DoesNotExposeInternalBookkeeping()
+    {
+        var project = await CreateProjectAsync("wfp-stage-clear-contract");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Stage clear contract", projectId = project.Id });
+
+        await _client.PutAsJsonOkAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            new
+            {
+                vars = new Dictionary<string, object?>
+                {
+                    ["foo"] = "bar",
+                },
+                stages = new Dictionary<string, object?>
+                {
+                    ["plan"] = new
+                    {
+                        vars = new Dictionary<string, object?>
+                        {
+                            ["baz"] = "qux",
+                            ["keep"] = "yes",
+                        },
+                    },
+                },
+            });
+
+        await _client.PatchOkAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            new
+            {
+                stages = new Dictionary<string, object?>
+                {
+                    ["plan"] = new
+                    {
+                        vars = new Dictionary<string, object?>
+                        {
+                            ["baz"] = null,
+                        },
+                    },
+                },
+            });
+
+        var response = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await response.Content.ReadAsStringAsync();
+        var data = JsonDocument.Parse(json).RootElement.GetProperty("data");
+        var planVars = data.GetProperty("variables").GetProperty("stages").GetProperty("plan").GetProperty("vars");
+
+        Assert.False(planVars.TryGetProperty("baz", out _));
+        Assert.Equal("yes", planVars.GetProperty("keep").GetString());
+        Assert.DoesNotContain("StagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("stagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task PromptPreview_WithoutVariablesBody_UsesStoredIssueVariables()
+    {
+        var project = await CreateProjectAsync("wfp-preview-vars");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Preview variables", projectId = project.Id });
+
+        await _client.PutAsJsonOkAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            new
+            {
+                vars = new Dictionary<string, object?>
+                {
+                    ["foo"] = "bar",
+                },
+            });
+        await _client.PutAsJsonOkAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/prompts/plan_prompt",
+            new { body = "Plan with ${{ foo }}." });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/prompts/plan_prompt/preview",
+            new { });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = body.GetProperty("data");
+        Assert.Equal("Plan with bar.", data.GetProperty("rendered").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task StartWorkflow_WithPrProfile_UsesPrSystemTemplate()
     {
         var project = await CreateProjectAsync("wfp-start-pr");

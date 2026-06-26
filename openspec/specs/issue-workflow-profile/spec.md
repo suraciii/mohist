@@ -1,5 +1,3 @@
-
-
 ### Requirement: Single source of truth for issue workflow profile
 
 An issue SHALL have exactly one workflow profile selection that is the single source of truth across every read surface. The issue detail read model, the issue list read model, the workflow-profile endpoint response, and `mo issue show` SHALL all project the identical effective `workflowProfileId`. When no issue-level selection is persisted, the effective profile SHALL be resolved by inheriting the project default and then the system default (`mohist/default`); no read surface SHALL independently invent or hardcode a default independent of this resolution.
@@ -71,7 +69,6 @@ An issue that has an active (started) workflow run SHALL reject any attempt to c
 - **THEN** the update SHALL be accepted as a run-scoped runtime override
 - **AND** the issue's original workflow profile selection SHALL remain unchanged
 
-
 ### Requirement: Startup uses the displayed workflow profile
 
 The workflow definition used when starting an issue SHALL be the one resolved from the issue's effective workflow profile selection — the same value displayed on the issue detail and `mo issue show`. A `mohist/github-pr` profile SHALL enter the GitHub PR draft/ready/merge execution path, and a `mohist/default` profile SHALL enter the default merge/push execution path. The startup resolution SHALL NOT consult a divergent source from the read models.
@@ -87,3 +84,20 @@ The workflow definition used when starting an issue SHALL be the one resolved fr
 - **WHEN** an issue whose effective profile is `mohist/default` is started
 - **THEN** the started workflow run SHALL use the default workflow definition
 - **AND** the run SHALL enter the default merge/push path
+
+### Requirement: Workflow profile variable clear via null on PATCH
+
+`PATCH /api/issues/:number/workflow-profile/variables` SHALL treat a variable value of JSON `null` as an explicit removal of that key: after a successful PATCH that sets key `k` to `null`, a subsequent read of the issue's workflow profile variables SHALL NOT include `k`. This removal semantics SHALL coexist with the existing deep-merge behavior for present values — a PATCH that omits a key preserves it, a PATCH that includes a key with a value replaces/merges it, and a PATCH that includes a key with `null` removes it. This enables clients (including the `mo issue workflow config clear --var k` CLI verb) to delete individual variables against a deep-merge server that otherwise cannot drop keys.
+
+#### Scenario: Null value removes a variable
+
+- **WHEN** a client sends `PATCH /api/issues/:number/workflow-profile/variables` with `{ "foo": null }`
+- **AND** the issue's variables previously contained `foo`
+- **THEN** a subsequent `GET /api/issues/:number/workflow-profile` SHALL NOT include `foo` in variables
+- **AND** other variables SHALL remain unchanged
+
+#### Scenario: Absent key preserves a variable
+
+- **WHEN** a client sends `PATCH /api/issues/:number/workflow-profile/variables` with a body that does not mention `foo`
+- **AND** the issue's variables previously contained `foo`
+- **THEN** `foo` SHALL remain present and unchanged in variables

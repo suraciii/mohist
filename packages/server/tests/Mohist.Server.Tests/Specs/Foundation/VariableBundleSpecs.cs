@@ -31,14 +31,16 @@ public class VariableBundleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
-    public void Patch_NullBase_ReturnsOverlay()
+    public void Patch_NullBase_MergesOverlayIntoEmptyBundle()
     {
         var overlay = new VariableBundle(
             JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { a = 1 })));
 
         var result = VariableBundle.Patch(null, overlay);
 
-        Assert.Same(overlay, result);
+        Assert.NotSame(overlay, result);
+        Assert.NotNull(result.Vars);
+        Assert.Equal(1, result.Vars.Value.GetProperty("a").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -90,7 +92,7 @@ public class VariableBundleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
-    public void Patch_VarsDeepMerge_NullOverlayPropertiesDoNotOverrideBase()
+    public void Patch_VarsDeepMerge_NullOverlayPropertiesRemoveBaseKeys()
     {
         var @base = new VariableBundle(
             JsonSerializer.Deserialize<JsonElement>("""
@@ -120,8 +122,271 @@ public class VariableBundleSpecs
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
         var agent = doc.RootElement.GetProperty("agent");
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
-        Assert.Equal("max", agent.GetProperty("variant").GetString());
+        Assert.False(agent.TryGetProperty("model", out _));
+        Assert.False(agent.TryGetProperty("variant", out _));
+        Assert.Equal(120000, agent.GetProperty("probeTimeoutMs").GetInt32());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_TopLevelNullOverlay_RemovesKeyFromMergedVars()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "foo": "old",
+              "keep": "yes"
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            { "foo": null }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var root = doc.RootElement;
+
+        Assert.False(root.TryGetProperty("foo", out _));
+        Assert.Equal("yes", root.GetProperty("keep").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_OmittedOverlayKey_PreservesBaseValue()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "foo": "kept",
+              "bar": 1
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            { "other": "added" }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var root = doc.RootElement;
+
+        Assert.Equal("kept", root.GetProperty("foo").GetString());
+        Assert.Equal(1, root.GetProperty("bar").GetInt32());
+        Assert.Equal("added", root.GetProperty("other").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_NullOverlay_OnPreviouslyAbsentKey_IsNoOp()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "present": "yes"
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            { "absent": null }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var root = doc.RootElement;
+
+        Assert.False(root.TryGetProperty("absent", out _));
+        Assert.Equal("yes", root.GetProperty("present").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_EmptyBase_NullTopLevelOverlayKey_IsNoOp()
+    {
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            { "foo": null }
+            """));
+
+        var result = VariableBundle.Patch(VariableBundle.Empty, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        Assert.False(doc.RootElement.TryGetProperty("foo", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_EmptyBase_NullNestedOverlayKey_IsNoOp()
+    {
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            { "agent": { "model": null } }
+            """));
+
+        var result = VariableBundle.Patch(VariableBundle.Empty, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var agent = doc.RootElement.GetProperty("agent");
+        Assert.False(agent.TryGetProperty("model", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_EmptyBase_NullStageOverlayKey_IsNoOp()
+    {
+        var overlay = new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                { "baz": null }
+                """))
+            });
+
+        var result = VariableBundle.Patch(VariableBundle.Empty, overlay);
+
+        Assert.NotNull(result.Stages);
+        var planVars = result.Stages!["plan"].Vars;
+        Assert.NotNull(planVars);
+        using var doc = JsonDocument.Parse(planVars.Value.GetRawText());
+        Assert.False(doc.RootElement.TryGetProperty("baz", out _));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_StageVarsNullOverlay_RemovesKeyFromThatStage()
+    {
+        var @base = new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                {
+                  "baz": "old",
+                  "keep": "yes"
+                }
+                """)),
+                ["build"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                { "untouched": true }
+                """))
+            });
+
+        var overlay = new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                { "baz": null }
+                """))
+            });
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Stages);
+        var planVars = result.Stages!["plan"].Vars;
+        Assert.NotNull(planVars);
+        using var planDoc = JsonDocument.Parse(planVars!.Value.GetRawText());
+        Assert.False(planDoc.RootElement.TryGetProperty("baz", out _));
+        Assert.Equal("yes", planDoc.RootElement.GetProperty("keep").GetString());
+
+        var buildVars = result.Stages!["build"].Vars;
+        Assert.NotNull(buildVars);
+        using var buildDoc = JsonDocument.Parse(buildVars!.Value.GetRawText());
+        Assert.True(buildDoc.RootElement.GetProperty("untouched").GetBoolean());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void Patch_PresentOverlayValues_StillOverrideBase()
+    {
+        var @base = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "foo": "old",
+              "agent": { "model": "old-model", "type": "opencode" }
+            }
+            """));
+
+        var overlay = new VariableBundle(
+            JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "foo": "new",
+              "agent": { "model": "new-model", "extra": 1 }
+            }
+            """));
+
+        var result = VariableBundle.Patch(@base, overlay);
+
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        var root = doc.RootElement;
+
+        Assert.Equal("new", root.GetProperty("foo").GetString());
+        var agent = root.GetProperty("agent");
+        Assert.Equal("new-model", agent.GetProperty("model").GetString());
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal(1, agent.GetProperty("extra").GetInt32());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void ResolveStageVars_AfterNullClearOnStage_FallsBackToTopLevelWhenPresent()
+    {
+        var bundle = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "shared": "top",
+              "agent": {
+                "model": "minimax-coding-plan/MiniMax-M3",
+                "type": "opencode"
+              }
+            }
+            """),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                {
+                  "shared": "plan",
+                  "agent": {
+                    "model": null,
+                    "probeTimeoutMs": 120000
+                  }
+                }
+                """))
+            });
+
+        var cleared = VariableBundle.Patch(bundle, new VariableBundle(
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                { "shared": null }
+                """))
+            }));
+
+        var result = cleared.ResolveStageVars("plan");
+
+        Assert.NotNull(result);
+        Assert.Equal("top", result!.Value.GetProperty("shared").GetString());
+        var agent = result.Value.GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.False(agent.TryGetProperty("model", out _));
         Assert.Equal(120000, agent.GetProperty("probeTimeoutMs").GetInt32());
     }
 
@@ -260,7 +525,7 @@ public class VariableBundleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
-    public void ResolveStageVars_NullStageAgentModelFallsBackToTopLevelModel()
+    public void ResolveStageVars_NullStageAgentModelRemovesKeyFromMergedResult()
     {
         var bundle = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>("""
@@ -290,7 +555,7 @@ public class VariableBundleSpecs
         Assert.NotNull(result);
         var agent = result.Value.GetProperty("agent");
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
+        Assert.False(agent.TryGetProperty("model", out _));
         Assert.Equal(1200000, agent.GetProperty("livenessQuietThresholdMs").GetInt32());
         Assert.Equal(120000, agent.GetProperty("probeTimeoutMs").GetInt32());
     }
@@ -390,6 +655,31 @@ public class VariableBundleSpecs
         Assert.NotNull(deserialized.Vars);
         Assert.NotNull(deserialized.Stages);
         Assert.Single(deserialized.Stages);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
+    [Fact]
+    public void ToJson_DoesNotExposeInternalStageClearBookkeeping()
+    {
+        var original = new VariableBundle(
+            Vars: JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "shared": "top",
+              "agent": { "type": "opencode" }
+            }
+            """),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["plan"] = new(JsonSerializer.Deserialize<JsonElement>("""
+                { "agent": { "probeTimeoutMs": 120000 } }
+                """))
+            });
+
+        var json = original.ToJson();
+
+        Assert.DoesNotContain("StagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("stagesClearedKeys", json, StringComparison.OrdinalIgnoreCase);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

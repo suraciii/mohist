@@ -13,6 +13,7 @@ internal sealed class MohistCliApi
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         WriteIndented = true,
     };
+    internal static JsonSerializerOptions JsonOutputOptions => JsonOptions;
 
     private readonly HttpClient _http;
     private readonly TextWriter _out;
@@ -101,6 +102,64 @@ internal sealed class MohistCliApi
     public async Task<int> PrintPutAsync(string path, object body) =>
         await PrintResponseAsync(await _http.PutAsJsonAsync(path, body, JsonOptions));
 
+    public async Task<int> PrintPutWithOutputAsync(string path, object body, string mode, string? tableShape = null)
+    {
+        try
+        {
+            using var response = await _http.PutAsJsonAsync(path, body, JsonOptions);
+            return await PrintEnvelopeAsync(response, mode, tableShape);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// Expands an <c>@file</c> reference into the file's UTF-8 contents.
+    /// Values that do not start with <c>@</c> are returned as-is (inline).
+    /// Read errors print to <see cref="Error"/> and return
+    /// <see cref="Result.Failure"/>; the caller exits non-zero.
+    /// </summary>
+    public abstract record ExpandAtFileResult
+    {
+        private ExpandAtFileResult() { }
+
+        public sealed record Success(string Value) : ExpandAtFileResult;
+
+        public sealed record Failure(string Message) : ExpandAtFileResult;
+    }
+
+    public async Task<ExpandAtFileResult> ExpandAtFileAsync(string? raw, string optionName)
+    {
+        if (string.IsNullOrEmpty(raw))
+            return new ExpandAtFileResult.Success(string.Empty);
+
+        if (!raw.StartsWith('@'))
+            return new ExpandAtFileResult.Success(raw);
+
+        var path = raw[1..];
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            await _err.WriteLineAsync(
+                $"{optionName}: '@' must be followed by a file path").ConfigureAwait(false);
+            return new ExpandAtFileResult.Failure($"{optionName}: missing file path after '@'");
+        }
+
+        try
+        {
+            var text = await _fileSystem.ReadAllTextAsync(path).ConfigureAwait(false);
+            return new ExpandAtFileResult.Success(text ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            await _err.WriteLineAsync(
+                $"{optionName}: could not read file '{path}' ({ex.Message})").ConfigureAwait(false);
+            return new ExpandAtFileResult.Failure($"{optionName}: could not read file '{path}'");
+        }
+    }
+
     public async Task<int> PrintPatchAsync(string path, object body)
     {
         using var request = new HttpRequestMessage(HttpMethod.Patch, path)
@@ -114,6 +173,24 @@ internal sealed class MohistCliApi
     {
         using var response = await _http.GetAsync(path);
         return await ReadSuccessDataAsync(response);
+    }
+
+    public async Task<(int ExitCode, JsonNode? Data)> GetDataOrPrintErrorAsync(string path)
+    {
+        try
+        {
+            return (0, await GetDataAsync(path));
+        }
+        catch (ApiResponseException ex)
+        {
+            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            return (ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1, null);
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return (1, null);
+        }
     }
 
     public async Task<int> PrintGetSafeAsync(string path)
@@ -428,12 +505,12 @@ internal sealed class MohistCliApi
         }
     }
 
-    public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null)
+    public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null, JsonNode? successDataFallback = null)
     {
         try
         {
             using var response = await _http.DeleteAsync(path);
-            return await PrintEnvelopeAsync(response, mode, tableShape);
+            return await PrintEnvelopeAsync(response, mode, tableShape, successDataFallback);
         }
         catch (HttpRequestException)
         {
@@ -442,15 +519,19 @@ internal sealed class MohistCliApi
         }
     }
 
-    private async Task<int> PrintEnvelopeAsync(HttpResponseMessage response, string mode, string? tableShape)
+    private async Task<int> PrintEnvelopeAsync(HttpResponseMessage response, string mode, string? tableShape, JsonNode? successDataFallback = null)
     {
         if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            if (successDataFallback is not null)
+                return await PrintResponseAsync(response, successDataFallback);
             return await PrintResponseAsync(response);
+        }
 
         if (!response.IsSuccessStatusCode)
             return await PrintResponseAsync(response);
 
-        var data = await ReadSuccessDataAsync(response);
+        var data = await ReadSuccessDataAsync(response) ?? successDataFallback?.DeepClone();
         var shape = ParseTableShape(tableShape);
         return await RenderTableAsync(data, shape);
     }
@@ -476,6 +557,10 @@ internal sealed class MohistCliApi
         IssueTemplateList,
         IssueTemplateShow,
         RunnerList,
+        WorkflowProfile,
+        WorkflowVariables,
+        WorkflowProfilePrompt,
+        WorkflowProfilePreview,
     }
 
     internal static TableShape ParseTableShape(string? shape)
@@ -658,7 +743,7 @@ internal sealed class MohistCliApi
         throw new ApiResponseException(response.StatusCode, error, code);
     }
 
-    private async Task<int> PrintResponseAsync(HttpResponseMessage response)
+    private async Task<int> PrintResponseAsync(HttpResponseMessage response, JsonNode? successDataFallback = null)
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
         JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
@@ -671,7 +756,7 @@ internal sealed class MohistCliApi
         var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
         if (success)
         {
-            var data = node["data"];
+            var data = node["data"] ?? successDataFallback;
             _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
             return 0;
         }
