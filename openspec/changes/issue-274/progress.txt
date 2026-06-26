@@ -1,0 +1,15 @@
+## T-001 progress
+
+- Added four stored computed columns to `IssueRow`: `Title`, `Priority`, `IsDraft`, `PrerequisiteNumbersJson`.
+- Registered them in `MohistDbContext.OnModelCreating` with `HasComputedColumnSql(..., stored: true)` using `COALESCE(json_extract(State, '$.camel'), json_extract(State, '$.Pascal'))`.
+- Generated EF Core migration `20260626200645_AddEpicListDerivedColumns` (timestamped after `20260625052135_AddIssueIsArchivedComputedColumn`); `MohistDbContextModelSnapshot.cs` regenerated automatically.
+- Added integration tests in `Specs/Issue/Data/IssueDerivedColumnsSpecs.cs` covering derived-column tracking after State update and null-safety for missing/legacy keys.
+- `dotnet build Mohist.sln` and `dotnet test Mohist.sln -p:SkipWebBuild=true` pass (2830 passed, 14 skipped).
+
+## Codebase Patterns
+
+- Computed columns are declared as nullable properties on the row class and configured in `MohistDbContext.OnModelCreating`.
+- Use `COALESCE(camelCase, PascalCase)` to tolerate both casings in `State` JSON.
+- For SQLite, use `stored: true` for columns that will be joined/selected heavily; virtual columns are acceptable for indexed status columns but not for join columns.
+- Migrations are generated with `~/.dotnet/tools/dotnet-ef migrations add <Name>` from `packages/server` using the server project as both `--project` and `--startup-project`.
+- In-memory SQLite integration tests use `Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:")` + `DbContextOptionsBuilder< MohistDbContext>().UseSqlite(connection)` + `db.Database.Migrate()`.
