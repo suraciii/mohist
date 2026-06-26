@@ -123,30 +123,66 @@ describe('DashboardPage', () => {
     expect(container.querySelector('[data-testid="dashboard-zone-productivity"] [data-testid="dashboard-digest-empty"]')).toBeNull()
   })
 
-  it('keeps attention, pulse, and productivity zones as empty placeholders', () => {
+  it('mounts AttentionHero directly in the hero slot and keeps pulse/productivity as empty placeholders', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
 
     const { container } = renderPage()
 
-    const attention = screen.getByTestId('dashboard-zone-attention')
+    const attentionSlots = screen.getAllByTestId('dashboard-zone-attention')
+    expect(attentionSlots).toHaveLength(1)
+    const attention = attentionSlots[0]
     const pulse = screen.getByTestId('dashboard-zone-pulse')
     const productivity = screen.getByTestId('dashboard-zone-productivity')
 
-    expect(attention.className).toMatch(/border-dashed/)
+    expect(attention.className).not.toMatch(/border-dashed/)
     expect(pulse.className).toMatch(/border-dashed/)
     expect(productivity.className).toMatch(/border-dashed/)
 
-    expect(attention.childElementCount).toBe(0)
+    expect(attention.childElementCount).toBeGreaterThan(0)
     expect(pulse.childElementCount).toBe(0)
     expect(productivity.childElementCount).toBe(0)
+
+    expect(screen.getByTestId('dashboard-hero').contains(attention)).toBe(true)
+    expect(screen.getByTestId('dashboard-zones').contains(attention)).toBe(false)
 
     expect(attention.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
     expect(pulse.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
     expect(productivity.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
     expect(productivity.querySelector('[data-testid="productivity-zone"]')).toBeNull()
     expect(container).toBeTruthy()
+  })
+
+  it('renders the factory status headline at the top of the page', () => {
+    mocks.projects = [
+      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+    ]
+
+    renderPage()
+
+    expect(screen.getByTestId('factory-status-headline')).toBeInTheDocument()
+    expect(screen.getByTestId('factory-status-runner')).toBeInTheDocument()
+  })
+
+  it('renders the three-stack layout in top-to-bottom order', () => {
+    mocks.projects = [
+      { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+    ]
+
+    renderPage()
+
+    const page = screen.getByTestId('dashboard-page')
+    const headline = screen.getByTestId('dashboard-headline')
+    const hero = screen.getByTestId('dashboard-hero')
+    const zones = screen.getByTestId('dashboard-zones')
+
+    expect(page.contains(headline)).toBe(true)
+    expect(page.contains(hero)).toBe(true)
+    expect(page.contains(zones)).toBe(true)
+
+    expect(headline.compareDocumentPosition(hero) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(hero.compareDocumentPosition(zones) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('renders digest content inside the digest slot when the widget has resolved data', () => {

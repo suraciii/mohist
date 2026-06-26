@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Dashboard provides four zone mount-point slots
 
 The Dashboard page SHALL expose a first-screen composition contract made of, top to bottom: (1) a full-width **factory status headline** mount-point slot at the very top; (2) a full-width **Attention Hero** slot directly below the headline; (3) three remaining equal-weight zone mount-point slots with stable identities — `Pulse`, `Productivity`, and `Digest` — rendered underneath the Hero. The `Digest` slot SHALL mount the `dashboard-recent-digest` zone content. The `Attention` slot SHALL mount the `AttentionHero` widget as a full-width Hero and SHALL NOT render as an equal-weight peer within the remaining zones grid. The `Pulse` and `Productivity` slots SHALL render as empty placeholders until their respective downstream zone issues land. The headline and Hero SHALL each span the full content width, distinct from the remaining zones.
