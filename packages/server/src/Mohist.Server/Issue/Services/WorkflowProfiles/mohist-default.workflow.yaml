@@ -206,9 +206,24 @@ stages:
                 oneOf:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
+                failIf: <promise>FAIL</promise>
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/review.md
+        onFailure:
+          limit: 2
+          cases:
+            - when:
+                output.promise: FAIL
+              tasks:
+                - id: recover:fix-review-findings
+                  title: Fix review findings
+                  uses: mohist/acp-agent
+                  with:
+                    session: check
+                    prompt: ${{ prompts.auto-fix }}
+                    agent: ${{ vars.agent }}
+              retry: self
     checks:
       - name: health
         title: Health
@@ -226,21 +241,6 @@ stages:
             prompt: |
               Fix the check-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ vars.agent }}
-      - name: review-passed
-        title: Review passed
-        uses: core/marker
-        with:
-          path: ${{ openspecChangeDir }}/review.md
-          expect: <promise>PASS</promise>
-        repairLimit: 2
-        repairTask:
-          id: fix-review-findings
-          title: Fix review findings
-          uses: mohist/acp-agent
-          with:
-            session: check
-            prompt: ${{ prompts.auto-fix }}
             agent: ${{ vars.agent }}
       - name: merge-ready
         title: Merge ready

@@ -553,17 +553,26 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
         Assert.Contains("repairTask:", yaml);
-        Assert.Contains("id: fix-review-findings", yaml);
+        Assert.Contains("id: recover:fix-review-findings", yaml);
         Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
+        Assert.Contains("retry: self", yaml);
         // The serializer must not emit a verifyTask key. VerifyTask is
         // removed from the check-repair model; the serialized check
         // carries only the repair task.
         Assert.DoesNotContain("verifyTask:", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
-        var reviewRepair = reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Repair;
-        Assert.NotNull(reviewRepair);
-        Assert.Equal(2, reviewRepair!.Limit);
-        Assert.Equal("fix-review-findings", reviewRepair.Task.Id);
+        // Review failure is modeled on the ai-review task itself
+        // (failIf + onFailure + retry:self), not on a review-passed
+        // check. The check stage no longer carries review-passed.
+        var checkStage = reparsed.Stages[2];
+        Assert.DoesNotContain(checkStage.Checks, c => c.Name == "review-passed");
+        var aiReview = checkStage.Tasks.Single(t => t.Id == "ai-review");
+        Assert.NotNull(aiReview.OnFailure);
+        Assert.Equal(2, aiReview.OnFailure!.Limit);
+        var failureCase = Assert.Single(aiReview.OnFailure.Cases);
+        Assert.True(failureCase.RetrySelf);
+        var fixReviewFindings = Assert.Single(failureCase.Tasks);
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -966,27 +975,35 @@ public class MohistDefaultWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void DefaultWorkflowDefinition_ReviewPassedRepairHasNoVerifyTask()
+    public void DefaultWorkflowDefinition_AiReviewFailsOnReviewFailAndRecoversWithRetrySelf()
     {
-        // VerifyTask is removed from the check-repair model. The
-        // review-passed check's repair path exposes only the named
-        // repair task (fix-review-findings); the check-repair path is
-        // exactly [repairTask] with no verify step. The marker oneof
-        // declaration is the responsibility of the original task, not
-        // the repair path; see DefaultWorkflowDefinition_AiReviewTaskDeclaresMarkerExpectationWithOneOf.
+        // Review failure is modeled on the ai-review task itself, not on
+        // a review-passed check: the task declares failIf: FAIL so the
+        // engine fails the task on a FAIL verdict, then onFailure runs
+        // the recover:fix-review-findings (auto-fix) recovery task and
+        // retries ai-review (re-review) via retry: self. There is no
+        // review-passed check; the check stage carries only health and
+        // merge-ready.
         var definition = MohistWorkflow.Definition;
         var check = definition.Stages[2];
-        var reviewPassed = check.Checks.Single(c => c.Name == "review-passed");
-        Assert.NotNull(reviewPassed.OnFailure?.Repair);
-        var repair = reviewPassed.OnFailure!.Repair!;
-        Assert.Equal(2, repair.Limit);
-        Assert.Equal("fix-review-findings", repair.Task.Id);
-        // The CheckFailureRepair record has exactly two fields, Limit and
-        // Task; the absent VerifyTask property name confirms the type.
-        var propertyNames = typeof(CheckFailureRepair).GetProperties()
-            .Select(p => p.Name)
-            .ToArray();
-        Assert.Equal(new[] { "Limit", "Task" }, propertyNames);
+        Assert.DoesNotContain(check.Checks, c => c.Name == "review-passed");
+
+        var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
+        Assert.NotNull(aiReview.With);
+        var expectElement = JsonSerializer.SerializeToElement(aiReview.With!["expect"]);
+        Assert.True(expectElement.TryGetProperty("markers", out var markers));
+        var firstMarker = markers[0];
+        Assert.Equal("<promise>FAIL</promise>", firstMarker.GetProperty("failIf").GetString());
+
+        Assert.NotNull(aiReview.OnFailure);
+        Assert.Equal(2, aiReview.OnFailure!.Limit);
+        var failureCase = Assert.Single(aiReview.OnFailure.Cases);
+        Assert.True(failureCase.RetrySelf);
+        Assert.Equal("FAIL", failureCase.When["output.promise"]!.Value.GetString());
+        var fixReviewFindings = Assert.Single(failureCase.Tasks);
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
+        var promptElement = JsonSerializer.SerializeToElement(fixReviewFindings.With!["prompt"]);
+        Assert.Equal("${{ prompts.auto-fix }}", promptElement.GetString());
     }
 
     private static void AssertMarkerOneOf(TaskDefinition task)
