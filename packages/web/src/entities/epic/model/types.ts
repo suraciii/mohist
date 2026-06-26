@@ -1,10 +1,22 @@
 import type { IssueStartBlocker, IssueStatus, IssueHealth, WorkflowStage } from '../../issue/@x/types'
 
 export enum EpicStatus {
-  Active = 'active',
+  Idle = 'idle',
+  Running = 'running',
   Paused = 'paused',
   Done = 'done',
   Closed = 'closed',
+}
+
+export function parseEpicStatus(value: string | null | undefined): EpicStatus {
+  if (!value) return EpicStatus.Idle
+  const normalized = value.toLowerCase()
+  if (normalized === 'active') return EpicStatus.Idle
+  if (normalized === EpicStatus.Running) return EpicStatus.Running
+  if (normalized === EpicStatus.Paused) return EpicStatus.Paused
+  if (normalized === EpicStatus.Done) return EpicStatus.Done
+  if (normalized === EpicStatus.Closed) return EpicStatus.Closed
+  return EpicStatus.Idle
 }
 
 export type EpicPriority = 'p0' | 'p1' | 'p2' | 'p3' | 'p4'

@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   useAddEpicIssue: vi.fn(),
   useRemoveEpicIssue: vi.fn(),
   useStartIssue: vi.fn(),
+  useStartEpic: vi.fn(),
   useMarkEpicDone: vi.fn(),
   useCloseEpic: vi.fn(),
   useUpdateEpic: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useAddEpicIssue: mocks.useAddEpicIssue,
     useRemoveEpicIssue: mocks.useRemoveEpicIssue,
     useStartIssue: mocks.useStartIssue,
+    useStartEpic: mocks.useStartEpic,
     useMarkEpicDone: mocks.useMarkEpicDone,
     useCloseEpic: mocks.useCloseEpic,
     useUpdateEpic: mocks.useUpdateEpic,
@@ -132,6 +134,7 @@ describe('EpicDetailPage', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -146,6 +149,7 @@ describe('EpicDetailPage', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -213,7 +217,7 @@ describe('EpicDetailPage lifecycle guards', () => {
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
-      status: EpicStatus.Active,
+      status: EpicStatus.Idle,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
       progress: {
@@ -238,6 +242,7 @@ describe('EpicDetailPage lifecycle guards', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -251,6 +256,7 @@ describe('EpicDetailPage lifecycle guards', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -508,6 +514,7 @@ describe('EpicDetailPage numbered display', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -522,6 +529,7 @@ describe('EpicDetailPage numbered display', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -598,6 +606,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -612,6 +621,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -711,6 +721,7 @@ describe('EpicDetailPage edit flow', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   function defaultEpic() {
     return {
@@ -750,6 +761,7 @@ progress: {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -879,6 +891,7 @@ describe('EpicDetailPage markdown description', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   const markdownDescription = [
     '## Goal',
@@ -899,7 +912,7 @@ describe('EpicDetailPage markdown description', () => {
       title: 'Epic title',
       description: markdownDescription,
       priority: 'p1',
-      status: EpicStatus.Active,
+      status: EpicStatus.Idle,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
       progress: {
@@ -928,6 +941,7 @@ describe('EpicDetailPage markdown description', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -982,6 +996,7 @@ describe('EpicDetailPage current activity listing', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
@@ -990,7 +1005,7 @@ describe('EpicDetailPage current activity listing', () => {
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
-      status: EpicStatus.Active,
+      status: EpicStatus.Idle,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
       progress: {
@@ -1022,6 +1037,7 @@ describe('EpicDetailPage current activity listing', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -1123,6 +1139,7 @@ describe('EpicDetailPage pause/resume actions', () => {
   const doneMutate = vi.fn()
   const closeMutate = vi.fn()
   const updateMutate = vi.fn()
+  const startEpicMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
 
@@ -1133,7 +1150,7 @@ describe('EpicDetailPage pause/resume actions', () => {
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
-      status: EpicStatus.Active,
+      status: EpicStatus.Idle,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
       progress: {
@@ -1161,15 +1178,16 @@ describe('EpicDetailPage pause/resume actions', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('shows a Pause button on an active Epic that opens a confirm dialog with a reason input', () => {
+  it('shows a Pause button on a running Epic that opens a confirm dialog with a reason input', () => {
     mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Active }),
+      data: makeEpic({ status: EpicStatus.Running }),
       isLoading: false,
     })
 
@@ -1189,7 +1207,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 
   it('submits the pause mutation with an optional reason', () => {
     mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Active }),
+      data: makeEpic({ status: EpicStatus.Running }),
       isLoading: false,
     })
 
@@ -1210,7 +1228,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 
   it('submits the pause mutation with null reason when the input is left empty', () => {
     mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Active }),
+      data: makeEpic({ status: EpicStatus.Running }),
       isLoading: false,
     })
 
@@ -1227,7 +1245,7 @@ describe('EpicDetailPage pause/resume actions', () => {
 
   it('cancels the pause dialog without calling the mutation', () => {
     mocks.useEpic.mockReturnValue({
-      data: makeEpic({ status: EpicStatus.Active }),
+      data: makeEpic({ status: EpicStatus.Running }),
       isLoading: false,
     })
 
@@ -1347,6 +1365,245 @@ describe('EpicDetailPage pause/resume actions', () => {
   })
 })
 
+describe('EpicDetailPage lifecycle header actions', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+  const pauseMutate = vi.fn()
+  const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: EpicStatus.Idle,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
+    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders Start Epic as the only lifecycle action when the epic is idle', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+
+    renderPage()
+
+    const start = screen.getByTestId('start-epic-trigger')
+    expect(start).toBeTruthy()
+    expect(start).toHaveTextContent('Start Epic')
+
+    expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
+  })
+
+  it('invokes the start mutation with the epic id when Start Epic is clicked', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('start-epic-trigger'))
+
+    expect(startEpicMutate).toHaveBeenCalledTimes(1)
+    expect(startEpicMutate).toHaveBeenCalledWith('epic-12345678')
+  })
+
+  it('renders Pause as the only lifecycle action when the epic is running', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Running }), isLoading: false })
+
+    renderPage()
+
+    const pause = screen.getByTestId('pause-epic-trigger')
+    expect(pause).toBeTruthy()
+    expect(pause).toHaveTextContent('Pause')
+
+    expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
+  })
+
+  it('renders Resume as the only lifecycle action when the epic is paused', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Paused }), isLoading: false })
+
+    renderPage()
+
+    const resume = screen.getByTestId('resume-epic-trigger')
+    expect(resume).toBeTruthy()
+    expect(resume).toHaveTextContent('Resume')
+
+    expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
+  })
+
+  it('renders no lifecycle action when the epic is done', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        status: EpicStatus.Done,
+        progress: {
+          deliveredCount: 1,
+          totalIssueCount: 1,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: true,
+        },
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('mark-epic-done')).toBeNull()
+    expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
+  })
+
+  it('renders no lifecycle action when the epic is closed', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Closed }), isLoading: false })
+
+    renderPage()
+
+    expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('mark-epic-done')).toBeNull()
+    expect(screen.queryByTestId('close-epic-trigger')).toBeNull()
+  })
+
+  it('shows the Start Epic label with Starting... and disables the trigger while pending', () => {
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: true })
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+
+    renderPage()
+
+    const start = screen.getByTestId('start-epic-trigger')
+    expect(start).toHaveTextContent('Starting...')
+    expect(start).toBeDisabled()
+  })
+})
+
+describe('EpicDetailPage Start Epic refresh on success', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+  const pauseMutate = vi.fn()
+  const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: EpicStatus.Idle,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
+    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('submits the start mutation with the epic id and no extra options', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('start-epic-trigger'))
+
+    expect(startEpicMutate).toHaveBeenCalledTimes(1)
+    expect(startEpicMutate).toHaveBeenCalledWith('epic-12345678')
+    expect(startEpicMutate.mock.calls[0]).toHaveLength(1)
+  })
+
+  it('does not invoke the start mutation when Start Epic is not clicked', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Idle }), isLoading: false })
+
+    renderPage()
+
+    expect(startEpicMutate).not.toHaveBeenCalled()
+  })
+
+  it('keeps the Start Epic trigger stable across multiple idle renders (header does not flicker)', () => {
+    const idleEpic = makeEpic({ status: EpicStatus.Idle })
+    mocks.useEpic.mockReturnValue({ data: idleEpic, isLoading: false })
+
+    renderPage()
+    expect(screen.getByTestId('start-epic-trigger')).toBeTruthy()
+    expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
+    expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
+  })
+})
+
 describe('EpicDetailPage next issue reason display', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
@@ -1356,6 +1613,7 @@ describe('EpicDetailPage next issue reason display', () => {
   const updateMutate = vi.fn()
   const pauseMutate = vi.fn()
   const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
 
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
@@ -1364,7 +1622,7 @@ describe('EpicDetailPage next issue reason display', () => {
       title: 'Epic title',
       description: 'Epic description',
       priority: 'p1',
-      status: EpicStatus.Active,
+      status: EpicStatus.Idle,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
       progress: {
@@ -1395,6 +1653,7 @@ describe('EpicDetailPage next issue reason display', () => {
     mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
     mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
     mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
   })
 
   afterEach(() => {
@@ -1411,7 +1670,7 @@ describe('EpicDetailPage next issue reason display', () => {
     expect(screen.queryByTestId('mark-epic-done')).toBeTruthy()
   })
 
-  it('shows a Start action in the Next Issue summary and preserves the issue link', () => {
+  it('shows the next issue link without a Start button when a next issue exists', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         progress: {
@@ -1431,8 +1690,8 @@ describe('EpicDetailPage next issue reason display', () => {
     renderPage()
 
     expect(screen.getByRole('link', { name: '#3 Candidate issue' }).getAttribute('href')).toContain('/issues/3')
-    fireEvent.click(screen.getByTestId('epic-detail-next-start'))
-    expect(startMutate).toHaveBeenCalledWith(3, expect.objectContaining({ onSettled: expect.any(Function) }))
+    expect(screen.queryByTestId('epic-detail-next-start')).toBeNull()
+    expect(startMutate).not.toHaveBeenCalled()
   })
 
   it('does not show a Next Issue Start action for reason ready or empty states', () => {
@@ -1700,7 +1959,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
       title: 'Graph epic',
       description: 'Epic description',
       priority: 'p1',
-      status: 'active',
+      status: EpicStatus.Idle,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
       progress: {

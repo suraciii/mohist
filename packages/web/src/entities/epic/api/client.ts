@@ -61,3 +61,7 @@ export function pauseEpic(id: string, reason?: string | null, projectId?: string
 export function resumeEpic(id: string, projectId?: string | null) {
   return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/resume`), { method: 'POST' })
 }
+
+export function startEpic(id: string, projectId?: string | null) {
+  return request<Epic>(projectApiPath(projectId, `/epics/${encodeURIComponent(id)}/start`), { method: 'POST' })
+}

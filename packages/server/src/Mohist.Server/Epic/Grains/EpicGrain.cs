@@ -1,8 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using EpicAggregate = Mohist.Server.Epic.Domain.Epic;
@@ -14,11 +19,16 @@ public class EpicGrain : Grain, IEpicGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
+    private readonly ILogger<EpicGrain> _log;
 
-    public EpicGrain(IDbContextFactory<MohistDbContext> dbFactory, IGrainFactory grains)
+    public EpicGrain(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IGrainFactory grains,
+        ILogger<EpicGrain> log)
     {
         _dbFactory = dbFactory;
         _grains = grains;
+        _log = log;
     }
 
     internal string GrainKeyForTest { get; set; } = string.Empty;
@@ -124,12 +134,53 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
+        // Idempotency at the boundary is owned by the domain's status
+        // checks (e.g. Pause-from-Paused short-circuits without throwing).
+        // Invalid non-target transitions (Pause-from-Idle raises
+        // EpicPauseRequiresRunningException; Pause-from-Terminal raises
+        // EpicAlreadyTerminalException) propagate so the HTTP layer can
+        // surface them as 409 EPIC_NOT_RUNNING / 409 EPIC_ALREADY_TERMINAL.
         var now = DateTimeOffset.UtcNow;
         domain.Pause(reason, now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
         domain.ClearPendingEvents();
+        return ToDto(row);
+    }
+
+    public async Task<EpicDto> StartAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+        var domain = Materialize(row, links);
+        // Idempotency at the boundary is owned by the domain's status
+        // checks (Start-from-Running short-circuits without throwing).
+        // Invalid non-target transitions (Start-from-Paused raises
+        // EpicStartRequiresIdleException; Start-from-Terminal raises
+        // EpicAlreadyTerminalException) propagate so the HTTP layer can
+        // surface them as 409 EPIC_START_REQUIRES_IDLE / 409 EPIC_ALREADY_TERMINAL.
+        var now = DateTimeOffset.UtcNow;
+        var wasAlreadyRunning = row.Status == EpicStatusName.Running;
+        domain.Start(now.UtcDateTime);
+        MapToRow(domain, row, now);
+        ApplyPendingEvents(db, domain, projectId, epicId);
+        await db.SaveChangesAsync();
+        domain.ClearPendingEvents();
+
+        if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
+        {
+            return await TryStartNextAsync(db, projectId, epicId, row, links);
+        }
         return ToDto(row);
     }
 
@@ -147,17 +198,23 @@ public class EpicGrain : Grain, IEpicGrain
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
         var domain = Materialize(row, links);
-        var wasPaused = domain.Status == EpicStatusEnum.Paused;
+        // Idempotency at the boundary is owned by the domain's status
+        // checks (Resume-from-Running short-circuits without throwing).
+        // Invalid non-target transitions (Resume-from-Idle raises
+        // EpicResumeRequiresPausedException; Resume-from-Terminal raises
+        // EpicAlreadyTerminalException) propagate so the HTTP layer can
+        // surface them as 409 EPIC_RESUME_REQUIRES_PAUSED / 409 EPIC_ALREADY_TERMINAL.
         var now = DateTimeOffset.UtcNow;
+        var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
         domain.ClearPendingEvents();
 
-        if (wasPaused)
+        if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
-            return await TryAutoMarkDoneAsync(db, projectId, epicId, row);
+            return await ReconcileAfterTerminalInternalAsync(db, projectId, epicId, row, links);
         }
         return ToDto(row);
     }
@@ -236,6 +293,117 @@ public class EpicGrain : Grain, IEpicGrain
         return await TryAutoMarkDoneAsync(db, projectId, epicId, row);
     }
 
+    public async Task<EpicDto?> ReconcileAfterTerminalAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var parts = GrainKey.Split(':');
+        var epicId = parts.Length > 1 ? parts[1] : parts[0];
+        var projectId = parts[0];
+
+        var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
+        if (row is null) return null;
+
+        var links = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
+            .ToListAsync();
+
+        return await ReconcileAfterTerminalInternalAsync(db, projectId, epicId, row, links);
+    }
+
+    /// <summary>
+    /// Core reconcile-on-terminal-event logic, shared by the
+    /// <see cref="ReconcileAfterTerminalAsync"/> grain entry point and
+    /// <see cref="ResumeAsync"/>'s post-resume re-evaluation.
+    ///
+    /// Behavior:
+    /// <list type="bullet">
+    /// <item>Skips terminal (done/closed) and paused epics — no advance.</item>
+    /// <item>Marks done when readiness is satisfied.</item>
+    /// <item>For a <c>running</c> epic, calls <see cref="TryStartNextAsync"/>;
+    /// an <c>idle</c> epic does not auto-advance.</item>
+    /// </list>
+    /// </summary>
+    private async Task<EpicDto> ReconcileAfterTerminalInternalAsync(
+        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links)
+    {
+        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+            return ToDto(row);
+        if (row.Status == EpicStatusName.Paused)
+            return ToDto(row);
+
+        var undelivered = await ComputeUndeliveredLinkedNumbersAsync(db, projectId, links);
+        if (undelivered.Count == 0)
+        {
+            var domain = Materialize(row, links);
+            var now = DateTimeOffset.UtcNow;
+            domain.MarkDone(undelivered, now.UtcDateTime);
+            MapToRow(domain, row, now);
+            ApplyPendingEvents(db, domain, projectId, epicId);
+            await db.SaveChangesAsync();
+            domain.ClearPendingEvents();
+            return ToDto(row);
+        }
+
+        if (row.Status == EpicStatusName.Running)
+        {
+            return await TryStartNextAsync(db, projectId, epicId, row, links);
+        }
+
+        // idle: not self-driving; do not advance.
+        return ToDto(row);
+    }
+
+    /// <summary>
+    /// Advance the next startable linked issue for a <c>running</c> epic.
+    /// Idempotent and safe to call repeatedly: returns without starting
+    /// when the serial in-progress slot is occupied, when nothing is
+    /// startable, or when the previous start attempt already left the
+    /// epic in a stable state. Exceptions from
+    /// <see cref="IIssueGrain.StartWorkAsync"/> are caught and logged —
+    /// the epic remains <c>running</c> (running-but-idle) so the next
+    /// reconcile retry can re-evaluate. The serial "at most one
+    /// in-progress" rule is expressed here as a runtime check
+    /// (capacity N=1), leaving room for future multi-runner parallelism.
+    /// </summary>
+    private async Task<EpicDto> TryStartNextAsync(
+        MohistDbContext db, string projectId, string epicId, EpicRow row, IReadOnlyList<EpicIssueRow> links)
+    {
+        if (row.Status != EpicStatusName.Running)
+            return ToDto(row);
+
+        var linked = await BuildLinkedIssueDtosAsync(db, projectId, links);
+        if (linked.Any(i => i.Status == "in_progress"))
+            return ToDto(row);
+
+        var undelivered = linked
+            .Where(i => !EpicProgress.IsCompleted(i) && i.Status != "cancelled")
+            .ToList();
+
+        var next = EpicProgress.SelectStartableNext(undelivered);
+        if (next is null)
+        {
+            // Running-but-idle: nothing currently startable. The read
+            // model (EpicQuerier → EpicProgress.Build) computes the
+            // nextIssueReason for the dashboard; no further state
+            // mutation is required here.
+            return ToDto(row);
+        }
+
+        try
+        {
+            var issueGrain = _grains.GetGrain<IIssueGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(next.Id));
+            await issueGrain.StartWorkAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Epic {EpicId} ({ProjectId}) failed to start next linked issue {IssueId}; epic remains running-but-idle",
+                epicId, projectId, next.Id);
+        }
+
+        return ToDto(row);
+    }
+
     private async Task<EpicDto> TryAutoMarkDoneAsync(MohistDbContext db, string projectId, string epicId, EpicRow row)
     {
         if (row.Status is "done" or "closed")
@@ -283,6 +451,16 @@ public class EpicGrain : Grain, IEpicGrain
             .ToListAsync();
         var byNumber = IssueRowMapper.ByNumber(rows, projectId, issueNumbers);
 
+        // Build the set of undelivered issue numbers across the linked
+        // issues so each issue's StartBlocker can be evaluated against
+        // peer state. Cancelled issues are NOT considered delivered
+        // (they are excluded from selection by EpicProgress anyway, and
+        // other in-flight work should still be respected as prereqs).
+        var undeliveredPrereqNumbers = new HashSet<int>(
+            byNumber.Values
+                .Where(i => i.Status is not (IssueStatus.Done or IssueStatus.Cancelled))
+                .Select(i => i.Number));
+
         return links
             .OrderBy(l => l.CreatedAt)
             .Select(link => byNumber.TryGetValue(link.IssueNumber, out var issue)
@@ -293,7 +471,9 @@ public class EpicGrain : Grain, IEpicGrain
                     Status: MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
                     Stage: "",
                     Health: MohistDefaultWorkflowProjection.Health(issue.Status),
-                    Priority: issue.Priority)
+                    Priority: issue.Priority,
+                    CanStart: issue.CanStart(undeliveredPrereqNumbers),
+                    StartBlocker: IssueStartBlockerDto.FromDomain(issue.StartBlocker(undeliveredPrereqNumbers)))
                 : null)
             .Where(dto => dto is not null)
             .Cast<LinkedIssueDto>()
@@ -345,22 +525,9 @@ public class EpicGrain : Grain, IEpicGrain
         if (row.CreatedAt == default) row.CreatedAt = now;
     }
 
-    private static string StatusName(EpicStatusEnum status) => status switch
-    {
-        EpicStatusEnum.Active => "active",
-        EpicStatusEnum.Paused => "paused",
-        EpicStatusEnum.Done => "done",
-        EpicStatusEnum.Closed => "closed",
-        _ => "active",
-    };
+    private static string StatusName(EpicStatusEnum status) => EpicStatusName.ToName(status);
 
-    private static EpicStatusEnum ParseStatus(string status) => status?.ToLowerInvariant() switch
-    {
-        "paused" => EpicStatusEnum.Paused,
-        "done" => EpicStatusEnum.Done,
-        "closed" => EpicStatusEnum.Closed,
-        _ => EpicStatusEnum.Active,
-    };
+    private static EpicStatusEnum ParseStatus(string status) => EpicStatusName.Parse(status);
 
     private static void ApplyPendingEvents(MohistDbContext db, EpicAggregate epic, string projectId, string epicId)
     {

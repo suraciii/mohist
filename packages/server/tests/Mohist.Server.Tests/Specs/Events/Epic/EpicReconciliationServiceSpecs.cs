@@ -17,14 +17,22 @@ public class EpicReconciliationServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileOnceAsync_ReadyActiveEpicMissedEvent_TransitionsToDone()
+    public void DefaultReconciliationPeriod_RecoversRunningEpicsPromptly()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(10), EpicReconciliationOptions.DefaultReconciliationPeriod);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_ReadyIdleEpicMissedEvent_TransitionsToDone()
     {
         // Simulates a missed com.mohist.issue.work-completed event: all
-        // linked issues are done, but the epic is still active. The
+        // linked issues are done, but the epic is still idle. The
         // sweep is the safety net that catches this and transitions
         // the epic to done.
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
 
@@ -47,8 +55,9 @@ public class EpicReconciliationServiceSpecs
     public async Task ReconcileOnceAsync_PausedEpic_IsSkippedByCandidateQuery()
     {
         // Paused epics must not be auto-done by the sweep. Because the
-        // candidate query filters to Status == "active", a paused epic
-        // is excluded at the SQL layer; the grain is never invoked.
+        // candidate query filters to Status IN ('idle','running'), a
+        // paused epic is excluded at the SQL layer; the grain is never
+        // invoked.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, epicId: "epic_paused", status: "paused", pauseReason: "on hold");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
@@ -97,13 +106,14 @@ public class EpicReconciliationServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileOnceAsync_ActiveEpicWithIncompleteIssue_StaysActiveAndGrainNoOps()
+    public async Task ReconcileOnceAsync_IdleEpicWithIncompleteIssue_StaysIdleAndGrainNoOps()
     {
-        // Sweep reaches the active epic (it IS a candidate) but the
-        // grain's AutoMarkDoneIfReadyAsync short-circuits on
-        // undelivered > 0; the epic stays active.
+        // Sweep reaches the idle epic (it IS a candidate) but the
+        // grain's ReconcileAfterTerminalAsync short-circuits on
+        // undelivered > 0 for an idle epic (no TryStartNext on idle);
+        // the epic stays idle.
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
@@ -117,7 +127,7 @@ public class EpicReconciliationServiceSpecs
 
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("active", stored.Status);
+        Assert.Equal("idle", stored.Status);
         Assert.Single(grains.Calls);
     }
 
@@ -129,7 +139,7 @@ public class EpicReconciliationServiceSpecs
         // Re-running the sweep must not error and must not toggle the
         // epic's status once it has reached the terminal state.
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
 
@@ -144,9 +154,9 @@ public class EpicReconciliationServiceSpecs
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("done", stored.Status);
-        // The candidate set is filtered to Status == "active", so once
-        // the epic is done the second/third runs no longer invoke the
-        // grain at all.
+        // The candidate set is filtered to Status IN ('idle','running'),
+        // so once the epic is done the second/third runs no longer
+        // invoke the grain at all.
         Assert.Single(grains.Calls);
     }
 
@@ -171,13 +181,13 @@ public class EpicReconciliationServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileOnceAsync_ActiveEpicWithCancelledIssueOnly_StaysActive()
+    public async Task ReconcileOnceAsync_IdleEpicWithCancelledIssueOnly_StaysIdle()
     {
         // Cancelled issues are not treated as complete by the readiness
-        // check; the sweep should reach the epic (it's active) and the
+        // check; the sweep should reach the epic (it's idle) and the
         // grain should no-op because undelivered is non-empty.
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, status: "active");
+        await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
         await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
 
@@ -189,19 +199,19 @@ public class EpicReconciliationServiceSpecs
 
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("active", stored.Status);
+        Assert.Equal("idle", stored.Status);
         Assert.Single(grains.Calls);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileOnceAsync_MultipleActiveEpics_FansOutAcrossAllCandidates()
+    public async Task ReconcileOnceAsync_MultipleIdleEpics_FansOutAcrossAllCandidates()
     {
         await using var database = CreateDatabase();
-        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_ready_a", status: "active");
-        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_ready_b", status: "active");
-        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_unready", status: "active");
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_ready_a", status: "idle");
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_ready_b", status: "idle");
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_unready", status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_a1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_b1", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_unready1", issueNumber: 3, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
@@ -221,7 +231,7 @@ public class EpicReconciliationServiceSpecs
             .ToDictionaryAsync(e => e.Id, e => e.Status);
         Assert.Equal("done", statuses["epic_ready_a"]);
         Assert.Equal("done", statuses["epic_ready_b"]);
-        Assert.Equal("active", statuses["epic_unready"]);
+        Assert.Equal("idle", statuses["epic_unready"]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -234,11 +244,11 @@ public class EpicReconciliationServiceSpecs
         {
             var epicId = $"epic_unready_{i:D3}";
             var issueId = $"issue_unready_{i:D3}";
-            await SeedEpicAsync(database, projectId: "project_1", epicId: epicId, status: "active");
+            await SeedEpicAsync(database, projectId: "project_1", epicId: epicId, status: "idle");
             await SeedIssueAsync(database, projectId: "project_1", issueId: issueId, issueNumber: i + 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
             await SeedLinkAsync(database, epicId: epicId, issueId: issueId, issueNumber: i + 1);
         }
-        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_z_ready", status: "active");
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_z_ready", status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_z_ready", issueNumber: 1001, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
         await SeedLinkAsync(database, epicId: "epic_z_ready", issueId: "issue_z_ready", issueNumber: 1001);
 
@@ -255,12 +265,174 @@ public class EpicReconciliationServiceSpecs
         Assert.Contains(grains.Calls, call => call.GrainKey == "project_1:epic_z_ready");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_RunningEpic_IsCandidateAndInvokesReconcile()
+    {
+        // A running epic is a candidate: a missed work-completed or
+        // closed event would otherwise leave it stuck waiting for
+        // the in-progress slot to clear. The sweep covers running
+        // epics exactly like idle epics — the grain's
+        // ReconcileAfterTerminalAsync short-circuits no-ops for the
+        // running-but-stable case.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var service = new EpicReconciliationService(
+            database.Factory, grains, NullLogger<EpicReconciliationService>.Instance);
+
+        await service.ReconcileOnceAsync();
+
+        // Single grain call to the running epic — the in-progress
+        // slot is occupied, so TryStartNext returns without
+        // starting another issue (serial slot held). The grain is
+        // still invoked so that, if a previous terminal event was
+        // missed, the sweep can recover it.
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_1", call.GrainKey);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("running", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_RunningEpicMissedClosedEvent_AdvancesNext()
+    {
+        // The risk that motivates the running-epic sweep: a missed
+        // com.mohist.issue.closed event would deadlock the epic
+        // because the in-progress slot stays occupied. After the
+        // issue is observed as cancelled in the DB and the sweep
+        // runs ReconcileAfterTerminalAsync, TryStartNext must pick
+        // the next startable issue.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var service = new EpicReconciliationService(
+            database.Factory, grains, NullLogger<EpicReconciliationService>.Instance);
+
+        await service.ReconcileOnceAsync();
+
+        Assert.Single(grains.Calls);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        // The EpicGrain's ReconcileAfterTerminalAsync advances the
+        // next startable issue (issue_2); the epic remains running.
+        Assert.Equal("running", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_RunningEpicMissedDoneEventWithAllComplete_AutoMarksDone()
+    {
+        // A running epic whose last in-progress issue is observed as
+        // done in the DB (terminal event lost) must auto-mark done
+        // via the sweep — the same path the live work-completed
+        // handler drives.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_2", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_2", issueNumber: 2);
+
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var service = new EpicReconciliationService(
+            database.Factory, grains, NullLogger<EpicReconciliationService>.Instance);
+
+        await service.ReconcileOnceAsync();
+
+        Assert.Single(grains.Calls);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("done", stored.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_MixedIdleAndRunningEpics_AllReachTheGrain()
+    {
+        // Both idle (auto-done readiness) and running (terminal-event
+        // recovery) candidates are walked in the same sweep — they
+        // share ReconcileAfterTerminalAsync.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_idle_ready", status: "idle");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_idle_ready", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, epicId: "epic_idle_ready", issueId: "issue_idle_ready", issueNumber: 1);
+
+        await SeedEpicAsync(database, projectId: "project_1", epicId: "epic_running_stuck", status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_stuck_cancelled", issueNumber: 2, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_stuck_next", issueNumber: 3, status: Mohist.Server.Issue.Domain.IssueStatus.Backlog);
+        await SeedLinkAsync(database, epicId: "epic_running_stuck", issueId: "issue_stuck_cancelled", issueNumber: 2);
+        await SeedLinkAsync(database, epicId: "epic_running_stuck", issueId: "issue_stuck_next", issueNumber: 3);
+
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var service = new EpicReconciliationService(
+            database.Factory, grains, NullLogger<EpicReconciliationService>.Instance);
+
+        await service.ReconcileOnceAsync();
+
+        Assert.Equal(2, grains.Calls.Count);
+        Assert.Contains(grains.Calls, c => c.GrainKey == "project_1:epic_idle_ready");
+        Assert.Contains(grains.Calls, c => c.GrainKey == "project_1:epic_running_stuck");
+
+        await using var verify = database.CreateDbContext();
+        var idleReady = await verify.Epics.AsNoTracking().FirstAsync(e => e.Id == "epic_idle_ready");
+        Assert.Equal("done", idleReady.Status);
+        var runningStuck = await verify.Epics.AsNoTracking().FirstAsync(e => e.Id == "epic_running_stuck");
+        // Running epic advances the next startable, stays running.
+        Assert.Equal("running", runningStuck.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ReconcileOnceAsync_RunningEpicRepeatedSweeps_AreIdempotent()
+    {
+        // Repeated sweeps on a running epic are idempotent: the
+        // grain call happens each time, but the epic state does not
+        // toggle once the missed event has been recovered.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.InProgress);
+        await SeedLinkAsync(database, epicId: "epic_1", issueId: "issue_1", issueNumber: 1);
+
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var service = new EpicReconciliationService(
+            database.Factory, grains, NullLogger<EpicReconciliationService>.Instance);
+
+        await service.ReconcileOnceAsync();
+        await service.ReconcileOnceAsync();
+        await service.ReconcileOnceAsync();
+
+        // Each sweep is a fresh candidate walk — the epic remains a
+        // running candidate until it transitions, so all three
+        // sweeps reach the grain. The grain is idempotent; no state
+        // toggles after the first call.
+        Assert.Equal(3, grains.Calls.Count);
+        await using var verify = database.CreateDbContext();
+        var stored = await verify.Epics.AsNoTracking().FirstAsync();
+        Assert.Equal("running", stored.Status);
+    }
+
     private static async Task SeedEpicAsync(
         TestDatabase database,
         string projectId = "project_1",
         string epicId = "epic_1",
         int number = 1,
-        string status = "active",
+        string status = "idle",
         string? pauseReason = null)
     {
         await using var db = database.CreateDbContext();
@@ -376,7 +548,7 @@ public class EpicReconciliationServiceSpecs
         public IEpicGrain GetEpicGrain(string grainKey)
         {
             Calls.Add(new RecordedGrainCall(grainKey));
-            return new EpicGrain(_dbFactory, this) { GrainKeyForTest = grainKey };
+            return new EpicGrain(_dbFactory, this, NullLogger<EpicGrain>.Instance) { GrainKeyForTest = grainKey };
         }
 
         public TGrainInterface GetGrain<TGrainInterface>(string primaryKey, string? grainClassNamePrefix = null)

@@ -10,9 +10,17 @@ public class EpicProgressSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public void IsTerminal_OnActive_ReturnsFalse()
+    public void IsTerminal_OnIdle_ReturnsFalse()
     {
-        Assert.False(EpicProgress.IsTerminal(EpicStatus.Active));
+        Assert.False(EpicProgress.IsTerminal(EpicStatus.Idle));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsTerminal_OnRunning_ReturnsFalse()
+    {
+        Assert.False(EpicProgress.IsTerminal(EpicStatus.Running));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

@@ -71,7 +71,7 @@ function makeEpic(overrides: Record<string, unknown>) {
     title: 'Epic',
     description: 'desc',
     priority: 'p1',
-    status: EpicStatus.Active,
+    status: EpicStatus.Idle,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     progress: {
