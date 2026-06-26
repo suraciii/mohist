@@ -170,13 +170,14 @@ public class EpicGrain : Grain, IEpicGrain
         // EpicAlreadyTerminalException) propagate so the HTTP layer can
         // surface them as 409 EPIC_START_REQUIRES_IDLE / 409 EPIC_ALREADY_TERMINAL.
         var now = DateTimeOffset.UtcNow;
+        var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
         domain.ClearPendingEvents();
 
-        if (row.Status == EpicStatusName.Running)
+        if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
             return await TryStartNextAsync(db, projectId, epicId, row, links);
         }
@@ -204,13 +205,14 @@ public class EpicGrain : Grain, IEpicGrain
         // EpicAlreadyTerminalException) propagate so the HTTP layer can
         // surface them as 409 EPIC_RESUME_REQUIRES_PAUSED / 409 EPIC_ALREADY_TERMINAL.
         var now = DateTimeOffset.UtcNow;
+        var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
         domain.ClearPendingEvents();
 
-        if (row.Status == EpicStatusName.Running)
+        if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
             return await ReconcileAfterTerminalInternalAsync(db, projectId, epicId, row, links);
         }

@@ -54,7 +54,7 @@ describe('epic lifecycle query invalidation', () => {
     vi.clearAllMocks()
     mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
     mocks.pauseEpic.mockResolvedValue({ id: 'epic-1', status: 'paused' })
-    mocks.resumeEpic.mockResolvedValue({ id: 'epic-1', status: 'active' })
+    mocks.resumeEpic.mockResolvedValue({ id: 'epic-1', status: 'running' })
     mocks.startEpic.mockResolvedValue({ id: 'epic-1', status: 'running' })
     mocks.startIssue.mockResolvedValue({ issue: { number: 7 }, message: 'started' })
   })
