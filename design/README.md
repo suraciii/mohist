@@ -29,4 +29,5 @@ style: ["短索引，只说明入口。"]
 
 - [prompt-management.md](prompt-management.md) — project-scoped prompt 库和 workflow 的关系。
 - [runner.md](runner.md) — Runner 聚合信息结构与自报 status。
+- [task-log.md](task-log.md) — task 执行日志的采集管道、上报通道与存储归属。
 - [web-ui.md](web-ui.md) — Web UI 设计边界。
