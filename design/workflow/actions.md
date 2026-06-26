@@ -195,44 +195,17 @@ PR checks 失败时，`merge-github-pr` 返回 action-owned JSON failure，例�
 
 ## Failure Recovery
 
-task 可以声明失败恢复规则。规则只读取当前失败 task 的 output，不判断
-action type，不判断 task id。
+Task 遇到可恢复失败时，由 action 决定需要哪些 recovery tasks，通过 result
+返回给 engine 插入。Recovery 是 task 完成的一部分，不是失败后的补救。
 
-示例：
+详细设计见 [`recovery.md`](recovery.md)。
 
-```yaml
-- id: deliver
-  uses: example/deliver
-  with:
-    target: ${{ repository.baseBranch }}
-  onFailure:
-    limit: 1
-    cases:
-      - when:
-          output.errorCode: base-moved
-        tasks:
-          - id: recover:rebase
-            uses: mohist/rebase
-            with:
-              baseBranch: ${{ repository.baseBranch }}
-              remote: origin
-              squash: false
-        retry: self
-```
+核心边界：
 
-执行规则：
-
-- task failed 后，engine 解析该 task 的 output。
-- 按 `cases` 顺序做动态字段匹配。
-- 命中 case 时，把 case.tasks 插入当前 stage，workflow 回到 running。
-- case 声明 `retry: self` 时，engine 在 recovery tasks 之后追加原失败 task
-  的新 attempt，并保留原 task 的 `onFailure`。
-- 超过 `limit` 或无 case 命中时，保留普通 task failure，用户仍可 retry/rerun。
-
-边界：
-
-- `onFailure` 是 workflow profile 对 action output 接口的编排，不是 action 内部重试。
-- 恢复 task 与普通 task 一样由 runner 执行。
+- recovery 的决策和 task 构造在 action 侧（runner），不在 workflow engine。
+- `recoveryBudget` 是 task 声明属性，随 `with` 下发；action 读取并递减。
+- engine 收到带 `recoveryTasks` 的 completed result 时，机械插入这些真实
+  workflow tasks，不理解其内容。
 - rebase、push、PR checks wait、PR merge 等副作用仍在 runner action 内执行。
 - `titleFrom`、`bodyFrom`、`subjectFrom`、`messageFrom` 这类 `issue.title` / `issue.body` 输入不是 workflow metadata。runner action 在运行时通过 `mo issue show <number> --project-id <projectId> --output json` 获取 issue title/body。
-- Workflow domain 只保存 output 并做通用 JSON path 匹配，不理解 error code 的业务含义。
+- Workflow domain 只保存 output，不理解 error code 的业务含义。
