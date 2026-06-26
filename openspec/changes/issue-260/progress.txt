@@ -1,0 +1,28 @@
+## T-001 Backend approval-wait aggregation endpoint
+
+### Codebase patterns
+
+- The existing completion metrics path (`IssueQuerier.GetCompletionBucketsAsync` + `IssueRoutes.Metrics.cs`) is the exact template for adding a new read-only project-level issue metric.
+- Approval timestamps are only available by deserializing `WorkflowRuns.State` and applying `MohistDefaultWorkflowProjection.ProjectWorkflowState`; the projection selects the last stage carrying an `ApprovalStatus`.
+- `StageApproval.Status` is `"approved"`/`"rejected"` for completed approvals and `"awaiting"` when `RespondedAt` is null; filtering must check both status and `RespondedAt.HasValue`.
+- EF Core SQLite cannot translate `DateTimeOffset` comparisons against TEXT columns, so windowing/filtering is done in memory after loading the candidate set (same rationale as completion metrics).
+- Integration endpoint tests cannot pin `DateTimeOffset.UtcNow` from the client; assert the returned window is within the request interval and that `From == To - 7 days`.
+
+### Decisions
+
+- `IssueQuerier.GetApprovalWaitAsync` builds lightweight `IssueReadModel`s and calls `ApplyWorkflowProjections` with the already-existing workflow-state loader, reusing the single definition of "the approval for an issue".
+- Result type uses nullable `AverageSeconds`/`MedianSeconds`/`MaxSeconds` plus a `SampleCount` discriminator so the UI can distinguish "no data" from "instant approval".
+- Route `GET /api/projects/{projectRef}/issues/metrics/approval-wait` uses the literal `metrics/` prefix, matching the completion route and avoiding collision with `{number:int}`.
+- Clock seam is a passed-in `DateTimeOffset now` for parity with `GetCompletionBucketsAsync` and deterministic unit tests.
+
+### Gotchas
+
+- `DateTime.TryParse` on ISO-8601 strings with offsets yields `DateTimeKind.Local`; conversions to `DateTimeOffset` for window comparison should normalize via `.ToUniversalTime()`.
+- `WorkflowRuns` rows require an `ETag` column when inserted via raw SQL, even though the entity class no longer exposes it.
+- Tests that seed workflow-run JSON must include at least enough stage shape (tasks/checks) for `WorkflowStatusMapper.BuildStatusView` to succeed.
+
+### Verification
+
+- `IssueQuerierSpecs` covers: trailing-7d windowing, avg/median/max, pending exclusion, single sample, zero sample, zero-duration wait, project scoping.
+- `IssueMetricsApiSpecs` covers: 200 response shape with stats and zero-sample empty result.
+- Full `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj` passes (2837 passed, 14 skipped).
