@@ -90,29 +90,25 @@ const demoProject = {
   repositories: [],
 }
 
-function renderHero() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+function renderHeroTree(queryClient: QueryClient) {
+  return (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
         <MemoryRouter initialEntries={['/demo']}>
           <AttentionHero />
         </MemoryRouter>
       </ProjectProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
 }
 
+function renderHero() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(renderHeroTree(queryClient))
+}
+
 function renderHeroWithClient(queryClient: QueryClient) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-        <MemoryRouter initialEntries={['/demo']}>
-          <AttentionHero />
-        </MemoryRouter>
-      </ProjectProvider>
-    </QueryClientProvider>,
-  )
+  return render(renderHeroTree(queryClient))
 }
 
 beforeEach(() => {
@@ -575,6 +571,22 @@ describe('AttentionHero - all-clear state', () => {
     expect(screen.getByText('Checking attention')).toBeInTheDocument()
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
     expect(screen.queryByTestId('runner-down-entry')).not.toBeInTheDocument()
+  })
+
+  it('can rerender from loading to all-clear without changing hook order', () => {
+    mocks.issues = undefined
+    mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    const { rerender } = render(renderHeroTree(queryClient))
+
+    expect(screen.getByText('Checking attention')).toBeInTheDocument()
+
+    mocks.issues = []
+    rerender(renderHeroTree(queryClient))
+
+    expect(screen.getByText('All clear')).toBeInTheDocument()
+    expect(screen.queryByText('Checking attention')).not.toBeInTheDocument()
   })
 
   it('renders the all-clear state with All clear message and Productivity placeholder when no items and runner available', () => {

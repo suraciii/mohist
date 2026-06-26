@@ -49,10 +49,6 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
   const runnerDown = agentStatus?.runnerAvailable === false
   const hasAttention = items.length > 0 || runnerDown
 
-  if (!issuesResolved && !runnerDown) {
-    return <LoadingState />
-  }
-
   const approveMutation = useMutation({
     mutationFn: (issueNumber: number) => approveIssue(issueNumber, projectId),
     onSuccess: () => {
@@ -68,6 +64,10 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   })
+
+  if (!issuesResolved && !runnerDown) {
+    return <LoadingState />
+  }
 
   if (!hasAttention) {
     return <AllClearState />
