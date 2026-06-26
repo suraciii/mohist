@@ -107,6 +107,69 @@ public class WorkflowProfileManager : IScopedService
             ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId));
     }
 
+    // =======================================================================
+    // Narrow APIs — encapsulate the full template selection cascade so the
+    // control-plane grain never has to touch a WorkflowDefinition. Each call
+    // re-runs LoadTemplateAsync so profile mutations (issue/profile template
+    // edits) become visible to subsequent callers. For stage-init callers this
+    // is the hot-reload hook; for Create and RequestChanges it costs the same
+    // one extra cascade the control plane already paid.
+    // =======================================================================
+
+    /// <summary>
+    /// Returns the per-stage spec (tasks + checks + lock behavior) for a
+    /// single stage. Re-runs the cascade on every call so subsequent stages
+    /// see live profile edits (hot reload per stage-enter). Throws if the
+    /// resolved template does not contain <paramref name="stageId"/>.
+    /// </summary>
+    public async Task<StageDefinition> LoadStageSpecsAsync(
+        string runId,
+        string stageId,
+        string? projectId = null,
+        string? issueId = null)
+    {
+        var template = await LoadTemplateAsync(runId, projectId, issueId);
+        var definition = template.Structure
+            ?? throw new InvalidOperationException(
+                $"Workflow '{runId}' has no effective workflow template");
+        var stage = definition.Stages.Find(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Workflow '{runId}' has no definition for stage '{stageId}'");
+        return stage;
+    }
+
+    /// <summary>
+    /// Returns just the workflow's stage sequence and approval flags — enough
+    /// to construct a <see cref="WorkflowRun"/> aggregate without pulling tasks,
+    /// checks, or lock configuration across the grain boundary. Used by the
+    /// grain's <c>StartAsync</c> path.
+    /// </summary>
+    public async Task<WorkflowStructure> LoadStructureAsync(
+        string runId,
+        string? projectId = null,
+        string? issueId = null)
+    {
+        var template = await LoadTemplateAsync(runId, projectId, issueId);
+        var definition = template.Structure
+            ?? throw new InvalidOperationException(
+                $"Workflow '{runId}' has no effective workflow template");
+        if (definition.Stages.Count == 0)
+            throw new InvalidOperationException(
+                $"Workflow '{runId}' has no stages in its effective template");
+        return definition.ToStructure();
+    }
+
+    /// <summary>
+    /// Returns the approval configuration (currently the feedback task config)
+    /// from the resolved template. Used by the grain's
+    /// <c>RequestChangesAsync</c> path.
+    /// </summary>
+    public async Task<ApprovalConfig?> LoadApprovalConfigAsync(string runId)
+    {
+        var template = await LoadTemplateAsync(runId);
+        return template.Structure?.Approval;
+    }
+
     private async Task<EffectiveProfileContext> ResolveEffectiveProfileContextAsync(MohistDbContext db, RunContext context)
     {
         string? issueSelection = null;

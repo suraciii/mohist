@@ -5,8 +5,17 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 
-namespace Mohist.Server.Workflow.Grains;
+namespace Mohist.Server.Workflow.Services;
 
+/// <summary>
+/// Pure formatting helpers shared between the control-plane grain and the
+/// runner-side <c>WorkflowItemTranslator</c>. These methods contain no
+/// external dependencies and carry only invariant shapes (work-id attempt
+/// parsing, check-result JSON parsing, agent-model diagnostics). Pulled
+/// out of <c>WorkflowDispatchBuilder</c> so the translator (now in
+/// <c>Runner.Services</c>) can reuse them without taking a dependency on
+/// the old grain-side builder.
+/// </summary>
 internal static class WorkflowDispatchHelpers
 {
     internal static object? JsonElementToObject(JsonElement element) => element.ValueKind switch
@@ -124,4 +133,43 @@ internal static class WorkflowDispatchHelpers
 
     internal static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
         with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with, JSON.Options) : null;
+
+    /// <summary>
+    /// Projects the most recent task outputs of the given workflow run
+    /// onto the dispatch payload under the <c>tasks</c> key. Tasks whose
+    /// output is not an object (string, array, etc.) are skipped. Used by
+    /// the runner-side <c>WorkflowItemTranslator</c> when assembling the
+    /// runner execution envelope; kept as a shared helper so it stays
+    /// unit-testable without spinning up a runner grain.
+    /// </summary>
+    internal static void MergeTaskOutputsIntoPayload(Dictionary<string, JsonElement?> payload, WorkflowRun run)
+    {
+        var tasksMap = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        foreach (var stage in run.Stages)
+        {
+            foreach (var task in stage.Tasks)
+            {
+                if (task.Status != TaskRunStatus.Completed || !task.Output.HasValue)
+                    continue;
+
+                if (task.Output.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var outputs = JsonElementToObject(task.Output.Value);
+                if (outputs is Dictionary<string, object?> dict)
+                {
+                    tasksMap[task.DefinitionId] = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["outputs"] = dict
+                    };
+                }
+            }
+        }
+
+        if (tasksMap.Count > 0)
+        {
+            payload["tasks"] = JSON.SerializeToElement(tasksMap);
+        }
+    }
 }

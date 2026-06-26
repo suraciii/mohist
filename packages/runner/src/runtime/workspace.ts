@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import type { JsonObject, WorkItem } from "../core/types.js"
+import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
@@ -62,7 +62,7 @@ export class WorkspaceManager {
   // run branch. Idempotent — a workspace already on this run's branch is
   // left alone (cheap re-entry); anything else is (re)created from the
   // latest base.
-  async prepare(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+  async prepare(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const gitUrl = stringAt(variables, ["repository", "gitUrl"])
     const baseBranch = stringAt(variables, ["repository", "baseBranch"]) ?? "main"
@@ -110,7 +110,7 @@ export class WorkspaceManager {
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
   }
 
-  async verify(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+  async verify(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const issueNumber = numberAt(variables, ["issue", "number"])
     const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId

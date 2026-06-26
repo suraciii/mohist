@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs.Workflow.Grain;
@@ -22,7 +22,7 @@ public class RuntimeVariableMergeSpecs
         task.Output = JsonSerializer.Deserialize<JsonElement>("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}");
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        WorkflowDispatchBuilder.MergeTaskOutputsIntoPayload(payload, run);
+        WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 
         Assert.True(payload.TryGetValue("tasks", out var tasksEl));
         var tasks = tasksEl!.Value;
@@ -52,7 +52,7 @@ public class RuntimeVariableMergeSpecs
         pending.Status = TaskRunStatus.Pending;
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        WorkflowDispatchBuilder.MergeTaskOutputsIntoPayload(payload, run);
+        WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 
         Assert.True(payload.TryGetValue("tasks", out var tasksEl));
         var tasks = tasksEl!.Value;
@@ -74,7 +74,7 @@ public class RuntimeVariableMergeSpecs
         task.Output = JsonSerializer.Deserialize<JsonElement>("\"plain string\"");
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        WorkflowDispatchBuilder.MergeTaskOutputsIntoPayload(payload, run);
+        WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 
         Assert.False(payload.ContainsKey("tasks"));
     }
@@ -88,7 +88,7 @@ public class RuntimeVariableMergeSpecs
         {
             ["workflow"] = JsonSerializer.SerializeToElement(new { runId = "wr_1" })
         };
-        WorkflowDispatchBuilder.MergeTaskOutputsIntoPayload(payload, run);
+        WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 
         Assert.True(payload.TryGetValue("workflow", out _));
         Assert.False(payload.ContainsKey("tasks"));

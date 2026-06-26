@@ -4,7 +4,6 @@ namespace Mohist.Server.Infrastructure.Events;
 
 public sealed class InMemoryEventBus : IEventPublisher
 {
-    private readonly IReadOnlyList<Subscription> _subscriptions;
     private readonly ILogger<InMemoryEventBus> _log = null!;
 
     public InMemoryEventBus(IEnumerable<Subscription> subscriptions, ILogger<InMemoryEventBus> log)
@@ -20,6 +19,24 @@ public sealed class InMemoryEventBus : IEventPublisher
     }
 
     public InMemoryEventBus(ILogger<InMemoryEventBus> log) : this([], log) { }
+
+    private readonly List<Subscription> _subscriptions;
+
+    /// <summary>
+    /// Adds a subscription after construction. Used by test fixtures that
+    /// build the bus empty and then wire the same handlers the production
+    /// pipeline registers via <c>AddCloudEventHandlersFromAssembly</c>.
+    /// </summary>
+    public void AddSubscription(Subscription subscription)
+    {
+        ValidateType(subscription.Type);
+        lock (_subscriptions)
+        {
+            _subscriptions.Add(subscription);
+        }
+    }
+
+    private IReadOnlyList<Subscription> Snapshot() => _subscriptions.ToList();
 
     public async Task PublishAsync<TData>(
         TData data,
@@ -42,7 +59,11 @@ public sealed class InMemoryEventBus : IEventPublisher
             subject: subject,
             extensions: extDict);
 
-        foreach (var sub in _subscriptions)
+        // Snapshot the subscription list so concurrent AddSubscription calls
+        // (used by test fixtures that wire handlers post-construction) do not
+        // mutate it mid-dispatch.
+        var subs = Snapshot();
+        foreach (var sub in subs)
         {
             if (!Matches(sub.Type, evt.Type))
                 continue;

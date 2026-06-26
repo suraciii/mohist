@@ -95,7 +95,6 @@ public static class MohistServiceRegistration
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
-        services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));

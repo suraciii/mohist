@@ -34,7 +34,6 @@ public static class MohistSiloRegistration
         // Handlers are registered there too, since grains need them.
         silo.Services.AddCloudEventBus();
         silo.Services.AddCloudEventHandlersFromAssembly(typeof(MohistSiloRegistration).Assembly);
-        silo.Services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
         silo.Services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
         silo.Services.AddSingleton(TimeProvider.System);
 

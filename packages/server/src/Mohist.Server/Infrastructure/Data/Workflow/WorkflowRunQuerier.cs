@@ -13,6 +13,24 @@ public sealed class WorkflowRunQuerier
         _dbFactory = dbFactory;
     }
 
+    /// <summary>
+    /// Loads the persisted <see cref="WorkflowRun"/> state for the given
+    /// run id. Used by execution-plane callers (e.g. RunnerGrain's
+    /// translator) that need a read-only projection without crossing the
+    /// control-plane grain boundary. Returns <c>null</c> if the row does
+    /// not exist; callers fall back to grain state when projection lag
+    /// is unacceptable.
+    /// </summary>
+    public async Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId)) return null;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == workflowRunId, ct);
+        if (row is null) return null;
+        return JSON.Deserialize<WorkflowRun>(WorkflowRunStore.MigrateAssignmentJson(row.State));
+    }
+
     public async Task<IReadOnlyList<string>> FindAssignedToAsync(string runnerId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(runnerId))
