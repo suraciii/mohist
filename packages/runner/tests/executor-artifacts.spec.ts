@@ -96,7 +96,7 @@ describe("WorkExecutor artifact capture", () => {
     expect(connection.uploads).toHaveLength(2)
   })
 
-  it("failsTaskThroughNormalFailureWhenDeclaredArtifactMissing", async () => {
+  it("declaredArtifactMissingIsNonFatalWarning", async () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ status: "success", message: "agent done" })),
@@ -109,14 +109,13 @@ describe("WorkExecutor artifact capture", () => {
 
     const result = await executor.execute(buildWork({ files: [{ path: "missing.md" }] }), new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.message).toMatch(/required declared artifacts could not be captured/)
+    expect(result.status).toBe("completed")
+    expect(result.message).toMatch(/artifact capture warnings/)
     expect(result.message).toMatch(/missing\.md/)
     expect(connection.uploads).toEqual([])
-    expect(result.artifactUploadIds).toBeUndefined()
   })
 
-  it("failsTaskThroughNormalFailureWhenUploadFailsForDeclaredArtifact", async () => {
+  it("declaredArtifactUploadFailureIsNonFatalWarning", async () => {
     await writeFile(join(workDir, "review.md"), "content", "utf8")
     const connection = new FakeServerConnection()
     connection.uploadFailures.set("review.md", new Error("server 503"))
@@ -131,16 +130,14 @@ describe("WorkExecutor artifact capture", () => {
 
     const result = await executor.execute(buildWork({ files: [{ path: "review.md" }] }), new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.message).toMatch(/required declared artifacts could not be uploaded/)
+    expect(result.status).toBe("completed")
+    expect(result.message).toMatch(/artifact warnings/)
     expect(result.message).toMatch(/server 503/)
   })
 
-  it("failsTaskWhenDeclaredDirectoryExceedsLimits", async () => {
+  it("declaredDirectoryExceedsLimitsIsNonFatalWarning", async () => {
     const specs = join(workDir, "specs")
     await mkdir(specs, { recursive: true })
-    // 250 files of 300 bytes each (75k total) — must exceed both the
-    // default 200-file limit and the 64KiB total size limit.
     for (let i = 0; i < 250; i += 1) {
       await writeFile(join(specs, `f${i}.md`), "x".repeat(300), "utf8")
     }
@@ -156,8 +153,8 @@ describe("WorkExecutor artifact capture", () => {
 
     const result = await executor.execute(buildWork({ files: [{ path: "specs" }] }), new AbortController().signal)
 
-    expect(result.status).toBe("failed")
-    expect(result.message).toMatch(/required declared artifacts could not be captured/)
+    expect(result.status).toBe("completed")
+    expect(result.message).toMatch(/artifact capture warnings/)
   })
 
   it("capturesDynamicArtifactsFromActionOutput", async () => {
@@ -205,7 +202,7 @@ describe("WorkExecutor artifact capture", () => {
 
     expect(result.status).toBe("completed")
     expect(result.artifactUploadIds).toEqual(["artup_1"])
-    expect(result.message).toMatch(/some dynamic artifacts failed to upload/)
+    expect(result.message).toMatch(/artifact warnings/)
   })
 
   it("actionFailureShortCircuitsArtifactCapture", async () => {

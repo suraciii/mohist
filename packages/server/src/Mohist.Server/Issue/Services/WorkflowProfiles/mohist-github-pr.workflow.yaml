@@ -46,9 +46,6 @@ stages:
           session: plan
           prompt: ${{ prompts.specs }}
           agent: ${{ vars.agent }}
-        expect:
-          files:
-            - path: ${{ openspecChangeDir }}/specs
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/specs

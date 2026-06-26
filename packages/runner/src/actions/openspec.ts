@@ -89,7 +89,6 @@ export async function openspecArtifactsAction(context: ActionContext): Promise<A
 
   const required: Array<{ path: string; kind: "file" | "directory" }> = [
     { path: join(changeDir, "proposal.md"), kind: "file" },
-    { path: join(changeDir, "specs"), kind: "directory" },
     { path: join(changeDir, "design.md"), kind: "file" },
     { path: join(changeDir, "tasks.json"), kind: "file" },
   ]
@@ -126,7 +125,7 @@ export async function openspecSyncAction(context: ActionContext): Promise<Action
   const changeDir = resolveChangeDir(context)
   if (!changeDir) return { status: "failure", message: "OpenSpec sync requires 'changeDir'" }
   const specsDir = join(changeDir, "specs")
-  if (!exists(specsDir)) return { status: "failure", message: `OpenSpec specs directory not found: ${specsDir}` }
+  if (!exists(specsDir)) return { status: "success", message: "No specs directory to sync; skipping" }
 
   const destination = join(context.workDir, "specs")
   await copyDirectory(specsDir, destination)

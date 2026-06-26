@@ -14,7 +14,6 @@ import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js
 import {
   actionProducedArtifacts,
   captureArtifacts,
-  captureRequiresFailures,
   summarizeCaptureFailures,
   uploadCapturedArtifacts,
 } from "./artifact-capture.js"
@@ -487,16 +486,11 @@ export class WorkExecutor {
         message: `${result.message ? result.message + "; " : ""}artifact capture failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
       }
     }
-    const declaredFailures = captureRequiresFailures(captureOutcome)
-    if (declaredFailures.length > 0) {
-      return {
-        ...result,
-        status: "failed",
-        message: `${result.message ? result.message + "; " : ""}required declared artifacts could not be captured: ${summarizeCaptureFailures(declaredFailures)}`.slice(0, 4000),
-      }
-    }
     if (captureOutcome.captures.length === 0) {
-      return result
+      const captureWarnings = captureOutcome.failures.length > 0
+        ? `${result.message ? result.message + "; " : ""}artifact capture warnings: ${summarizeCaptureFailures(captureOutcome.failures)}`.slice(0, 4000)
+        : result.message
+      return { ...result, message: captureWarnings }
     }
     let uploads
     try {
@@ -517,21 +511,13 @@ export class WorkExecutor {
         message: `${result.message ? result.message + "; " : ""}artifact upload failed: ${error instanceof Error ? error.message : String(error)}`.slice(0, 4000),
       }
     }
-    const uploadFailures = uploads.failures
-    const requiredUploadFailures = uploadFailures.filter((failure) => failure.source === "declared")
-    if (requiredUploadFailures.length > 0) {
-      return {
-        ...result,
-        status: "failed",
-        message: `${result.message ? result.message + "; " : ""}required declared artifacts could not be uploaded: ${summarizeCaptureFailures(requiredUploadFailures)}`.slice(0, 4000),
-      }
-    }
-    const message = uploadFailures.length > 0
-      ? `${result.message ? result.message + "; " : ""}some dynamic artifacts failed to upload: ${summarizeCaptureFailures(uploadFailures)}`
+    const allFailures = [...captureOutcome.failures, ...uploads.failures]
+    const message = allFailures.length > 0
+      ? `${result.message ? result.message + "; " : ""}artifact warnings: ${summarizeCaptureFailures(allFailures)}`.slice(0, 4000)
       : result.message
     return {
       ...result,
-      message: message ?? result.message,
+      message,
       artifactUploadIds: uploads.uploads.map((upload) => upload.uploadId),
     }
   }
