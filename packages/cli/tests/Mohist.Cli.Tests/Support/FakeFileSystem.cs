@@ -61,6 +61,16 @@ public sealed class FakeFileSystem : IFileSystem
         }
     }
 
+    public void MoveFile(string source, string destination)
+    {
+        var sourceKey = Normalize(source);
+        var destKey = Normalize(destination);
+        if (!_files.TryGetValue(sourceKey, out var content))
+            throw new FileNotFoundException($"File not found: {source}");
+        _files.Remove(sourceKey);
+        _files[destKey] = content;
+    }
+
     public string ReadAllText(string path) => _files.TryGetValue(Normalize(path), out var content)
         ? content
         : throw new FileNotFoundException($"File not found: {path}");

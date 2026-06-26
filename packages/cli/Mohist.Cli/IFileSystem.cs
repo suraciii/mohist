@@ -11,6 +11,7 @@ internal interface IFileSystem
     void Delete(string path);
     void DeleteDirectory(string path);
     void Move(string source, string destination);
+    void MoveFile(string source, string destination);
     string ReadAllText(string path);
     Task<string> ReadAllTextAsync(string path);
     void WriteAllText(string path, string contents);
@@ -41,6 +42,8 @@ internal sealed class RealFileSystem : IFileSystem
     public void DeleteDirectory(string path) => Directory.Delete(path, recursive: true);
 
     public void Move(string source, string destination) => Directory.Move(source, destination);
+
+    public void MoveFile(string source, string destination) => File.Move(source, destination, overwrite: true);
 
     public string ReadAllText(string path) => File.ReadAllText(path);
 
