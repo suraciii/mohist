@@ -1,6 +1,6 @@
 ### Requirement: Single source of truth for issue workflow profile
 
-An issue SHALL have exactly one workflow profile selection that is the single source of truth across every read surface. The issue detail read model, the issue list read model, the workflow-profile endpoint response, and `mo issue show` SHALL all project the identical effective `workflowProfileId`. When no issue-level selection is persisted, the effective profile SHALL be resolved by inheriting the project default and then the system default (`mohist/default`); no read surface SHALL independently invent or hardcode a default independent of this resolution.
+An issue SHALL have exactly one workflow profile selection that is the single source of truth across every read surface. The issue detail read model, the issue list read model, the workflow-profile endpoint response, and `mo issue show` SHALL all project the identical effective `workflowProfileId`. When no issue-level selection is persisted, the effective profile SHALL be resolved by inheriting the project default and then the system default (`mohist/local`); no read surface SHALL independently invent or hardcode a default independent of this resolution.
 
 #### Scenario: All read surfaces agree after create with GitHub PR profile
 
@@ -12,13 +12,13 @@ An issue SHALL have exactly one workflow profile selection that is the single so
 
 #### Scenario: Read surfaces agree after update to GitHub PR profile
 
-- **WHEN** a backlog issue whose profile is `mohist/default` is updated to `mohist/github-pr`
+- **WHEN** a backlog issue whose profile is `mohist/local` is updated to `mohist/github-pr`
 - **THEN** the issue detail, list, and workflow-profile endpoint SHALL all report `workflowProfileId: "mohist/github-pr"` in the same response cycle
 
 #### Scenario: No issue-level selection inherits default
 
 - **WHEN** an issue is created without an explicit workflow profile selection
-- **THEN** the effective `workflowProfileId` SHALL resolve to the project default, or the system default `mohist/default` when no project default exists
+- **THEN** the effective `workflowProfileId` SHALL resolve to the project default, or the system default `mohist/local` when no project default exists
 - **AND** every read surface SHALL report that same resolved value
 
 ### Requirement: Create persists the workflow profile selection
@@ -43,7 +43,7 @@ A backlog or ready issue (an issue with no active workflow run) SHALL support ch
 
 #### Scenario: Update profile on backlog issue
 
-- **WHEN** a backlog issue's workflow profile is changed from `mohist/default` to `mohist/github-pr`
+- **WHEN** a backlog issue's workflow profile is changed from `mohist/local` to `mohist/github-pr`
 - **THEN** the issue detail, list, and workflow-profile endpoint SHALL report `mohist/github-pr`
 - **AND** the issue's configured workflow profile variables SHALL remain unchanged
 
@@ -71,7 +71,7 @@ An issue that has an active (started) workflow run SHALL reject any attempt to c
 
 ### Requirement: Startup uses the displayed workflow profile
 
-The workflow definition used when starting an issue SHALL be the one resolved from the issue's effective workflow profile selection — the same value displayed on the issue detail and `mo issue show`. A `mohist/github-pr` profile SHALL enter the GitHub PR draft/ready/merge execution path, and a `mohist/default` profile SHALL enter the default merge/push execution path. The startup resolution SHALL NOT consult a divergent source from the read models.
+The workflow definition used when starting an issue SHALL be the one resolved from the issue's effective workflow profile selection — the same value displayed on the issue detail and `mo issue show`. A `mohist/github-pr` profile SHALL enter the GitHub PR draft/ready/merge execution path, and a `mohist/local` profile SHALL enter the default merge/push execution path. The startup resolution SHALL NOT consult a divergent source from the read models.
 
 #### Scenario: GitHub PR profile starts the GitHub PR workflow
 
@@ -81,7 +81,7 @@ The workflow definition used when starting an issue SHALL be the one resolved fr
 
 #### Scenario: Default profile starts the default workflow
 
-- **WHEN** an issue whose effective profile is `mohist/default` is started
+- **WHEN** an issue whose effective profile is `mohist/local` is started
 - **THEN** the started workflow run SHALL use the default workflow definition
 - **AND** the run SHALL enter the default merge/push path
 

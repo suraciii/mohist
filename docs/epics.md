@@ -167,7 +167,7 @@ mo epic close <epic-id-or-number>
 
 ## 和 workflow 的关系
 
-Epic 不影响 workflow。Epic 内每个 issue 各自走自己的 workflow（默认 `mohist/default`，或你 per-issue 指定）。
+Epic 不影响 workflow。Epic 内每个 issue 各自走自己的 workflow（默认 `mohist/local`，或你 per-issue 指定）。
 
 Epic 只是组织工具，不参与执行。
 

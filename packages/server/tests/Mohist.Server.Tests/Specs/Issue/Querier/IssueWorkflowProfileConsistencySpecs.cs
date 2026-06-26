@@ -32,7 +32,7 @@ public class IssueWorkflowProfileConsistencySpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetAsync_NoStoredSelection_ResolvesToMohistDefault()
+    public async Task GetAsync_NoStoredSelection_ResolvesToMohistLocal()
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -66,7 +66,7 @@ public class IssueWorkflowProfileConsistencySpecs
         var detail = await service.GetAsync(project.Id, issue.Number, project);
 
         Assert.NotNull(detail);
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, detail!.WorkflowProfileId);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, detail!.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -236,6 +236,6 @@ public class IssueWorkflowProfileConsistencySpecs
         var detail = await service.GetAsync(project.Id, issue.Number, project);
 
         Assert.NotNull(detail);
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, detail!.WorkflowProfileId);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, detail!.WorkflowProfileId);
     }
 }

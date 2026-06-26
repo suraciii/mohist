@@ -6,7 +6,7 @@ Mohist 是一个面向个人开发者的本地优先软件生产系统，用于�
 
 ## 工作流
 
-工作流由 workflow profile 定义，阶段、任务、检查均可自定义。默认 profile（`mohist/default`）：
+工作流由 workflow profile 定义，阶段、任务、检查均可自定义。默认 profile（`mohist/local`）：
 
 ```
 Draft → Plan → Build → Check → Integrate → Done

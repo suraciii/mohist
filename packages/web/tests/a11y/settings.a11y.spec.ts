@@ -45,7 +45,7 @@ const config = {
 }
 
 const workflowTemplate = {
-  id: 'mohist/default',
+  id: 'mohist/local',
   name: 'Default',
   displayName: 'Default',
   description: 'Default workflow',
@@ -106,7 +106,7 @@ async function mockSettingsApi(page: Page) {
     if (method === 'GET' && path === '/workflow-templates/system') {
       return route.fulfill({ json: apiResponse([workflowTemplate]) })
     }
-    if (method === 'GET' && decodeURIComponent(path) === '/workflow-templates/system/mohist/default') {
+    if (method === 'GET' && decodeURIComponent(path) === '/workflow-templates/system/mohist/local') {
       return route.fulfill({ json: apiResponse(workflowTemplate) })
     }
     if (method === 'GET' && path === '/templates/system') {
@@ -308,7 +308,7 @@ test.describe('Settings accessibility browser audit', () => {
     await page.setViewportSize({ width: 375, height: 812 })
     await gotoSettingsTab(page, 'workflows')
 
-    await page.getByTestId('workflow-profile-mohist/default').click()
+    await page.getByTestId('workflow-profile-mohist/local').click()
     await expect(page.getByText('Failed to load profile.')).toHaveCount(0)
     await expectMinTouchTarget(page.getByTestId('workflow-profile-back'))
   })

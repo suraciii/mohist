@@ -236,7 +236,7 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
   }
 
   it('returns project source when defaultTemplateId is set', () => {
-    mockQueryData('mohist/github-pr', [{ id: 'mohist/default', isDefault: true }])
+    mockQueryData('mohist/github-pr', [{ id: 'mohist/local', isDefault: true }])
 
     const result = useEffectiveDefaultWorkflowProfile()
 
@@ -248,12 +248,12 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
   })
 
   it('returns system source when defaultTemplateId is unset and an isDefault profile exists', () => {
-    mockQueryData(null, [{ id: 'mohist/default', isDefault: true }])
+    mockQueryData(null, [{ id: 'mohist/local', isDefault: true }])
 
     const result = useEffectiveDefaultWorkflowProfile()
 
     expect(result).toEqual({
-      effectiveTemplateId: 'mohist/default',
+      effectiveTemplateId: 'mohist/local',
       source: 'system',
       configuredTemplateId: null,
     })
@@ -265,7 +265,7 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
     const result = useEffectiveDefaultWorkflowProfile()
 
     expect(result).toEqual({
-      effectiveTemplateId: 'mohist/default',
+      effectiveTemplateId: 'mohist/local',
       source: 'none',
       configuredTemplateId: null,
     })

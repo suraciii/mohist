@@ -75,7 +75,7 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
         Assert.Equal("active", issue.Health);
         Assert.Equal(project.Id, issue.ProjectId);
         Assert.StartsWith("issue_", issue.Id);
-        Assert.Equal("mohist/default", issue.WorkflowProfileId);
+        Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -87,7 +87,7 @@ private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, s
 
         var issue = await CreateIssueAsync(project.Id, "Default profile");
 
-        Assert.Equal("mohist/default", issue.WorkflowProfileId);
+        Assert.Equal("mohist/local", issue.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

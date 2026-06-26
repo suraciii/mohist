@@ -200,8 +200,8 @@ describe('IssueCard - workflow profile chip', () => {
 
     const chip = screen.getByTestId('issue-card-workflow-profile')
     expect(chip).toBeInTheDocument()
-    expect(chip).toHaveTextContent('mohist/default')
-    expect(chip.dataset.workflowProfile).toBe('mohist/default')
+    expect(chip).toHaveTextContent('mohist/local')
+    expect(chip.dataset.workflowProfile).toBe('mohist/local')
   })
 
 })

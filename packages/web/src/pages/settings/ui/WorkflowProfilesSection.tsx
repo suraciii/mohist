@@ -110,7 +110,7 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
 
       <CardSection title="Shared Stage Definition (YAML)" titleAs="h3">
         <p className="text-[11px] text-muted-foreground mb-3">
-          quick-fix and experiment reuse these stages from mohist/default; only the metadata above differs.
+          quick-fix and experiment reuse these stages from mohist/local; only the metadata above differs.
         </p>
         <YamlViewer yaml={profile.yaml} />
       </CardSection>

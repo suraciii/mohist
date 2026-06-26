@@ -91,12 +91,12 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         // Stored selection is null → reads fall back to system default.
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("mohist/default", detail.WorkflowProfileId);
+        Assert.Equal("mohist/local", detail.WorkflowProfileId);
 
         var profile = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         Assert.Equal(HttpStatusCode.OK, profile.StatusCode);
         var profileData = (await profile.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.Equal("mohist/default", profileData.GetProperty("profileId").GetString());
+        Assert.Equal("mohist/local", profileData.GetProperty("profileId").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -126,7 +126,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             $"/api/projects/{project.Id}/issues",
             new { title = "Switch profile", projectId = project.Id });
 
-        Assert.Equal("mohist/default", issue.WorkflowProfileId);
+        Assert.Equal("mohist/local", issue.WorkflowProfileId);
 
         var patched = await _client.PatchDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
@@ -180,10 +180,10 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         // Present-and-null clears the issue-level selection; reads fall back
         // to the inherited default.
-        Assert.Equal("mohist/default", patched.WorkflowProfileId);
+        Assert.Equal("mohist/local", patched.WorkflowProfileId);
 
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("mohist/default", detail.WorkflowProfileId);
+        Assert.Equal("mohist/local", detail.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -223,7 +223,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
 
         using var response = await _client.PatchAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issue.Number}",
-            new { workflowProfileId = "mohist/default" });
+            new { workflowProfileId = "mohist/local" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -466,7 +466,7 @@ public class IssueWorkflowProfileApiConsistencySpecs : IAsyncLifetime
             {
                 title = "Default startup",
                 projectId = project.Id,
-                workflowProfileId = "mohist/default",
+                workflowProfileId = "mohist/local",
                 isDraft = false,
             });
 

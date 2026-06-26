@@ -162,7 +162,7 @@ function arrangeLoadedMocks() {
   useSystemUpdateStatusMock.mockReturnValue({ data: { hasJob: false, job: null }, refetch: vi.fn() })
   useWorkflowProfilesMock.mockReturnValue({
     data: [
-      { id: 'mohist/default', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true },
+      { id: 'mohist/local', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true },
       { id: 'mohist/quick-fix', displayName: 'Quick Fix', description: 'Short repair workflow.', isDefault: false },
     ],
     isLoading: false,

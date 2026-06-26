@@ -29,7 +29,7 @@ mo workflow list --described
 This prints each workflow profile's `id`, display name, description, and `suitable_for` tags, for example:
 
 ```
-mohist/default — Mohist Default Workflow
+mohist/local — Mohist Local Workflow
   Standard autonomous plan→build→check→merge pipeline.
   Suitable for: feature, bugfix, refactor, default
 ```
@@ -51,8 +51,8 @@ If two profiles tie, prefer the more specific one (fewer, more targeted tags). I
 
 When no profile's `suitable_for` description matches the content (every candidate scores zero, `suitable_for` is unspecified for all profiles, or `mo workflow list --described` is unavailable), default to:
 
-- `recommended_workflow: mohist/default`
-- `recommended_workflow_reason: No specific workflow matched the issue content; falling back to mohist/default.`
+- `recommended_workflow: mohist/local`
+- `recommended_workflow_reason: No specific workflow matched the issue content; falling back to mohist/local.`
 
 Never leave `recommended_workflow` blank. The default profile is always a safe choice because it is guaranteed to exist.
 
@@ -74,7 +74,7 @@ Supported fields:
 
 | Field | Required | Description |
 |---|---|---|
-| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, or `mohist/default` as fallback. |
+| `recommended_workflow` | yes | Profile id from `mo workflow list --described`, or `mohist/local` as fallback. |
 | `recommended_workflow_reason` | yes | One sentence explaining why this workflow was chosen, referencing matched `suitable_for` tags or the fallback rationale. Multi-line values use the YAML `\|` block scalar. |
 | `risk` | yes | One of `low`, `medium`, `high`. |
 
@@ -119,7 +119,7 @@ Never run `mo issue create --body-file` without confirmation. The body file is a
 ### End-to-end creation checklist
 
 - [ ] `mo workflow list --described` was run and parsed.
-- [ ] `recommended_workflow` is populated (best match or `mohist/default`).
+- [ ] `recommended_workflow` is populated (best match or `mohist/local`).
 - [ ] `recommended_workflow_reason` references the matched `suitable_for` tags or states the fallback.
 - [ ] `risk` is `low`, `medium`, or `high`, with the driver noted in the body.
 - [ ] The body's sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional (omit for pure technical changes).

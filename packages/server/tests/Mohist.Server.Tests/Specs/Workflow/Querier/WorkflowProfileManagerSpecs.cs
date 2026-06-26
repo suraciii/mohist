@@ -59,7 +59,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = await _manager.LoadTemplateAsync("unknown-run-id");
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        Assert.Contains("system-template:mohist/local", result.Id ?? "");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -142,12 +142,12 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         await SeedAsync(projectId: "proj-sys", issueId: "issue_sys", runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
-            projectDefaultTemplateId: "mohist/default");
+            projectDefaultTemplateId: "mohist/local");
 
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        Assert.Contains("system-template:mohist/local", result.Id ?? "");
         Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
     }
 
@@ -183,12 +183,12 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: null,
-            issueWorkflowProfileId: "mohist/default");
+            issueWorkflowProfileId: "mohist/local");
 
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        Assert.Contains("system-template:mohist/local", result.Id ?? "");
         var integrate = Assert.Single(result.Structure.Stages, s => s.Stage == "integrate");
         Assert.Contains(integrate.Tasks, t => t.Id == "integrate:rebase");
         Assert.DoesNotContain(integrate.Tasks, t => t.Id == "integrate:open-pr");
@@ -203,7 +203,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         await SeedAsync(projectId: "proj-issue-pr-proj-default", issueId: "issue_pr_proj", runId: runId,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
-            projectDefaultTemplateId: "mohist/default",
+            projectDefaultTemplateId: "mohist/local",
             issueWorkflowProfileId: "mohist/github-pr");
 
         var result = await _manager.LoadTemplateAsync(runId);

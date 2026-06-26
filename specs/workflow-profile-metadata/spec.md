@@ -33,10 +33,10 @@ The server SHALL include the full multi-line `description` in `WorkflowProfileIn
 
 ### Requirement: Default profile has a complete AI-readable description
 
-The `mohist/default` workflow profile YAML SHALL include a `description` field that covers: the profile's intended scope (full feature implementation with plan/design/build/check/integrate stages), its approval requirements, and explicit exclusions (simple bug fixes, experiments, pure refactoring).
+The `mohist/local` workflow profile YAML SHALL include a `description` field that covers: the profile's intended scope (full feature implementation with plan/design/build/check/integrate stages), its approval requirements, and explicit exclusions (simple bug fixes, experiments, pure refactoring).
 
 #### Scenario: Default profile description is present
-- **WHEN** the `mohist-default.workflow.yaml` file is inspected
+- **WHEN** the `mohist-local.workflow.yaml` file is inspected
 - **THEN** it SHALL contain a `description` field
 - **AND** the description SHALL use YAML block scalar format
 - **AND** the description SHALL describe the full pipeline: plan, design, build, check, integrate
@@ -44,11 +44,11 @@ The `mohist/default` workflow profile YAML SHALL include a `description` field t
 
 ### Requirement: System profile catalog exposes only executable profiles
 
-The system SHALL expose a workflow profile only when its metadata and execution definition describe the same behavior. It SHALL NOT list metadata-only variants that reuse `mohist/default` while promising a lighter or different workflow.
+The system SHALL expose a workflow profile only when its metadata and execution definition describe the same behavior. It SHALL NOT list metadata-only variants that reuse `mohist/local` while promising a lighter or different workflow.
 
 #### Scenario: default profile is listed
 - **WHEN** the system lists available profiles
-- **THEN** the `mohist/default` profile SHALL be present
+- **THEN** the `mohist/local` profile SHALL be present
 
 #### Scenario: unimplemented profiles are not listed
 - **WHEN** a profile such as `mohist/quick-fix` or `mohist/experiment` has no distinct executable definition

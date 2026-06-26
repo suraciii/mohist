@@ -13,7 +13,7 @@ const TEMPLATE_FIXTURES = {
     about: 'Three-voice PRD template',
     isDefault: true,
     suitableFor: ['prd', 'feature', 'refactor'],
-    defaults: { labels: { type: 'prd' }, risk: 'high', workflow: 'mohist/default' },
+    defaults: { labels: { type: 'prd' }, risk: 'high', workflow: 'mohist/local' },
     sections: [
       { title: 'User Voice', guidance: 'What to write in User Voice', placeholder: '<user voice goes here>' },
       { title: 'Product Shape', guidance: 'What to write in Product Shape', placeholder: '<product shape goes here>' },
@@ -46,7 +46,7 @@ const mocks = vi.hoisted(() => ({
   useAvailableModelIds: vi.fn<() => { data: { models: string[]; modelVariants: Record<string, string[]> } | undefined; isLoading: boolean; error: unknown }>(() => ({ data: { models: [], modelVariants: {} }, isLoading: false, error: null })),
   useWorkflowProfiles: vi.fn<() => { data: unknown[] }>(() => ({ data: [] })),
   useEffectiveDefaultWorkflowProfile: vi.fn<() => { effectiveTemplateId: string; source: 'project' | 'system' | 'none'; configuredTemplateId: string | null }>(() => ({
-    effectiveTemplateId: 'mohist/default',
+    effectiveTemplateId: 'mohist/local',
     source: 'system',
     configuredTemplateId: null,
   })),
@@ -258,7 +258,7 @@ describe('CreateIssueDialog template selector', () => {
     await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
     expect(mocks.createIssue).toHaveBeenCalledWith(expect.not.objectContaining({
       risk: 'high',
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       labels: { type: 'prd' },
     }))
   })
@@ -472,7 +472,7 @@ describe('CreateIssueDialog workflow profile default', () => {
   function setupProfiles() {
     mocks.useWorkflowProfiles.mockReturnValue({
       data: [
-        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
         { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
@@ -504,7 +504,7 @@ describe('CreateIssueDialog workflow profile default', () => {
   it('falls back to the system default workflow profile when the project default is unset', async () => {
     setupProfiles()
     mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/default',
+      effectiveTemplateId: 'mohist/local',
       source: 'system',
       configuredTemplateId: null,
     })
@@ -512,6 +512,6 @@ describe('CreateIssueDialog workflow profile default', () => {
     renderDialog()
 
     const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
-    expect(select.value).toBe('mohist/default')
+    expect(select.value).toBe('mohist/local')
   })
 })

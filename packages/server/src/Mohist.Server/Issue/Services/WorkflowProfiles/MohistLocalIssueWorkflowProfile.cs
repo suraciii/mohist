@@ -5,17 +5,17 @@ using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
-public class MohistDefaultIssueWorkflowProfile : MohistIssueWorkflowProfileBase
+public class MohistLocalIssueWorkflowProfile : MohistIssueWorkflowProfileBase
 {
-    public MohistDefaultIssueWorkflowProfile(
+    public MohistLocalIssueWorkflowProfile(
         IPromptLoader promptLoader,
         IDbContextFactory<MohistDbContext> dbFactory)
         : base(promptLoader, dbFactory)
     {
     }
 
-    public override string Id => IssueWorkflowProfiles.DefaultId;
-    public override string DisplayName => "Mohist Default";
+    public override string Id => IssueWorkflowProfiles.LocalId;
+    public override string DisplayName => "Mohist Local";
     public override string Description => ResolveDescription();
     public override bool IsDefault => true;
     public override IReadOnlyList<string> SuitableFor { get; } = [

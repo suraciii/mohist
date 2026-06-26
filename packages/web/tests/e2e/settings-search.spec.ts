@@ -22,7 +22,7 @@ const config = {
 }
 
 const workflowTemplate = {
-  id: 'mohist/default',
+  id: 'mohist/local',
   name: 'Default',
   displayName: 'Default',
   description: 'Default workflow',
@@ -83,7 +83,7 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
     if (method === 'GET' && path === '/workflow-templates/system') {
       return route.fulfill({ json: apiResponse([workflowTemplate]) })
     }
-    if (method === 'GET' && decodeURIComponent(path) === '/workflow-templates/system/mohist/default') {
+    if (method === 'GET' && decodeURIComponent(path) === '/workflow-templates/system/mohist/local') {
       return route.fulfill({ json: apiResponse(workflowTemplate) })
     }
     if (method === 'GET' && path === '/templates/system') {

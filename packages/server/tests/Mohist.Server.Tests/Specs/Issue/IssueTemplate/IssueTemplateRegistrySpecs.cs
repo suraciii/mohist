@@ -658,7 +658,7 @@ public class IssueTemplateRegistrySpecs
         var template = registry.Get("mohist/default");
 
         Assert.Equal("medium", template.Defaults.Risk);
-        Assert.Equal("mohist/default", template.Defaults.Workflow);
+        Assert.Equal("mohist/local", template.Defaults.Workflow);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

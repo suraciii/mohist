@@ -54,11 +54,11 @@ public class CliIssueWorkflowConfigSpecs
         issueNumber = 42,
         projectId = "proj_abc",
         issueId = "issue_42",
-        sourceTemplateId = "mohist/default",
+        sourceTemplateId = "mohist/local",
         hasCustomTemplate = true,
         yaml = "name: workflow\ntasks:\n  - stage: plan\n    with:\n      greeting: hi\n",
         workflowRunId = (string?)null,
-        profileId = "mohist/default",
+        profileId = "mohist/local",
         updateMode = "custom",
         templateSource = "custom",
         variables = new

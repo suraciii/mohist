@@ -73,7 +73,7 @@ Draft → Plan → Build → Check → Integrate → Done
 Workflow 不是写死的。产品模型支持多个 **Workflow Profile**，每个 issue 可以选一个用。
 
 当前内置 profile：
-- `mohist/default` — 完整 5 阶段流程（默认）
+- `mohist/local` — 完整 5 阶段流程（默认）
 
 详见 [Workflow Profile](workflow-profiles.md)。
 
@@ -127,7 +127,7 @@ AI 自治执行到 Done
      ▼     │
 [Issue] ◄──┘
      │
-     │  Workflow（默认 mohist/default）
+     │  Workflow（默认 mohist/local）
      ▼
 [Plan → Build → Check → Integrate → Done]
      │

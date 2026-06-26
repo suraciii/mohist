@@ -13,8 +13,8 @@ interface CapturedRequest {
 }
 
 const PROFILE_DETAIL = {
-  id: 'mohist/default',
-  displayName: 'Mohist Default',
+  id: 'mohist/local',
+  displayName: 'Mohist Local',
   description: 'Default workflow profile',
   isDefault: true,
   yaml: 'stages: []\n',
@@ -46,7 +46,7 @@ function renderUseWorkflowProfile(id: string | null) {
 let requests: CapturedRequest[] = []
 
 const server = setupServer(
-  http.get('/api/workflow-templates/system/mohist/default', ({ request }) => {
+  http.get('/api/workflow-templates/system/mohist/local', ({ request }) => {
     requests.push({ method: request.method, url: request.url })
     return HttpResponse.json({ success: true, data: PROFILE_DETAIL })
   }),
@@ -71,7 +71,7 @@ afterAll(() => {
 
 describe('getWorkflowProfile (workflow profile detail URL)', () => {
   it('issues a request to the literal path with the slash left unencoded', async () => {
-    const { result } = renderUseWorkflowProfile('mohist/default')
+    const { result } = renderUseWorkflowProfile('mohist/local')
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
@@ -79,19 +79,19 @@ describe('getWorkflowProfile (workflow profile detail URL)', () => {
 
     expect(requests).toHaveLength(1)
     expect(requests[0].method).toBe('GET')
-    expect(requests[0].url).toContain('/api/workflow-templates/system/mohist/default')
+    expect(requests[0].url).toContain('/api/workflow-templates/system/mohist/local')
     expect(requests[0].url).not.toContain('%2F')
     expect(requests[0].url).not.toContain('mohist%2Fdefault')
   })
 
   it('returns the profile detail payload', async () => {
-    const { result } = renderUseWorkflowProfile('mohist/default')
+    const { result } = renderUseWorkflowProfile('mohist/local')
 
     await waitFor(() => {
       expect(result.current.data).toEqual(PROFILE_DETAIL)
     })
 
-    expect(result.current.data?.id).toBe('mohist/default')
+    expect(result.current.data?.id).toBe('mohist/local')
     expect(result.current.data?.yaml).toBe(PROFILE_DETAIL.yaml)
     expect(result.current.data?.stages).toEqual([])
   })

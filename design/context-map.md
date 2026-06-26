@@ -105,6 +105,6 @@
 
 本文是目标态。当前代码与目标的偏差，逐步收敛：
 
-- **默认 `WorkflowDefinition` 内容错位**：`MohistWorkflow` + `mohist-default.workflow.yaml` 是应用级配置，却躺在 `Issue/Services/WorkflowProfiles/`——应挪到应用配置层。（注：workflow profile 配置本身 = template 选择 + variables，是 Issue/Project 自己的配置，留原处是对的；详见 [`workflow/boundaries/issue.md`](workflow/boundaries/issue.md)。）
+- **默认 `WorkflowDefinition` 内容错位**：`MohistWorkflow` + `mohist-local.workflow.yaml` 是应用级配置，却躺在 `Issue/Services/WorkflowProfiles/`——应挪到应用配置层。（注：workflow profile 配置本身 = template 选择 + variables，是 Issue/Project 自己的配置，留原处是对的；详见 [`workflow/boundaries/issue.md`](workflow/boundaries/issue.md)。）
 - **模块目录与上下文归属**未对齐：`Epic/`→Issue、`Sessions/`→Agent。物理是否合并视成本，归属以本文为准。
 - **Workflow↔Issue 目标为单向依赖**（Issue→Workflow）；目前 `ProjectWorkflowProfileManager` 因拿 `MohistWorkflow.Definition` 而反向引用 Issue，搬走默认定义即消除。

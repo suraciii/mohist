@@ -258,7 +258,7 @@ Recovery budget 的读取、检查、递减全部在 runner 侧完成。
         retrySelf: true
 ```
 
-`mohist/default` 的 ai-review task：
+`mohist/local` 的 ai-review task：
 
 ```yaml
 - id: ai-review

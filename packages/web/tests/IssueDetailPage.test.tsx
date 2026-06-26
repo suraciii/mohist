@@ -808,7 +808,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     hasCustomTemplate: false,
     yaml: null,
     workflowRunId: null,
-    profileId: 'mohist/default',
+    profileId: 'mohist/local',
     updateMode: 'Reference',
     variables: {},
     updatedAt: '2024-01-01T00:00:00.000Z',
@@ -834,7 +834,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       projectName: 'Test Project',
       repository: { name: 'main', baseBranch: 'main' },
     })
@@ -856,7 +856,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       projectName: 'Test Project',
       repository: { name: 'main', baseBranch: 'main' },
     })
@@ -883,7 +883,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
     })
     mocks.workflowProfile = referenceProfileData()
 
@@ -891,7 +891,7 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     const profileCard = await waitFor(() => screen.getByTestId('workflow-profile-reference'))
     expect(profileCard).toBeInTheDocument()
-    expect(within(profileCard).getByText('mohist/default')).toBeInTheDocument()
+    expect(within(profileCard).getByText('mohist/local')).toBeInTheDocument()
     expect(within(profileCard).getByText('Inherited')).toBeInTheDocument()
   })
 
@@ -901,7 +901,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       status: 'in_progress',
       workflowStage: WorkflowStage.Plan,
       workflowRunId: 'run-123',
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       projectName: 'Test Project',
       repository: { name: 'main', baseBranch: 'main' },
     })
@@ -934,7 +934,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     mocks.issue = makeIssue({
       body: 'Issue body',
       status: 'backlog',
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       prerequisites: [
         { number: 2, title: 'Prepare dependency', completed: false },
       ],
@@ -958,7 +958,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'in_progress',
       workflowStage: WorkflowStage.Build,
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       workflowRunId: 'run-123',
     })
     mocks.workflowProfile = referenceProfileData()
@@ -1010,7 +1010,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     })
     mocks.workflowProfile = referenceProfileData()
     mocks.workflowProfilesList = [
-      { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
 
@@ -1026,14 +1026,14 @@ describe('IssueDetailPage workflow profile integration', () => {
     mocks.issue = makeIssue({
       body: 'Issue body',
       status: 'backlog',
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       isDraft: false,
       canStart: true,
       blocker: null,
     })
     mocks.workflowProfile = referenceProfileData()
     mocks.workflowProfilesList = [
-      { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
 
@@ -1055,14 +1055,14 @@ describe('IssueDetailPage workflow profile integration', () => {
     mocks.issue = makeIssue({
       body: 'Issue body',
       status: 'backlog',
-      workflowProfileId: 'mohist/default',
+      workflowProfileId: 'mohist/local',
       isDraft: false,
       canStart: true,
       blocker: null,
     })
     mocks.workflowProfile = referenceProfileData()
     mocks.workflowProfilesList = [
-      { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
       { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
     ]
     mocks.updateIssueWorkflowProfileMutateAsync = vi.fn(() => Promise.reject(
@@ -1075,7 +1075,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
     await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
-    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/local')
   })
 
   it('renders the inherited default when neither the read model nor the workflow-profile response carry a selection', async () => {
@@ -1092,7 +1092,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     renderWithQueryClient(<IssueDetailPage />)
 
     const control = await waitFor(() => screen.getByTestId('issue-workflow-profile-control'))
-    expect(control.dataset.effectiveProfile).toBe('mohist/default')
-    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')
+    expect(control.dataset.effectiveProfile).toBe('mohist/local')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/local')
   })
 })

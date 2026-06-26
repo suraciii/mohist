@@ -38,7 +38,7 @@ The server SHALL expose an API endpoint that returns the full list of available 
 
 #### Scenario: Empty profile list is impossible
 - **WHEN** the server receives a GET request to the profile list endpoint
-- **THEN** the response SHALL always include at least the `mohist/default` profile
+- **THEN** the response SHALL always include at least the `mohist/local` profile
 - **AND** the response SHALL NOT be an empty array
 
 ### Requirement: JSON output is consumable by external agent skills

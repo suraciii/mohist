@@ -42,8 +42,8 @@ public class ProjectWorkflowProfileManager : IScopedService
         return
         [
             new SystemTemplateInfo(
-                Id: IssueWorkflowProfiles.DefaultId,
-                Name: "Mohist Default",
+                Id: IssueWorkflowProfiles.LocalId,
+                Name: "Mohist Local",
                 Description: defaultDescription,
                 IsDefault: true),
             new SystemTemplateInfo(
@@ -83,7 +83,7 @@ public class ProjectWorkflowProfileManager : IScopedService
 
     public static WorkflowDefinition? GetSystemTemplateDefinition(string templateId)
     {
-        if (string.Equals(templateId, IssueWorkflowProfiles.DefaultId, StringComparison.Ordinal))
+        if (string.Equals(templateId, IssueWorkflowProfiles.LocalId, StringComparison.Ordinal))
             return MohistWorkflow.Definition;
         if (string.Equals(templateId, IssueWorkflowProfiles.GithubPrId, StringComparison.Ordinal))
             return MohistWorkflow.GithubPrWorkflowDefinition;

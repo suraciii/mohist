@@ -63,7 +63,7 @@ The Web UI SHALL read and write the issue's workflow profile selection as a sing
 
 #### Scenario: Change profile from issue detail
 
-- **WHEN** a user changes a backlog issue's workflow profile from `mohist/default` to `mohist/pr` on the issue detail page
+- **WHEN** a user changes a backlog issue's workflow profile from `mohist/local` to `mohist/pr` on the issue detail page
 - **THEN** the issue detail, workflow-profile page, and issue list SHALL all reflect `mohist/pr`
 
 #### Scenario: Started issue blocks profile change in Web UI

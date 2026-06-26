@@ -58,7 +58,7 @@ public class CliIssueTemplateCommandSpecs
                         {
                             labels = new Dictionary<string, string>(),
                             risk = "medium",
-                            workflow = "mohist/default",
+                            workflow = "mohist/local",
                         },
                         sections = new[]
                         {
@@ -400,7 +400,7 @@ public class CliIssueTemplateCommandSpecs
         Assert.Equal(0, exitCode);
         var text = output.ToString();
         Assert.Contains("defaults.risk:       medium", text);
-        Assert.Contains("defaults.workflow:   mohist/default", text);
+        Assert.Contains("defaults.workflow:   mohist/local", text);
     }
 
     [Fact]

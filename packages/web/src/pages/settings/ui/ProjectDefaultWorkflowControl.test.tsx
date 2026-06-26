@@ -9,8 +9,8 @@ import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 
 const SYSTEM_TEMPLATES = [
   {
-    id: 'mohist/default',
-    name: 'Mohist Default',
+    id: 'mohist/local',
+    name: 'Mohist Local',
     description: 'Standard staged workflow.',
     isDefault: true,
   },
@@ -149,7 +149,7 @@ describe('ProjectDefaultWorkflowControl', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('project-default-workflow-system-default')).toHaveTextContent(
-        'mohist/default',
+        'mohist/local',
       ),
     )
     expect(screen.queryByTestId('project-default-workflow-value')).not.toBeInTheDocument()
@@ -169,7 +169,7 @@ describe('ProjectDefaultWorkflowControl', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('project-default-workflow-system-default')).toHaveTextContent(
-        'mohist/default',
+        'mohist/local',
       ),
     )
     expect(select.value).toBe('')
@@ -196,10 +196,10 @@ describe('ProjectDefaultWorkflowControl', () => {
       expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
     )
     await waitFor(() =>
-      expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
+      expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
     )
 
-    const defaultCard = screen.getByTestId('workflow-profile-mohist/default')
+    const defaultCard = screen.getByTestId('workflow-profile-mohist/local')
     const systemBadge = within(defaultCard).getByText('System default')
     expect(systemBadge.className).toContain('bg-slate-50')
     expect(systemBadge.className).toContain('text-slate-700')

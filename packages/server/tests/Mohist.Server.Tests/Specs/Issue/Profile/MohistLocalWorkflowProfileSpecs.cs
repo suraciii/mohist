@@ -65,14 +65,14 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
     public void Dispose() => _connection.Dispose();
 }
 
-public class MohistDefaultWorkflowProfileSpecs
+public class MohistLocalWorkflowProfileSpecs
 {
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void IssueWithNonAsciiTitle_BuildsIssueNumberBasedOpenSpecChangeVariables()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-154",
@@ -259,7 +259,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -289,7 +289,7 @@ public class MohistDefaultWorkflowProfileSpecs
         // Workflow-engine spec: BuildVariables captures the variant alongside
         // the model at issue creation time so per-stage dispatch can carry
         // both. BuildVariables is the source-of-truth seal for this invariant.
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-variant",
@@ -319,7 +319,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void StageVariables_MergesStageOverrides()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -345,7 +345,7 @@ public class MohistDefaultWorkflowProfileSpecs
     public void BuildVariables_IncludesPromptsFromLoader()
     {
         var loader = new FakePromptLoader();
-        var profile = new MohistDefaultIssueWorkflowProfile(loader, new FakeDbContextFactory());
+        var profile = new MohistLocalIssueWorkflowProfile(loader, new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -375,7 +375,7 @@ public class MohistDefaultWorkflowProfileSpecs
             ["deploy-checklist"] = "# Deploy checklist body",
         }, "project-1");
 
-        var profile = new MohistDefaultIssueWorkflowProfile(loader, dbFactory);
+        var profile = new MohistLocalIssueWorkflowProfile(loader, dbFactory);
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -400,7 +400,7 @@ public class MohistDefaultWorkflowProfileSpecs
     {
         var loader = new FakePromptLoader();
         var templateStore = new FakeDbContextFactory();
-        var profile = new MohistDefaultIssueWorkflowProfile(loader, templateStore);
+        var profile = new MohistLocalIssueWorkflowProfile(loader, templateStore);
 
         var merged = await profile.GetMergedPromptsAsync("project-99");
 
@@ -1093,7 +1093,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void DefaultIssueWorkflowProfile_DescriptionSourcesFromWorkflowYaml()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
+        var profile = new MohistLocalIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
 
         Assert.Equal(MohistWorkflow.Definition.Description, profile.Description);
     }
@@ -1106,7 +1106,7 @@ public class MohistDefaultWorkflowProfileSpecs
         // Mirrors the spec scenario "Profile without description field":
         // a workflow profile whose source description is missing must
         // surface the "No description provided" fallback string. The
-        // MohistDefaultIssueWorkflowProfile class applies the fallback
+        // MohistLocalIssueWorkflowProfile class applies the fallback
         // through ResolveDescription; the SystemRoutes detail endpoint
         // applies the same string (now sourced from SystemTemplateInfo).
         const string fallback = "No description provided";
@@ -1137,7 +1137,7 @@ public class MohistDefaultWorkflowProfileSpecs
 
         var list = registry.List();
 
-        var defaultEntry = Assert.Single(list, info => info.Id == "mohist/default");
+        var defaultEntry = Assert.Single(list, info => info.Id == "mohist/local");
         Assert.True(defaultEntry.IsDefault);
         Assert.Equal(MohistWorkflow.Definition.Description, defaultEntry.Description);
     }
@@ -1151,7 +1151,7 @@ public class MohistDefaultWorkflowProfileSpecs
 
         var templates = await manager.ListSystemTemplatesAsync();
 
-        var defaultTemplate = Assert.Single(templates, t => t.Id == "mohist/default");
+        var defaultTemplate = Assert.Single(templates, t => t.Id == "mohist/local");
         Assert.True(defaultTemplate.IsDefault);
         Assert.Equal(MohistWorkflow.Definition.Description, defaultTemplate.Description);
     }
@@ -1175,7 +1175,7 @@ public class MohistDefaultWorkflowProfileSpecs
         // payload (stages, tasks, checks) is identical to the version
         // without the description key, plus the round-trip is stable.
         var descriptionOnlyYaml = """
-            id: mohist/default
+            id: mohist/local
             description: |
               Some user-facing description that the engine must not
               read or interpret.
@@ -1444,12 +1444,12 @@ internal sealed class FakePromptFileStore : IPromptFileStore
 }
 
 [Collection("MohistIntegration")]
-public class MohistDefaultWorkflowProfileStartWorkSpecs
+public class MohistLocalWorkflowProfileStartWorkSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public MohistDefaultWorkflowProfileStartWorkSpecs(MohistIntegrationFixture fixture)
+    public MohistLocalWorkflowProfileStartWorkSpecs(MohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

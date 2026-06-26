@@ -21,7 +21,7 @@ public class WorkflowProfileCatalogSpecs
     [Fact]
     public void IssueWorkflowProfiles_ExposesDefaultSystemId()
     {
-        Assert.Equal("mohist/default", IssueWorkflowProfiles.DefaultId);
+        Assert.Equal("mohist/local", IssueWorkflowProfiles.LocalId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -44,7 +44,7 @@ public class WorkflowProfileCatalogSpecs
         var list = registry.List();
 
         Assert.Equal(2, list.Count);
-        Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.DefaultId);
+        Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.LocalId);
         Assert.Contains(list, p => p.Id == IssueWorkflowProfiles.GithubPrId);
     }
 
@@ -58,7 +58,7 @@ public class WorkflowProfileCatalogSpecs
         var list = registry.List();
         var defaultEntry = Assert.Single(list, p => p.IsDefault);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, defaultEntry.Id);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, defaultEntry.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -85,7 +85,7 @@ public class WorkflowProfileCatalogSpecs
         var templates = await manager.ListSystemTemplatesAsync();
 
         Assert.Equal(2, templates.Count);
-        Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.DefaultId);
+        Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.LocalId);
         Assert.Contains(templates, t => t.Id == IssueWorkflowProfiles.GithubPrId);
     }
 
@@ -116,7 +116,7 @@ public class WorkflowProfileCatalogSpecs
     [Fact]
     public void GetSystemTemplateDefinition_Default_StillWorks()
     {
-        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId);
+        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.LocalId);
 
         Assert.NotNull(def);
         Assert.NotEmpty(def!.Stages);
@@ -137,10 +137,10 @@ public class WorkflowProfileCatalogSpecs
     [Fact]
     public void GetSystemTemplateInfo_Default_ReturnsFriendlyDisplayNameAndYamlDescription()
     {
-        var info = ProjectWorkflowProfileManager.GetSystemTemplateInfo(IssueWorkflowProfiles.DefaultId);
+        var info = ProjectWorkflowProfileManager.GetSystemTemplateInfo(IssueWorkflowProfiles.LocalId);
 
         Assert.NotNull(info);
-        Assert.Equal("Mohist Default", info!.Name);
+        Assert.Equal("Mohist Local", info!.Name);
         Assert.True(info.IsDefault);
         Assert.Equal(MohistWorkflow.Definition.Description, info.Description);
     }
@@ -185,7 +185,7 @@ public class WorkflowProfileCatalogSpecs
 
         var defaultInfo = Assert.Single(templates, t => t.IsDefault);
 
-        Assert.Equal("Mohist Default", defaultInfo.Name);
+        Assert.Equal("Mohist Local", defaultInfo.Name);
         Assert.True(defaultInfo.IsDefault);
 
         Assert.DoesNotContain('/', defaultInfo.Name);

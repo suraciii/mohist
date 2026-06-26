@@ -5,15 +5,15 @@ namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
 public static class MohistWorkflow
 {
-    private const string DefaultDefinitionFileName = "mohist-default.workflow.yaml";
+    private const string LocalDefinitionFileName = "mohist-local.workflow.yaml";
     private const string GithubPrDefinitionFileName = "mohist-github-pr.workflow.yaml";
-    private static readonly Lazy<WorkflowDefinition> DefaultDefinition = new(LoadDefaultDefinition);
+    private static readonly Lazy<WorkflowDefinition> LocalDefinition = new(LoadLocalDefinition);
     private static readonly Lazy<WorkflowDefinition> GithubPrDefinition = new(LoadGithubPrDefinition);
 
-    public static WorkflowDefinition Definition => DefaultDefinition.Value;
+    public static WorkflowDefinition Definition => LocalDefinition.Value;
     public static WorkflowDefinition GithubPrWorkflowDefinition => GithubPrDefinition.Value;
 
-    public static WorkflowDefinition ParseYaml(string yaml) => WorkflowYamlSerializer.FromYaml(yaml, IssueWorkflowProfiles.DefaultId);
+    public static WorkflowDefinition ParseYaml(string yaml) => WorkflowYamlSerializer.FromYaml(yaml, IssueWorkflowProfiles.LocalId);
 
     public static WorkflowDefinition LoadDefinitionForProfile(string profileId)
     {
@@ -22,12 +22,12 @@ public static class MohistWorkflow
         return Definition;
     }
 
-    private static WorkflowDefinition LoadDefaultDefinition()
+    private static WorkflowDefinition LoadLocalDefinition()
     {
-        var path = ResolveDefinitionPath(DefaultDefinitionFileName);
+        var path = ResolveDefinitionPath(LocalDefinitionFileName);
         if (path is null)
-            throw new FileNotFoundException($"Default Mohist workflow definition not found: {DefaultDefinitionFileName}");
-        return WorkflowYamlSerializer.FromYaml(File.ReadAllText(path), IssueWorkflowProfiles.DefaultId);
+            throw new FileNotFoundException($"Local Mohist workflow definition not found: {LocalDefinitionFileName}");
+        return WorkflowYamlSerializer.FromYaml(File.ReadAllText(path), IssueWorkflowProfiles.LocalId);
     }
 
     private static WorkflowDefinition LoadGithubPrDefinition()

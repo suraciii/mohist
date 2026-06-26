@@ -406,7 +406,7 @@ public class IssueQuerier : IScopedService
             UpdatedAt = issue.UpdatedAt.ToString("o"),
             ArchivedAt = issue.ArchivedAt?.ToString("o"),
             WorkflowRunId = issue.WorkflowRunId,
-            WorkflowProfileId = IssueWorkflowProfiles.DefaultId,
+            WorkflowProfileId = IssueWorkflowProfiles.LocalId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             IsDraft = issue.IsDraft,
             Repository = resolution.Repository,

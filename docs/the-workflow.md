@@ -188,4 +188,4 @@ Web UI 上每个 issue card 会用颜色点显示 health。
 
 ---
 
-对应源码：`packages/server/src/Mohist.Server/Workflow/`、`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`。
+对应源码：`packages/server/src/Mohist.Server/Workflow/`、`Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml`。
