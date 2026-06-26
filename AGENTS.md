@@ -34,6 +34,13 @@ npm run dev            # 启动 server + Web UI（并发）
 npm run dev:runner     # 另一个终端启动 runner
 ```
 
+重启受管理服务务必用 `mo update`（不要手动 `dotnet run`，会触发 runner id 漂移导致 workflow sticky assignment 失配）：
+
+```bash
+mo update server       # 重建并以 systemd 受管理方式重启 server
+mo update runner       # 同上，重启 runner
+```
+
 ## 测试与类型检查
 
 改完代码务必跑对应 typecheck + test：
