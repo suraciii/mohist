@@ -26,3 +26,12 @@
 - Static catalog `isDefault` badge relabeled from "Default" to "System default" and restyled with slate/gray (`bg-slate-50 text-slate-700`) to avoid conflation with the green "Project default" badge.
 - One colocated test (`renders the system-default badge with styling distinct from the project-default badge`) initially raced with the loading state; fixed by waiting for `project-default-workflow-value` before asserting on the badges.
 - Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (162 files, 2344 tests).
+
+## T-003 Decisions / Gotchas
+
+- Rewired `CreateIssueDialog.tsx` and `WorkflowProfileControl.tsx` to consume `useEffectiveDefaultWorkflowProfile().effectiveTemplateId` instead of `workflowProfiles.find((p) => p.isDefault)`.
+- In `CreateIssueDialog`, the default is used only for the workflow `<select>` display value when the user has not touched the selector; the existing `workflowProfileId` state remains `null` until touched, so the create request continues to omit `workflowProfileId` and lets the backend resolve the project default.
+- In `WorkflowProfileControl`, the effective profile displayed for an issue still follows `issue.workflowProfileId ?? yaml.profileId ?? SYSTEM_DEFAULT_ID`; only the `data-default-profile` (default suggestion) is sourced from `useEffectiveDefaultWorkflowProfile`.
+- Tests mock `useEffectiveDefaultWorkflowProfile` at the `entities/settings` boundary to avoid coupling to `useProject` and the project-default query internals.
+- Added reset of `mockUseIssueWorkflowProfileYaml` in `WorkflowProfileControl.test.tsx` `beforeEach` to prevent stale yaml-return values from leaking between tests.
+- Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (162 files, 2348 tests).

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useWorkflowProfiles } from '../../../entities/settings'
+import { useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import {
   IssueStatus,
@@ -44,8 +44,7 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
     return [...list, ...extras]
   }, [workflowProfiles, pending])
 
-  const defaultProfileId = workflowProfiles?.find((p) => p.isDefault)?.id
-    ?? SYSTEM_DEFAULT_ID
+  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
 
   const selectValue = pending ?? effectiveProfileId
 

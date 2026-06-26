@@ -45,6 +45,11 @@ const mocks = vi.hoisted(() => ({
   useRepositories: vi.fn(() => ({ data: [{ name: 'main', isDefault: true }] })),
   useAvailableModelIds: vi.fn<() => { data: { models: string[]; modelVariants: Record<string, string[]> } | undefined; isLoading: boolean; error: unknown }>(() => ({ data: { models: [], modelVariants: {} }, isLoading: false, error: null })),
   useWorkflowProfiles: vi.fn<() => { data: unknown[] }>(() => ({ data: [] })),
+  useEffectiveDefaultWorkflowProfile: vi.fn<() => { effectiveTemplateId: string; source: 'project' | 'system' | 'none'; configuredTemplateId: string | null }>(() => ({
+    effectiveTemplateId: 'mohist/default',
+    source: 'system',
+    configuredTemplateId: null,
+  })),
   useIssueTemplates: vi.fn<() => { data: unknown[]; isLoading: boolean }>(() => ({ data: [], isLoading: false })),
   useIssueTemplate: vi.fn<(id: string | null) => { data: unknown }>(() => ({ data: undefined })),
 }))
@@ -62,6 +67,7 @@ vi.mock('../../../entities/project', () => ({
 
 vi.mock('../../../entities/settings', () => ({
   useAvailableModelIds: mocks.useAvailableModelIds,
+  useEffectiveDefaultWorkflowProfile: mocks.useEffectiveDefaultWorkflowProfile,
   useWorkflowProfiles: mocks.useWorkflowProfiles,
 }))
 
@@ -454,5 +460,49 @@ describe('CreateIssueDialog model + variant chips', () => {
       model: 'anthropic/claude',
       modelVariant: 'high',
     })))
+  })
+})
+
+describe('CreateIssueDialog workflow profile default', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  function setupProfiles() {
+    mocks.useWorkflowProfiles.mockReturnValue({
+      data: [
+        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+      ],
+    })
+  }
+
+  it('inherits the project-configured default workflow profile when opening the dialog', async () => {
+    setupProfiles()
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/pr',
+      source: 'project',
+      configuredTemplateId: 'mohist/pr',
+    })
+
+    renderDialog()
+
+    const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    expect(select.value).toBe('mohist/pr')
+  })
+
+  it('falls back to the system default workflow profile when the project default is unset', async () => {
+    setupProfiles()
+    mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/default',
+      source: 'system',
+      configuredTemplateId: null,
+    })
+
+    renderDialog()
+
+    const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
+    expect(select.value).toBe('mohist/default')
   })
 })

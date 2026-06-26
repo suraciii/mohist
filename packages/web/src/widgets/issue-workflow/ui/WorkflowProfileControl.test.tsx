@@ -7,10 +7,16 @@ import { WorkflowProfileControl } from './WorkflowProfileControl'
 import type { Issue } from '../../../entities/issue'
 
 const mockUseWorkflowProfiles = vi.fn<() => { data: { id: string; displayName: string; description: string; isDefault: boolean }[] | undefined }>(() => ({ data: undefined }))
+const mockUseEffectiveDefaultWorkflowProfile = vi.fn<() => { effectiveTemplateId: string; source: 'project' | 'system' | 'none'; configuredTemplateId: string | null }>(() => ({
+  effectiveTemplateId: 'mohist/default',
+  source: 'system',
+  configuredTemplateId: null,
+}))
 const mockUseIssueWorkflowProfileYaml = vi.fn<() => { data: { profileId: string; hasCustomTemplate: boolean } | undefined }>(() => ({ data: undefined }))
 const mockUpdateMutation = vi.fn()
 
 vi.mock('../../../entities/settings', () => ({
+  useEffectiveDefaultWorkflowProfile: () => mockUseEffectiveDefaultWorkflowProfile(),
   useWorkflowProfiles: () => mockUseWorkflowProfiles(),
 }))
 
@@ -57,6 +63,12 @@ function renderControl(issue: Issue) {
 describe('WorkflowProfileControl', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUseIssueWorkflowProfileYaml.mockReturnValue({ data: undefined })
+    mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/default',
+      source: 'system',
+      configuredTemplateId: null,
+    })
     mockUpdateMutation.mockResolvedValue({})
   })
 
@@ -175,5 +187,43 @@ describe('WorkflowProfileControl', () => {
     await waitFor(() => expect(screen.getByTestId('issue-workflow-profile-error')).toHaveTextContent(/active/))
 
     expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')
+  })
+
+  it('uses the project-configured default profile id when no issue-level selection exists', async () => {
+    mockUseWorkflowProfiles.mockReturnValue({
+      data: [
+        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+      ],
+    })
+    mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/pr',
+      source: 'project',
+      configuredTemplateId: 'mohist/pr',
+    })
+
+    renderControl(makeIssue({ workflowProfileId: null }))
+
+    const control = await screen.findByTestId('issue-workflow-profile-control')
+    expect(control.dataset.defaultProfile).toBe('mohist/pr')
+  })
+
+  it('falls back to the system default profile id when the project default is unset', async () => {
+    mockUseWorkflowProfiles.mockReturnValue({
+      data: [
+        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+      ],
+    })
+    mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/default',
+      source: 'system',
+      configuredTemplateId: null,
+    })
+
+    renderControl(makeIssue({ workflowProfileId: null }))
+
+    const control = await screen.findByTestId('issue-workflow-profile-control')
+    expect(control.dataset.defaultProfile).toBe('mohist/default')
   })
 })
