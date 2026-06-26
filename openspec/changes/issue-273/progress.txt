@@ -1,0 +1,16 @@
+## T-001 Progress
+
+- Removed `retrySelf: true` from the rebase `when: conflict` recovery handler in `mohist-github-pr.workflow.yaml`.
+- Removed dead `conflictMode: task` from `recover:rebase` `with` block.
+- Kept parent `base-moved` handler `retrySelf: true` intact.
+- Updated `MohistPrIssueWorkflowProfileSpecs.cs`:
+  - Assert conflict handler has no `retrySelf` property.
+  - Assert rebase `with` has no `conflictMode` property.
+- Verified `mohist-default.workflow.yaml` has no `conflictMode` to sync (confirmed none).
+- Server tests pass: 31 profile-specific tests, full suite 2785 passed / 0 failed.
+
+## Codebase Patterns
+
+- Workflow profile YAML lives under `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/`.
+- Server-side profile assertions are in `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs`.
+- `npm test` at server root runs `dotnet test Mohist.sln`; workspace vitest failures are pre-existing environment issues in this repo.
