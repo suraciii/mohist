@@ -1,23 +1,76 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useModelVariants } from './queries'
+import {
+  useClearProjectDefaultWorkflowProfile,
+  useEffectiveDefaultWorkflowProfile,
+  useModelVariants,
+  useProjectDefaultWorkflowProfile,
+  useSetProjectDefaultWorkflowProfile,
+} from './queries'
 
 const useQueryMock = vi.fn()
+const useMutationMock = vi.fn()
+const useQueryClientMock = vi.fn()
 const useProjectMock = vi.fn()
+const toastSuccessMock = vi.fn()
+const toastErrorMock = vi.fn()
+const getProjectDefaultWorkflowProfileMock = vi.fn()
+const setProjectDefaultWorkflowProfileMock = vi.fn()
+const clearProjectDefaultWorkflowProfileMock = vi.fn()
+const getWorkflowProfilesMock = vi.fn()
+const invalidateQueriesMock = vi.fn()
 
-vi.mock('@tanstack/react-query', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: (...args: unknown[]) => useQueryMock(...args),
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+  return {
+    ...actual,
+    useQuery: (...args: unknown[]) => useQueryMock(...args),
+    useMutation: (...args: unknown[]) => useMutationMock(...args),
+    useQueryClient: () => useQueryClientMock(),
+  }
+})
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccessMock(...args),
+    error: (...args: unknown[]) => toastErrorMock(...args),
+  },
 }))
 
 vi.mock('../../project/@x/project-context', () => ({
   useProject: () => useProjectMock(),
 }))
 
+vi.mock('./client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./client')>()
+  return {
+    ...actual,
+    getProjectDefaultWorkflowProfile: (...args: unknown[]) => getProjectDefaultWorkflowProfileMock(...args),
+    setProjectDefaultWorkflowProfile: (...args: unknown[]) => setProjectDefaultWorkflowProfileMock(...args),
+    clearProjectDefaultWorkflowProfile: (...args: unknown[]) => clearProjectDefaultWorkflowProfileMock(...args),
+    getWorkflowProfiles: (...args: unknown[]) => getWorkflowProfilesMock(...args),
+  }
+})
+
 beforeEach(() => {
   useQueryMock.mockReset()
+  useMutationMock.mockReset()
+  useQueryClientMock.mockReset()
   useProjectMock.mockReset()
+  toastSuccessMock.mockReset()
+  toastErrorMock.mockReset()
+  getProjectDefaultWorkflowProfileMock.mockReset()
+  setProjectDefaultWorkflowProfileMock.mockReset()
+  clearProjectDefaultWorkflowProfileMock.mockReset()
+  getWorkflowProfilesMock.mockReset()
+  invalidateQueriesMock.mockReset()
   useProjectMock.mockReturnValue({ projectId: 'proj-1' })
+  useQueryClientMock.mockReturnValue({ invalidateQueries: invalidateQueriesMock })
   useQueryMock.mockReturnValue({ data: undefined, isLoading: false })
+  useMutationMock.mockReturnValue({ mutate: vi.fn() })
+  getProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: null })
+  setProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: 'mohist/github-pr' })
+  clearProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: null })
+  getWorkflowProfilesMock.mockResolvedValue([])
 })
 
 describe('useModelVariants', () => {
@@ -70,5 +123,151 @@ describe('useModelVariants', () => {
     const config = useQueryMock.mock.calls[0][0]
     expect(config.queryKey).toEqual(['opencode-model-ids', 'proj-1'])
     expect(config.enabled).toBe(true)
+  })
+})
+
+describe('useProjectDefaultWorkflowProfile', () => {
+  it('uses a project-scoped query key', () => {
+    useProjectDefaultWorkflowProfile()
+
+    expect(useQueryMock).toHaveBeenCalledTimes(1)
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.queryKey).toEqual(['project-workflow-profile', 'proj-1'])
+  })
+
+  it('is disabled when projectId is missing', () => {
+    useProjectMock.mockReturnValue({ projectId: null })
+
+    useProjectDefaultWorkflowProfile()
+
+    const config = useQueryMock.mock.calls[0][0]
+    expect(config.enabled).toBe(false)
+  })
+
+  it('invokes getProjectDefaultWorkflowProfile(projectId) as the query function', async () => {
+    getProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: 'mohist/github-pr' })
+
+    useProjectDefaultWorkflowProfile()
+
+    const config = useQueryMock.mock.calls[0][0]
+    await config.queryFn()
+    expect(getProjectDefaultWorkflowProfileMock).toHaveBeenCalledWith('proj-1')
+  })
+})
+
+describe('useSetProjectDefaultWorkflowProfile', () => {
+  it('passes the input through to setProjectDefaultWorkflowProfile for the active project', () => {
+    useSetProjectDefaultWorkflowProfile()
+
+    const config = useMutationMock.mock.calls[0][0]
+    config.mutationFn({ templateId: 'mohist/github-pr' })
+
+    expect(setProjectDefaultWorkflowProfileMock).toHaveBeenCalledWith('proj-1', 'mohist/github-pr')
+  })
+
+  it('invalidates the project workflow-profile query on success', () => {
+    useSetProjectDefaultWorkflowProfile()
+
+    const config = useMutationMock.mock.calls[0][0]
+    config.onSuccess()
+
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['project-workflow-profile', 'proj-1'] })
+    expect(toastSuccessMock).toHaveBeenCalled()
+  })
+
+  it('shows an error toast on failure', () => {
+    useSetProjectDefaultWorkflowProfile()
+
+    const config = useMutationMock.mock.calls[0][0]
+    config.onError(new Error('boom'))
+
+    expect(toastErrorMock).toHaveBeenCalledWith('boom')
+  })
+})
+
+describe('useClearProjectDefaultWorkflowProfile', () => {
+  it('calls clearProjectDefaultWorkflowProfile for the active project', () => {
+    useClearProjectDefaultWorkflowProfile()
+
+    const config = useMutationMock.mock.calls[0][0]
+    config.mutationFn()
+
+    expect(clearProjectDefaultWorkflowProfileMock).toHaveBeenCalledWith('proj-1')
+  })
+
+  it('invalidates the project workflow-profile query on success', () => {
+    useClearProjectDefaultWorkflowProfile()
+
+    const config = useMutationMock.mock.calls[0][0]
+    config.onSuccess()
+
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({ queryKey: ['project-workflow-profile', 'proj-1'] })
+    expect(toastSuccessMock).toHaveBeenCalled()
+  })
+
+  it('shows an error toast on failure', () => {
+    useClearProjectDefaultWorkflowProfile()
+
+    const config = useMutationMock.mock.calls[0][0]
+    config.onError(new Error('boom'))
+
+    expect(toastErrorMock).toHaveBeenCalledWith('boom')
+  })
+})
+
+describe('useEffectiveDefaultWorkflowProfile', () => {
+  function mockQueryData(projectDefault: string | null, profiles: Array<{ id: string; isDefault: boolean }>) {
+    useQueryMock.mockImplementation((config) => {
+      if (config.queryKey[0] === 'project-workflow-profile') {
+        return { data: { projectId: 'proj-1', defaultTemplateId: projectDefault } }
+      }
+      if (config.queryKey[0] === 'workflow-templates') {
+        return {
+          data: profiles.map((p) => ({
+            id: p.id,
+            displayName: p.id,
+            description: '',
+            isDefault: p.isDefault,
+          })),
+        }
+      }
+      return { data: undefined }
+    })
+  }
+
+  it('returns project source when defaultTemplateId is set', () => {
+    mockQueryData('mohist/github-pr', [{ id: 'mohist/default', isDefault: true }])
+
+    const result = useEffectiveDefaultWorkflowProfile()
+
+    expect(result).toEqual({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'project',
+      configuredTemplateId: 'mohist/github-pr',
+    })
+  })
+
+  it('returns system source when defaultTemplateId is unset and an isDefault profile exists', () => {
+    mockQueryData(null, [{ id: 'mohist/default', isDefault: true }])
+
+    const result = useEffectiveDefaultWorkflowProfile()
+
+    expect(result).toEqual({
+      effectiveTemplateId: 'mohist/default',
+      source: 'system',
+      configuredTemplateId: null,
+    })
+  })
+
+  it('returns none source with the fallback id when no project or system default exists', () => {
+    mockQueryData(null, [{ id: 'mohist/github-pr', isDefault: false }])
+
+    const result = useEffectiveDefaultWorkflowProfile()
+
+    expect(result).toEqual({
+      effectiveTemplateId: 'mohist/default',
+      source: 'none',
+      configuredTemplateId: null,
+    })
   })
 })

@@ -69,6 +69,9 @@ const handlers = [
   http.get('/api/workflow-templates/system', () =>
     HttpResponse.json({ success: true, data: SYSTEM_TEMPLATES }),
   ),
+  http.get('/api/projects/test-project/workflow-profile', () =>
+    HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultTemplateId: null } }),
+  ),
   http.get('/api/workflow-templates/system/mohist/default', () =>
     HttpResponse.json({ success: true, data: DEFAULT_DETAIL }),
   ),
@@ -145,8 +148,8 @@ describe('WorkflowProfilesSection', () => {
       expect(quickFixDescription.className).toContain('whitespace-pre-line')
       expect(quickFixDescription.textContent).toContain('Lightweight workflow for small, low-risk, fast-turnaround changes.')
 
-      expect(within(defaultCard).getByText('Default')).toBeInTheDocument()
-      expect(within(quickFixCard).queryByText('Default')).not.toBeInTheDocument()
+      expect(within(defaultCard).getByText('System default')).toBeInTheDocument()
+      expect(within(quickFixCard).queryByText('System default')).not.toBeInTheDocument()
 
       expect(within(defaultCard).getByText('mohist/default')).toBeInTheDocument()
       expect(within(quickFixCard).getByText('mohist/quick-fix')).toBeInTheDocument()
