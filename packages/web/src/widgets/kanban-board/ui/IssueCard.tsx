@@ -29,7 +29,7 @@ const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
   [WorkflowStage.Done]: 'Done',
 }
 
-const SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID = 'mohist/default'
+const SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID = 'mohist/local'
 
 function getStatusIndicator(issue: Issue, isAgentRunning: boolean): StatusIndicator {
   if (issue.health === IssueHealth.Blocked) return 'blocked'

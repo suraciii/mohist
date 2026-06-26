@@ -107,10 +107,10 @@ public class IssueApiSpecs
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", isDefault = true });
 
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/default" });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/local" });
         var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
-        Assert.Equal("mohist/default", detail.WorkflowProfileId);
+        Assert.Equal("mohist/local", detail.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -120,8 +120,8 @@ public class IssueApiSpecs
     {
         var profiles = await _client.GetDataAsync<WorkflowProfileDto[]>("/api/workflow-templates/system");
 
-        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/default");
-        Assert.Equal("Mohist Default", defaultProfile.Name);
+        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/local");
+        Assert.Equal("Mohist Local", defaultProfile.Name);
         Assert.Contains("Mohist pipeline", defaultProfile.Description);
 
         var prProfile = Assert.Single(profiles, p => p.Id == "mohist/github-pr");
@@ -138,8 +138,8 @@ public class IssueApiSpecs
 
         Assert.Equal(2, profiles.Length);
 
-        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/default");
-        Assert.Equal("Mohist Default", defaultProfile.DisplayName);
+        var defaultProfile = Assert.Single(profiles, p => p.Id == "mohist/local");
+        Assert.Equal("Mohist Local", defaultProfile.DisplayName);
         Assert.Contains("Mohist pipeline", defaultProfile.Description);
         Assert.NotNull(defaultProfile.SuitableFor);
         Assert.NotEmpty(defaultProfile.SuitableFor);

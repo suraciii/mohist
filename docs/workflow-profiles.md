@@ -1,10 +1,10 @@
 # Workflow Profile
 
-Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带 `mohist/default` 和 `mohist/github-pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
+Workflow Profile 定义"Issue 怎么从 Draft 走到 Done"。当前 Mohist 自带 `mohist/local` 和 `mohist/github-pr`。只有当 profile 的描述和实际执行定义一致时，系统才会把它暴露给用户选择。
 
 ## 默认 Profile
 
-文件位置：`packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`
+文件位置：`packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml`
 
 结构（简化）：
 
@@ -271,7 +271,7 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 ### 通过文件（开发场景）
 
-直接改 `mohist-default.workflow.yaml`，重启 server 生效。
+直接改 `mohist-local.workflow.yaml`，重启 server 生效。
 
 ## 常见定制场景
 
@@ -318,7 +318,7 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 当前版本不支持通过 UI 创建新 profile（roadmap）。临时方案：
 
-1. 复制 `mohist-default.workflow.yaml` 为 `<your-name>.workflow.yaml`
+1. 复制 `mohist-local.workflow.yaml` 为 `<your-name>.workflow.yaml`
 2. 放在 WorkflowProfiles 目录下
 3. 修改内容
 4. 重启 server
@@ -327,7 +327,7 @@ Settings → Workflows → 选 profile → 编辑 yaml。
 
 ## Profile ID 约定
 
-- `mohist/default` → 官方默认
+- `mohist/local` → 官方默认
 - `mohist/<name>` → 官方提供的其他 profile；只有实现了独立执行定义后才会暴露
 - `<your-org>/<name>` → 你自定义的
 
@@ -366,4 +366,4 @@ mo issue show ${{ issue.number }} --project-id ${{ project.id }}
 
 ---
 
-对应源码：`Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml`、`Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml`、[`design/workflow/profile.md`](../design/workflow/profile.md)、[`design/workflow/builtin-workflows/github-pr.md`](../design/workflow/builtin-workflows/github-pr.md)。
+对应源码：`Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml`、`Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml`、[`design/workflow/profile.md`](../design/workflow/profile.md)、[`design/workflow/builtin-workflows/github-pr.md`](../design/workflow/builtin-workflows/github-pr.md)。

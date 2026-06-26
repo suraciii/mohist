@@ -303,7 +303,7 @@ public class IssueCliBodyInputSpecs
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["issue", "create", "Title", "--body-file", "body.md", "--workflow-profile", "mohist/default", "--project", "mohist-local"],
+            ["issue", "create", "Title", "--body-file", "body.md", "--workflow-profile", "mohist/local", "--project", "mohist-local"],
             output,
             error,
             files,
@@ -311,7 +311,7 @@ public class IssueCliBodyInputSpecs
 
         Assert.Equal(0, exitCode);
         var body = http.ReadCapturedBody(http.Requests.Single());
-        Assert.Equal("mohist/default", body?["workflowProfileId"]?.GetValue<string>());
+        Assert.Equal("mohist/local", body?["workflowProfileId"]?.GetValue<string>());
         Assert.Equal("low", body?["risk"]?.GetValue<string>());
         Assert.Contains("overrides frontmatter recommended_workflow", error.ToString());
     }

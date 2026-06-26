@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest"
 
 const workflowPath = resolve(
   process.cwd(),
-  "../server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml",
+  "../server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-local.workflow.yaml",
 )
 
-describe("mohist default workflow profile", () => {
+describe("mohist local workflow profile", () => {
   it("IntegrateStage_UsesRebaseSquashThenPushWithoutPreparePublish", async () => {
     const yaml = await readFile(workflowPath, "utf8")
     const integrate = yaml.slice(yaml.indexOf("  - stage: integrate"))

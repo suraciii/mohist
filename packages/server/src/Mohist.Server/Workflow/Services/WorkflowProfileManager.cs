@@ -22,7 +22,7 @@ namespace Mohist.Server.Workflow.Services;
 ///   1. Issue custom YAML (issue_workflow_profile.Template)
 ///   2. Issue referenced template (issue_workflow_profile.SourceTemplateId)
 ///   3. Issue's effective workflow profile (issue.WorkflowProfileId →
-///      project default template → mohist/default), resolved through the centralized
+///      project default template → mohist/local), resolved through the centralized
 ///      <see cref="EffectiveWorkflowProfileResolver"/> so the running
 ///      workflow agrees with the profile id projected by every read surface.
 /// </summary>
@@ -103,8 +103,8 @@ public class WorkflowProfileManager : IScopedService
         }
 
         return ResolvedTemplate.FromDefinition(
-            $"system-template:{IssueWorkflowProfiles.DefaultId}",
-            ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId));
+            $"system-template:{IssueWorkflowProfiles.LocalId}",
+            ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.LocalId));
     }
 
     // =======================================================================

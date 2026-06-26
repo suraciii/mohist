@@ -7,10 +7,10 @@ style: ["短索引，只说明入口。"]
 
 Mohist 内置 workflow：
 
-- [`mohist/default`](default.md) — 本地 squash 后直推 base branch。
+- [`mohist/local`](local.md) — 本地 squash 后直推 base branch。
 - [`mohist/github-pr`](github-pr.md) — 通过 GitHub draft PR -> ready PR -> squash merge 交付。
 
-`mohist/default` 是默认 workflow。选择 `mohist/github-pr`：
+`mohist/local` 是默认 workflow。选择 `mohist/github-pr`：
 
 ```bash
 mo issue create "..." --workflow-profile mohist/github-pr

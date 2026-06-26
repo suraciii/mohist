@@ -79,7 +79,7 @@ const DELIVERY_FAILURE_GUIDANCE: Record<DeliveryFailureKind, DeliveryFailureGuid
   'protection-conflict': {
     failureKind: 'protection-conflict',
     label: 'Branch protection blocked the merge',
-    nextAction: 'GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository\'s branch-protection rules (or switch this issue to the `mohist/default` workflow) and re-run. The workflow will not auto-retry this kind.',
+    nextAction: 'GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository\'s branch-protection rules (or switch this issue to the `mohist/local` workflow) and re-run. The workflow will not auto-retry this kind.',
     retryable: false,
   },
   'pr-state-conflict': {

@@ -153,12 +153,12 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         // selection; the override is surfaced via updateMode/hasCustomTemplate
         // and (after issue-workflow-profile consistency) the same profileId
         // every other read surface reports.
-        Assert.Equal("mohist/default", savedData.GetProperty("profileId").GetString());
+        Assert.Equal("mohist/local", savedData.GetProperty("profileId").GetString());
 
         var projectProfilesResponse = await _client.GetAsync("/api/workflow-templates/system");
         var projectProfilesJson = await projectProfilesResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectProfilesData = projectProfilesJson.GetProperty("data");
-        Assert.Contains(projectProfilesData.EnumerateArray(), p => p.GetProperty("id").GetString() == "mohist/default");
+        Assert.Contains(projectProfilesData.EnumerateArray(), p => p.GetProperty("id").GetString() == "mohist/local");
 
         var getResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var reloaded = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -448,7 +448,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
-        var defaultTemplate = Assert.Single(data.EnumerateArray(), t => t.GetProperty("id").GetString() == "mohist/default");
+        var defaultTemplate = Assert.Single(data.EnumerateArray(), t => t.GetProperty("id").GetString() == "mohist/local");
 
         Assert.True(defaultTemplate.GetProperty("isDefault").GetBoolean());
         var description = defaultTemplate.GetProperty("description").GetString();
@@ -460,14 +460,14 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
     public async Task GetSystemTemplateDetail_ReturnsDescriptionFromYaml()
     {
-        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/default");
+        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/local");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
 
         Assert.True(data.GetProperty("isDefault").GetBoolean());
-        Assert.Equal("Mohist Default", data.GetProperty("displayName").GetString());
+        Assert.Equal("Mohist Local", data.GetProperty("displayName").GetString());
         Assert.Equal(MohistWorkflow.Definition.Description, data.GetProperty("description").GetString());
     }
 
@@ -485,7 +485,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     [Fact(Skip = "Integration test host cannot boot due to pre-existing pending EF migration unrelated to this change.")]
     public async Task GetSystemTemplateDetail_EmittedYamlRoundTripsBackToSameDescription()
     {
-        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/default");
+        using var response = await _client.GetAsync("/api/workflow-templates/system/mohist/local");
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
 

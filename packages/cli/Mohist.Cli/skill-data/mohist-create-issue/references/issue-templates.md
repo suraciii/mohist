@@ -6,7 +6,7 @@ Use this template when creating a Mohist issue. The file is the only contract be
 
 | Field | Required | Values |
 |---|---|---|
-| `recommended_workflow` | yes | A profile id returned by `mo workflow list --described`, or `mohist/default` when nothing matches. |
+| `recommended_workflow` | yes | A profile id returned by `mo workflow list --described`, or `mohist/local` when nothing matches. |
 | `recommended_workflow_reason` | yes | One sentence that names the matched `suitable_for` tag(s) or explains the fallback. Use the YAML `\|` block scalar for multi-line reasons. |
 | `risk` | yes | One of `low`, `medium`, `high`. Driver must be documented in `## Product Shape` or `## Acceptance Criteria`. |
 
@@ -14,10 +14,10 @@ Use this template when creating a Mohist issue. The file is the only contract be
 
 ```markdown
 ---
-recommended_workflow: mohist/default
+recommended_workflow: mohist/local
 recommended_workflow_reason: |
   No specific workflow matched the issue content; falling back to
-  mohist/default.
+  mohist/local.
 risk: medium
 ---
 
@@ -59,8 +59,8 @@ A UI affordance problem: the create-issue dialog offers no risk selector.
 
 ```markdown
 ---
-recommended_workflow: mohist/default
-recommended_workflow_reason: Content covers a UI affordance and a feature addition; mohist/default covers UI work.
+recommended_workflow: mohist/local
+recommended_workflow_reason: Content covers a UI affordance and a feature addition; mohist/local covers UI work.
 risk: low
 ---
 
@@ -106,7 +106,7 @@ in the Web UI binding. No data-model change needed.
 - [ ] Frontmatter block is the first thing in the file, delimited by `---`.
 - [ ] All three required fields are present and non-empty.
 - [ ] `risk` is exactly one of `low`, `medium`, `high`.
-- [ ] `recommended_workflow` is a real id (or `mohist/default`).
+- [ ] `recommended_workflow` is a real id (or `mohist/local`).
 - [ ] Sections appear in order: User Voice, Product Shape, [Domain Model], Acceptance Criteria, Non-Goals. Domain Model is optional.
 - [ ] The body contains no source paths, file names, line numbers, or symbol names.
 - [ ] User has confirmed the workflow, risk, and a body summary before running `mo issue create --body-file`.

@@ -32,7 +32,7 @@ export function ProjectDefaultWorkflowControl() {
   }
 
   const configuredTemplateId = projectProfile?.defaultTemplateId ?? null
-  const systemDefaultId = profiles?.find((p) => p.isDefault)?.id ?? 'mohist/default'
+  const systemDefaultId = profiles?.find((p) => p.isDefault)?.id ?? 'mohist/local'
   const isConfiguredInCatalog = configuredTemplateId
     ? profiles?.some((p) => p.id === configuredTemplateId) ?? true
     : true

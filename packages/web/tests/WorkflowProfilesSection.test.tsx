@@ -15,8 +15,8 @@ import { setupServer } from 'msw/node'
 
 const SYSTEM_TEMPLATES = [
   {
-    id: 'mohist/default',
-    name: 'Mohist Default',
+    id: 'mohist/local',
+    name: 'Mohist Local',
     description:
       'Full Mohist pipeline for shipping user-visible changes end-to-end.\nStages: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (spec sync, archive, merge).\nRequires human approval at the plan and check stages, with the workflow merging the working branch into the project base branch on completion.\nTypical duration: 20-60 minutes for a focused change.\nBest suited for: new features, user-visible behavior changes, changes that need a design document or spec delta.\nNot suited for: simple bug fixes (use quick-fix), exploration or throwaway prototypes (use experiment), or pure refactors with no behavior change.',
     isDefault: true,
@@ -25,7 +25,7 @@ const SYSTEM_TEMPLATES = [
     id: 'mohist/quick-fix',
     name: 'Mohist Quick Fix',
     description:
-      'Lightweight workflow for small, low-risk, fast-turnaround changes.\nSuited for: simple bug fixes, single-file or few-line corrections, trivial test updates, and obvious defects with a known fix.\nGoal is a fast, low-friction path: minimal planning artifacts, no design document, no spec delta, and lighter review.\nTypical duration: 5-15 minutes for a focused fix.\nNot suited for: new user-visible features (use mohist/default), exploration or throwaway prototypes (use experiment), or changes that need a design/spec delta (use mohist/default).',
+      'Lightweight workflow for small, low-risk, fast-turnaround changes.\nSuited for: simple bug fixes, single-file or few-line corrections, trivial test updates, and obvious defects with a known fix.\nGoal is a fast, low-friction path: minimal planning artifacts, no design document, no spec delta, and lighter review.\nTypical duration: 5-15 minutes for a focused fix.\nNot suited for: new user-visible features (use mohist/local), exploration or throwaway prototypes (use experiment), or changes that need a design/spec delta (use mohist/local).',
     isDefault: false,
   },
   {
@@ -37,8 +37,8 @@ const SYSTEM_TEMPLATES = [
 ]
 
 const DEFAULT_DETAIL = {
-  id: 'mohist/default',
-  name: 'Mohist Default',
+  id: 'mohist/local',
+  name: 'Mohist Local',
   description: SYSTEM_TEMPLATES[0].description,
   isDefault: true,
   yaml: 'description: |\n  Full Mohist pipeline for shipping user-visible changes end-to-end.\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
@@ -72,7 +72,7 @@ const handlers = [
   http.get('/api/projects/test-project/workflow-profile', () =>
     HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultTemplateId: null } }),
   ),
-  http.get('/api/workflow-templates/system/mohist/default', () =>
+  http.get('/api/workflow-templates/system/mohist/local', () =>
     HttpResponse.json({ success: true, data: DEFAULT_DETAIL }),
   ),
   http.get('/api/workflow-templates/system/mohist/quick-fix', () =>
@@ -133,9 +133,9 @@ describe('WorkflowProfilesSection', () => {
         )
       }
 
-      const defaultCard = screen.getByTestId('workflow-profile-mohist/default')
+      const defaultCard = screen.getByTestId('workflow-profile-mohist/local')
       const defaultDescription = within(defaultCard).getByTestId(
-        'workflow-profile-mohist/default-description',
+        'workflow-profile-mohist/local-description',
       )
       expect(defaultDescription.className).toContain('whitespace-pre-line')
       expect(defaultDescription.textContent).toContain('Full Mohist pipeline for shipping user-visible changes end-to-end.')
@@ -151,7 +151,7 @@ describe('WorkflowProfilesSection', () => {
       expect(within(defaultCard).getByText('System default')).toBeInTheDocument()
       expect(within(quickFixCard).queryByText('System default')).not.toBeInTheDocument()
 
-      expect(within(defaultCard).getByText('mohist/default')).toBeInTheDocument()
+      expect(within(defaultCard).getByText('mohist/local')).toBeInTheDocument()
       expect(within(quickFixCard).getByText('mohist/quick-fix')).toBeInTheDocument()
 
       for (const profile of SYSTEM_TEMPLATES) {
@@ -178,12 +178,12 @@ describe('WorkflowProfilesSection', () => {
     })
 
     it('keeps Read more as an independent keyboard action without opening detail', async () => {
-      overflowByTestId.set('workflow-profile-mohist/default-description', true)
+      overflowByTestId.set('workflow-profile-mohist/local-description', true)
 
       render(<WorkflowProfilesSection />)
 
       const defaultDescription = await waitFor(() =>
-        screen.getByTestId('workflow-profile-mohist/default-description'),
+        screen.getByTestId('workflow-profile-mohist/local-description'),
       )
       const readMore = screen.getByRole('button', { name: 'Read more' })
 
@@ -193,18 +193,18 @@ describe('WorkflowProfilesSection', () => {
 
       expect(defaultDescription.className).not.toContain('line-clamp-2')
       expect(screen.queryByTestId('workflow-profile-description')).not.toBeInTheDocument()
-      expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument()
+      expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument()
     })
 
     it('shows Read more only for overflowing descriptions and expands the text', async () => {
-      overflowByTestId.set('workflow-profile-mohist/default-description', true)
+      overflowByTestId.set('workflow-profile-mohist/local-description', true)
       overflowByTestId.set('workflow-profile-mohist/quick-fix-description', false)
       overflowByTestId.set('workflow-profile-mohist/experiment-description', false)
 
       render(<WorkflowProfilesSection />)
 
       const defaultDescription = await waitFor(() =>
-        screen.getByTestId('workflow-profile-mohist/default-description'),
+        screen.getByTestId('workflow-profile-mohist/local-description'),
       )
 
       expect(screen.getByText('Read more')).toBeInTheDocument()
@@ -223,11 +223,11 @@ describe('WorkflowProfilesSection', () => {
       render(<WorkflowProfilesSection />)
 
       await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
+        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
       )
 
       fireEvent.click(
-        within(screen.getByTestId('workflow-profile-mohist/default')).getByRole('button', {
+        within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', {
           name: 'View details',
         }),
       )
@@ -251,10 +251,10 @@ describe('WorkflowProfilesSection', () => {
       render(<WorkflowProfilesSection />, { container })
 
       await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
+        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
       )
       fireEvent.click(
-        within(screen.getByTestId('workflow-profile-mohist/default')).getByRole('button', {
+        within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', {
           name: 'View details',
         }),
       )
@@ -276,10 +276,10 @@ describe('WorkflowProfilesSection', () => {
       render(<WorkflowProfilesSection />)
 
       await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
+        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
       )
       fireEvent.click(
-        within(screen.getByTestId('workflow-profile-mohist/default')).getByRole('button', {
+        within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', {
           name: 'View details',
         }),
       )
@@ -290,7 +290,7 @@ describe('WorkflowProfilesSection', () => {
       fireEvent.click(backButton)
 
       await waitFor(() =>
-        expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),
+        expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument(),
       )
     })
   })

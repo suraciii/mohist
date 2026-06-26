@@ -98,20 +98,20 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Registry_GetById_ResolvesMohistDefault()
+    public void Registry_GetById_ResolvesMohistLocal()
     {
         var registry = BuildRegistry();
 
-        var profile = registry.Get("mohist/default");
+        var profile = registry.Get("mohist/local");
 
-        Assert.Equal("mohist/default", profile.Id);
+        Assert.Equal("mohist/local", profile.Id);
         Assert.True(profile.IsDefault);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Registry_GetByNullOrEmpty_ResolvesMohistDefault()
+    public void Registry_GetByNullOrEmpty_ResolvesMohistLocal()
     {
         var registry = BuildRegistry();
 
@@ -119,9 +119,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var byEmpty = registry.Get(string.Empty);
         var byWhitespace = registry.Get("   ");
 
-        Assert.Equal("mohist/default", byNull.Id);
-        Assert.Equal("mohist/default", byEmpty.Id);
-        Assert.Equal("mohist/default", byWhitespace.Id);
+        Assert.Equal("mohist/local", byNull.Id);
+        Assert.Equal("mohist/local", byEmpty.Id);
+        Assert.Equal("mohist/local", byWhitespace.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -132,7 +132,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var registry = BuildRegistry();
 
         Assert.True(registry.Exists("mohist/github-pr"));
-        Assert.True(registry.Exists("mohist/default"));
+        Assert.True(registry.Exists("mohist/local"));
         Assert.False(registry.Exists("mohist/pr"));
         Assert.False(registry.Exists("mohist/unknown"));
     }
@@ -147,7 +147,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var list = registry.List();
 
         Assert.Equal(2, list.Count);
-        var defaultEntry = Assert.Single(list, info => info.Id == "mohist/default");
+        var defaultEntry = Assert.Single(list, info => info.Id == "mohist/local");
         var prEntry = Assert.Single(list, info => info.Id == "mohist/github-pr");
 
         Assert.True(defaultEntry.IsDefault);
@@ -167,7 +167,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var described = registry.ListDescribed();
 
         Assert.Equal(2, described.Count);
-        var defaultEntry = Assert.Single(described, d => d.Id == "mohist/default");
+        var defaultEntry = Assert.Single(described, d => d.Id == "mohist/local");
         var prEntry = Assert.Single(described, d => d.Id == "mohist/github-pr");
 
         Assert.NotEmpty(defaultEntry.SuitableFor);
@@ -177,13 +177,13 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Registry_Default_StillResolvesToMohistDefault()
+    public void Registry_Default_StillResolvesToMohistLocal()
     {
         var registry = BuildRegistry();
 
         var defaultInfo = registry.Default;
 
-        Assert.Equal("mohist/default", defaultInfo.Id);
+        Assert.Equal("mohist/local", defaultInfo.Id);
         Assert.True(defaultInfo.IsDefault);
     }
 

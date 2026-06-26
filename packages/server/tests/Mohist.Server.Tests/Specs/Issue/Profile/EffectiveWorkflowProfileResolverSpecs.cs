@@ -30,7 +30,7 @@ public class EffectiveWorkflowProfileResolverSpecs
             projectDefaultId: null,
             exists: _ => true);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, resolved);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -43,7 +43,7 @@ public class EffectiveWorkflowProfileResolverSpecs
             projectDefaultId: null,
             exists: _ => true);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, resolved);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -53,7 +53,7 @@ public class EffectiveWorkflowProfileResolverSpecs
     {
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
             issueSelection: "mohist/github-pr",
-            projectDefaultId: "mohist/default",
+            projectDefaultId: "mohist/local",
             exists: _ => true);
 
         Assert.Equal("mohist/github-pr", resolved);
@@ -80,7 +80,7 @@ public class EffectiveWorkflowProfileResolverSpecs
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
             issueSelection: "team/custom",
             projectDefaultId: "mohist/github-pr",
-            exists: id => id == "mohist/github-pr" || id == IssueWorkflowProfiles.DefaultId);
+            exists: id => id == "mohist/github-pr" || id == IssueWorkflowProfiles.LocalId);
 
         Assert.Equal("mohist/github-pr", resolved);
     }
@@ -93,9 +93,9 @@ public class EffectiveWorkflowProfileResolverSpecs
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
             issueSelection: "team/custom",
             projectDefaultId: "team/custom-default",
-            exists: id => id == IssueWorkflowProfiles.DefaultId);
+            exists: id => id == IssueWorkflowProfiles.LocalId);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, resolved);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -106,9 +106,9 @@ public class EffectiveWorkflowProfileResolverSpecs
         var resolved = EffectiveWorkflowProfileResolver.ResolveCore(
             issueSelection: null,
             projectDefaultId: "team/custom-default",
-            exists: id => id == IssueWorkflowProfiles.DefaultId);
+            exists: id => id == IssueWorkflowProfiles.LocalId);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, resolved);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
     // ===================== Service (registry-backed) =====================
@@ -116,13 +116,13 @@ public class EffectiveWorkflowProfileResolverSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Resolve_NullSelection_AndNoProjectDefault_ReturnsMohistDefault()
+    public void Resolve_NullSelection_AndNoProjectDefault_ReturnsMohistLocal()
     {
         var resolver = BuildResolver();
 
         var resolved = resolver.Resolve(issueSelection: null, projectDefaultId: null);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, resolved);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -152,13 +152,13 @@ public class EffectiveWorkflowProfileResolverSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void Resolve_ExplicitDefaultSelection_ReturnsMohistDefault()
+    public void Resolve_ExplicitDefaultSelection_ReturnsMohistLocal()
     {
         var resolver = BuildResolver();
 
-        var resolved = resolver.Resolve(issueSelection: "mohist/default", projectDefaultId: "mohist/github-pr");
+        var resolved = resolver.Resolve(issueSelection: "mohist/local", projectDefaultId: "mohist/github-pr");
 
-        Assert.Equal("mohist/default", resolved);
+        Assert.Equal("mohist/local", resolved);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -170,6 +170,6 @@ public class EffectiveWorkflowProfileResolverSpecs
 
         var resolved = resolver.Resolve(issueSelection: "team/missing", projectDefaultId: null);
 
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, resolved);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, resolved);
     }
 }

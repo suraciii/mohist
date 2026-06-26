@@ -50,7 +50,7 @@ const EXPECTED_GUIDANCE: Record<DeliveryFailureKind, { label: string; nextAction
   },
   'protection-conflict': {
     label: 'Branch protection blocked the merge',
-    nextAction: 'GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository\'s branch-protection rules (or switch this issue to the `mohist/default` workflow) and re-run. The workflow will not auto-retry this kind.',
+    nextAction: 'GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository\'s branch-protection rules (or switch this issue to the `mohist/local` workflow) and re-run. The workflow will not auto-retry this kind.',
   },
   'pr-state-conflict': {
     label: 'Pull request state changed externally',

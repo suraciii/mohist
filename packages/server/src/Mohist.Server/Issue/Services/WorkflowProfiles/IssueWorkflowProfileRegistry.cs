@@ -15,7 +15,7 @@ public class IssueWorkflowProfileRegistry : IScopedService
         IPromptLoader promptLoader,
         IDbContextFactory<MohistDbContext> dbFactory)
     {
-        var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, dbFactory);
+        var defaults = new MohistLocalIssueWorkflowProfile(promptLoader, dbFactory);
         var githubPr = new MohistGithubPrIssueWorkflowProfile(promptLoader, dbFactory);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
@@ -26,7 +26,7 @@ public class IssueWorkflowProfileRegistry : IScopedService
 
     public IIssueWorkflowProfile Get(string? id)
     {
-        var profileId = string.IsNullOrWhiteSpace(id) ? IssueWorkflowProfiles.DefaultId : id;
+        var profileId = string.IsNullOrWhiteSpace(id) ? IssueWorkflowProfiles.LocalId : id;
         if (_profiles.TryGetValue(profileId, out var profile)) return profile;
         throw new KeyNotFoundException($"WorkflowProfile '{profileId}' not found");
     }
@@ -43,7 +43,7 @@ public class IssueWorkflowProfileRegistry : IScopedService
         .Select(p => new WorkflowProfileDescription(p.Id, p.DisplayName, p.Description, p.SuitableFor))
         .ToList();
 
-    public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.DefaultId));
+    public WorkflowProfileInfo Default => ToInfo(Get(IssueWorkflowProfiles.LocalId));
 
     public bool Exists(string? id) => !string.IsNullOrWhiteSpace(id) && _profiles.ContainsKey(id);
 

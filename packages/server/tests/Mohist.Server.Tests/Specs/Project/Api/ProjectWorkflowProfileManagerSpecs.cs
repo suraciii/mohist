@@ -41,20 +41,20 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task ListSystemTemplates_ReturnsAtLeastMohistDefault()
+    public async Task ListSystemTemplates_ReturnsAtLeastMohistLocal()
     {
         var list = await _manager.ListSystemTemplatesAsync();
 
         Assert.NotEmpty(list);
-        Assert.Contains(list, t => t.Id == "mohist/default");
+        Assert.Contains(list, t => t.Id == "mohist/local");
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public void GetSystemTemplateDefinition_MohistDefault_HasStages()
+    public void GetSystemTemplateDefinition_MohistLocal_HasStages()
     {
-        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/default");
+        var def = ProjectWorkflowProfileManager.GetSystemTemplateDefinition("mohist/local");
 
         Assert.NotNull(def);
         Assert.NotEmpty(def.Stages);
@@ -180,8 +180,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
     [Fact]
     public async Task SetDefaultTemplate_AcceptsSystemTemplate()
     {
-        var result = await _manager.SetDefaultTemplateAsync("proj-sys", "mohist/default");
-        Assert.Equal("mohist/default", result);
+        var result = await _manager.SetDefaultTemplateAsync("proj-sys", "mohist/local");
+        Assert.Equal("mohist/local", result);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

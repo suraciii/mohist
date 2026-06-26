@@ -143,7 +143,7 @@ public class CliIssueWorkflowProfileSpecs
                         status = "active",
                         priority = "p2",
                         projectName = "demo",
-                        workflowProfileId = "mohist/default",
+                        workflowProfileId = "mohist/local",
                     },
                 });
             }
@@ -155,7 +155,7 @@ public class CliIssueWorkflowProfileSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("profile:  mohist/default", stdout);
+        Assert.Contains("profile:  mohist/local", stdout);
     }
 
     [Fact]
@@ -296,7 +296,7 @@ public class CliIssueWorkflowProfileSpecs
             ["status"] = "active",
             ["priority"] = "p2",
             ["projectName"] = "demo",
-            ["workflowProfileId"] = "mohist/default",
+            ["workflowProfileId"] = "mohist/local",
         };
         var lockObj = new object();
 

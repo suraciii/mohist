@@ -85,11 +85,11 @@ const agentRuntime = {
 }
 
 const workflowProfiles = [
-  { id: 'mohist/default', displayName: 'Default', description: 'Default workflow', isDefault: true },
+  { id: 'mohist/local', displayName: 'Default', description: 'Default workflow', isDefault: true },
 ]
 
 const workflowProfileDetail = {
-  id: 'mohist/default',
+  id: 'mohist/local',
   displayName: 'Default',
   description: 'Default workflow',
   isDefault: true,

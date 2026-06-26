@@ -10,7 +10,7 @@ namespace Mohist.Server.Workflow.Services;
 ///   1. issue_workflow_profile.Template (issue 自定义)
 ///   2. project_templates 中 SourceTemplateId 引用的模板
 ///   3. project_workflow_profile.DefaultTemplateId 引用的项目默认模板
-///   4. mohist/default 系统模板
+///   4. mohist/local 系统模板
 /// </summary>
 public sealed record ResolvedTemplate(
     string? Id,

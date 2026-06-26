@@ -34,7 +34,7 @@ const { useWorkflowProfiles, useEffectiveDefaultWorkflowProfile, useAvailableMod
 const { useRepositories } = await import('../src/entities/project')
 
 const PROFILES = [
-  { id: 'mohist/default', displayName: 'Default', description: 'Default profile', isDefault: true },
+  { id: 'mohist/local', displayName: 'Default', description: 'Default profile', isDefault: true },
   { id: 'feature-flow', displayName: 'Feature Flow', description: 'Feature work', isDefault: false },
 ]
 
@@ -43,7 +43,7 @@ function mockHooks() {
   ;(useLabels as ReturnType<typeof vi.fn>).mockReturnValue({ data: [] })
   ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({ data: PROFILES })
   ;(useEffectiveDefaultWorkflowProfile as ReturnType<typeof vi.fn>).mockReturnValue({
-    effectiveTemplateId: 'mohist/default',
+    effectiveTemplateId: 'mohist/local',
     source: 'system',
     configuredTemplateId: null,
   })
@@ -141,7 +141,7 @@ describe('CreateIssueDialog frontmatter detection', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/default')
+    expect(payload.workflowProfileId).toBe('mohist/local')
   })
 })
 
@@ -175,7 +175,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(workflowSelect.value).toBe('feature-flow')
     })
 
-    fireEvent.change(workflowSelect, { target: { value: 'mohist/default' } })
+    fireEvent.change(workflowSelect, { target: { value: 'mohist/local' } })
 
     fireEvent.click(screen.getByText('Create'))
 
@@ -183,7 +183,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/default')
+    expect(payload.workflowProfileId).toBe('mohist/local')
   })
 
   it('sends the displayed effective workflowProfileId when no frontmatter recommendation is present', async () => {
@@ -197,13 +197,13 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBe('mohist/default')
+    expect(payload.workflowProfileId).toBe('mohist/local')
   })
 
   it('sends the project-configured default workflowProfileId when the selector is not manually changed', async () => {
     ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
-        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
         { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
@@ -231,7 +231,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
   it('sends workflowProfileId=mohist/github-pr when the user explicitly selects it', async () => {
     ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
-        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
         { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
@@ -279,7 +279,7 @@ describe('CreateIssueDialog -> issue detail workflow profile display round-trip'
     ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue(createdIssue)
     ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
-        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/local', displayName: 'Default', description: '', isDefault: true },
         { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })

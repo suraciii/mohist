@@ -12,7 +12,7 @@ interface WorkflowProfileControlProps {
   issue: Issue
 }
 
-const SYSTEM_DEFAULT_ID = 'mohist/default'
+const SYSTEM_DEFAULT_ID = 'mohist/local'
 
 function isStartedIssue(issue: Issue): boolean {
   return issue.status !== IssueStatus.Backlog || !!issue.workflowRunId

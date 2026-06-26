@@ -43,7 +43,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "displayName": "Mohist Default", "description": "Default profile.", "suitableFor": ["feature development"] },
+                { "id": "mohist/local", "displayName": "Mohist Local", "description": "Default profile.", "suitableFor": ["feature development"] },
                 { "id": "team/custom", "displayName": "Team Custom", "description": "Custom profile.", "suitableFor": [] }
               ]
             }
@@ -54,9 +54,9 @@ public class WorkflowCliListSpecs
         var (exitCode, stdout, stderr) = await InvokeWorkflowAsync(http, "workflow", "list", "--described");
 
         Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
-        Assert.Contains("Mohist Default", stdout);
+        Assert.Contains("Mohist Local", stdout);
         Assert.Contains("Team Custom", stdout);
-        Assert.Contains("mohist/default", stdout);
+        Assert.Contains("mohist/local", stdout);
         Assert.Contains("team/custom", stdout);
     }
 
@@ -70,7 +70,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "displayName": "Mohist Default", "description": {{JsonSerializer.Serialize(multiLine)}}, "suitableFor": [] }
+                { "id": "mohist/local", "displayName": "Mohist Local", "description": {{JsonSerializer.Serialize(multiLine)}}, "suitableFor": [] }
               ]
             }
             """;
@@ -94,7 +94,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": "Default profile.", "isDefault": true },
+                { "id": "mohist/local", "name": "Mohist Local", "description": "Default profile.", "isDefault": true },
                 { "id": "team/custom", "name": "Team Custom", "description": "Custom profile.", "isDefault": false }
               ]
             }
@@ -112,8 +112,8 @@ public class WorkflowCliListSpecs
         Assert.Equal(2, parsed!.Count);
 
         var first = parsed[0]!.AsObject();
-        Assert.Equal("mohist/default", first["id"]!.GetValue<string>());
-        Assert.Equal("Mohist Default", first["name"]!.GetValue<string>());
+        Assert.Equal("mohist/local", first["id"]!.GetValue<string>());
+        Assert.Equal("Mohist Local", first["name"]!.GetValue<string>());
         Assert.Equal("Default profile.", first["description"]!.GetValue<string>());
         Assert.True(first["isDefault"]!.GetValue<bool>());
 
@@ -132,7 +132,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": {{JsonSerializer.Serialize(multiLine)}}, "isDefault": true }
+                { "id": "mohist/local", "name": "Mohist Local", "description": {{JsonSerializer.Serialize(multiLine)}}, "isDefault": true }
               ]
             }
             """;
@@ -159,7 +159,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": "Default profile.", "isDefault": false }
+                { "id": "mohist/local", "name": "Mohist Local", "description": "Default profile.", "isDefault": false }
               ]
             }
             """;
@@ -172,7 +172,7 @@ public class WorkflowCliListSpecs
         var parsed = JsonNode.Parse(stdout) as JsonArray;
         Assert.NotNull(parsed);
         var first = parsed![0]!.AsObject();
-        Assert.Equal("mohist/default", first["id"]!.GetValue<string>());
+        Assert.Equal("mohist/local", first["id"]!.GetValue<string>());
         Assert.False(first["isDefault"]!.GetValue<bool>());
     }
 
@@ -187,7 +187,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "name": "Mohist Default", "description": "Default profile.", "isDefault": true }
+                { "id": "mohist/local", "name": "Mohist Local", "description": "Default profile.", "isDefault": true }
               ]
             }
             """;
@@ -283,7 +283,7 @@ public class WorkflowCliListSpecs
             {
               "success": true,
               "data": [
-                { "id": "mohist/default", "displayName": "Mohist Default", "description": "Default.", "suitableFor": [] },
+                { "id": "mohist/local", "displayName": "Mohist Local", "description": "Default.", "suitableFor": [] },
                 { "id": "team/custom", "displayName": "Team Custom", "description": "Custom.", "suitableFor": [] }
               ]
             }
@@ -295,7 +295,7 @@ public class WorkflowCliListSpecs
 
         Assert.True(exitCode == 0, $"exit={exitCode}");
         var text = stdout.Replace("\r\n", "\n");
-        var defaultIndex = text.IndexOf("Mohist Default", StringComparison.Ordinal);
+        var defaultIndex = text.IndexOf("Mohist Local", StringComparison.Ordinal);
         var customIndex = text.IndexOf("Team Custom", StringComparison.Ordinal);
         Assert.True(defaultIndex >= 0);
         Assert.True(customIndex > defaultIndex);

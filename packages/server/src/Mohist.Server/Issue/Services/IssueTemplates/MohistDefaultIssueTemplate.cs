@@ -25,7 +25,7 @@ public class MohistDefaultIssueTemplate : IIssueTemplate
 
     public IssueTemplateDefaults Defaults => new(
         Risk: "medium",
-        Workflow: "mohist/default");
+        Workflow: "mohist/local");
 
     public IReadOnlyList<IssueTemplateSection> Sections { get; } = new[]
     {

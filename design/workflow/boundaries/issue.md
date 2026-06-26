@@ -13,7 +13,7 @@
 - **Workflow 领域模型纯净**：`Workflow/Domain/` 零 Issue 引用。`WorkflowDefinition`（结构类型）+ 引擎都在 Workflow。
 - **workflow profile 留在 Issue/Project 是对的**：profile = template 选择 + variables，本就是各上下文自己的配置数据，不是 Workflow 的领域。
 
-**唯一的真问题**：默认 `WorkflowDefinition` 的**内容**（`MohistWorkflow` + `mohist-default.workflow.yaml`）错放在 `Issue/Services/WorkflowProfiles/`，导致反向依赖。
+**唯一的真问题**：默认 `WorkflowDefinition` 的**内容**（`MohistWorkflow` + `mohist-local.workflow.yaml`）错放在 `Issue/Services/WorkflowProfiles/`，导致反向依赖。
 
 ## 归属判定
 
@@ -35,7 +35,7 @@
 
 本文是目标态。需要收敛的偏差，范围比一开始以为的窄：
 
-- **搬（唯一跨上下文的搬迁）**：`MohistWorkflow.cs` + `mohist-default.workflow.yaml` → **应用配置层**。
+- **搬（唯一跨上下文的搬迁）**：`MohistWorkflow.cs` + `mohist-local.workflow.yaml` → **应用配置层**。
 - **Issue 内部清理（不跨上下文）**：`IIssueWorkflowProfile` 把"profile 配置"和"投影（`ProjectWorkflowState`）"焊在一个接口里，应拆开——两者都留 Issue，只是各管各的。
 - **可选后续**：三个 profile Manager 现都在 `Workflow/Services/`，管理的是 per-context 的 profile 数据。除上述反向引用外它们不碰 Issue 领域；是否挪回各上下文，视后续重构成本而定，非本边界必需。
 

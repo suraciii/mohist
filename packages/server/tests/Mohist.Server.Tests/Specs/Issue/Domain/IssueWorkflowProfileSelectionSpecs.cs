@@ -85,11 +85,11 @@ public class IssueWorkflowProfileSelectionSpecs
 
         issue.ReplaceWorkflowProfile("mohist/github-pr");
         issue.ClearPendingEvents();
-        issue.ReplaceWorkflowProfile("mohist/default");
+        issue.ReplaceWorkflowProfile("mohist/local");
 
         var evt = Assert.Single(issue.PendingEvents);
         var changed = UnwrapChanged(evt);
-        Assert.Equal("mohist/default", changed.WorkflowProfileId);
+        Assert.Equal("mohist/local", changed.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

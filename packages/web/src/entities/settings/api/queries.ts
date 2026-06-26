@@ -351,7 +351,7 @@ export function useEffectiveDefaultWorkflowProfile(): EffectiveDefaultWorkflowPr
   }
 
   return {
-    effectiveTemplateId: 'mohist/default',
+    effectiveTemplateId: 'mohist/local',
     source: 'none',
     configuredTemplateId,
   }

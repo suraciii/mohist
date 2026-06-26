@@ -96,12 +96,12 @@ public class IssueQuerierSpecs
 
         Assert.NotNull(loaded);
         Assert.Equal(issue.Id, loaded.Id);
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, loaded.WorkflowProfileId);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, loaded.WorkflowProfileId);
         Assert.NotNull(identity);
         Assert.Equal(issue.Id, identity.IssueId);
         var item = Assert.Single(listed);
         Assert.Equal(issue.Id, item.Id);
-        Assert.Equal(IssueWorkflowProfiles.DefaultId, item.WorkflowProfileId);
+        Assert.Equal(IssueWorkflowProfiles.LocalId, item.WorkflowProfileId);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]

@@ -111,7 +111,7 @@ function TabPlaceholder() {
               ? 'system-log-level'
               : section === 'preferences'
                 ? 'preferences-theme'
-                : 'workflow-profile-mohist/default'
+                : 'workflow-profile-mohist/local'
   return (
     <div data-testid={`placeholder-section-${section}`}>
       <input data-testid={`placeholder-input-${section}`} id={id} />

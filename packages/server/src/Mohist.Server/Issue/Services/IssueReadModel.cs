@@ -38,7 +38,7 @@ public class IssueReadModel
     public string? WorkflowStatus { get; set; }
     [JsonPropertyName("workflowStageProgress")]
     public WorkflowStageProgress? WorkflowStageProgress { get; set; }
-    public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
+    public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
     public string? WorkflowProfileMode { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];

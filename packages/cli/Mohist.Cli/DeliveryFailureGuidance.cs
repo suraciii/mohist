@@ -38,7 +38,7 @@ internal static class DeliveryFailureGuidance
                 NextAction: "Install the GitHub CLI (`gh`) on the runner host and run `gh auth login` to authenticate with GitHub. Then re-run the issue. The workflow will not auto-retry this kind — environment fixes need a human before the next attempt."),
             [ProtectionConflict] = (
                 Label: "Branch protection blocked the merge",
-                NextAction: "GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository's branch-protection rules (or switch this issue to the `mohist/default` workflow) and re-run. The workflow will not auto-retry this kind."),
+                NextAction: "GitHub rejected the merge because branch protection requires status checks or reviews that this run cannot satisfy. Adjust the repository's branch-protection rules (or switch this issue to the `mohist/local` workflow) and re-run. The workflow will not auto-retry this kind."),
             [PrStateConflict] = (
                 Label: "Pull request state changed externally",
                 NextAction: "The pull request was closed or its state changed outside the runner between workflow steps (for example, by a human via the GitHub UI). Decide whether to re-open the PR or abandon it, then re-run or close the issue. The workflow will not auto-retry this kind."),

@@ -27,7 +27,7 @@ public class WorkflowCliSpecs
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/default", "displayName": "Mohist Default", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts.", "suitableFor": ["feature development", "bug fixes"] } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts.", "suitableFor": ["feature development", "bug fixes"] } ] }
             """);
 
         var output = new StringWriter();
@@ -54,7 +54,7 @@ public class WorkflowCliSpecs
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/default", "displayName": "Mohist Default", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts.", "suitableFor": ["feature development", "bug fixes"] } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "Plan, build, check, and integrate an issue using OpenSpec artifacts.", "suitableFor": ["feature development", "bug fixes"] } ] }
             """);
 
         var output = new StringWriter();
@@ -70,8 +70,8 @@ public class WorkflowCliSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        Assert.Contains("mohist/default", stdout);
-        Assert.Contains("Mohist Default", stdout);
+        Assert.Contains("mohist/local", stdout);
+        Assert.Contains("Mohist Local", stdout);
         Assert.Contains("OpenSpec", stdout);
         Assert.Contains("feature development", stdout);
         Assert.Contains("bug fixes", stdout);
@@ -84,7 +84,7 @@ public class WorkflowCliSpecs
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/default", "displayName": "Mohist Default", "description": "A workflow.", "suitableFor": [] } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "displayName": "Mohist Local", "description": "A workflow.", "suitableFor": [] } ] }
             """);
 
         var output = new StringWriter();
@@ -110,7 +110,7 @@ public class WorkflowCliSpecs
     {
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """
-            { "success": true, "data": [ { "id": "mohist/default", "name": "Mohist Default", "description": "A workflow." } ] }
+            { "success": true, "data": [ { "id": "mohist/local", "name": "Mohist Local", "description": "A workflow." } ] }
             """);
 
         var output = new StringWriter();

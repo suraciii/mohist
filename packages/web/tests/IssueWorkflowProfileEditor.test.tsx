@@ -12,7 +12,7 @@ const customData = (): IssueWorkflowProfileYamlResponse => ({
   issueKey: 'mohist/test-project#1',
   yaml: 'id: baseline\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
   workflowRunId: null,
-  profileId: 'mohist/default',
+  profileId: 'mohist/local',
   updateMode: 'Reference',
   hasCustomTemplate: true,
   templateSource: 'custom',
@@ -188,7 +188,7 @@ describe('IssueWorkflowProfileEditor (reference mode)', () => {
     expect(card).toBeInTheDocument()
 
     expect(within(card).getByText('Profile')).toBeInTheDocument()
-    expect(within(card).getByText('mohist/default')).toBeInTheDocument()
+    expect(within(card).getByText('mohist/local')).toBeInTheDocument()
 
     expect(within(card).getByText('Mode')).toBeInTheDocument()
     expect(within(card).getByText('Inherited')).toBeInTheDocument()

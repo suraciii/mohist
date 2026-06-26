@@ -152,16 +152,16 @@ public class IssueGrain : Grain, IIssueGrain
         // YAML, project template reference) take precedence. Auto-seeding the
         // project default here would shadow an explicit issue-level profile
         // selection (e.g. mohist/github-pr would lose to a freshly auto-seeded
-        // mohist/default), so the resolver's own fallback handles projects
+        // mohist/local), so the resolver's own fallback handles projects
         // without a configured default.
 
         var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id);
-        var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.DefaultId).Definition;
+        var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.LocalId).Definition;
 
         // Resolve the effective profile (issue selection → project default →
         // system default) so prompts are merged from the same profile that
         // drives the workflow definition. Previously this hardcoded the
-        // mohist/default profile, which meant a mohist/github-pr issue would
+        // mohist/local profile, which meant a mohist/github-pr issue would
         // inherit default prompts even though the run used the GitHub PR
         // definition.
         var projectDefaultTemplateId = await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id);
@@ -456,7 +456,7 @@ public class IssueGrain : Grain, IIssueGrain
         // the issue in sync with the workflow's actual state.
         await ReconcileWithWorkflowTerminalStateAsync(wrId, wfStatus);
 
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.LocalId);
         var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
 
         return new IssueWorkflowStatus(

@@ -11,7 +11,7 @@ namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 ///   2. Project default template id (from
 ///      <c>ProjectWorkflowProfile.DefaultTemplateId</c>) when set and present
 ///      in the registry.
-///   3. System default (<see cref="IssueWorkflowProfiles.DefaultId"/>).
+///   3. System default (<see cref="IssueWorkflowProfiles.LocalId"/>).
 ///
 /// Every read surface (issue detail, list, workflow-profile endpoint,
 /// <c>mo issue show</c>) MUST go through this resolver so they cannot diverge.
@@ -46,6 +46,6 @@ public sealed class EffectiveWorkflowProfileResolver : IScopedService
             return issueSelection;
         if (!string.IsNullOrWhiteSpace(projectDefaultId) && exists(projectDefaultId))
             return projectDefaultId;
-        return IssueWorkflowProfiles.DefaultId;
+        return IssueWorkflowProfiles.LocalId;
     }
 }

@@ -181,7 +181,7 @@ LoadTemplate(runId):                          adapter, live
   issue.Template?           → parsed (自定义)
   issue.SourceTemplateId    → project_templates
   project.DefaultTemplateId → project_templates
-  else                      → mohist/default (应用配置层)
+  else                      → mohist/local (应用配置层)
 
 ResolveCurrentTemplateVariables(runId):       adapter, live, fallback selection
   issue custom template vars?
