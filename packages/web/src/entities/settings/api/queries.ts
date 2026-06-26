@@ -3,8 +3,8 @@ import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, RuntimeConsistencyResponse, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 import { isActiveUpdateStatus, isSupersededStatus, isTerminalUpdateStatus } from '../model/updateOutcome'
 import { useProject } from '../../project/@x/project-context'
-import type { OpencodeModelVariants } from './client'
-import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import type { OpencodeModelVariants, ProjectDefaultWorkflowProfile } from './client'
+import { clearProjectDefaultWorkflowProfile, getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getProjectDefaultWorkflowProfile, getRuntimeConsistency, getStageModels, getSystemInfo, getSystemUpdateStatus, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setProjectDefaultWorkflowProfile, setStageModel, startSystemUpdate, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
   return useQuery<GeneralConfig, Error>({
@@ -280,4 +280,79 @@ export function useWorkflowProfile(id: string | null) {
     queryFn: () => getWorkflowProfile(id!),
     enabled: !!id,
   })
+}
+
+export function useProjectDefaultWorkflowProfile() {
+  const { projectId } = useProject()
+  return useQuery<ProjectDefaultWorkflowProfile>({
+    queryKey: ['project-workflow-profile', projectId],
+    queryFn: () => getProjectDefaultWorkflowProfile(projectId),
+    enabled: !!projectId,
+  })
+}
+
+export function useSetProjectDefaultWorkflowProfile() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<{ projectId: string; defaultTemplateId: string }, Error, { templateId: string }>({
+    mutationFn: ({ templateId }) => setProjectDefaultWorkflowProfile(projectId, templateId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
+      toast.success('Project default workflow updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useClearProjectDefaultWorkflowProfile() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<{ projectId: string; defaultTemplateId: null }, Error>({
+    mutationFn: () => clearProjectDefaultWorkflowProfile(projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['project-workflow-profile', projectId] })
+      toast.success('Project default workflow cleared')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export interface EffectiveDefaultWorkflowProfile {
+  effectiveTemplateId: string
+  source: 'project' | 'system' | 'none'
+  configuredTemplateId: string | null
+}
+
+export function useEffectiveDefaultWorkflowProfile(): EffectiveDefaultWorkflowProfile {
+  const { data: projectProfile } = useProjectDefaultWorkflowProfile()
+  const { data: profiles } = useWorkflowProfiles()
+
+  const configuredTemplateId = projectProfile?.defaultTemplateId ?? null
+
+  if (configuredTemplateId) {
+    return {
+      effectiveTemplateId: configuredTemplateId,
+      source: 'project',
+      configuredTemplateId,
+    }
+  }
+
+  const systemDefaultId = profiles?.find((p) => p.isDefault)?.id
+  if (systemDefaultId) {
+    return {
+      effectiveTemplateId: systemDefaultId,
+      source: 'system',
+      configuredTemplateId,
+    }
+  }
+
+  return {
+    effectiveTemplateId: 'mohist/default',
+    source: 'none',
+    configuredTemplateId,
+  }
 }

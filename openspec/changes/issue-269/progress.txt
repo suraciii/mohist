@@ -1,0 +1,18 @@
+## Codebase Patterns
+
+- Project-scoped settings hooks live in `entities/settings` and import `useProject` from `../../project/@x/project-context`.
+- `projectApiPath(projectRef, path)` from `shared/api/client.ts` builds `/projects/{projectRef}{path}` and throws `ApiError(400)` when `projectRef` is falsy.
+- Query-key convention for project-scoped settings: `['<feature>', projectId]` with `enabled: !!projectId`.
+- Mutation hooks invalidate only the relevant query key on success and emit `toast.success/toast.error(err.message || 'Request failed')`.
+- Existing `queries.test.ts` mocks `@tanstack/react-query` and `../../project/@x/project-context`; new tests follow the same pattern and also mock `sonner` and `./client`.
+
+## T-001 Decisions / Gotchas
+
+- Placed workflow-profile default-template client + hooks in `entities/settings` per design Decision 1, alongside `useOpencodeModel`/`useUpdateOpencodeModel`.
+- GET `/workflow-profile` returns `{ projectId, defaultTemplateId, variables }`; client projects down to `{ projectId, defaultTemplateId }` (drops `variables`).
+- `defaultTemplateId` is nullable on the wire; client normalizes missing/undefined to `null`.
+- `useEffectiveDefaultWorkflowProfile` resolves precedence: project-configured → system `isDefault` profile → fallback `'mohist/default'` with source `'none'`.
+- `useSetProjectDefaultWorkflowProfile` / `useClearProjectDefaultWorkflowProfile` invalidate only `['project-workflow-profile', projectId]`; system catalog `['workflow-templates', 'system']` is intentionally not invalidated because project writes do not affect it.
+- All new hooks and the `ProjectDefaultWorkflowProfile` type are re-exported from `entities/settings/index.ts`.
+- Tests cover query keys, enabled state, mutation invalidation, toast calls, and effective-default resolution for `'project'`, `'system'`, and `'none'` sources.
+- Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (161 files, 2338 tests).

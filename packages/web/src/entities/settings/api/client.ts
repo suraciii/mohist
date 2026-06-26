@@ -220,6 +220,39 @@ export function getWorkflowProfile(id: string) {
   return request<WorkflowProfileDetail>(`/workflow-templates/system/${id}`)
 }
 
+export interface ProjectDefaultWorkflowProfile {
+  projectId: string
+  defaultTemplateId: string | null
+}
+
+export function getProjectDefaultWorkflowProfile(projectId?: string | null) {
+  return request<{ projectId: string; defaultTemplateId: string | null; variables?: unknown }>(
+    projectApiPath(projectId, '/workflow-profile'),
+  ).then((response) => ({
+    projectId: response.projectId,
+    defaultTemplateId: response.defaultTemplateId ?? null,
+  }))
+}
+
+export function setProjectDefaultWorkflowProfile(projectId: string | null | undefined, templateId: string) {
+  return request<{ projectId: string; defaultTemplateId: string }>(
+    projectApiPath(projectId, '/workflow-profile/default-template'),
+    {
+      method: 'PUT',
+      body: JSON.stringify({ templateId }),
+    },
+  )
+}
+
+export function clearProjectDefaultWorkflowProfile(projectId: string | null | undefined) {
+  return request<{ projectId: string; defaultTemplateId: null }>(
+    projectApiPath(projectId, '/workflow-profile/default-template'),
+    {
+      method: 'DELETE',
+    },
+  )
+}
+
 export function getSystemInfo() {
   return request<SystemInfo>('/system/info')
 }
