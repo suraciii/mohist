@@ -1,10 +1,11 @@
 import { hostname } from "node:os"
-import type { JsonObject, RenderedWorkItem, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
+import type { CleanupPolicy, JsonObject, RenderedWorkItem, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  private lastCleanupPolicy: CleanupPolicy | null = null
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
@@ -26,7 +27,32 @@ export class ServerConnection {
     const response = await fetch(this.url("poll"), { method: "POST", signal })
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    return toWorkItem((await response.json()) as WorkDispatchResponse)
+    const dispatch = (await response.json()) as WorkDispatchResponse
+    this.lastCleanupPolicy = dispatch.cleanupPolicy ?? null
+    return toWorkItem(dispatch)
+  }
+
+  getLastCleanupPolicy(): CleanupPolicy | null {
+    return this.lastCleanupPolicy
+  }
+
+  async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
+    if (workflowRunIds.length === 0) return {}
+    const response = await fetch(this.url("workflow-runs/status"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflowRunIds }),
+      signal,
+    })
+    if (!response.ok) throw new Error(`workflowRunsStatus failed: ${response.status} ${await response.text()}`)
+    const payload = (await response.json()) as unknown
+    const statuses = readObject(payload, ["statuses"])
+    if (!statuses) return {}
+    const result: Record<string, string> = {}
+    for (const [key, value] of Object.entries(statuses)) {
+      if (typeof value === "string") result[key] = value
+    }
+    return result
   }
 
   async report(work: RenderedWorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {

@@ -7,7 +7,6 @@ import { deleteDirectory, runCommand as defaultRunCommand } from "../system/proc
 import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
-import type { JsonObject, WorkItem } from "../core/types.js"
 import type { ServerConnection } from "./connection.js"
 
 export interface FollowupTarget {

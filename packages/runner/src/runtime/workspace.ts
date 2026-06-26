@@ -110,7 +110,7 @@ export class WorkspaceManager {
     return { path: workspacePath, branch: runBranch, changeDir: changeDir ? join(workspacePath, changeDir) : null }
   }
 
-  async verify(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
+  async verify(work: RenderedWorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}
     const issueNumber = numberAt(variables, ["issue", "number"])
     const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
