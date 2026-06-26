@@ -245,16 +245,14 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("<promise>PASS</promise>", oneOfTexts);
         Assert.Contains("<promise>FAIL</promise>", oneOfTexts);
 
-        Assert.NotNull(selfReview.OnFailure);
-        Assert.Equal(2, selfReview.OnFailure!.Limit);
-        var failureCase = Assert.Single(selfReview.OnFailure.Cases);
-        Assert.Equal("FAIL", failureCase.When["output.promise"]!.Value.GetString());
-        Assert.True(failureCase.RetrySelf);
-
-        var fixPlanReview = Assert.Single(failureCase.Tasks);
-        Assert.Equal("recover:fix-plan-review", fixPlanReview.Id);
-        Assert.Equal("mohist/acp-agent", fixPlanReview.Uses);
-        Assert.Equal("${{ prompts.fix-plan-review }}", ReadStringWith(fixPlanReview, "prompt"));
+        var recovery = GetRecovery(selfReview.With!);
+        Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
+        var handler = Assert.Single(recovery.GetProperty("handlers").EnumerateArray());
+        Assert.True(handler.GetProperty("retrySelf").GetBoolean());
+        var fixPlanReview = Assert.Single(handler.GetProperty("tasks").EnumerateArray());
+        Assert.Equal("recover:fix-plan-review", fixPlanReview.GetProperty("id").GetString());
+        Assert.Equal("mohist/acp-agent", fixPlanReview.GetProperty("uses").GetString());
+        Assert.Equal("${{ prompts.fix-plan-review }}", fixPlanReview.GetProperty("with").GetProperty("prompt").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -321,14 +319,14 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var markers = GetList(expect!, "markers");
         var marker = Assert.Single(markers!.Select(NormalizeToMap));
         Assert.Equal("<promise>FAIL</promise>", marker["failIf"]?.ToString());
-        Assert.NotNull(aiReview.OnFailure);
-        var failureCase = Assert.Single(aiReview.OnFailure!.Cases);
-        Assert.True(failureCase.RetrySelf);
-        Assert.Equal("FAIL", failureCase.When["output.promise"]!.Value.GetString());
-        var fixReviewFindings = Assert.Single(failureCase.Tasks);
-        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
-        Assert.Equal("mohist/acp-agent", fixReviewFindings.Uses);
-        Assert.Equal("${{ prompts.auto-fix }}", ReadStringWith(fixReviewFindings, "prompt"));
+        var recovery = GetRecovery(aiReview.With!);
+        var handler = Assert.Single(recovery.GetProperty("handlers").EnumerateArray());
+        Assert.True(handler.GetProperty("retrySelf").GetBoolean());
+        Assert.Equal("review-failed", handler.GetProperty("when").GetString());
+        var fixReviewFindings = Assert.Single(handler.GetProperty("tasks").EnumerateArray());
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.GetProperty("id").GetString());
+        Assert.Equal("mohist/acp-agent", fixReviewFindings.GetProperty("uses").GetString());
+        Assert.Equal("${{ prompts.auto-fix }}", fixReviewFindings.GetProperty("with").GetProperty("prompt").GetString());
 
         var push = check.Tasks.Single(t => t.Id == "push");
         Assert.Equal("mohist/push", push.Uses);
@@ -397,59 +395,50 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void GithubPrWorkflowDefinition_MergePrOnFailure_DeclaresBaseMovedAndPrChecksFailedCases()
+    public void GithubPrWorkflowDefinition_MergePrRecovery_DeclaresBaseMovedAndPrChecksFailedHandlers()
     {
         var mergePr = MohistWorkflow.GithubPrWorkflowDefinition
             .Stages.Single(s => s.Stage == "integrate")
             .Tasks.Single(t => t.Id == "merge-pr");
 
-        Assert.NotNull(mergePr.OnFailure);
-        Assert.Equal(2, mergePr.OnFailure!.Limit);
-        Assert.Equal(2, mergePr.OnFailure.Cases.Count);
+        var recovery = GetRecovery(mergePr.With!);
+        Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
+        var handlers = recovery.GetProperty("handlers").EnumerateArray().ToList();
+        Assert.Equal(2, handlers.Count);
 
-        var baseMoved = mergePr.OnFailure.Cases.Single(c => c.When["output.errorCode"]!.Value.GetString() == "base-moved");
-        Assert.True(baseMoved.RetrySelf);
-        var baseMovedIds = baseMoved.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "recover:rebase", "recover:push" }, baseMovedIds);
+        var baseMoved = handlers.Single(h => h.GetProperty("when").GetString() == "base-moved");
+        Assert.True(baseMoved.GetProperty("retrySelf").GetBoolean());
+        var baseMovedTasks = baseMoved.GetProperty("tasks").EnumerateArray().ToList();
+        Assert.Equal(new[] { "recover:rebase", "recover:push" }, baseMovedTasks.Select(t => t.GetProperty("id").GetString()).ToArray());
 
-        var recoverRebase = baseMoved.Tasks.Single(t => t.Id == "recover:rebase");
-        Assert.Equal("mohist/rebase", recoverRebase.Uses);
-        Assert.Equal("${{ repository.baseBranch }}", ReadStringWith(recoverRebase, "baseBranch"));
-        Assert.Equal("origin", ReadStringWith(recoverRebase, "remote"));
-        Assert.Equal(false, ReadBoolWith(recoverRebase, "squash"));
-        Assert.Equal("task", ReadStringWith(recoverRebase, "conflictMode"));
+        var recoverRebase = baseMovedTasks.Single(t => t.GetProperty("id").GetString() == "recover:rebase");
+        Assert.Equal("mohist/rebase", recoverRebase.GetProperty("uses").GetString());
+        var rebaseWith = recoverRebase.GetProperty("with");
+        Assert.Equal("${{ repository.baseBranch }}", rebaseWith.GetProperty("baseBranch").GetString());
+        Assert.Equal("origin", rebaseWith.GetProperty("remote").GetString());
+        Assert.False(rebaseWith.GetProperty("squash").GetBoolean());
+        Assert.Equal("task", rebaseWith.GetProperty("conflictMode").GetString());
 
-        Assert.NotNull(recoverRebase.OnFailure);
-        Assert.Equal(1, recoverRebase.OnFailure!.Limit);
-        var nestedConflict = Assert.Single(recoverRebase.OnFailure.Cases);
-        Assert.Equal("conflict", nestedConflict.When["output.failureKind"]!.Value.GetString());
-        Assert.False(nestedConflict.RetrySelf);
+        var recoverPushBaseMoved = baseMovedTasks.Single(t => t.GetProperty("id").GetString() == "recover:push");
+        Assert.Equal("mohist/push", recoverPushBaseMoved.GetProperty("uses").GetString());
+        var pushWith = recoverPushBaseMoved.GetProperty("with");
+        Assert.Equal("${{ workspace.branch }}", pushWith.GetProperty("source").GetString());
+        Assert.Equal("${{ workspace.branch }}", pushWith.GetProperty("target").GetString());
+        Assert.True(pushWith.GetProperty("forceWithLease").GetBoolean());
 
-        var resolveRebaseConflicts = Assert.Single(nestedConflict.Tasks);
-        Assert.Equal("recover:resolve-rebase-conflicts", resolveRebaseConflicts.Id);
-        Assert.Equal("mohist/acp-agent", resolveRebaseConflicts.Uses);
-        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", ReadStringWith(resolveRebaseConflicts, "prompt"));
-        Assert.Equal("integrate", ReadStringWith(resolveRebaseConflicts, "session"));
+        var prChecksFailed = handlers.Single(h => h.GetProperty("when").GetString() == "pr-checks-failed");
+        Assert.True(prChecksFailed.GetProperty("retrySelf").GetBoolean());
+        var prChecksTasks = prChecksFailed.GetProperty("tasks").EnumerateArray().ToList();
+        Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, prChecksTasks.Select(t => t.GetProperty("id").GetString()).ToArray());
 
-        var recoverPushBaseMoved = baseMoved.Tasks.Single(t => t.Id == "recover:push");
-        Assert.Equal("mohist/push", recoverPushBaseMoved.Uses);
-        Assert.Equal("${{ workspace.branch }}", ReadStringWith(recoverPushBaseMoved, "source"));
-        Assert.Equal("${{ workspace.branch }}", ReadStringWith(recoverPushBaseMoved, "target"));
-        Assert.Equal(true, ReadBoolWith(recoverPushBaseMoved, "forceWithLease"));
+        var fixPrChecks = prChecksTasks.Single(t => t.GetProperty("id").GetString() == "recover:fix-pr-checks");
+        Assert.Equal("mohist/acp-agent", fixPrChecks.GetProperty("uses").GetString());
+        Assert.Equal("${{ prompts.fix-pr-checks }}", fixPrChecks.GetProperty("with").GetProperty("prompt").GetString());
 
-        var prChecksFailed = mergePr.OnFailure.Cases.Single(c => c.When["output.errorCode"]!.Value.GetString() == "pr-checks-failed");
-        Assert.True(prChecksFailed.RetrySelf);
-        var prChecksFailedIds = prChecksFailed.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "recover:fix-pr-checks", "recover:push" }, prChecksFailedIds);
-
-        var fixPrChecks = prChecksFailed.Tasks.Single(t => t.Id == "recover:fix-pr-checks");
-        Assert.Equal("mohist/acp-agent", fixPrChecks.Uses);
-        Assert.Equal("${{ prompts.fix-pr-checks }}", ReadStringWith(fixPrChecks, "prompt"));
-
-        var recoverPushPrChecks = prChecksFailed.Tasks.Single(t => t.Id == "recover:push");
-        Assert.Equal("mohist/push", recoverPushPrChecks.Uses);
-        Assert.Equal("${{ workspace.branch }}", ReadStringWith(recoverPushPrChecks, "source"));
-        Assert.Equal(true, ReadBoolWith(recoverPushPrChecks, "forceWithLease"));
+        var recoverPushPrChecks = prChecksTasks.Single(t => t.GetProperty("id").GetString() == "recover:push");
+        Assert.Equal("mohist/push", recoverPushPrChecks.GetProperty("uses").GetString());
+        Assert.Equal("${{ workspace.branch }}", recoverPushPrChecks.GetProperty("with").GetProperty("source").GetString());
+        Assert.True(recoverPushPrChecks.GetProperty("with").GetProperty("forceWithLease").GetBoolean());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -462,13 +451,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var allTaskIds = definition.Stages
             .SelectMany(s => s.Tasks.Select(t => t.Id))
             .Concat(definition.Stages.SelectMany(s => s.Tasks
-                .Where(t => t.OnFailure is not null)
-                .SelectMany(t => t.OnFailure!.Cases.SelectMany(c => c.Tasks.Select(ct => ct.Id)))))
-            .Concat(definition.Stages.SelectMany(s => s.Tasks
-                .Where(t => t.OnFailure is not null)
-                .SelectMany(t => t.OnFailure!.Cases.SelectMany(c => c.Tasks
-                    .Where(ct => ct.OnFailure is not null)
-                    .SelectMany(ct => ct.OnFailure!.Cases.SelectMany(cc => cc.Tasks.Select(cct => cct.Id)))))))
+                .Where(t => t.With is not null && t.With.ContainsKey("recovery"))
+                .SelectMany(t => ExtractRecoveryTaskIds(t.With!["recovery"]!.Value))))
             .ToList();
 
         Assert.NotEmpty(allTaskIds);
@@ -481,7 +465,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("recover:fix-plan-review", recoveryIds);
         Assert.Contains("recover:fix-review-findings", recoveryIds);
         Assert.Contains("recover:rebase", recoveryIds);
-        Assert.Contains("recover:resolve-rebase-conflicts", recoveryIds);
         Assert.Contains("recover:push", recoveryIds);
         Assert.Contains("recover:fix-pr-checks", recoveryIds);
     }
@@ -506,7 +489,21 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
                 if (string.IsNullOrEmpty(promptStr)) continue;
                 if (!promptStr.TrimStart().StartsWith("${{", StringComparison.Ordinal))
                 {
-                    inlinePromptTasks.Add((stage.Stage, task.Id, promptStr));
+                    inlinePromptTasks.Add((stage.Stage, task.Id, promptStr!));
+                }
+            }
+
+            foreach (var recoveryTask in EnumerateRecoveryTaskElements(stage))
+            {
+                if (!recoveryTask.TryGetProperty("with", out var withEl)) continue;
+                if (!withEl.TryGetProperty("prompt", out var promptEl)) continue;
+                var promptStr = promptEl.ValueKind == JsonValueKind.String
+                    ? promptEl.GetString()
+                    : promptEl.GetRawText();
+                if (string.IsNullOrEmpty(promptStr)) continue;
+                if (!promptStr!.TrimStart().StartsWith("${{", StringComparison.Ordinal))
+                {
+                    inlinePromptTasks.Add((stage.Stage, recoveryTask.GetProperty("id").GetString() ?? "", promptStr));
                 }
             }
         }
@@ -520,10 +517,14 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
     public void GithubPrWorkflowDefinition_DoesNotReferenceRemovedActions()
     {
         var definition = MohistWorkflow.GithubPrWorkflowDefinition;
+        var integrateStage = definition.Stages.Single(s => s.Stage == "integrate");
 
-        var usedActionIds = CollectAllTasks(definition.Stages.Single(s => s.Stage == "integrate"))
+        var usedActionIds = CollectAllTasks(integrateStage)
             .Select(t => t.Uses)
             .Where(u => !string.IsNullOrEmpty(u))
+            .Concat(EnumerateRecoveryTaskElements(integrateStage)
+                .Select(t => t.TryGetProperty("uses", out var usesEl) && usesEl.ValueKind == JsonValueKind.String ? usesEl.GetString() : null)
+                .Where(u => !string.IsNullOrEmpty(u)))
             .ToList();
 
         Assert.DoesNotContain(usedActionIds, u => u == "mohist/create-pull-request");
@@ -589,7 +590,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var serializedAll = JsonSerializer.Serialize(definition);
         Assert.Contains("prompts.fix-plan-review", serializedAll);
-        Assert.Contains("prompts.resolve-rebase-conflicts", serializedAll);
         Assert.Contains("prompts.fix-pr-checks", serializedAll);
     }
 
@@ -610,7 +610,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("merge-verified", emitted);
         Assert.Contains("github-pr-status", emitted);
         Assert.Contains("conflictMode: task", emitted);
-        Assert.Contains("retry: self", emitted);
+        Assert.Contains("retrySelf: true", emitted);
 
         var reparsed = WorkflowYamlSerializer.FromYaml(emitted, "mohist/github-pr");
         Assert.Equal(definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
@@ -691,12 +691,45 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Mohist.Server.Workflow.Domain.Definition.TaskDefinition task)
     {
         yield return task;
-        if (task.OnFailure is null) yield break;
-        foreach (var failureCase in task.OnFailure.Cases)
+    }
+
+    private static JsonElement GetRecovery(Dictionary<string, JsonElement?> with)
+    {
+        var element = with["recovery"] ?? throw new InvalidOperationException("task 'with' is missing 'recovery'");
+        return element;
+    }
+
+    private static IEnumerable<string> ExtractRecoveryTaskIds(JsonElement recovery)
+    {
+        if (recovery.ValueKind != JsonValueKind.Object) yield break;
+        if (!recovery.TryGetProperty("handlers", out var handlers)) yield break;
+        foreach (var handler in handlers.EnumerateArray())
         {
-            foreach (var recoveryTask in failureCase.Tasks)
-                foreach (var visited in CollectWithNested(recoveryTask))
-                    yield return visited;
+            if (!handler.TryGetProperty("tasks", out var tasks)) continue;
+            foreach (var task in tasks.EnumerateArray())
+            {
+                if (task.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                    yield return id.GetString()!;
+            }
+        }
+    }
+
+    private static IEnumerable<JsonElement> EnumerateRecoveryTaskElements(
+        Mohist.Server.Workflow.Domain.Definition.StageDefinition stage)
+    {
+        foreach (var task in stage.Tasks)
+        {
+            if (task.With is null) continue;
+            if (!task.With.TryGetValue("recovery", out var recoveryEl) || recoveryEl is null) continue;
+            var recovery = recoveryEl.Value;
+            if (recovery.ValueKind != JsonValueKind.Object) continue;
+            if (!recovery.TryGetProperty("handlers", out var handlers)) continue;
+            foreach (var handler in handlers.EnumerateArray())
+            {
+                if (!handler.TryGetProperty("tasks", out var tasks)) continue;
+                foreach (var t in tasks.EnumerateArray())
+                    yield return t;
+            }
         }
     }
 

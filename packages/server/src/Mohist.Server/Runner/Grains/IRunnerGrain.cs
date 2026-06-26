@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Grains;
 using Orleans.Concurrency;
 
 namespace Mohist.Server.Runner.Grains;
@@ -99,7 +100,8 @@ public record WorkResult(
     string? Message = null,
     string? Output = null,
     int? ExitCode = null,
-    string[]? ArtifactUploadIds = null);
+    string[]? ArtifactUploadIds = null,
+    [property: Id(5)] List<RuntimeTaskInput>? RecoveryTasks = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

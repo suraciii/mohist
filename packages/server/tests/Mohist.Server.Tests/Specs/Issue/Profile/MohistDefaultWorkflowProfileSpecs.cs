@@ -555,24 +555,25 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("repairTask:", yaml);
         Assert.Contains("id: recover:fix-review-findings", yaml);
         Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
-        Assert.Contains("retry: self", yaml);
+        Assert.Contains("retrySelf: true", yaml);
         // The serializer must not emit a verifyTask key. VerifyTask is
         // removed from the check-repair model; the serialized check
         // carries only the repair task.
         Assert.DoesNotContain("verifyTask:", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
         // Review failure is modeled on the ai-review task itself
-        // (failIf + onFailure + retry:self), not on a review-passed
+        // (failIf + with.recovery + retrySelf), not on a review-passed
         // check. The check stage no longer carries review-passed.
         var checkStage = reparsed.Stages[2];
         Assert.DoesNotContain(checkStage.Checks, c => c.Name == "review-passed");
         var aiReview = checkStage.Tasks.Single(t => t.Id == "ai-review");
-        Assert.NotNull(aiReview.OnFailure);
-        Assert.Equal(2, aiReview.OnFailure!.Limit);
-        var failureCase = Assert.Single(aiReview.OnFailure.Cases);
-        Assert.True(failureCase.RetrySelf);
-        var fixReviewFindings = Assert.Single(failureCase.Tasks);
-        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
+        Assert.NotNull(aiReview.With);
+        var recovery = aiReview.With!["recovery"]!.Value;
+        Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
+        var handler = Assert.Single(recovery.GetProperty("handlers").EnumerateArray());
+        Assert.True(handler.GetProperty("retrySelf").GetBoolean());
+        var fixReviewFindings = Assert.Single(handler.GetProperty("tasks").EnumerateArray());
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.GetProperty("id").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -897,49 +898,6 @@ public class MohistDefaultWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void WorkflowYamlSerializer_RoundTripsTaskOnFailureCases()
-    {
-        var definition = MohistWorkflow.ParseYaml("""
-        stages:
-          - stage: integrate
-            tasks:
-              - id: integrate:merge-pr
-                title: Merge GitHub PR
-                uses: mohist/merge-pull-request
-                onFailure:
-                  limit: 1
-                  cases:
-                    - when:
-                        output.errorCode: base-moved
-                      tasks:
-                        - id: recover:rebase
-                          title: Rebase after base moved
-                          uses: mohist/rebase
-                        - id: recover:open-pr
-                          title: Open or update GitHub PR
-                          uses: mohist/create-pull-request
-                        - id: recover:merge-pr
-                          title: Merge GitHub PR
-                          uses: mohist/merge-pull-request
-            checks: []
-        """);
-
-        var yaml = WorkflowYamlSerializer.ToYaml(definition);
-        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
-        var onFailure = reparsed.Stages.Single().Tasks.Single().OnFailure;
-
-        Assert.NotNull(onFailure);
-        Assert.Equal(1, onFailure!.Limit);
-        var failureCase = Assert.Single(onFailure.Cases);
-        Assert.Equal("base-moved", failureCase.When["output.errorCode"]!.Value.GetString());
-        Assert.Equal(new[] { "recover:rebase", "recover:open-pr", "recover:merge-pr" }, failureCase.Tasks.Select(t => t.Id).ToArray());
-        Assert.Contains("onFailure:", yaml);
-        Assert.Contains("output.errorCode: base-moved", yaml);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
     public void DefaultWorkflowDefinition_DeclaresExpectedArtifactCapturePaths()
     {
         var definition = MohistWorkflow.Definition;
@@ -979,10 +937,10 @@ public class MohistDefaultWorkflowProfileSpecs
     {
         // Review failure is modeled on the ai-review task itself, not on
         // a review-passed check: the task declares failIf: FAIL so the
-        // engine fails the task on a FAIL verdict, then onFailure runs
-        // the recover:fix-review-findings (auto-fix) recovery task and
-        // retries ai-review (re-review) via retry: self. There is no
-        // review-passed check; the check stage carries only health and
+        // runner fails the task on a FAIL verdict, then with.recovery
+        // runs the recover:fix-review-findings (auto-fix) recovery task
+        // and retries ai-review (re-review) via retrySelf: true. There is
+        // no review-passed check; the check stage carries only health and
         // merge-ready.
         var definition = MohistWorkflow.Definition;
         var check = definition.Stages[2];
@@ -995,15 +953,14 @@ public class MohistDefaultWorkflowProfileSpecs
         var firstMarker = markers[0];
         Assert.Equal("<promise>FAIL</promise>", firstMarker.GetProperty("failIf").GetString());
 
-        Assert.NotNull(aiReview.OnFailure);
-        Assert.Equal(2, aiReview.OnFailure!.Limit);
-        var failureCase = Assert.Single(aiReview.OnFailure.Cases);
-        Assert.True(failureCase.RetrySelf);
-        Assert.Equal("FAIL", failureCase.When["output.promise"]!.Value.GetString());
-        var fixReviewFindings = Assert.Single(failureCase.Tasks);
-        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
-        var promptElement = JsonSerializer.SerializeToElement(fixReviewFindings.With!["prompt"]);
-        Assert.Equal("${{ prompts.auto-fix }}", promptElement.GetString());
+        var recovery = aiReview.With!["recovery"]!.Value;
+        Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
+        var handler = Assert.Single(recovery.GetProperty("handlers").EnumerateArray());
+        Assert.Equal("review-failed", handler.GetProperty("when").GetString());
+        Assert.True(handler.GetProperty("retrySelf").GetBoolean());
+        var fixReviewFindings = Assert.Single(handler.GetProperty("tasks").EnumerateArray());
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.GetProperty("id").GetString());
+        Assert.Equal("${{ prompts.auto-fix }}", fixReviewFindings.GetProperty("with").GetProperty("prompt").GetString());
     }
 
     private static void AssertMarkerOneOf(TaskDefinition task)

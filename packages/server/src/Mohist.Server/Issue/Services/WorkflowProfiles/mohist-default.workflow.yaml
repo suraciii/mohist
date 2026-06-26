@@ -207,23 +207,22 @@ stages:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
                 failIf: <promise>FAIL</promise>
+          recovery:
+            budget: 2
+            handlers:
+              - when: review-failed
+                tasks:
+                  - id: recover:fix-review-findings
+                    title: Fix review findings
+                    uses: mohist/acp-agent
+                    with:
+                      session: check
+                      prompt: ${{ prompts.auto-fix }}
+                      agent: ${{ vars.agent }}
+                retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/review.md
-        onFailure:
-          limit: 2
-          cases:
-            - when:
-                output.promise: FAIL
-              tasks:
-                - id: recover:fix-review-findings
-                  title: Fix review findings
-                  uses: mohist/acp-agent
-                  with:
-                    session: check
-                    prompt: ${{ prompts.auto-fix }}
-                    agent: ${{ vars.agent }}
-              retry: self
     checks:
       - name: health
         title: Health

@@ -35,10 +35,6 @@ public static class PromptReferenceScanner
     private static void ScanTask(TaskDefinition task, HashSet<string> keys)
     {
         ScanWith(task.With, keys);
-        if (task.OnFailure is null) return;
-        foreach (var failureCase in task.OnFailure.Cases)
-            foreach (var recoveryTask in failureCase.Tasks)
-                ScanTask(recoveryTask, keys);
     }
 
     private static void ScanWith(Dictionary<string, JsonElement?>? with, HashSet<string> keys)

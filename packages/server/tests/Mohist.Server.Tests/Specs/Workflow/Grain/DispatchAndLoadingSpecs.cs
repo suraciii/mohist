@@ -551,66 +551,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task FailedTask_WithMatchingOnFailure_InsertsRecoveryTasks()
-    {
-        await StartWorkflowAsync(SingleStage(
-            tasks: [
-                new TaskDefinition(
-                    "integrate:merge-pr",
-                    "Merge GitHub PR",
-                    "mohist/merge-pull-request",
-                    OnFailure: new TaskFailureAction(
-                        1,
-                        [
-                            new TaskFailureCase(
-                                new Dictionary<string, JsonElement?>
-                                {
-                                    ["output.errorCode"] = JsonSerializer.SerializeToElement("base-moved")
-                                },
-                                [
-                                    new TaskDefinition("recover:rebase", "Rebase after base moved", "mohist/rebase"),
-                                    new TaskDefinition("recover:open-pr", "Open or update GitHub PR", "mohist/create-pull-request"),
-                                    new TaskDefinition("recover:merge-pr", "Merge GitHub PR", "mohist/merge-pull-request")
-                                ])
-                        ]))
-            ],
-            checks: []));
-
-        var (mergePr, mergePrRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("integrate:merge-pr.", mergePr.WorkId);
-        await ReportAsync(mergePrRunnerId, mergePr.WorkId, new WorkResult("failed", "base moved", Output: """
-        {
-          "kind": "merge-pull-request",
-          "status": "failed",
-          "errorCode": "base-moved"
-        }
-        """));
-
-        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
-        Assert.Equal("Running", status);
-
-        var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("recover:rebase.", rebase.WorkId);
-        Assert.Equal("mohist/rebase", rebase.Uses);
-        await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
-
-        var (recoverOpenPr, recoverOpenPrRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("recover:open-pr.", recoverOpenPr.WorkId);
-        Assert.Equal("mohist/create-pull-request", recoverOpenPr.Uses);
-        await ReportAsync(recoverOpenPrRunnerId, recoverOpenPr.WorkId, "completed");
-
-        var (recoverMergePr, recoverMergePrRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("recover:merge-pr.", recoverMergePr.WorkId);
-        Assert.Equal("mohist/merge-pull-request", recoverMergePr.Uses);
-        await ReportAsync(recoverMergePrRunnerId, recoverMergePr.WorkId, "completed");
-
-        status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
-        Assert.Equal("Completed", status);
-    }
-
-    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
-    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact]
     public async Task LoadTaskFails_WorkflowFails()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",

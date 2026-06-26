@@ -95,23 +95,22 @@ stages:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
                 failIf: <promise>FAIL</promise>
+          recovery:
+            budget: 2
+            handlers:
+              - when: review-failed
+                tasks:
+                  - id: recover:fix-plan-review
+                    title: Fix plan review findings
+                    uses: mohist/acp-agent
+                    with:
+                      session: plan
+                      prompt: ${{ prompts.fix-plan-review }}
+                      agent: ${{ vars.agent }}
+                retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/self-review.md
-        onFailure:
-          limit: 2
-          cases:
-            - when:
-                output.promise: FAIL
-              tasks:
-                - id: recover:fix-plan-review
-                  title: Fix plan review findings
-                  uses: mohist/acp-agent
-                  with:
-                    session: plan
-                    prompt: ${{ prompts.fix-plan-review }}
-                    agent: ${{ vars.agent }}
-              retry: self
 
       - id: open-draft-pr
         title: Open draft GitHub PR
@@ -185,23 +184,22 @@ stages:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
                 failIf: <promise>FAIL</promise>
+          recovery:
+            budget: 2
+            handlers:
+              - when: review-failed
+                tasks:
+                  - id: recover:fix-review-findings
+                    title: Fix review findings
+                    uses: mohist/acp-agent
+                    with:
+                      session: check
+                      prompt: ${{ prompts.auto-fix }}
+                      agent: ${{ vars.agent }}
+                retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/review.md
-        onFailure:
-          limit: 2
-          cases:
-            - when:
-                output.promise: FAIL
-              tasks:
-                - id: recover:fix-review-findings
-                  title: Fix review findings
-                  uses: mohist/acp-agent
-                  with:
-                    session: check
-                    prompt: ${{ prompts.auto-fix }}
-                    agent: ${{ vars.agent }}
-              retry: self
 
       - id: push
         title: Push
@@ -262,62 +260,46 @@ stages:
         with:
           prNumber: ${{ vars.github.pr.number }}
           method: squash
-        onFailure:
-          limit: 2
-          cases:
-            - when:
-                output.errorCode: base-moved
-              tasks:
-                - id: recover:rebase
-                  title: Rebase after base moved
-                  uses: mohist/rebase
-                  with:
-                    baseBranch: ${{ repository.baseBranch }}
-                    remote: origin
-                    squash: false
-                    conflictMode: task
-                  onFailure:
-                    limit: 1
-                    cases:
-                      - when:
-                          output.failureKind: conflict
-                        tasks:
-                          - id: recover:resolve-rebase-conflicts
-                            title: Resolve rebase conflicts
-                            uses: mohist/acp-agent
-                            with:
-                              session: integrate
-                              prompt: ${{ prompts.resolve-rebase-conflicts }}
-                              agent: ${{ vars.agent }}
-                - id: recover:push
-                  title: Push
-                  uses: mohist/push
-                  with:
-                    source: ${{ workspace.branch }}
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    forceWithLease: true
-              retry: self
-
-            - when:
-                output.errorCode: pr-checks-failed
-              tasks:
-                - id: recover:fix-pr-checks
-                  title: Fix failing GitHub PR checks
-                  uses: mohist/acp-agent
-                  with:
-                    session: integrate
-                    prompt: ${{ prompts.fix-pr-checks }}
-                    agent: ${{ vars.agent }}
-                - id: recover:push
-                  title: Push
-                  uses: mohist/push
-                  with:
-                    source: ${{ workspace.branch }}
-                    target: ${{ workspace.branch }}
-                    remote: origin
-                    forceWithLease: true
-              retry: self
+          recovery:
+            budget: 2
+            handlers:
+              - when: base-moved
+                tasks:
+                  - id: recover:rebase
+                    title: Rebase after base moved
+                    uses: mohist/rebase
+                    with:
+                      baseBranch: ${{ repository.baseBranch }}
+                      remote: origin
+                      squash: false
+                      conflictMode: task
+                  - id: recover:push
+                    title: Push
+                    uses: mohist/push
+                    with:
+                      source: ${{ workspace.branch }}
+                      target: ${{ workspace.branch }}
+                      remote: origin
+                      forceWithLease: true
+                retrySelf: true
+              - when: pr-checks-failed
+                tasks:
+                  - id: recover:fix-pr-checks
+                    title: Fix failing GitHub PR checks
+                    uses: mohist/acp-agent
+                    with:
+                      session: integrate
+                      prompt: ${{ prompts.fix-pr-checks }}
+                      agent: ${{ vars.agent }}
+                  - id: recover:push
+                    title: Push
+                    uses: mohist/push
+                    with:
+                      source: ${{ workspace.branch }}
+                      target: ${{ workspace.branch }}
+                      remote: origin
+                      forceWithLease: true
+                retrySelf: true
 
     checks:
       - name: merge-verified
