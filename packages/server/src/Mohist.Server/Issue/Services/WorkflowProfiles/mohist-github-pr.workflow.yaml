@@ -102,7 +102,7 @@ stages:
           limit: 2
           cases:
             - when:
-                output.errorCode: review-failed
+                output.promise: FAIL
               tasks:
                 - id: recover:fix-plan-review
                   title: Fix plan review findings
@@ -192,7 +192,7 @@ stages:
           limit: 2
           cases:
             - when:
-                output.errorCode: review-failed
+                output.promise: FAIL
               tasks:
                 - id: recover:fix-review-findings
                   title: Fix review findings

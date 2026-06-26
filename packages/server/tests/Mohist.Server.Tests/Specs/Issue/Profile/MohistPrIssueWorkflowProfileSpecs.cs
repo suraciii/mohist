@@ -248,7 +248,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(selfReview.OnFailure);
         Assert.Equal(2, selfReview.OnFailure!.Limit);
         var failureCase = Assert.Single(selfReview.OnFailure.Cases);
-        Assert.Equal("review-failed", failureCase.When["output.errorCode"]!.Value.GetString());
+        Assert.Equal("FAIL", failureCase.When["output.promise"]!.Value.GetString());
         Assert.True(failureCase.RetrySelf);
 
         var fixPlanReview = Assert.Single(failureCase.Tasks);
@@ -324,7 +324,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(aiReview.OnFailure);
         var failureCase = Assert.Single(aiReview.OnFailure!.Cases);
         Assert.True(failureCase.RetrySelf);
-        Assert.Equal("review-failed", failureCase.When["output.errorCode"]!.Value.GetString());
+        Assert.Equal("FAIL", failureCase.When["output.promise"]!.Value.GetString());
         var fixReviewFindings = Assert.Single(failureCase.Tasks);
         Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
         Assert.Equal("mohist/acp-agent", fixReviewFindings.Uses);

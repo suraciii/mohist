@@ -120,16 +120,14 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task TaskWithFailIfMarker_ReportsErrorCode_TriggersOnFailureRecovery()
+    public async Task TaskWithFailIfMarker_ReportsPromise_TriggersOnFailureRecovery()
     {
         // End-to-end shape: a profile declares a task with an
         // expect.markers[*].failIf binding and an onFailure case that
-        // matches output.errorCode. The runner reports the task as
-        // failed with the action's own errorCode (here, review-failed);
-        // the engine must then treat it like any other task failure and
-        // apply the recovery sequence — exactly the same recovery the
-        // engine applies to a marker-less failure that emits the same
-        // errorCode.
+        // matches output.promise. The runner reports the task as failed
+        // with the action's promise verdict (here, FAIL); the engine
+        // must then treat it like any other task failure and apply the
+        // recovery sequence.
         await StartWorkflowAsync(SingleStage(
             tasks: [
                 new TaskDefinition(
@@ -142,7 +140,7 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
                             new TaskFailureCase(
                                 new Dictionary<string, JsonElement?>
                                 {
-                                    ["output.errorCode"] = JsonSerializer.SerializeToElement("review-failed")
+                                    ["output.promise"] = JsonSerializer.SerializeToElement("FAIL")
                                 },
                                 [
                                     new TaskDefinition(
@@ -157,12 +155,12 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         var (selfReview, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("self-review.", selfReview.WorkId);
 
-        // The runner reads the action output (which contains errorCode
-        // set from the failIf marker); the engine treats this as an
-        // ordinary failed-task report.
-        await ReportAsync(r1, selfReview.WorkId, new WorkResult("failed", "failIf marker matched: <promise>FAIL</promise> (errorCode: review-failed)", Output: """
+        // The runner reads the action output (which carries the promise
+        // verdict derived from the failIf marker); the engine treats
+        // this as an ordinary failed-task report.
+        await ReportAsync(r1, selfReview.WorkId, new WorkResult("failed", "failIf marker matched: <promise>FAIL</promise>", Output: """
         {
-          "errorCode": "review-failed",
+          "promise": "FAIL",
           "kind": "acp-agent",
           "status": "failure",
           "failIfMarker": "<promise>FAIL</promise>"
@@ -188,10 +186,10 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task TaskWithFailIfMarker_NoMatchingCase_PreservesFailure()
     {
-        // The failIf-induced failure carries an errorCode the profile
-        // does not match. The engine must treat it like an ordinary task
-        // failure with no onFailure case matched — the task remains
-        // failed and no recovery is injected.
+        // The failIf-induced failure carries promise=FAIL, but the only
+        // onFailure case requires promise=PASS. The engine must treat it
+        // like an ordinary task failure with no onFailure case matched —
+        // the task remains failed and no recovery is injected.
         await StartWorkflowAsync(SingleStage(
             tasks: [
                 new TaskDefinition(
@@ -204,12 +202,12 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
                             new TaskFailureCase(
                                 new Dictionary<string, JsonElement?>
                                 {
-                                    ["output.errorCode"] = JsonSerializer.SerializeToElement("auth-failed")
+                                    ["output.promise"] = JsonSerializer.SerializeToElement("PASS")
                                 },
                                 [
                                     new TaskDefinition(
-                                        "recover:reauth",
-                                        "Re-auth",
+                                        "recover:on-pass-verdict",
+                                        "Recover on pass verdict",
                                         "mohist/acp-agent")
                                 ])
                         ]))
@@ -219,7 +217,7 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         var (selfReview, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, selfReview.WorkId, new WorkResult("failed", "failIf marker matched: <promise>FAIL</promise>", Output: """
         {
-          "errorCode": "review-failed",
+          "promise": "FAIL",
           "kind": "acp-agent",
           "status": "failure",
           "failIfMarker": "<promise>FAIL</promise>"
@@ -261,7 +259,7 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
                             new TaskFailureCase(
                                 new Dictionary<string, JsonElement?>
                                 {
-                                    ["output.errorCode"] = JsonSerializer.SerializeToElement("review-failed")
+                                    ["output.promise"] = JsonSerializer.SerializeToElement("FAIL")
                                 },
                                 [
                                     new TaskDefinition(
@@ -276,7 +274,7 @@ public class FailIfMarkerSpecs : WorkflowGrainSpecs
         var (selfReview, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, selfReview.WorkId, new WorkResult("completed", "Self review complete", Output: """
         {
-          "errorCode": null,
+          "promise": "PASS",
           "kind": "acp-agent",
           "status": "success",
           "failIfMarker": null,
