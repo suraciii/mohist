@@ -67,7 +67,7 @@ _None._
     `ReportWorkflowResultAsync`; hydrate outstanding works on
     `OnActivateAsync`; inject `TimeProvider`; switch take points off
     `UtcNow`.
-  - Persistence — new `RunnerWorks` table + grain storage; insert on take,
+  - Persistence — new `RunnerWorks` table (EF SQL); insert on take,
     update-to-terminal (no delete) on report / synthesis.
   - `RecoverActiveWorkflowWorkAsync` — reload original `TakenAt` from ledger
     instead of `UtcNow`.

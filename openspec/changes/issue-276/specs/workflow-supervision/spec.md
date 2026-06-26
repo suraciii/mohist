@@ -59,7 +59,7 @@ work 完成超时与 runner 丢失 SHALL 共用同一 report 通道合成失败�
 
 ### Requirement: RunnerWorks 持久台账
 
-RunnerGrain SHALL 维护一张 `RunnerWorks` 持久台账（grain storage），记录发生在一个 runner 上的所有 work（workflow + agent-job）的全生命周期。台账 SHALL 在取用时 insert、在 report 或合成时 update 为终态，SHALL NOT delete 终态行（保留历史）。
+RunnerGrain SHALL 维护一张 `RunnerWorks` 持久台账，记录发生在一个 runner 上的所有 work（workflow + agent-job）的全生命周期。台账 SHALL 在取用时 insert、在 report 或合成时 update 为终态，SHALL NOT delete 终态行（保留历史）。
 
 台账状态 SHALL 扁平为 `outstanding | completed | failed`；`timeout` / `runner-lost` / 具体 message 仅作为 `Reason` 字段填充于 `Status=failed` 的行，SHALL NOT 新增状态枚举。`TakenAt`（取用时刻）SHALL 作为完成超时的起算点被记录与持久化。
 
