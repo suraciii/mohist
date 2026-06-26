@@ -11,6 +11,7 @@ import {
   approveIssue,
   deriveAttentionItems,
   resumeIssue,
+  type ApprovalWaitMetricsResponse,
   type Issue,
 } from '../../../entities/issue'
 import { type AgentStatus } from '../../../entities/agent'
@@ -20,6 +21,7 @@ import { AttentionHero } from './AttentionHero'
 const mocks = vi.hoisted(() => ({
   issues: undefined as Issue[] | undefined,
   agentStatus: undefined as AgentStatus | undefined,
+  approvalWait: undefined as ApprovalWaitMetricsResponse | undefined,
 }))
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
@@ -29,6 +31,7 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     approveIssue: vi.fn(),
     resumeIssue: vi.fn(),
     useIssues: () => ({ data: mocks.issues, isLoading: false }),
+    useApprovalWait: () => ({ data: mocks.approvalWait, isLoading: false }),
   }
 })
 
@@ -114,6 +117,7 @@ function renderHeroWithClient(queryClient: QueryClient) {
 beforeEach(() => {
   mocks.issues = []
   mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
+  mocks.approvalWait = undefined
 })
 
 afterEach(() => {
@@ -678,5 +682,128 @@ describe('AttentionHero - data-testid/data-zone hook', () => {
     renderHero()
     const hasAttentionRoot = screen.getByTestId('dashboard-zone-attention')
     expect(hasAttentionRoot).toHaveAttribute('data-zone', 'attention')
+  })
+})
+
+describe('AttentionHero - approval-wait metric', () => {
+  it('shows the aggregate average approval wait from the aggregation', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 200,
+        title: 'Pending approval',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+    ]
+    mocks.approvalWait = {
+      window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
+      sampleCount: 3,
+      averageSeconds: 3.2 * 3_600,
+      medianSeconds: 2 * 3_600,
+      maxSeconds: 8 * 3_600,
+    }
+
+    renderHero()
+
+    const value = screen.getByTestId('approval-wait-value')
+    expect(value).toHaveAttribute('data-state', 'value')
+    expect(value).toHaveTextContent('3.2h')
+    expect(value).toHaveTextContent('averaged')
+    expect(screen.queryByTestId('approval-wait-empty')).not.toBeInTheDocument()
+  })
+
+  it('renders a defined empty presentation when the aggregation has zero samples', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 201,
+        title: 'Pending approval',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+    ]
+    mocks.approvalWait = {
+      window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
+      sampleCount: 0,
+      averageSeconds: null,
+      medianSeconds: null,
+      maxSeconds: null,
+    }
+
+    renderHero()
+
+    const empty = screen.getByTestId('approval-wait-empty')
+    expect(empty).toHaveAttribute('data-state', 'empty')
+    expect(empty).toHaveClass('text-muted-foreground')
+    expect(screen.queryByTestId('approval-wait-value')).not.toBeInTheDocument()
+  })
+
+  it('accepts an approvalWait prop that overrides the internal hook', () => {
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 202,
+        title: 'Pending approval',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+    ]
+    mocks.approvalWait = {
+      window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
+      sampleCount: 0,
+      averageSeconds: null,
+      medianSeconds: null,
+      maxSeconds: null,
+    }
+    const propOverride: ApprovalWaitMetricsResponse = {
+      window: { from: '2026-06-20T00:00:00.000Z', to: '2026-06-27T00:00:00.000Z' },
+      sampleCount: 1,
+      averageSeconds: 5 * 3_600,
+      medianSeconds: 5 * 3_600,
+      maxSeconds: 5 * 3_600,
+    }
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
+          <MemoryRouter initialEntries={['/demo']}>
+            <AttentionHero approvalWait={propOverride} />
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByTestId('approval-wait-value')).toHaveTextContent('5.0h')
+    expect(screen.queryByTestId('approval-wait-empty')).not.toBeInTheDocument()
+  })
+
+  it('invalidates the approval-wait query on Approve success', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    mocks.issues = [
+      makeIssue({
+        id: 'awaiting-1',
+        number: 203,
+        title: 'Approve and invalidate approval wait',
+        approvalState: { status: 'awaiting', requestedAt: '2026-06-18T00:00:00.000Z' },
+      }),
+    ]
+    mockedApproveIssue.mockResolvedValue({
+      issue: makeIssue({ id: 'awaiting-1', number: 203 }),
+      context: null,
+      message: 'ok',
+    })
+
+    renderHeroWithClient(queryClient)
+
+    fireEvent.click(screen.getByTestId('attention-item-approve'))
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['issues', 'metrics', 'approval-wait'],
+      })
+    })
   })
 })
