@@ -22,9 +22,11 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
   const { data: workflowProfiles } = useWorkflowProfiles()
   const { data: workflowProfileYaml } = useIssueWorkflowProfileYaml(issue.number, true)
   const updateMutation = useUpdateIssueWorkflowProfile()
+  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
 
   const effectiveProfileId = issue.workflowProfileId
     ?? workflowProfileYaml?.profileId
+    ?? defaultProfileId
     ?? SYSTEM_DEFAULT_ID
 
   const started = isStartedIssue(issue)
@@ -38,13 +40,14 @@ export function WorkflowProfileControl({ issue }: WorkflowProfileControlProps) {
   const profileOptions: WorkflowProfileInfo[] = useMemo(() => {
     const list = workflowProfiles ?? []
     const known = new Set(list.map((p) => p.id))
-    const extras = pending && !known.has(pending)
-      ? [{ id: pending, displayName: pending, description: '', isDefault: false }]
-      : []
+    const extras: WorkflowProfileInfo[] = []
+    for (const id of [pending, defaultProfileId]) {
+      if (!id || known.has(id)) continue
+      known.add(id)
+      extras.push({ id, displayName: id, description: '', isDefault: false })
+    }
     return [...list, ...extras]
-  }, [workflowProfiles, pending])
-
-  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
+  }, [workflowProfiles, pending, defaultProfileId])
 
   const selectValue = pending ?? effectiveProfileId
 

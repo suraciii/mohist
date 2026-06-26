@@ -98,6 +98,8 @@ export function ProjectDefaultWorkflowControl() {
                   const value = event.target.value
                   if (value) {
                     setDefault.mutate({ templateId: value })
+                  } else if (configuredTemplateId) {
+                    clearDefault.mutate()
                   }
                 }}
                 className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"

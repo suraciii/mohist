@@ -206,6 +206,9 @@ describe('WorkflowProfileControl', () => {
 
     const control = await screen.findByTestId('issue-workflow-profile-control')
     expect(control.dataset.defaultProfile).toBe('mohist/pr')
+    expect(control.dataset.effectiveProfile).toBe('mohist/pr')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/pr')
+    expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/pr')
   })
 
   it('falls back to the system default profile id when the project default is unset', async () => {
@@ -225,5 +228,27 @@ describe('WorkflowProfileControl', () => {
 
     const control = await screen.findByTestId('issue-workflow-profile-control')
     expect(control.dataset.defaultProfile).toBe('mohist/default')
+    expect(control.dataset.effectiveProfile).toBe('mohist/default')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/default')
+    expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/default')
+  })
+
+  it('adds the project default to the selector when it is absent from the catalog', async () => {
+    mockUseWorkflowProfiles.mockReturnValue({
+      data: [
+        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+      ],
+    })
+    mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/pr',
+      source: 'project',
+      configuredTemplateId: 'mohist/pr',
+    })
+
+    renderControl(makeIssue({ workflowProfileId: null }))
+
+    const select = await screen.findByTestId('issue-workflow-profile-select')
+    expect(select).toHaveValue('mohist/pr')
+    expect(screen.getByRole('option', { name: 'mohist/pr' })).toBeInTheDocument()
   })
 })

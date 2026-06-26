@@ -155,6 +155,26 @@ describe('ProjectDefaultWorkflowControl', () => {
     expect(screen.queryByTestId('project-default-workflow-value')).not.toBeInTheDocument()
   })
 
+  it('selecting inherit system default sends DELETE and returns to the inherit state', async () => {
+    currentDefault = 'mohist/pr'
+    renderSection()
+
+    const select = await screen.findByTestId('project-default-workflow-select') as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe('mohist/pr'))
+
+    fireEvent.change(select, { target: { value: '' } })
+
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0].method).toBe('DELETE')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('project-default-workflow-system-default')).toHaveTextContent(
+        'mohist/default',
+      ),
+    )
+    expect(select.value).toBe('')
+  })
+
   it('warns when the configured default is absent from the system catalog and offers Clear', async () => {
     currentDefault = 'mohist/unknown'
     renderSection()

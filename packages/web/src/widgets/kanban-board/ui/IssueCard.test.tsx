@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { IssueCard } from './IssueCard'
 import { IssueStatus, IssueHealth, type Issue } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
+
+const mockUseEffectiveDefaultWorkflowProfile = vi.fn<() => { effectiveTemplateId: string; source: 'project' | 'system' | 'none'; configuredTemplateId: string | null }>(() => ({
+  effectiveTemplateId: 'mohist/default',
+  source: 'system',
+  configuredTemplateId: null,
+}))
+
+vi.mock('../../../entities/settings', () => ({
+  useEffectiveDefaultWorkflowProfile: () => mockUseEffectiveDefaultWorkflowProfile(),
+}))
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()
@@ -55,6 +65,14 @@ function renderCard(issue: Issue) {
     </QueryClientProvider>,
   )
 }
+
+beforeEach(() => {
+  mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
+    effectiveTemplateId: 'mohist/default',
+    source: 'system',
+    configuredTemplateId: null,
+  })
+})
 
 afterEach(() => {
   cleanup()
@@ -202,5 +220,20 @@ describe('IssueCard - workflow profile chip', () => {
     expect(chip).toBeInTheDocument()
     expect(chip).toHaveTextContent('mohist/default')
     expect(chip.dataset.workflowProfile).toBe('mohist/default')
+  })
+
+  it('renders the project default profile when the read model has no selection', () => {
+    mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
+      effectiveTemplateId: 'mohist/pr',
+      source: 'project',
+      configuredTemplateId: 'mohist/pr',
+    })
+    const issue = makeIssue({ workflowProfileId: null })
+    renderCard(issue)
+
+    const chip = screen.getByTestId('issue-card-workflow-profile')
+    expect(chip).toBeInTheDocument()
+    expect(chip).toHaveTextContent('mohist/pr')
+    expect(chip.dataset.workflowProfile).toBe('mohist/pr')
   })
 })
