@@ -1026,8 +1026,9 @@ function tryRecovery(
   const recoveryTasks: RecoveryTaskInput[] = [...handler.tasks]
 
   if (handler.retrySelf) {
+    const retryId = work.workId.includes(".") ? work.workId.substring(0, work.workId.lastIndexOf(".")) : work.workId
     recoveryTasks.push({
-      id: work.workId,
+      id: retryId,
       title: work.title ?? work.workId,
       uses: work.uses ?? null,
       with: decrementRecoveryBudget(renderedWith, recovery.budget),
@@ -1038,6 +1039,7 @@ function tryRecovery(
   return {
     status: "completed",
     message: `${label} failed (${errorCode}); recovery scheduled`,
+    output: result.output,
     recoveryTasks,
   }
 }
@@ -1090,11 +1092,12 @@ function readErrorCode(output: string | null | undefined): string | null {
   try {
     const parsed = JSON.parse(output) as unknown
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const code = (parsed as JsonObject)["errorCode"]
+      const obj = parsed as JsonObject
+      const code = obj["errorCode"] ?? obj["failureKind"]
       return typeof code === "string" && code.length > 0 ? code : null
     }
   } catch {
-    // output is not JSON or errorCode absent — not recoverable
+    // output is not JSON or parseable — not recoverable
   }
   return null
 }

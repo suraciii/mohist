@@ -6,6 +6,7 @@ using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services.Sessions;
 
 namespace Mohist.Server.Api;
@@ -134,7 +135,7 @@ public static class RunnerRoutes
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds);
+            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.RecoveryTasks);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var report = string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
                 ? await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result)
@@ -302,7 +303,8 @@ public record RunnerReportRequest(
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
     string? OwnerKind = null,
-    string? AgentJobId = null);
+    string? AgentJobId = null,
+    List<RuntimeTaskInput>? RecoveryTasks = null);
 public record RunnerReportResponse(
     string WorkflowRunId,
     string? WorkflowStatus,
