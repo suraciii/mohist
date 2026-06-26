@@ -19,6 +19,27 @@ export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
   gh = runner ?? runCommand
 }
 
+const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
+// How long to keep polling after `gh pr checks` reports "no checks reported"
+// before concluding the branch genuinely has no CI and proceeding to merge.
+// Long enough to ride out the registration window right after a push / force
+// push (GitHub hasn't turned the workflow run into a check run yet), short
+// enough that repos without CI don't wait forever.
+const PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT = 120_000
+
+let prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
+let prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
+
+export function setGitHubPrChecksTimingForTest(timing: { pollIntervalMs?: number; noChecksGraceMs?: number } | null) {
+  if (timing === null) {
+    prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
+    prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
+    return
+  }
+  if (timing.pollIntervalMs !== undefined) prChecksPollIntervalMs = timing.pollIntervalMs
+  if (timing.noChecksGraceMs !== undefined) prChecksNoChecksGraceMs = timing.noChecksGraceMs
+}
+
 export type GitHubPrErrorCode =
   | "base-moved"
   | "retry-safe"
@@ -564,8 +585,6 @@ export interface WaitChecksAndMergeFailure {
   output: string
 }
 
-const PR_CHECKS_POLL_INTERVAL_MS = 15_000
-
 export async function waitChecksAndMergePr(
   gh: GhRunner,
   workDir: string,
@@ -697,6 +716,10 @@ async function waitForPrChecks(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
 ): Promise<PrChecksWaitResult> {
+  // Timestamp of the first poll that saw zero check runs, or null once checks
+  // have appeared. Used to bound how long we wait before treating the branch
+  // as genuinely check-less.
+  let noChecksSince: number | null = null
   for (;;) {
     if (signal.aborted) {
       return {
@@ -714,25 +737,41 @@ async function waitForPrChecks(
     const checksOutput = combinedGhOutput(checksResult)
     record("gh-pr-checks", `pr checks ${prNumber} --json bucket,name,state`, checksResult.exitCode, checksOutput)
     if (checksResult.exitCode !== 0) {
-      return {
-        kind: "failure",
-        message: checksOutput,
-        output: checksOutput,
+      // `gh pr checks` exits non-zero in two very different situations:
+      //   1. a check actually failed (terminal), and
+      //   2. the branch has zero check runs yet — right after a push / force
+      //      push, before GitHub has registered the workflow run as a check.
+      // Case 2 is transient (the "no checks reported" message) and must be
+      // polled like PENDING; only after the grace window elapses with still
+      // zero checks do we proceed to merge (repos with no CI).
+      if (looksLikeNoChecksReported(checksOutput)) {
+        if (noChecksSince === null) noChecksSince = Date.now()
+        if (Date.now() - noChecksSince >= prChecksNoChecksGraceMs) {
+          return { kind: "ok" }
+        }
+      } else {
+        return {
+          kind: "failure",
+          message: checksOutput,
+          output: checksOutput,
+        }
       }
-    }
-    const classification = classifyPrChecks(parsePrChecks(checksResult.stdout))
-    if (classification.kind === "failed") {
-      return {
-        kind: "failure",
-        message: classification.message,
-        output: classification.message,
+    } else {
+      noChecksSince = null
+      const classification = classifyPrChecks(parsePrChecks(checksResult.stdout))
+      if (classification.kind === "failed") {
+        return {
+          kind: "failure",
+          message: classification.message,
+          output: classification.message,
+        }
       }
-    }
-    if (classification.kind === "passed") {
-      return { kind: "ok" }
+      if (classification.kind === "passed") {
+        return { kind: "ok" }
+      }
     }
     try {
-      await delayWithSignal(PR_CHECKS_POLL_INTERVAL_MS, signal)
+      await delayWithSignal(prChecksPollIntervalMs, signal)
     } catch (error) {
       return {
         kind: "cancelled",
@@ -816,6 +855,13 @@ function formatFailedCheck(entry: PrCheckEntry): string {
   const bucket = entry.bucket || "FAIL"
   const state = entry.state && entry.state !== bucket ? ` (state=${entry.state})` : ""
   return `${label} [bucket=${bucket}]${state}`
+}
+
+// `gh pr checks` prints this and exits non-zero when the branch has zero check
+// runs. That's a transient state right after a push (and a permanent one for
+// repos with no CI), distinct from an actual check failure.
+export function looksLikeNoChecksReported(output: string): boolean {
+  return /no checks reported/i.test(output)
 }
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {
