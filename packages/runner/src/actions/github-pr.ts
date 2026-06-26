@@ -27,6 +27,11 @@ const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
 // enough that repos without CI don't wait forever.
 const PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT = 120_000
 
+// How long to poll mergeStateStatus after checks pass before giving up.
+// GitHub's merge eligibility can lag behind gh pr checks by a few seconds;
+// a BLOCKED/UNSTABLE state right after checks settle is usually transient.
+const PR_MERGE_STATUS_POLL_TIMEOUT_MS = 120_000
+
 let prChecksPollIntervalMs = PR_CHECKS_POLL_INTERVAL_MS_DEFAULT
 let prChecksNoChecksGraceMs = PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT
 
@@ -659,45 +664,73 @@ export async function waitChecksAndMergePr(
   // waitForPrChecks tracks commit statuses via gh pr checks, but branch
   // protection may also gate on reviews or check suites that aren't reported
   // as commit statuses. The PR's mergeStateStatus is the authoritative signal.
-  const mergeStatusResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "mergeStateStatus"], workDir, signal)
-  const mergeStatusOutput = combinedGhOutput(mergeStatusResult)
-  record("gh-pr-merge-ready", `pr view ${prNumber} --json mergeStateStatus`, mergeStatusResult.exitCode, mergeStatusOutput)
-  if (mergeStatusResult.exitCode !== 0) {
-    return {
-      kind: "failure",
-      errorCode: classifyGhFailure(mergeStatusResult.stdout, mergeStatusResult.stderr),
-      message: `gh pr view ${prNumber} mergeStateStatus failed: ${mergeStatusOutput}`,
-      prUrl: view.url ?? null,
-      output: mergeStatusOutput,
+  // Poll it for up to PR_MERGE_STATUS_POLL_TIMEOUT_MS — BLOCKED/UNSTABLE right
+  // after checks settle is usually transient (checks hadn't fully registered).
+  const mergeStatusPollStart = Date.now()
+  for (;;) {
+    if (signal.aborted) {
+      return {
+        kind: "failure",
+        errorCode: "retry-safe",
+        message: `Cancelled while waiting for merge eligibility: ${signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? "aborted")}`,
+        prUrl: view.url ?? null,
+        output: "cancelled before merge status settled",
+      }
     }
-  }
-  const mergeStatusView = parsePrView(mergeStatusResult.stdout)
-  const blocked = mergeStatusView?.mergeStateStatus
-  if (blocked === "BLOCKED" || blocked === "UNSTABLE") {
-    return {
-      kind: "failure",
-      errorCode: "protection-conflict",
-      message: `PR #${prNumber} merge blocked by branch protection (state=${blocked})`,
-      prUrl: view.url ?? null,
-      output: mergeStatusOutput,
+    const mergeStatusResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "mergeStateStatus"], workDir, signal)
+    const mergeStatusOutput = combinedGhOutput(mergeStatusResult)
+    record("gh-pr-merge-ready", `pr view ${prNumber} --json mergeStateStatus`, mergeStatusResult.exitCode, mergeStatusOutput)
+    if (mergeStatusResult.exitCode !== 0) {
+      return {
+        kind: "failure",
+        errorCode: classifyGhFailure(mergeStatusResult.stdout, mergeStatusResult.stderr),
+        message: `gh pr view ${prNumber} mergeStateStatus failed: ${mergeStatusOutput}`,
+        prUrl: view.url ?? null,
+        output: mergeStatusOutput,
+      }
     }
-  }
-  if (blocked === "DIRTY" || blocked === "BEHIND") {
-    return {
-      kind: "failure",
-      errorCode: "base-moved",
-      message: `PR #${prNumber} is ${blocked}; rebase required.`,
-      prUrl: view.url ?? null,
-      output: mergeStatusOutput,
+    const mergeStatusView = parsePrView(mergeStatusResult.stdout)
+    const mergeState = mergeStatusView?.mergeStateStatus
+    if (mergeState === "CLEAN" || mergeState === "HAS_HOOKS" || mergeState === "UNKNOWN") {
+      break
     }
-  }
-  if (blocked === "DRAFT") {
-    return {
-      kind: "failure",
-      errorCode: "pr-state-conflict",
-      message: `PR #${prNumber} is still a draft.`,
-      prUrl: view.url ?? null,
-      output: mergeStatusOutput,
+    if (mergeState === "DIRTY" || mergeState === "BEHIND") {
+      return {
+        kind: "failure",
+        errorCode: "base-moved",
+        message: `PR #${prNumber} is ${mergeState}; rebase required.`,
+        prUrl: view.url ?? null,
+        output: mergeStatusOutput,
+      }
+    }
+    if (mergeState === "DRAFT") {
+      return {
+        kind: "failure",
+        errorCode: "pr-state-conflict",
+        message: `PR #${prNumber} is still a draft.`,
+        prUrl: view.url ?? null,
+        output: mergeStatusOutput,
+      }
+    }
+    if (Date.now() - mergeStatusPollStart >= PR_MERGE_STATUS_POLL_TIMEOUT_MS) {
+      return {
+        kind: "failure",
+        errorCode: "protection-conflict",
+        message: `PR #${prNumber} merge blocked by branch protection (state=${mergeState}); timeout after ${PR_MERGE_STATUS_POLL_TIMEOUT_MS / 1000}s`,
+        prUrl: view.url ?? null,
+        output: mergeStatusOutput,
+      }
+    }
+    try {
+      await delayWithSignal(prChecksPollIntervalMs, signal)
+    } catch (err) {
+      return {
+        kind: "failure",
+        errorCode: "retry-safe",
+        message: `Cancelled while waiting for merge eligibility: ${errorMessage(err)}`,
+        prUrl: view.url ?? null,
+        output: "cancelled during merge status poll",
+      }
     }
   }
 
