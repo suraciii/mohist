@@ -47,11 +47,11 @@ The zone wrapper itself is unchanged: `DashboardZone` already renders the same `
 ### D3. Test assertions updated to "mounted, in-slot, non-leaking"
 
 Update the test at `DashboardPage.test.tsx:126-155` so the `pulse` slot is asserted like `digest`:
-- `pulse.childElementCount > 0` and its class does **not** match `border-dashed` (it is no longer a placeholder).
+- `pulse.childElementCount > 0` (it is no longer an empty placeholder). Note: `DashboardZone` renders `border-dashed` **unconditionally** whether or not children are passed (see `DashboardZone.tsx`), so the mounted `pulse` and `digest` zones are both `border-dashed`; `border-dashed` is therefore not a distinguishing assertion. The existing `digest` test mirrors this — it asserts containment only and never checks `border-dashed`.
 - `pulse` contains `[data-testid="pulse-zone"]` (or `pulse-empty-state` given D2's empty fixture).
 - `pulse` does **not** contain the digest widget's testid, and `digest`/`productivity` do not contain `pulse-zone` (no leakage, matching the existing negative-assertion convention).
 
-`productivity` remains asserted as the sole empty placeholder (`childElementCount === 0`, `border-dashed`).
+`productivity` remains asserted as the sole empty placeholder — the only zone with `childElementCount === 0`.
 
 ## Risks / Trade-offs
 

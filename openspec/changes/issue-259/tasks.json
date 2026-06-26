@@ -11,7 +11,7 @@
         "DashboardPage.tsx imports PulseZone from ../../../widgets/dashboard-pulse and renders it inside the pulse DashboardZone, so the pulse slot is no longer a bare empty placeholder.",
         "The productivity zone remains the only empty placeholder (border-dashed, childElementCount === 0); the digest zone still mounts DashboardDigestWidget unchanged.",
         "DashboardPage.test.tsx mocks useActivityCards at the @/widgets/coder-session/model/activity-cards boundary with an empty view-model (no timer/refetch involvement).",
-        "DashboardPage.test.tsx asserts the pulse slot contains [data-testid=\"pulse-empty-state\"] (or pulse-zone), has childElementCount > 0, and its class does not match border-dashed.",
+        "DashboardPage.test.tsx asserts the pulse slot contains [data-testid=\"pulse-empty-state\"] (or pulse-zone) and has childElementCount > 0 (the DashboardZone wrapper retains border-dashed unconditionally regardless of children, matching the mounted digest zone, so border-dashed is not a distinguishing assertion).",
         "DashboardPage.test.tsx asserts no zone leakage: pulse does not contain the digest widget testid, and neither digest nor productivity contains pulse-zone/pulse-empty-state.",
         "npm run typecheck -w packages/web passes with no errors.",
         "npm run test:run -w packages/web passes, including the existing unchanged PulseZone.test.tsx and CompactSessionCard.test.tsx alongside the updated DashboardPage.test.tsx.",
