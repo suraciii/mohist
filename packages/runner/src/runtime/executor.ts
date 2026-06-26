@@ -1,6 +1,6 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, JsonValue, RenderedWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, JsonValue, AddTaskInput, RenderedWorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
@@ -139,6 +139,8 @@ export class WorkExecutor {
       const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
       const normalized = normalize(work, result)
       if (normalized.status !== "completed") {
+        const recoveryResult = tryRecovery(work, normalized)
+        if (recoveryResult) return recoveryResult
         return attachBranchStabilityEvidence(normalized, startCheck.evidence)
       }
       const endCheck = await this.checkBranchStability(work, workDir, expectedBranch, "end", signal)
@@ -982,4 +984,115 @@ function branchStabilityToJson(evidence: BranchStabilityEvidence): JsonObject {
   }
   if (evidence.observedRef !== undefined) value["observedRef"] = evidence.observedRef
   return value
+}
+
+// ---------------------------------------------------------------------------
+// Task recovery — runner-side matching of action output against task-level
+// `recovery` config. When a handler matches and budget remains, the failure
+// is converted to `completed` + `addTasks` for the server to insert.
+// -----------------------------------------------------------------------
+
+interface RecoveryHandler {
+  when: string
+  tasks: AddTaskInput[]
+  retrySelf: boolean
+}
+
+interface RecoveryConfig {
+  budget: number
+  handlers: RecoveryHandler[]
+}
+
+function tryRecovery(
+  work: RenderedWorkItem,
+  result: WorkItemResult,
+): WorkItemResult | null {
+  const recovery = readRecoveryConfig(work.recovery)
+  if (!recovery) return null
+
+  const output = safeParseJson(result.output ?? "")
+  if (!output) return null
+
+  const handler = recovery.handlers.find((h) => matchesWhen(h.when, output))
+  if (!handler) return null
+
+  if (recovery.budget <= 0) return null
+
+  const addTasks: AddTaskInput[] = [...handler.tasks]
+
+  if (handler.retrySelf) {
+    const retryId = work.workId.includes(".")
+      ? work.workId.substring(0, work.workId.lastIndexOf("."))
+      : work.workId
+    addTasks.push({
+      id: retryId,
+      title: work.title ?? work.workId,
+      uses: work.uses ?? null,
+      with: decrementRecoveryBudget(work.recovery, recovery.budget),
+    })
+  }
+
+  const label = work.title?.trim() || work.uses || work.workId
+  return {
+    status: "completed",
+    message: `${label} failed (${handler.when}); recovery scheduled`,
+    output: result.output,
+    addTasks,
+  }
+}
+
+function matchesWhen(when: string, output: JsonObject): boolean {
+  const eq = when.indexOf("=")
+  if (eq === -1) return false
+  const field = when.slice(0, eq).trim()
+  const expected = when.slice(eq + 1).trim()
+  return String(output[field]) === expected
+}
+
+function readRecoveryConfig(recovery: JsonObject | null | undefined): RecoveryConfig | null {
+  if (!recovery) return null
+  const rawBudget = recovery["budget"]
+  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.floor(rawBudget) : 0
+  const rawHandlers = recovery["handlers"]
+  if (!Array.isArray(rawHandlers)) return null
+  const handlers: RecoveryHandler[] = []
+  for (const raw of rawHandlers) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue
+    const h = raw as JsonObject
+    const when = typeof h["when"] === "string" ? h["when"] : null
+    if (!when) continue
+    handlers.push({
+      when,
+      tasks: readAddTasks(h["tasks"]),
+      retrySelf: h["retrySelf"] === true,
+    })
+  }
+  return { budget, handlers }
+}
+
+function readAddTasks(raw: unknown): AddTaskInput[] {
+  if (!Array.isArray(raw)) return []
+  const tasks: AddTaskInput[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+    const t = entry as JsonObject
+    const id = typeof t["id"] === "string" ? t["id"] : null
+    if (!id) continue
+    const withValue = t["with"]
+    tasks.push({
+      id,
+      title: typeof t["title"] === "string" ? t["title"] : id,
+      uses: typeof t["uses"] === "string" ? t["uses"] : null,
+      with: withValue && typeof withValue === "object" && !Array.isArray(withValue) ? (withValue as JsonObject) : null,
+    })
+  }
+  return tasks
+}
+
+function decrementRecoveryBudget(recovery: JsonObject | null | undefined, currentBudget: number): JsonObject | null {
+  if (!recovery) return null
+  return {
+    ...recovery,
+    budget: currentBudget - 1,
+  }
 }

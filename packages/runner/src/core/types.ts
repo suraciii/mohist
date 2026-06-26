@@ -84,6 +84,7 @@ export type WorkDispatchResponse = {
   ownerKind?: string | null
   agentJobId?: string | null
   cleanupPolicy?: CleanupPolicy | null
+  recovery?: string | null
 }
 
 /**
@@ -125,9 +126,10 @@ export interface RenderedWorkItem {
   setVars?: Record<string, string> | null
   ownerKind?: string | null
   agentJobId?: string | null
+  recovery?: JsonObject | null
 }
 
-export interface RecoveryTaskInput {
+export interface AddTaskInput {
   id: string
   title: string
   uses?: string | null
@@ -142,7 +144,7 @@ export interface WorkItemResult {
   artifactUploadIds?: string[] | null
   capturedOutputs?: JsonObject | null
   cleanupAttempts?: number | null
-  recoveryTasks?: RecoveryTaskInput[] | null
+  addTasks?: AddTaskInput[] | null
 }
 
 export interface ActionContext {

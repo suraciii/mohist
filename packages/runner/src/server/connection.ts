@@ -66,6 +66,7 @@ export class ServerConnection {
       exitCode: result.exitCode,
       artifactUploadIds: result.artifactUploadIds ?? null,
       cleanupAttempts: result.cleanupAttempts ?? null,
+      addTasks: result.addTasks ?? null,
     }
     if (ownerKind) {
       body.ownerKind = ownerKind
@@ -235,6 +236,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     setVars: dispatch.setVars ? (parseObject(dispatch.setVars) as Record<string, string> | null) : null,
     ownerKind: dispatch.ownerKind ?? undefined,
     agentJobId: dispatch.agentJobId ?? undefined,
+    recovery: parseObject(dispatch.recovery),
   }
 }
 

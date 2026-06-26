@@ -130,6 +130,8 @@ vars.change.url
 - 不要求所有 action 都返回同一组错误码或字段名。
 - 不让 engine 理解 `base-moved`、`config-error` 等具体含义。
 
+Recovery handler 的 `when` 表达式匹配 action output 的任意字段（如 `errorCode=base-moved`、`promise=FAIL`、`failureKind=conflict`），不限定字段名。见 [`recovery.md`](recovery.md)。
+
 ## GitHub PR Actions
 
 `mohist/create-github-pr`、`mohist/mark-github-pr-ready`、`mohist/push`
@@ -195,16 +197,17 @@ PR checks 失败时，`merge-github-pr` 返回 action-owned JSON failure，例�
 
 ## Failure Recovery
 
-Task 遇到可恢复失败时，由 action 决定需要哪些 recovery tasks，通过 result
-返回给 engine 插入。Recovery 是 task 完成的一部分，不是失败后的补救。
+Task 遇到可恢复失败时，由 runner executor（不是 action 自身）用 `when` 表达式
+匹配 action output，决定需要哪些 recovery tasks，通过 result 返回给 engine 插入。
+Recovery 是 task 完成的一部分，不是失败后的补救。
 
 详细设计见 [`recovery.md`](recovery.md)。
 
 核心边界：
 
-- recovery 的决策和 task 构造在 action 侧（runner），不在 workflow engine。
-- `recoveryBudget` 是 task 声明属性，随 `with` 下发；action 读取并递减。
-- engine 收到带 `recoveryTasks` 的 completed result 时，机械插入这些真实
+- recovery 的决策和 task 构造在 runner executor 侧，不在 action 内部，不在 workflow engine。
+- `recovery` 是 task 顶级属性（与 `with`、`artifacts` 并列）。runner executor 读取并递减 budget。
+- engine 收到带 `addTasks` 的 completed result 时，机械插入这些真实
   workflow tasks，不理解其内容。
 - rebase、push、PR checks wait、PR merge 等副作用仍在 runner action 内执行。
 - `titleFrom`、`bodyFrom`、`subjectFrom`、`messageFrom` 这类 `issue.title` / `issue.body` 输入不是 workflow metadata。runner action 在运行时通过 `mo issue show <number> --project-id <projectId> --output json` 获取 issue title/body。

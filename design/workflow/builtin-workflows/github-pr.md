@@ -12,7 +12,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
 然后等待 PR checks 并 squash merge。
 
 不引入 `ready` stage，不引入 check-level `verifyTask`。自动修复通过 task
-`onFailure` 表达；恢复 task 完成后使用 `retry: self` 重新运行原失败 task。
+`recovery` 表达；恢复 task 完成后使用 `retrySelf: true` 重新运行原失败 task。
 
 ## Definition
 
@@ -92,11 +92,10 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
       artifacts:
         files:
           - path: ${{ openspecChangeDir }}/self-review.md
-      onFailure:
-        limit: 2
-        cases:
-          - when:
-              output.errorCode: review-failed
+      recovery:
+        budget: 2
+        handlers:
+          - when: promise=FAIL
             tasks:
               - id: recover:fix-plan-review
                 title: Fix plan review findings
@@ -105,7 +104,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
                   session: plan
                   prompt: ${{ prompts.fix-plan-review }}
                   agent: ${{ vars.agent }}
-            retry: self
+            retrySelf: true
     - id: open-draft-pr
       title: Open draft GitHub PR
       uses: mohist/create-github-pr
@@ -167,11 +166,10 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
       artifacts:
         files:
           - path: ${{ openspecChangeDir }}/review.md
-      onFailure:
-        limit: 2
-        cases:
-          - when:
-              output.errorCode: review-failed
+      recovery:
+        budget: 2
+        handlers:
+          - when: promise=FAIL
             tasks:
               - id: recover:fix-review-findings
                 title: Fix review findings
@@ -180,7 +178,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
                   session: check
                   prompt: ${{ prompts.auto-fix }}
                   agent: ${{ vars.agent }}
-            retry: self
+            retrySelf: true
 
     - id: push
       title: Push
@@ -243,11 +241,10 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
       with:
         prNumber: ${{ vars.github.pr.number }}
         method: squash
-      onFailure:
-        limit: 2
-        cases:
-          - when:
-              output.errorCode: base-moved
+      recovery:
+        budget: 2
+        handlers:
+          - when: errorCode=base-moved
             tasks:
               - id: recover:rebase
                 title: Rebase after base moved
@@ -256,20 +253,18 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
                   baseBranch: ${{ repository.baseBranch }}
                   remote: origin
                   squash: false
-                  conflictMode: task
-                onFailure:
-                  limit: 1
-                  cases:
-                    - when:
-                        output.failureKind: conflict
-                      tasks:
-                        - id: recover:resolve-rebase-conflicts
-                          title: Resolve rebase conflicts
-                          uses: mohist/acp-agent
-                          with:
-                            session: integrate
-                            prompt: ${{ prompts.resolve-rebase-conflicts }}
-                            agent: ${{ vars.agent }}
+                  recovery:
+                    budget: 1
+                    handlers:
+                      - when: failureKind=conflict
+                        tasks:
+                          - id: recover:resolve-rebase-conflicts
+                            title: Resolve rebase conflicts
+                            uses: mohist/acp-agent
+                            with:
+                              session: integrate
+                              prompt: ${{ prompts.resolve-rebase-conflicts }}
+                              agent: ${{ vars.agent }}
               - id: recover:push
                 title: Push
                 uses: mohist/push
@@ -278,10 +273,9 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
                   target: ${{ workspace.branch }}
                   remote: origin
                   forceWithLease: true
-            retry: self
+            retrySelf: true
 
-          - when:
-              output.errorCode: pr-checks-failed
+          - when: errorCode=pr-checks-failed
             tasks:
               - id: recover:fix-pr-checks
                 title: Fix failing GitHub PR checks
@@ -298,7 +292,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
                   target: ${{ workspace.branch }}
                   remote: origin
                   forceWithLease: true
-            retry: self
+            retrySelf: true
 
   checks:
     - name: merge-verified
@@ -320,11 +314,10 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
 - `github-pr-status` 有两种使用模式：check 阶段做只读确认（PR 已 ready，head/base
   匹配）；integrate 阶段用 `expect: merged` 验证 PR 已合入。
 - `ai-review` 的 `expect.markers.oneOf: [PASS, FAIL]` 保证 agent 产出合规
-  marker；`failIf: FAIL` 让 engine 在 marker 匹配到 FAIL 时将 task 标为失败。
-  失败时的 `errorCode` 由 action 在自己的 output 中定义（如
-  `errorCode: review-failed`），engine 不自动生成。auto-fix 是
-  `ai-review.onFailure` 的 recovery task；修复后 `retry: self` 重新运行
-  `ai-review`。`self-review` 同理。
+  marker；`failIf: FAIL` 让 action 在 marker 匹配到 FAIL 时返回失败，output
+  中 `promise` 字段值为 `FAIL`。recovery handler 用 `when: promise=FAIL`
+  匹配。auto-fix 是 recovery handler 的 task；修复后 `retrySelf: true`
+  重新运行 `ai-review`。`self-review` 同理。
 - `mark-pr-ready` 只需要 `prNumber`，且必须幂等：PR 已经 ready 时
   成功返回。
 - `push` 是显式同步 task。它把本地线性 workflow branch
@@ -332,11 +325,11 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
 - `push` 不声明业务 recovery。若 push 失败，说明权限、
   网络或远程 branch 被外部写入，应作为普通 task failure 暴露。
 - `merge-pr` 等待 GitHub PR checks，通过后 squash merge。
-- `base-moved` 属于 `merge-pr` 的 recovery：rebase、push、
-  然后 `retry: self` 重新运行原 merge task。不重新 mark ready。
-- rebase 如果发生冲突，`mohist/rebase` 在 `conflictMode: task` 下必须返回
-  `output.failureKind: conflict`，并保留 rebase 进行中。随后
-  `recover:rebase.onFailure` 触发显式 `recover:resolve-rebase-conflicts` task。
+- `base-moved` 属于 `merge-pr` 的 recovery（`when: errorCode=base-moved`）：rebase、push、
+  然后 `retrySelf: true` 重新运行原 merge task。不重新 mark ready。
+- rebase 如果发生冲突，`mohist/rebase` 必须返回 `output.failureKind: conflict`，
+  并保留 rebase 进行中。随后 rebase 的 recovery handler（`when: failureKind=conflict`）
+  触发显式 `recover:resolve-rebase-conflicts` task。
   该 task 负责解决冲突并完成正在进行的 rebase；随后 workflow 继续执行
   `recover:push`，再重试 merge。
 - recovery task 的 prompt 使用命名引用（`${{ prompts.resolve-rebase-conflicts }}`、
@@ -347,7 +340,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
     `${{ repository.baseBranch }}` 在 prompt 模板展开上下文中可用）。
   - `fix-pr-checks` 必须指导 agent：修复失败的 GitHub PR checks、并确保修复后
     的 commit 已推送到远程 PR branch。
-- `pr-checks-failed` 属于 `merge-pr` 的 recovery：agent 修复失败
-  checks、push，然后 `retry: self` 重新运行原 merge task。
+- `pr-checks-failed` 属于 `merge-pr` 的 recovery（`when: errorCode=pr-checks-failed`）：agent 修复失败
+  checks、push，然后 `retrySelf: true` 重新运行原 merge task。
 - PR checks 是 `merge-github-pr` 的内部前置条件，不是 stage check。
 - PR 相关副作用必须显式出现在 task graph；不使用 stage hook 或隐藏边界动作。

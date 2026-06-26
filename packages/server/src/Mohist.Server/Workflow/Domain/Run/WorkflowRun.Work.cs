@@ -17,10 +17,10 @@ public sealed record WorkflowWork
         Data = data;
     }
 
-    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null, Dictionary<string, string>? setVars = null) => new(stage, "task", new TaskData(id, title, uses, with, artifacts, setVars));
+    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null, Dictionary<string, string>? setVars = null, RecoveryDefinition? recovery = null) => new(stage, "task", new TaskData(id, title, uses, with, artifacts, setVars, recovery));
     public static WorkflowWork Checks(string stage, List<CheckItem> items) => new(stage, "checks", new ChecksData(items));
 
-    public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With, TaskArtifactCapture? Artifacts = null, Dictionary<string, string>? SetVars = null);
+    public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With, TaskArtifactCapture? Artifacts = null, Dictionary<string, string>? SetVars = null, RecoveryDefinition? Recovery = null);
     public sealed record ChecksData(List<CheckItem> Items);
 }
 
@@ -34,7 +34,7 @@ public static partial class WorkflowRunExtensions
 
             var pendingTask = current.CurrentTask();
             if (pendingTask is not null)
-                return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars);
+                return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery);
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)

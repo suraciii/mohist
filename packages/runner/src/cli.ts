@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { hostname } from "node:os"
 import { RunnerHost } from "./runtime/host.js"
 import { defaultRunnerRoot } from "./runtime/workspace.js"
 
@@ -8,7 +9,7 @@ process.on("SIGTERM", () => controller.abort())
 
 await new RunnerHost({
   serverUrl: env("SERVER_URL") ?? env("ServerUrl") ?? "http://localhost:3456",
-  runnerId: env("RUNNER_ID") ?? env("RunnerId") ?? `runner-${process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? process.pid}`,
+  runnerId: env("RUNNER_ID") ?? env("RunnerId") ?? `runner-${hostname()}`,
   projectId: env("PROJECT_ID") ?? env("ProjectId"),
   runnerRoot: env("RUNNER_ROOT") ?? env("RunnerRoot") ?? defaultRunnerRoot(),
   maxConcurrentWorkflows: positiveNumberEnv("MAX_CONCURRENT_WORKFLOWS") ?? positiveNumberEnv("MaxConcurrentWorkflows") ?? 1,

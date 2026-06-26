@@ -95,19 +95,19 @@ stages:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
                 failIf: <promise>FAIL</promise>
-          recovery:
-            budget: 2
-            handlers:
-              - when: review-failed
-                tasks:
-                  - id: recover:fix-plan-review
-                    title: Fix plan review findings
-                    uses: mohist/acp-agent
-                    with:
-                      session: plan
-                      prompt: ${{ prompts.fix-plan-review }}
-                      agent: ${{ vars.agent }}
-                retrySelf: true
+        recovery:
+          budget: 2
+          handlers:
+            - when: promise=FAIL
+              tasks:
+                - id: recover:fix-plan-review
+                  title: Fix plan review findings
+                  uses: mohist/acp-agent
+                  with:
+                    session: plan
+                    prompt: ${{ prompts.fix-plan-review }}
+                    agent: ${{ vars.agent }}
+              retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/self-review.md
@@ -184,19 +184,19 @@ stages:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
                 failIf: <promise>FAIL</promise>
-          recovery:
-            budget: 2
-            handlers:
-              - when: review-failed
-                tasks:
-                  - id: recover:fix-review-findings
-                    title: Fix review findings
-                    uses: mohist/acp-agent
-                    with:
-                      session: check
-                      prompt: ${{ prompts.auto-fix }}
-                      agent: ${{ vars.agent }}
-                retrySelf: true
+        recovery:
+          budget: 2
+          handlers:
+            - when: promise=FAIL
+              tasks:
+                - id: recover:fix-review-findings
+                  title: Fix review findings
+                  uses: mohist/acp-agent
+                  with:
+                    session: check
+                    prompt: ${{ prompts.auto-fix }}
+                    agent: ${{ vars.agent }}
+              retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/review.md
@@ -244,11 +244,11 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
-          recovery:
-            budget: 3
-            handlers:
-              - when: retry-safe
-                retrySelf: true
+        recovery:
+          budget: 3
+          handlers:
+            - when: errorCode=retry-safe
+              retrySelf: true
 
       - id: push
         title: Push
@@ -265,61 +265,60 @@ stages:
         with:
           prNumber: ${{ vars.github.pr.number }}
           method: squash
-          recovery:
-            budget: 2
-            handlers:
-              - when: base-moved
-                tasks:
-                  - id: recover:rebase
-                    title: Rebase after base moved
-                    uses: mohist/rebase
-                    with:
-                      baseBranch: ${{ repository.baseBranch }}
-                      remote: origin
-                      squash: false
-                      conflictMode: task
-                      recovery:
-                        budget: 2
-                        handlers:
-                          - when: conflict
-                            tasks:
-                              - id: recover:resolve-rebase-conflicts
-                                title: Resolve rebase conflicts
-                                uses: mohist/acp-agent
-                                with:
-                                  session: integrate
-                                  prompt: ${{ prompts.resolve-rebase-conflicts }}
-                                  agent: ${{ vars.agent }}
-                            retrySelf: true
-                  - id: recover:push
-                    title: Push
-                    uses: mohist/push
-                    with:
-                      source: ${{ workspace.branch }}
-                      target: ${{ workspace.branch }}
-                      remote: origin
-                      forceWithLease: true
-                retrySelf: true
-              - when: pr-checks-failed
-                tasks:
-                  - id: recover:fix-pr-checks
-                    title: Fix failing GitHub PR checks
-                    uses: mohist/acp-agent
-                    with:
-                      session: integrate
-                      prompt: ${{ prompts.fix-pr-checks }}
-                      agent: ${{ vars.agent }}
-                  - id: recover:push
-                    title: Push
-                    uses: mohist/push
-                    with:
-                      source: ${{ workspace.branch }}
-                      target: ${{ workspace.branch }}
-                      remote: origin
-                      forceWithLease: true
-                retrySelf: true
-              - when: protection-conflict
-                retrySelf: true
+        recovery:
+          budget: 2
+          handlers:
+            - when: errorCode=base-moved
+              tasks:
+                - id: recover:rebase
+                  title: Rebase after base moved
+                  uses: mohist/rebase
+                  with:
+                    baseBranch: ${{ repository.baseBranch }}
+                    remote: origin
+                    squash: false
+                  recovery:
+                    budget: 2
+                    handlers:
+                      - when: failureKind=conflict
+                        tasks:
+                          - id: recover:resolve-rebase-conflicts
+                            title: Resolve rebase conflicts
+                            uses: mohist/acp-agent
+                            with:
+                              session: integrate
+                              prompt: ${{ prompts.resolve-rebase-conflicts }}
+                              agent: ${{ vars.agent }}
+                        retrySelf: true
+                - id: recover:push
+                  title: Push
+                  uses: mohist/push
+                  with:
+                    source: ${{ workspace.branch }}
+                    target: ${{ workspace.branch }}
+                    remote: origin
+                    forceWithLease: true
+              retrySelf: true
+            - when: errorCode=pr-checks-failed
+              tasks:
+                - id: recover:fix-pr-checks
+                  title: Fix failing GitHub PR checks
+                  uses: mohist/acp-agent
+                  with:
+                    session: integrate
+                    prompt: ${{ prompts.fix-pr-checks }}
+                    agent: ${{ vars.agent }}
+                - id: recover:push
+                  title: Push
+                  uses: mohist/push
+                  with:
+                    source: ${{ workspace.branch }}
+                    target: ${{ workspace.branch }}
+                    remote: origin
+                    forceWithLease: true
+              retrySelf: true
+            - when: errorCode=protection-conflict
+              retrySelf: true
 
     checks:
       - name: merge-verified

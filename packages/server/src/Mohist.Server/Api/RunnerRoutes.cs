@@ -114,7 +114,8 @@ public static class RunnerRoutes
                 work.SetVars,
                 work.OwnerKind,
                 work.AgentJobId,
-                CleanupPolicy: ToCleanupPolicyDto(cleanupPolicyOptions.Value)));
+                CleanupPolicy: ToCleanupPolicyDto(cleanupPolicyOptions.Value),
+                Recovery: work.Recovery));
         });
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
@@ -137,7 +138,7 @@ public static class RunnerRoutes
                 return ApiResults.BadRequest($"ownerKind '{req.OwnerKind}' is not supported");
             }
 
-            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.RecoveryTasks);
+            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var report = string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
                 ? await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result)
@@ -361,7 +362,7 @@ public record RunnerReportRequest(
     string[]? ArtifactUploadIds = null,
     string? OwnerKind = null,
     string? AgentJobId = null,
-    List<RuntimeTaskInput>? RecoveryTasks = null);
+    List<RuntimeTaskInput>? AddTasks = null);
 public record RunnerReportResponse(
     string WorkflowRunId,
     string? WorkflowStatus,
@@ -391,7 +392,8 @@ public record WorkDispatchResponse(
     string? SetVars = null,
     string? OwnerKind = null,
     string? AgentJobId = null,
-    CleanupPolicyDto? CleanupPolicy = null);
+    CleanupPolicyDto? CleanupPolicy = null,
+    string? Recovery = null);
 
 /// <summary>
 /// Wire shape for the workspace cleanup policy that the server hands the

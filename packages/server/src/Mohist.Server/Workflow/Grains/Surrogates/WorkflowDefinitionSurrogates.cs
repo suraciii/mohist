@@ -56,13 +56,14 @@ public struct TaskDefinitionSurrogate
     [Id(3)] public Dictionary<string, JsonElement?>? With;
     [Id(4)] public TaskArtifactCapture? Artifacts;
     [Id(6)] public Dictionary<string, string>? SetVars;
+    [Id(7)] public RecoveryDefinition? Recovery;
 }
 
 [RegisterConverter]
 public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition, TaskDefinitionSurrogate>
 {
     public TaskDefinition ConvertFromSurrogate(in TaskDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Artifacts, surrogate.SetVars);
+        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.Artifacts, surrogate.SetVars, surrogate.Recovery);
 
     public TaskDefinitionSurrogate ConvertToSurrogate(in TaskDefinition value) => new()
     {
@@ -72,6 +73,49 @@ public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition
         With = value.With,
         Artifacts = value.Artifacts,
         SetVars = value.SetVars,
+        Recovery = value.Recovery,
+    };
+}
+
+[GenerateSerializer]
+public struct RecoveryDefinitionSurrogate
+{
+    [Id(0)] public int Budget;
+    [Id(1)] public List<RecoveryHandlerDefinition> Handlers;
+}
+
+[RegisterConverter]
+public sealed class RecoveryDefinitionSurrogateConverter : IConverter<RecoveryDefinition, RecoveryDefinitionSurrogate>
+{
+    public RecoveryDefinition ConvertFromSurrogate(in RecoveryDefinitionSurrogate surrogate) =>
+        new(surrogate.Budget, surrogate.Handlers);
+
+    public RecoveryDefinitionSurrogate ConvertToSurrogate(in RecoveryDefinition value) => new()
+    {
+        Budget = value.Budget,
+        Handlers = value.Handlers.ToList(),
+    };
+}
+
+[GenerateSerializer]
+public struct RecoveryHandlerDefinitionSurrogate
+{
+    [Id(0)] public string When;
+    [Id(1)] public List<TaskDefinition> Tasks;
+    [Id(2)] public bool RetrySelf;
+}
+
+[RegisterConverter]
+public sealed class RecoveryHandlerDefinitionSurrogateConverter : IConverter<RecoveryHandlerDefinition, RecoveryHandlerDefinitionSurrogate>
+{
+    public RecoveryHandlerDefinition ConvertFromSurrogate(in RecoveryHandlerDefinitionSurrogate surrogate) =>
+        new(surrogate.When, surrogate.Tasks, surrogate.RetrySelf);
+
+    public RecoveryHandlerDefinitionSurrogate ConvertToSurrogate(in RecoveryHandlerDefinition value) => new()
+    {
+        When = value.When,
+        Tasks = value.Tasks.ToList(),
+        RetrySelf = value.RetrySelf,
     };
 }
 

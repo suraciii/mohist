@@ -207,19 +207,19 @@ stages:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
                 failIf: <promise>FAIL</promise>
-          recovery:
-            budget: 2
-            handlers:
-              - when: review-failed
-                tasks:
-                  - id: recover:fix-review-findings
-                    title: Fix review findings
-                    uses: mohist/acp-agent
-                    with:
-                      session: check
-                      prompt: ${{ prompts.auto-fix }}
-                      agent: ${{ vars.agent }}
-                retrySelf: true
+        recovery:
+          budget: 2
+          handlers:
+            - when: promise=FAIL
+              tasks:
+                - id: recover:fix-review-findings
+                  title: Fix review findings
+                  uses: mohist/acp-agent
+                  with:
+                    session: check
+                    prompt: ${{ prompts.auto-fix }}
+                    agent: ${{ vars.agent }}
+              retrySelf: true
         artifacts:
           files:
             - path: ${{ openspecChangeDir }}/review.md
@@ -274,11 +274,11 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
-          recovery:
-            budget: 3
-            handlers:
-              - when: retry-safe
-                retrySelf: true
+        recovery:
+          budget: 3
+          handlers:
+            - when: errorCode=retry-safe
+              retrySelf: true
       - id: integrate:rebase
         title: Rebase and squash branch
         uses: mohist/rebase
