@@ -5,12 +5,14 @@ namespace Mohist.Server.Workflow.Domain.Run;
 
 public enum StageCheckStatus { Pending, Passed, Failed }
 
+[GenerateSerializer]
 public sealed record CheckItem(
     string Name,
     string Title,
     string? Uses = null,
     Dictionary<string, JsonElement?>? With = null);
 
+[GenerateSerializer]
 public sealed record CheckResult(
     string Name,
     string Status,

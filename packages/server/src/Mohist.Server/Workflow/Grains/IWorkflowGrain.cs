@@ -21,9 +21,20 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
-    Task<WorkDispatch?> PollWorkAsync(string runnerId);
-    Task NotifyRunnerLostAsync(string runnerId);
-    Task ReportResultAsync(string runnerId, string workId, WorkResult result);
+    Task<WorkItem?> PollWorkAsync(string runnerId);
+    Task ReportTaskOutcomeAsync(string runnerId, string workId, TaskOutcome outcome);
+    Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome);
+
+    /// <summary>
+    /// Releases the sequential stage lock owned by this workflow run for the
+    /// given stage. Driven by the bus-side
+    /// <c>com.mohist.workflow.stage.{completed,failed}</c> subscription
+    /// handler; also used internally by the grain's retry/rerun/stop paths
+    /// (which call into it with the current stage). The handler pattern
+    /// replaces the previous grain-internal <c>On()</c> branch so lock
+    /// release fires asynchronously after the event is published.
+    /// </summary>
+    Task ReleaseStageLocksAsync(string stage, string reason);
     Task<string?> GetRunStatusAsync();
     Task<bool> IsStoppedOrTerminalAsync();
     Task<string?> GetAssignedRunnerIdAsync();

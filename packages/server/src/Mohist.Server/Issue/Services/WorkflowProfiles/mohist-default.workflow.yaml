@@ -29,7 +29,7 @@ stages:
         uses: mohist/acp-agent
         with:
           session: plan
-          prompt: ${{ prompts.proposal }} 
+          prompt: ${{ prompts.proposal }}
           agent: ${{ vars.agent }}
           expect:
             files:

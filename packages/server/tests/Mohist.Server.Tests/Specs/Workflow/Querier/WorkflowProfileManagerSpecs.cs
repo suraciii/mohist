@@ -650,6 +650,280 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("${{ missing.agent }}", result!["agent"]!.Value.GetString());
     }
 
+    // =================================================================
+    // Narrow API tests — LoadStageSpecsAsync / LoadStructureAsync /
+    // LoadApprovalConfigAsync (design D6 — profileManager encapsulates
+    // the template selection cascade so the grain never holds a
+    // WorkflowDefinition).
+    // =================================================================
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStageSpecsAsync_ReturnsTasksAndChecksForStage_FromProjectTemplate()
+    {
+        var runId = "wr_stage_specs_proj";
+        var templateJson = SerializeDefinitionWithStages("specs-template",
+            ("plan", new[]
+            {
+                new TaskDefinition("draft", "Draft", "spec/task"),
+            }, new[]
+            {
+                new CheckDefinition("plan-ok", "Plan OK", "spec/check"),
+            }, requiresApproval: false),
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+                new TaskDefinition("test", "Test", "spec/task"),
+            }, new[]
+            {
+                new CheckDefinition("build-ok", "Build OK", "spec/check"),
+            }, requiresApproval: false));
+
+        await SeedProjectTemplateAsync("specs_proj", runId, "specs-template", templateJson);
+
+        var build = await _manager.LoadStageSpecsAsync(runId, "build");
+
+        Assert.Equal("build", build.Stage);
+        Assert.Equal(new[] { "compile", "test" }, build.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { "build-ok" }, build.Checks.Select(c => c.Name).ToArray());
+        Assert.Equal("sequential", build.LockBehavior);
+        Assert.Equal(new[] { "ci-pool" }, build.Resources);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStageSpecsAsync_HonorsIssueCustomTemplate_PerStage()
+    {
+        // Issue-level template can replace the project default. The narrow API
+        // re-runs the cascade on every call so the choice is honored
+        // even when stage-init runs after StartAsync has already loaded
+        // a different (e.g. project default) structure.
+        var runId = "wr_stage_specs_issue";
+        var projectJson = SerializeDefinitionWithStages("project-tmpl",
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+        var issueJson = SerializeDefinitionWithStages("issue-custom",
+            ("build", new[]
+            {
+                new TaskDefinition("replacement-task", "Replacement", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedIssueOverProjectTemplateAsync(
+            "iss_proj", "iss_issue", runId,
+            issueTemplateJson: issueJson,
+            projectDefaultTemplateId: "project-tmpl",
+            projectTemplateJson: projectJson);
+
+        var build = await _manager.LoadStageSpecsAsync(runId, "build");
+
+        Assert.Equal(new[] { "replacement-task" }, build.Tasks.Select(t => t.Id).ToArray());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStageSpecsAsync_RerunsCascadeBetweenCalls_HotReloadsProfileEdits()
+    {
+        // The hot-reload promise: profile edits between two calls MUST be
+        // visible to the second caller (since this API re-runs the cascade).
+        var runId = "wr_stage_specs_hot_reload";
+        var templateJson = SerializeDefinitionWithStages("hot-template",
+            ("build", new[]
+            {
+                new TaskDefinition("original-task", "Original", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedProjectTemplateAsync("hot_proj", runId, "hot-template", templateJson);
+
+        var before = await _manager.LoadStageSpecsAsync(runId, "build");
+        Assert.Equal(new[] { "original-task" }, before.Tasks.Select(t => t.Id).ToArray());
+
+        // Mutate the project template to a new task — next call must see it.
+        var updatedJson = SerializeDefinitionWithStages("hot-template",
+            ("build", new[]
+            {
+                new TaskDefinition("replacement-task", "Replacement", "spec/task"),
+                new TaskDefinition("follow-up-task", "Follow Up", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+        await UpdateProjectTemplateAsync("hot_proj", "hot-template", updatedJson);
+
+        var after = await _manager.LoadStageSpecsAsync(runId, "build");
+        Assert.Equal(new[] { "replacement-task", "follow-up-task" }, after.Tasks.Select(t => t.Id).ToArray());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStageSpecsAsync_ThrowsWhenStageMissing()
+    {
+        var runId = "wr_stage_specs_missing";
+        var templateJson = SerializeDefinitionWithStages("missing-template",
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedProjectTemplateAsync("missing_proj", runId, "missing-template", templateJson);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _manager.LoadStageSpecsAsync(runId, "no-such-stage"));
+
+        Assert.Contains("no-such-stage", ex.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStructureAsync_ReturnsStageSequenceAndApprovalFlags_WithoutTasks()
+    {
+        // The narrow structure projection must NOT carry tasks or checks.
+        // That keeps the grain's Create path from touching per-stage detail
+        // until a stage actually initializes.
+        var runId = "wr_structure_basic";
+        var templateJson = SerializeDefinitionWithStages("struct-template",
+            ("plan", new[]
+            {
+                new TaskDefinition("draft", "Draft", "spec/task"),
+            }, new[]
+            {
+                new CheckDefinition("plan-ok", "Plan OK", "spec/check"),
+            }, requiresApproval: true),
+            ("build", new[]
+            {
+                new TaskDefinition("compile", "Compile", "spec/task"),
+            }, new[]
+            {
+                new CheckDefinition("build-ok", "Build OK", "spec/check"),
+            }, requiresApproval: false));
+
+        await SeedProjectTemplateAsync("struct_proj", runId, "struct-template", templateJson);
+
+        var structure = await _manager.LoadStructureAsync(runId);
+
+        Assert.Equal("struct-template", structure.Id);
+        Assert.Equal(new[] { "plan", "build" }, structure.Stages.Select(s => s.Stage).ToArray());
+        Assert.True(structure.Stages.Single(s => s.Stage == "plan").RequiresApproval);
+        Assert.False(structure.Stages.Single(s => s.Stage == "build").RequiresApproval);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStructureAsync_HonorsExplicitContextAtCreateTime_BeforeRunPersisted()
+    {
+        // StartAsync passes project/issue context explicitly because the run
+        // is not yet persisted when the structure is loaded for Create.
+        var runId = "wr_structure_explicit";
+        var templateJson = SerializeDefinitionWithStages("explicit-tmpl",
+            ("plan", new[]
+            {
+                new TaskDefinition("draft", "Draft", "spec/task"),
+            }, Array.Empty<CheckDefinition>(), requiresApproval: true));
+
+        // Seed only the project profile — no WorkflowRun row exists yet.
+        await using (var db = new MohistDbContext(_options))
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = "explicit_proj",
+                DefaultTemplateId = "explicit-tmpl",
+                Variables = "{}",
+            });
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = "explicit_proj",
+                TemplateId = "explicit-tmpl",
+                Template = templateJson,
+            });
+            db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+            {
+                IssueId = "explicit_issue",
+                Variables = "{}",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // The run is not in the DB; only the explicit context will find the
+        // project template.
+        var structure = await _manager.LoadStructureAsync(
+            runId, projectId: "explicit_proj", issueId: "explicit_issue");
+
+        Assert.Equal("explicit-tmpl", structure.Id);
+        Assert.Equal(new[] { "plan" }, structure.Stages.Select(s => s.Stage).ToArray());
+        Assert.True(structure.Stages.Single().RequiresApproval);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadStructureAsync_FallsBackToSystemDefault_WhenContextMissing()
+    {
+        // Sanity: when neither the run nor explicit context carries a
+        // project, the cascade ends at the system default template.
+        var structure = await _manager.LoadStructureAsync("unknown-run-id");
+
+        Assert.NotEmpty(structure.Stages);
+        Assert.Contains(structure.Stages, s => s.Stage == "plan");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadApprovalConfigAsync_ReturnsConfiguredFeedbackTask_WhenDefined()
+    {
+        var runId = "wr_approval_defined";
+        var feedbackConfig = new ApprovalFeedbackConfig(
+            Task: new FeedbackTaskConfig(
+                Id: "apply-feedback",
+                Title: "Apply Feedback",
+                Uses: "spec/task",
+                With: null));
+        var approval = new ApprovalConfig(Feedback: feedbackConfig);
+        var def = new WorkflowDefinition("approval-template",
+            new List<StageDefinition>
+            {
+                new("plan",
+                    new List<TaskDefinition>(),
+                    new List<CheckDefinition>(),
+                    RequiresApproval: true),
+            },
+            Approval: approval);
+        var templateJson = JsonSerializer.Serialize(def, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        });
+
+        await SeedProjectTemplateAsync("approval_proj", runId, "approval-template", templateJson);
+
+        var loaded = await _manager.LoadApprovalConfigAsync(runId);
+
+        Assert.NotNull(loaded);
+        Assert.NotNull(loaded!.Feedback);
+        Assert.NotNull(loaded.Feedback!.Task);
+        Assert.Equal("apply-feedback", loaded.Feedback.Task!.Id);
+        Assert.Equal("spec/task", loaded.Feedback.Task.Uses);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task LoadApprovalConfigAsync_ReturnsNull_WhenNoApprovalConfig()
+    {
+        var runId = "wr_approval_null";
+        var templateJson = SerializeDefinitionWithStages("no-approval-template",
+            ("plan", Array.Empty<TaskDefinition>(), Array.Empty<CheckDefinition>(), requiresApproval: false));
+
+        await SeedProjectTemplateAsync("no_approval_proj", runId, "no-approval-template", templateJson);
+
+        var loaded = await _manager.LoadApprovalConfigAsync(runId);
+
+        Assert.Null(loaded);
+    }
+
     // --- helpers ---
 
     private static string SerializeDefinition(
@@ -665,6 +939,98 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         });
+    }
+
+    private static string SerializeDefinitionWithStages(
+        string id,
+        params (string stage, TaskDefinition[] tasks, CheckDefinition[] checks, bool requiresApproval)[] stageSpecs)
+    {
+        var stages = new List<StageDefinition>();
+        foreach (var (stage, tasks, checks, requiresApproval) in stageSpecs)
+        {
+            stages.Add(new StageDefinition(
+                stage,
+                new List<TaskDefinition>(tasks),
+                new List<CheckDefinition>(checks),
+                RequiresApproval: requiresApproval,
+                LockBehavior: stage == "build" ? "sequential" : null,
+                Resources: stage == "build" ? new List<string> { "ci-pool" } : null));
+        }
+
+        var def = new WorkflowDefinition(id, stages);
+        return JsonSerializer.Serialize(def, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        });
+    }
+
+    private async Task SeedProjectTemplateAsync(string projectId, string runId, string templateId, string templateJson)
+    {
+        await using var db = new MohistDbContext(_options);
+        SeedRunContext(db, projectId, runId, runId);
+
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = projectId,
+            DefaultTemplateId = templateId,
+            Variables = "{}",
+        });
+        db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+        {
+            ProjectId = projectId,
+            TemplateId = templateId,
+            Template = templateJson,
+        });
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+        {
+            IssueId = runId,
+            Variables = "{}",
+        });
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task UpdateProjectTemplateAsync(string projectId, string templateId, string templateJson)
+    {
+        await using var db = new MohistDbContext(_options);
+        var existing = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
+        Assert.NotNull(existing);
+        existing!.Template = templateJson;
+        existing.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SeedIssueOverProjectTemplateAsync(
+        string projectId,
+        string issueId,
+        string runId,
+        string issueTemplateJson,
+        string projectDefaultTemplateId,
+        string projectTemplateJson)
+    {
+        await using var db = new MohistDbContext(_options);
+        SeedRunContext(db, projectId, issueId, runId);
+
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+        {
+            ProjectId = projectId,
+            DefaultTemplateId = projectDefaultTemplateId,
+            Variables = "{}",
+        });
+        db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+        {
+            ProjectId = projectId,
+            TemplateId = projectDefaultTemplateId,
+            Template = projectTemplateJson,
+        });
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+        {
+            IssueId = issueId,
+            Template = issueTemplateJson,
+            Variables = "{}",
+        });
+
+        await db.SaveChangesAsync();
     }
 
     private async Task SeedAsync(

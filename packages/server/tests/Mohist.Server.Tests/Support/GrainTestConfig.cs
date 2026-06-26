@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Grains;
@@ -51,7 +52,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton(WorkflowGrainTestHelpers.CreateEmptyConfigService());
         siloBuilder.Services.AddScoped<WorkflowRunProfileManager>();
         siloBuilder.Services.AddScoped<WorkflowProfileManager>();
-        siloBuilder.Services.AddScoped<WorkflowDispatchBuilder>();
+        siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
         siloBuilder.Services.AddScoped<WorkflowSessionHealthService>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();

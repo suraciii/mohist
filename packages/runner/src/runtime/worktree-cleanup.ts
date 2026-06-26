@@ -1,4 +1,4 @@
-import type { JsonObject, WorkItem } from "../core/types.js"
+import type { JsonObject, RenderedWorkItem } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 
 export const AGENT_BACKED_USES = "mohist/acp-agent"
@@ -11,7 +11,7 @@ export interface WorktreeSnapshot {
   isClean: boolean
 }
 
-export function isAgentBackedTask(work: Pick<WorkItem, "uses">): boolean {
+export function isAgentBackedTask(work: Pick<RenderedWorkItem, "uses">): boolean {
   return typeof work.uses === "string" && work.uses.trim().toLowerCase() === AGENT_BACKED_USES
 }
 
@@ -31,7 +31,7 @@ export function resolveMaxCleanupAttempts(variables: JsonObject): number {
   return DEFAULT_MAX_CLEANUP_ATTEMPTS
 }
 
-export function buildCleanupWith(work: WorkItem, renderedWith: JsonObject | null, snapshot: WorktreeSnapshot, attempt: number): JsonObject {
+export function buildCleanupWith(work: RenderedWorkItem, renderedWith: JsonObject | null, snapshot: WorktreeSnapshot, attempt: number): JsonObject {
   const existingWith = renderedWith ?? {}
   const existingSession = stringInput(existingWith as JsonObject, "session")
   const basePrompt = stringInput(existingWith as JsonObject, "prompt")

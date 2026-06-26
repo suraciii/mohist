@@ -156,6 +156,72 @@ public class StageLockSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task FailedIntegrateStage_LockReleasedViaBusSubscriptionHandler()
+    {
+        // Pins the T-005 D8 bus-side lock release contract: the grain's
+        // On() dispatch no longer invokes ReleaseStageLocksAsync directly
+        // for StageCompleted/StageFailed — instead, the bus-side
+        // WorkflowStageLockReleaseHandler subscribes to the events and
+        // routes them back into the grain. Lock acquisition by the next
+        // workflow run therefore requires the publish → handler → grain
+        // round trip to complete before the next poll succeeds.
+        var suffix = Guid.NewGuid().ToString("N");
+        var projectId = $"stage-lock-bus-fail-project-{suffix}";
+        var resource = $"project-integration-bus-fail-{suffix}";
+        var workflow1Id = $"wf-stage-lock-bus-fail-1-{suffix}";
+        var workflow2Id = $"wf-stage-lock-bus-fail-2-{suffix}";
+        var runner1Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-bus-fail-runner-1-{suffix}");
+        var runner2Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-bus-fail-runner-2-{suffix}");
+        var runner1 = Grains.GetGrain<IRunnerGrain>(runner1Id);
+        var runner2 = Grains.GetGrain<IRunnerGrain>(runner2Id);
+
+        var wf1 = Grains.GetGrain<IWorkflowGrain>(workflow1Id);
+        var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
+
+        var definition = IntegrateWorkflow(resource);
+        await SeedWorkflowTemplateAsync(workflow1Id, definition, projectId);
+        await SeedWorkflowTemplateAsync(workflow2Id, definition, projectId);
+        await wf1.StartAsync(ProjectInput(projectId));
+        await wf2.StartAsync(ProjectInput(projectId));
+        await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
+        await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
+
+        var wf1Build = await runner1.PollAsync();
+        Assert.NotNull(wf1Build);
+        await ReportAsync(runner1Id, workflow1Id, wf1Build.WorkId, new WorkResult("completed"));
+
+        var wf2Build = await runner2.PollAsync();
+        Assert.NotNull(wf2Build);
+        await ReportAsync(runner2Id, workflow2Id, wf2Build.WorkId, new WorkResult("completed"));
+
+        var wf1Integrate = await runner1.PollAsync();
+        Assert.NotNull(wf1Integrate);
+
+        var lockGrain = Grains.GetGrain<IWorkflowStageLockGrain>(
+            WorkflowStageLockKeys.ForProjectResource(projectId, resource));
+        var stateBefore = await lockGrain.GetStateAsync();
+        Assert.Equal(workflow1Id, stateBefore?.Owner?.WorkflowRunId);
+
+        // Failing the integrate task emits StageFailed. The grain's On()
+        // branch used to release the lock here; T-005 moves that into the
+        // WorkflowStageLockReleaseHandler bus subscription. After
+        // ReportAsync returns, the publish → handler → grain.ReleaseStageLocksAsync
+        // chain must have completed (publish is awaited before SaveRunAsync
+        // returns), so the lock grain must have dropped its owner.
+        await ReportAsync(runner1Id, workflow1Id, wf1Integrate.WorkId, new WorkResult("failed", "merge conflict"));
+
+        var stateAfter = await lockGrain.GetStateAsync();
+        Assert.Null(stateAfter?.Owner);
+
+        var wf2Integrate = await runner2.PollAsync();
+        Assert.NotNull(wf2Integrate);
+        Assert.Equal(workflow2Id, wf2Integrate.WorkflowRunId);
+        Assert.Equal("integrate", wf2Integrate.Stage);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task StoppedIntegrateWorkflow_ReleasesSequentialLock()
     {
         var suffix = Guid.NewGuid().ToString("N");

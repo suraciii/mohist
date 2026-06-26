@@ -1,7 +1,7 @@
-import type { ActionResult, JsonObject, JsonValue, WorkItem } from "../core/types.js"
+import type { ActionResult, JsonObject, JsonValue, RenderedWorkItem } from "../core/types.js"
 
 export function captureOutputs(
-  outputs: WorkItem["outputs"],
+  outputs: RenderedWorkItem["outputs"],
   actionResult: ActionResult,
 ): JsonObject | undefined {
   if (actionResult.status !== "success" && actionResult.status !== "completed") return undefined

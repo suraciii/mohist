@@ -11,7 +11,7 @@ import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
-import type { WorkItem } from "../core/types.js"
+import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 
@@ -299,7 +299,7 @@ export class RunnerHost {
     }
   }
 
-  private async executeAndReport(work: WorkItem, signal: AbortSignal) {
+  private async executeAndReport(work: RenderedWorkItem, signal: AbortSignal) {
     // Capture the last known result for a best-effort drain report when the
     // host is being torn down (SIGINT). Using a fresh AbortSignal (with a
     // short timeout) gives the workflow an explicit runner report instead of

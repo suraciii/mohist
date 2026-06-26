@@ -4,97 +4,18 @@ using Orleans.Serialization;
 
 namespace Mohist.Server.Workflow.Grains.Surrogates;
 
-[GenerateSerializer]
-public struct WorkflowDefinitionSurrogate
-{
-    [Id(0)] public string Id;
-    [Id(1)] public List<StageDefinition> Stages;
-    [Id(2)] public string? Name;
-    [Id(3)] public Dictionary<string, JsonElement?>? Variables;
-    [Id(4)] public Dictionary<string, JsonElement?>? Defaults;
-    [Id(5)] public Dictionary<string, string>? Artifacts;
-    [Id(6)] public string? Description;
-    [Id(7)] public ApprovalConfig? Approval;
-}
-
-[RegisterConverter]
-public sealed class WorkflowDefinitionSurrogateConverter : IConverter<WorkflowDefinition, WorkflowDefinitionSurrogate>
-{
-    public WorkflowDefinition ConvertFromSurrogate(in WorkflowDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Stages, surrogate.Name, surrogate.Description, surrogate.Variables, surrogate.Defaults, surrogate.Artifacts, surrogate.Approval);
-
-    public WorkflowDefinitionSurrogate ConvertToSurrogate(in WorkflowDefinition value) => new()
-    {
-        Id = value.Id,
-        Stages = value.Stages,
-        Name = value.Name,
-        Description = value.Description,
-        Variables = value.Variables,
-        Defaults = value.Defaults,
-        Artifacts = value.Artifacts,
-        Approval = value.Approval,
-    };
-}
-
-[GenerateSerializer]
-public struct ApprovalConfigSurrogate
-{
-    [Id(0)] public ApprovalFeedbackConfig? Feedback;
-}
-
-[RegisterConverter]
-public sealed class ApprovalConfigSurrogateConverter : IConverter<ApprovalConfig, ApprovalConfigSurrogate>
-{
-    public ApprovalConfig ConvertFromSurrogate(in ApprovalConfigSurrogate surrogate) =>
-        new(surrogate.Feedback);
-
-    public ApprovalConfigSurrogate ConvertToSurrogate(in ApprovalConfig value) => new()
-    {
-        Feedback = value.Feedback,
-    };
-}
-
-[GenerateSerializer]
-public struct ApprovalFeedbackConfigSurrogate
-{
-    [Id(0)] public FeedbackTaskConfig? Task;
-}
-
-[RegisterConverter]
-public sealed class ApprovalFeedbackConfigSurrogateConverter : IConverter<ApprovalFeedbackConfig, ApprovalFeedbackConfigSurrogate>
-{
-    public ApprovalFeedbackConfig ConvertFromSurrogate(in ApprovalFeedbackConfigSurrogate surrogate) =>
-        new(surrogate.Task);
-
-    public ApprovalFeedbackConfigSurrogate ConvertToSurrogate(in ApprovalFeedbackConfig value) => new()
-    {
-        Task = value.Task,
-    };
-}
-
-[GenerateSerializer]
-public struct FeedbackTaskConfigSurrogate
-{
-    [Id(0)] public string Id;
-    [Id(1)] public string Title;
-    [Id(2)] public string? Uses;
-    [Id(3)] public Dictionary<string, JsonElement?>? With;
-}
-
-[RegisterConverter]
-public sealed class FeedbackTaskConfigSurrogateConverter : IConverter<FeedbackTaskConfig, FeedbackTaskConfigSurrogate>
-{
-    public FeedbackTaskConfig ConvertFromSurrogate(in FeedbackTaskConfigSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With);
-
-    public FeedbackTaskConfigSurrogate ConvertToSurrogate(in FeedbackTaskConfig value) => new()
-    {
-        Id = value.Id,
-        Title = value.Title,
-        Uses = value.Uses,
-        With = value.With,
-    };
-}
+// NOTE: WorkflowDefinition (and ApprovalConfig / ApprovalFeedbackConfig /
+// FeedbackTaskConfig) are intentionally NOT registered here. The control-plane
+// grain no longer holds or returns WorkflowDefinition — it only goes through
+// the narrow profileManager APIs (LoadStageSpecsAsync / LoadStructureAsync /
+// LoadApprovalConfigAsync), which deserialize into the runtime types and hand
+// the grain stage / structure / approval slices. WorkflowDefinition itself is
+// an internal persistence/management concern (IssueWorkflowProfileManager,
+// ProjectWorkflowProfileManager, WorkflowYamlSerializer, ResolvedTemplate)
+// serialized via System.Text.Json, not Orleans. The per-stage surrogates
+// below remain because StageDefinition / TaskDefinition / CheckDefinition are
+// still passed into grain methods (InitializeStage, AddTasksAsync,
+// BindArtifactUploadsAsync).
 
 [GenerateSerializer]
 public struct StageDefinitionSurrogate

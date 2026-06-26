@@ -17,11 +17,9 @@ public sealed record WorkflowWork
         Data = data;
     }
 
-    public static WorkflowWork StageInit(string stage) => new(stage, "stage-init", new StageInitData());
     public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null, Dictionary<string, string>? setVars = null) => new(stage, "task", new TaskData(id, title, uses, with, artifacts, setVars));
     public static WorkflowWork Checks(string stage, List<CheckItem> items) => new(stage, "checks", new ChecksData(items));
 
-    public sealed record StageInitData;
     public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With, TaskArtifactCapture? Artifacts = null, Dictionary<string, string>? SetVars = null);
     public sealed record ChecksData(List<CheckItem> Items);
 }
@@ -33,8 +31,6 @@ public static partial class WorkflowRunExtensions
         public WorkflowWork? NextWork()
         {
             var current = run.CurrentStage();
-            if (!current.Initialized)
-                return WorkflowWork.StageInit(current.Id);
 
             var pendingTask = current.CurrentTask();
             if (pendingTask is not null)

@@ -3,7 +3,7 @@ import { stat, readFile, readdir, realpath, lstat } from "node:fs/promises"
 import { realpathSync } from "node:fs"
 import { isAbsolute, normalize, relative, resolve, sep } from "node:path"
 import type { ArtifactUploadRequest, ArtifactUploadResponse } from "../server/connection.js"
-import type { ActionResult, JsonObject, WorkItem } from "../core/types.js"
+import type { ActionResult, JsonObject, RenderedWorkItem } from "../core/types.js"
 
 export interface ArtifactUploader {
   uploadArtifact(
@@ -42,13 +42,13 @@ export interface CapturedArtifact {
 }
 
 export interface ArtifactCaptureInput {
-  work: WorkItem
+  work: RenderedWorkItem
   workDir: string
   dynamicArtifacts?: ReadonlyArray<{ path: string }>
   limits?: ArtifactCaptureLimits
   /**
    * Optional pre-rendered `artifacts` object. When provided, the capture
-   * uses this in place of <see cref="WorkItem.artifacts"/> so callers
+   * uses this in place of <see cref="RenderedWorkItem.artifacts"/> so callers
    * that have already substituted template variables on the workflow
    * definition can feed the resolved paths through. Falls back to
    * <c>work.artifacts</c> when not set.
@@ -81,7 +81,7 @@ interface DeclaredArtifactDeclaration {
   source: "declared" | "dynamic"
 }
 
-export function declaredArtifactPaths(work: WorkItem): DeclaredArtifactDeclaration[] {
+export function declaredArtifactPaths(work: RenderedWorkItem): DeclaredArtifactDeclaration[] {
   return declaredPathsFromArtifacts(work.artifacts)
 }
 

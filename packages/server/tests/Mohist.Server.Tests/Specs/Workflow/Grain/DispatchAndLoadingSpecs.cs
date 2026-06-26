@@ -119,7 +119,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         Assert.Null(await runner.PollAsync());
 
-        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).ReportResultAsync(_runnerId!, load.WorkId, new WorkResult("completed"));
+        await runner.ReportWorkflowResultAsync(_workflowId!, load.WorkId, new WorkResult("completed"));
 
         var dynamicTask = await runner.PollAsync();
         Assert.NotNull(dynamicTask);

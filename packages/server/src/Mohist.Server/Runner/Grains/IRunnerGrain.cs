@@ -34,6 +34,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// without requiring the runner process to re-register or restart.
     /// </summary>
     Task UpdateAsync(int slots);
+    Task DeactivateForTestAsync();
 }
 
 public static class RunnerCapacity

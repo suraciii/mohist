@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Tests.Support;
 using Orleans;
@@ -24,7 +25,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     private readonly RecordingEventStore _sharedEventStore = new();
     private SqliteConnection _keeper = null!;
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
         var dbName = $"mohist-test-{Guid.NewGuid():N}";
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -39,7 +40,22 @@ public class WorkflowGrainFixture : IAsyncLifetime
         builder.ConfigureSilo((_, siloBuilder) =>
             GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore));
         Cluster = builder.Build();
-        return Cluster.DeployAsync();
+        await Cluster.DeployAsync();
+
+        // Wire the bus-side subscriptions that the production pipeline
+        // registers via AddCloudEventHandlersFromAssembly. Test fixtures
+        // do not run that registration path, so we add them explicitly
+        // here after the cluster has been deployed (the handler needs a
+        // live cluster client to dispatch lock releases into the running
+        // silo). New bus-side handlers must be added here so tests
+        // exercise the real dispatch path.
+        var handler = new WorkflowStageLockReleaseHandler(
+            Cluster.Client,
+            NullLogger<WorkflowStageLockReleaseHandler>.Instance);
+        _sharedEventBus.AddSubscription(new Subscription(
+            "com.mohist.workflow.stage.completed|com.mohist.workflow.stage.failed",
+            handler,
+            (h, e, ct) => ((WorkflowStageLockReleaseHandler)h).HandleAsync(e, ct)));
     }
 
     public Task DisposeAsync()

@@ -105,8 +105,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("checks-", check.WorkId);
 
-        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        await workflow.ReportResultAsync(r1, task.WorkId, new WorkResult("failed", "stale"));
+        var staleRunner = Grains.GetGrain<IRunnerGrain>(r1);
+        await staleRunner.ReportWorkflowResultAsync(_workflowId!, task.WorkId, new WorkResult("failed", "stale"));
 
         await ReportChecksPassAsync(r2, check, "check-1");
 
