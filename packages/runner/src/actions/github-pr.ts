@@ -915,10 +915,11 @@ export function classifyPrChecks(entries: PrCheckEntry[]): PrChecksClassificatio
   if (entries.length === 0) return { kind: "passed" }
   const failed: string[] = []
   for (const entry of entries) {
-    if (entry.bucket === "PENDING" || entry.bucket === "") {
+    const bucket = (entry.bucket ?? "").toLowerCase()
+    if (bucket === "pending" || bucket === "") {
       return { kind: "pending" }
     }
-    if (entry.bucket === "FAIL") {
+    if (bucket === "fail") {
       failed.push(formatFailedCheck(entry))
     }
   }
