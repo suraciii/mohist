@@ -12,7 +12,7 @@ import { AttachmentComposer } from '@/shared/ui'
 import { createIssue, extractAttachmentIds } from '../../../entities/issue'
 import { LabelEditor } from '../../../entities/issue/lib/label-editor'
 import type { LabelMap } from '../../../entities/issue/model/labels'
-import { useAvailableModelIds, useWorkflowProfiles } from '../../../entities/settings'
+import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { composeIssueTemplateBody, useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
@@ -176,9 +176,13 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     }
   }, [selectedTemplate])
 
+  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
+  const workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''
+
   const mutation = useMutation({
-    mutationFn: () =>
-      createIssue({
+    mutationFn: () => {
+      const selectedWorkflowProfileId = workflowProfileId ?? defaultProfileId ?? null
+      return createIssue({
         title,
         body: body || undefined,
         attachmentIds: extractAttachmentIds(body),
@@ -188,9 +192,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
-        ...(workflowProfileId ? { workflowProfileId } : {}),
+        ...(selectedWorkflowProfileId ? { workflowProfileId: selectedWorkflowProfileId } : {}),
         ...(risk ? { risk } : {}),
-      }),
+      })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       resetAndClose()
@@ -222,9 +227,6 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         : []
     return [...list, ...extras]
   }, [workflowProfiles, workflowProfileId])
-  const defaultProfileId = workflowProfiles?.find((p) => p.isDefault)?.id ?? null
-  const workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''
-
   return (
     <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
       <DialogContent>

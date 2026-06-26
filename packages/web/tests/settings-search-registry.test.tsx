@@ -32,6 +32,7 @@ const aiSettingsClient = vi.hoisted(() => ({
   useUpdateOpencodeModel: vi.fn(),
   useStageModels: vi.fn(),
   useSetStageModels: vi.fn(),
+  useProjectDefaultWorkflowProfile: vi.fn(),
 }))
 
 const RUNTIME_CONFIG = {
@@ -125,6 +126,7 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
     useSystemUpdateStatus: () => ({ data: null, refetch: vi.fn() }),
     useWorkflowProfiles: () => ({ data: [], isLoading: false, isError: false }),
     useWorkflowProfile: () => ({ data: null, isLoading: false, isError: false }),
+    useProjectDefaultWorkflowProfile: () => aiSettingsClient.useProjectDefaultWorkflowProfile(),
   }
 })
 
@@ -175,6 +177,11 @@ function arrangeAiLoaded() {
   aiSettingsClient.useUpdateOpencodeModel.mockReturnValue({ mutate: vi.fn() })
   aiSettingsClient.useStageModels.mockReturnValue({ data: { stageModels: null } })
   aiSettingsClient.useSetStageModels.mockReturnValue({ mutate: vi.fn() })
+  aiSettingsClient.useProjectDefaultWorkflowProfile.mockReturnValue({
+    data: { projectId: 'proj-1', defaultTemplateId: null },
+    isLoading: false,
+    isError: false,
+  })
 }
 
 function arrangeProjectLoaded(projectId = 'proj-1') {

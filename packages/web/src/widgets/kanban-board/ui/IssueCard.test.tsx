@@ -203,4 +203,5 @@ describe('IssueCard - workflow profile chip', () => {
     expect(chip).toHaveTextContent('mohist/default')
     expect(chip.dataset.workflowProfile).toBe('mohist/default')
   })
+
 })

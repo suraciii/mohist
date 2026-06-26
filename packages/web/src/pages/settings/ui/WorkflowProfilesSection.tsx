@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
+import { useProject } from '../../../entities/project'
 import { useWorkflowProfiles, useWorkflowProfile } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { CardSection } from '../../../shared/ui/components/card-section'
 import type { SettingsSearchEntry } from '@/features/settings-search'
+import { ProjectDefaultWorkflowControl } from './ProjectDefaultWorkflowControl'
 import { SectionState } from './SectionState'
 import { SettingsSection } from './SettingsSection'
 
@@ -84,8 +86,8 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-medium text-foreground">{profile.displayName}</h3>
           {profile.isDefault && (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
-              Default
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-700 border border-slate-200">
+              System default
             </span>
           )}
         </div>
@@ -136,8 +138,8 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-foreground">{profile.displayName}</span>
               {profile.isDefault && (
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
-                  Default
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-700 border border-slate-200">
+                  System default
                 </span>
               )}
             </div>
@@ -186,8 +188,17 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
 }
 
 export function WorkflowProfilesSection() {
+  const { currentProject } = useProject()
   const { data: profiles, isLoading, isError } = useWorkflowProfiles()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  if (!currentProject) {
+    return (
+      <SettingsSection title="Workflow Profiles">
+        <ProjectDefaultWorkflowControl />
+      </SettingsSection>
+    )
+  }
 
   if (selectedId) {
     return <ProfileDetail profileId={selectedId} onBack={() => setSelectedId(null)} />
@@ -210,9 +221,10 @@ export function WorkflowProfilesSection() {
   return (
     <SettingsSection
       title="Workflow Profiles"
-      description="Workflow profiles define how issues move through stages. Click a profile to view its definition."
+      description="Choose the workflow new issues inherit for this project, then browse the read-only system catalog below."
     >
-      <div className="space-y-2">
+      <div className="space-y-4">
+        <ProjectDefaultWorkflowControl />
         {profiles.map((p) => (
           <ProfileCard key={p.id} profile={p} onClick={() => setSelectedId(p.id)} />
         ))}

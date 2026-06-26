@@ -34,6 +34,7 @@ const useSystemUpdateMock = vi.fn()
 const useSystemUpdateStatusMock = vi.fn()
 const useWorkflowProfilesMock = vi.fn()
 const useWorkflowProfileMock = vi.fn()
+const useProjectDefaultWorkflowProfileMock = vi.fn()
 const useProjectTemplatesMock = vi.fn()
 const useSystemTemplatesMock = vi.fn()
 const useDeleteProjectTemplateOverrideMock = vi.fn()
@@ -72,6 +73,7 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
     useSystemUpdateStatus: () => useSystemUpdateStatusMock(),
     useWorkflowProfiles: () => useWorkflowProfilesMock(),
     useWorkflowProfile: (profileId: string) => useWorkflowProfileMock(profileId),
+    useProjectDefaultWorkflowProfile: () => useProjectDefaultWorkflowProfileMock(),
   }
 })
 
@@ -167,6 +169,11 @@ function arrangeLoadedMocks() {
     isError: false,
   })
   useWorkflowProfileMock.mockReturnValue({ data: null, isLoading: false, isError: false })
+  useProjectDefaultWorkflowProfileMock.mockReturnValue({
+    data: { projectId: 'proj-selected', defaultTemplateId: null },
+    isLoading: false,
+    isError: false,
+  })
   useProjectTemplatesMock.mockReturnValue({
     data: [
       { key: 'build-plan', displayName: 'Build Plan', description: 'Plan the implementation.', tags: ['plan'], stage: 'plan', body: 'Plan body', source: 'system' },

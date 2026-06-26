@@ -1,0 +1,129 @@
+import { useProject } from '../../../entities/project'
+import {
+  useClearProjectDefaultWorkflowProfile,
+  useProjectDefaultWorkflowProfile,
+  useSetProjectDefaultWorkflowProfile,
+  useWorkflowProfiles,
+} from '../../../entities/settings'
+import { Button } from '@/shared/ui/components/button'
+import { CardSection } from '@/shared/ui/components/card-section'
+import { Label } from '@/shared/ui/components/label'
+
+export function ProjectDefaultWorkflowControl() {
+  const { currentProject } = useProject()
+  const { data: profiles, isLoading: profilesLoading } = useWorkflowProfiles()
+  const {
+    data: projectProfile,
+    isLoading: profileLoading,
+    isError,
+  } = useProjectDefaultWorkflowProfile()
+  const setDefault = useSetProjectDefaultWorkflowProfile()
+  const clearDefault = useClearProjectDefaultWorkflowProfile()
+
+  if (!currentProject) {
+    return (
+      <div
+        data-testid="project-default-workflow-no-project"
+        className="text-sm text-muted-foreground"
+      >
+        No project selected
+      </div>
+    )
+  }
+
+  const configuredTemplateId = projectProfile?.defaultTemplateId ?? null
+  const systemDefaultId = profiles?.find((p) => p.isDefault)?.id ?? 'mohist/default'
+  const isConfiguredInCatalog = configuredTemplateId
+    ? profiles?.some((p) => p.id === configuredTemplateId) ?? true
+    : true
+  const isLoading = profileLoading || profilesLoading
+
+  return (
+    <CardSection title="Project default workflow" titleAs="h3" tone="blue">
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading...</div>
+      ) : isError ? (
+        <div className="text-sm text-red-700">Failed to load project default workflow.</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {configuredTemplateId ? (
+              <>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">
+                  Project default
+                </span>
+                <span
+                  className="text-sm font-medium text-foreground"
+                  data-testid="project-default-workflow-value"
+                >
+                  {configuredTemplateId}
+                </span>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">
+                No project default configured. New issues inherit the system default (
+                <span
+                  className="font-mono text-xs"
+                  data-testid="project-default-workflow-system-default"
+                >
+                  {systemDefaultId}
+                </span>
+                ).
+              </span>
+            )}
+          </div>
+
+          {configuredTemplateId && !isConfiguredInCatalog && (
+            <div
+              data-testid="project-default-workflow-orphan-warning"
+              className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+            >
+              Configured default{' '}
+              <span className="font-mono">{configuredTemplateId}</span> is not available in the
+              system catalog.
+            </div>
+          )}
+
+          <div className="flex items-end gap-2">
+            <div className="flex-1 min-w-0">
+              <Label className="text-xs" htmlFor="project-default-workflow-select">
+                Default workflow
+              </Label>
+              <select
+                id="project-default-workflow-select"
+                data-testid="project-default-workflow-select"
+                value={configuredTemplateId ?? ''}
+                disabled={setDefault.isPending || clearDefault.isPending}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (value) {
+                    setDefault.mutate({ templateId: value })
+                  } else if (configuredTemplateId) {
+                    clearDefault.mutate()
+                  }
+                }}
+                className="flex h-8 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">Inherit system default ({systemDefaultId})</option>
+                {profiles?.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.displayName} ({profile.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="project-default-workflow-clear"
+              disabled={!configuredTemplateId || clearDefault.isPending || setDefault.isPending}
+              onClick={() => clearDefault.mutate()}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+    </CardSection>
+  )
+}
