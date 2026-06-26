@@ -16,3 +16,13 @@
 - All new hooks and the `ProjectDefaultWorkflowProfile` type are re-exported from `entities/settings/index.ts`.
 - Tests cover query keys, enabled state, mutation invalidation, toast calls, and effective-default resolution for `'project'`, `'system'`, and `'none'` sources.
 - Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (161 files, 2338 tests).
+
+## T-002 Decisions / Gotchas
+
+- `ProjectDefaultWorkflowControl` is placed at the top of `WorkflowProfilesSection`, above the catalog, guarded by `currentProject`.
+- No-project state renders a plain "No project selected" hint matching the repositories/label-catalog guard pattern.
+- The control waits for both `useProjectDefaultWorkflowProfile` and `useWorkflowProfiles` to finish loading (`isLoading = profileLoading || profilesLoading`) to avoid showing a select before options or current value are ready.
+- Orphaned `defaultTemplateId` (not present in system catalog) shows an amber warning with the raw id and leaves Clear enabled.
+- Static catalog `isDefault` badge relabeled from "Default" to "System default" and restyled with slate/gray (`bg-slate-50 text-slate-700`) to avoid conflation with the green "Project default" badge.
+- One colocated test (`renders the system-default badge with styling distinct from the project-default badge`) initially raced with the loading state; fixed by waiting for `project-default-workflow-value` before asserting on the badges.
+- Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes (162 files, 2344 tests).
