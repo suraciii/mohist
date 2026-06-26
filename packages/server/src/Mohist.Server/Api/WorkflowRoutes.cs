@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
@@ -111,7 +112,7 @@ public static class WorkflowRoutes
         return app;
     }
 
-    public sealed record AddTaskRequestDto(string? Id, string? Title, string? Uses, string? With, string? Stage, bool InvalidateChecks = false);
+    public sealed record AddTaskRequestDto(string? Id, string? Title, string? Uses, JsonElement? With, string? Stage, bool InvalidateChecks = false);
     public sealed record AddTasksRequestDto(IReadOnlyList<AddTasksRequestTaskDto>? Tasks);
-    public sealed record AddTasksRequestTaskDto(string? Id, string? Title, string? Uses, string? With);
+    public sealed record AddTasksRequestTaskDto(string? Id, string? Title, string? Uses, JsonElement? With);
 }

@@ -90,7 +90,7 @@ public static partial class IssueRoutes
         return ApiResults.Ok(response!);
     }
 
-    internal static string BuildRebaseTaskWith(string baseBranch, RepositoryInfo repository, RuntimeTaskRequest? conflictResolver)
+    internal static JsonElement? BuildRebaseTaskWith(string baseBranch, RepositoryInfo repository, RuntimeTaskRequest? conflictResolver)
     {
         var with = new Dictionary<string, object?>
         {
@@ -121,7 +121,7 @@ public static partial class IssueRoutes
             };
         }
 
-        return JSON.Serialize(with);
+        return JsonSerializer.SerializeToElement(with, JSON.Options);
     }
 
     internal static async Task<IssueWorkflowProfileResponse?> BuildIssueWorkflowProfileResponseAsync(

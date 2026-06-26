@@ -58,7 +58,7 @@ public sealed record RuntimeTaskInput(
     [property: Id(0)] string Id,
     [property: Id(1)] string Title,
     [property: Id(2)] string? Uses = null,
-    [property: Id(3)] string? With = null,
+    [property: Id(3)] JsonElement? With = null,
     [property: Id(4)] string? Stage = null,
     [property: Id(5)] bool InvalidateChecks = false);
 
@@ -77,7 +77,7 @@ public sealed record AddTasksBatchItem(
     [property: Id(0)] string Id,
     [property: Id(1)] string Title,
     [property: Id(2)] string? Uses = null,
-    [property: Id(3)] string? With = null);
+    [property: Id(3)] JsonElement? With = null);
 
 [GenerateSerializer]
 public sealed record AddTasksBatchResult(

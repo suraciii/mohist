@@ -131,8 +131,8 @@ internal static class WorkflowDispatchHelpers
         return new CheckResult(name!, status, message, output);
     }
 
-    internal static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
-        with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with, JSON.Options) : null;
+    internal static Dictionary<string, JsonElement?>? ParseWith(JsonElement? with) =>
+        with is { } el ? el.Deserialize<Dictionary<string, JsonElement?>>(JSON.Options) : null;
 
     /// <summary>
     /// Projects the most recent task outputs of the given workflow run
