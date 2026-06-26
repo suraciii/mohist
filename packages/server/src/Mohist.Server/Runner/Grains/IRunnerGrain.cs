@@ -78,7 +78,8 @@ public record WorkDispatch(
     [property: Id(9)] string? Artifacts = null,
     [property: Id(11)] string OwnerKind = WorkDispatchOwnerKinds.Workflow,
     [property: Id(12)] string? AgentJobId = null,
-    [property: Id(13)] string? SetVars = null)
+    [property: Id(13)] string? SetVars = null,
+    [property: Id(14)] string? Recovery = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }
@@ -102,7 +103,7 @@ public record WorkResult(
     string? Output = null,
     int? ExitCode = null,
     string[]? ArtifactUploadIds = null,
-    [property: Id(5)] List<RuntimeTaskInput>? RecoveryTasks = null);
+    [property: Id(5)] List<RuntimeTaskInput>? AddTasks = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(

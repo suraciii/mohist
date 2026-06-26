@@ -95,8 +95,9 @@ public static class WorkflowYamlSerializer
 
         var artifacts = ParseTaskArtifacts(map);
         var setVars = ParseTaskSetVars(map, id);
+        var recovery = ParseTaskRecovery(map, id);
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars);
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap), artifacts, setVars, recovery);
     }
 
     private static Dictionary<string, string>? ParseTaskSetVars(Dictionary<string, object?> taskMap, string taskId)
@@ -118,6 +119,55 @@ public static class WorkflowYamlSerializer
         }
 
         return result.Count == 0 ? null : result;
+    }
+
+    private static RecoveryDefinition? ParseTaskRecovery(Dictionary<string, object?> taskMap, string taskId)
+    {
+        if (!taskMap.TryGetValue("recovery", out var recoveryValue) || recoveryValue is null)
+            return null;
+
+        var recoveryMap = Normalize(recoveryValue) as Dictionary<string, object?>;
+        if (recoveryMap is null)
+            throw new InvalidOperationException($"Workflow task '{taskId}' 'recovery' must be an object");
+
+        var budget = 0;
+        if (recoveryMap.TryGetValue("budget", out var budgetValue) && budgetValue is not null)
+        {
+            if (int.TryParse(budgetValue.ToString(), out var parsed))
+                budget = parsed;
+        }
+
+        var handlers = new List<RecoveryHandlerDefinition>();
+        if (recoveryMap.TryGetValue("handlers", out var handlersValue) && handlersValue is not null)
+        {
+            var handlersList = handlersValue as List<object?>;
+            if (handlersList is null)
+                throw new InvalidOperationException($"Workflow task '{taskId}' recovery.handlers must be a list");
+
+            foreach (var handlerEntry in handlersList)
+            {
+                var handlerMap = Normalize(handlerEntry) as Dictionary<string, object?>;
+                if (handlerMap is null) continue;
+
+                var when = String(handlerMap, "when");
+                if (string.IsNullOrWhiteSpace(when))
+                    throw new InvalidOperationException($"Workflow task '{taskId}' recovery handler requires 'when'");
+
+                var handlerTasks = new List<TaskDefinition>();
+                if (handlerMap.TryGetValue("tasks", out var tasksValue) && tasksValue is not null)
+                {
+                    var tasksList = tasksValue as List<object?>;
+                    if (tasksList is not null)
+                        foreach (var t in tasksList)
+                            handlerTasks.Add(ToTask(t));
+                }
+
+                var retrySelf = handlerMap.TryGetValue("retrySelf", out var rs) && rs is bool b && b;
+                handlers.Add(new RecoveryHandlerDefinition(when!, handlerTasks, retrySelf));
+            }
+        }
+
+        return new RecoveryDefinition(budget, handlers);
     }
 
     private static TaskArtifactCapture? ParseTaskArtifacts(Dictionary<string, object?> taskMap)
@@ -277,6 +327,7 @@ public static class WorkflowYamlSerializer
         AddWith(map, task.With);
         AddArtifacts(map, task.Artifacts);
         AddSetVars(map, task.SetVars);
+        AddRecovery(map, task.Recovery);
         return map;
     }
 
@@ -284,6 +335,21 @@ public static class WorkflowYamlSerializer
     {
         if (setVars is null || setVars.Count == 0) return;
         map["setVars"] = setVars.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
+    }
+
+    private static void AddRecovery(Dictionary<string, object?> map, RecoveryDefinition? recovery)
+    {
+        if (recovery is null) return;
+        map["recovery"] = new Dictionary<string, object?>
+        {
+            ["budget"] = recovery.Budget,
+            ["handlers"] = recovery.Handlers.Select(h => (object?)new Dictionary<string, object?>
+            {
+                ["when"] = h.When,
+                ["tasks"] = h.Tasks.Select(ToTaskMap).ToList(),
+                ["retrySelf"] = h.RetrySelf,
+            }).ToList(),
+        };
     }
 
     private static void AddArtifacts(Dictionary<string, object?> map, TaskArtifactCapture? artifacts)

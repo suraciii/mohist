@@ -355,7 +355,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     uses: t.Uses,
                     with: t.With,
                     artifacts: t.Artifacts,
-                    setVars: t.SetVars);
+                    setVars: t.SetVars,
+                    recovery: t.Recovery);
             }
             case "checks":
             {
@@ -649,6 +650,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 }
             }
             events.AddRange(run.CompleteTask());
+
+            if (outcome.AddTasks is { Count: > 0 } addTasks)
+            {
+                var taskDefs = addTasks.Select(t => new TaskDefinition(
+                    t.Id,
+                    t.Title,
+                    t.Uses,
+                    string.IsNullOrWhiteSpace(t.With) ? null : JSON.Deserialize<Dictionary<string, JsonElement?>>(t.With))).ToList();
+                var recoveryEvents = run.AddRuntimeTasks(taskDefs);
+                events.AddRange(recoveryEvents);
+                _log.LogInformation(
+                    "Workflow {Id} task {TaskId} produced {Count} recovery tasks",
+                    GrainKey, taskRunId, addTasks.Count);
+            }
         }
         else
         {

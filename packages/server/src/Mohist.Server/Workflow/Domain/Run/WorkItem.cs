@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -43,12 +44,13 @@ public sealed record WorkItem(
     [property: Id(6)] TaskArtifactCapture? Artifacts,
     [property: Id(7)] Dictionary<string, string>? SetVars,
     // ---- checks variant ----
-    [property: Id(8)] IReadOnlyList<CheckItem>? Items)
+    [property: Id(8)] IReadOnlyList<CheckItem>? Items,
+    [property: Id(9)] RecoveryDefinition? Recovery = null)
 {
     public static WorkItem Task(string stage, string id, string title, string? uses,
         Dictionary<string, JsonElement?>? with, TaskArtifactCapture? artifacts = null,
-        Dictionary<string, string>? setVars = null)
-        => new(stage, WorkItemTypes.Task, id, title, uses, with, artifacts, setVars, Items: null);
+        Dictionary<string, string>? setVars = null, RecoveryDefinition? recovery = null)
+        => new(stage, WorkItemTypes.Task, id, title, uses, with, artifacts, setVars, Items: null, Recovery: recovery);
 
     public static WorkItem Checks(string stage, string workId, IReadOnlyList<CheckItem> items)
         => new(stage, WorkItemTypes.Checks, workId, Title: null, Uses: null, With: null,
@@ -73,7 +75,8 @@ public sealed record TaskOutcome(
     [property: Id(1)] OutcomeStatus Status,
     [property: Id(2)] string? Output,
     [property: Id(3)] IReadOnlyList<ArtifactRef>? Artifacts,
-    [property: Id(4)] string? Detail = null);
+    [property: Id(4)] string? Detail = null,
+    [property: Id(5)] IReadOnlyList<RuntimeTaskInput>? AddTasks = null);
 
 /// <summary>
 /// Domain outcome of a checks batch. Each <see cref="CheckResult"/> carries

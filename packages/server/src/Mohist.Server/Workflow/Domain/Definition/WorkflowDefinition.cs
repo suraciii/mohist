@@ -17,7 +17,17 @@ public sealed record TaskDefinition(
     string? Uses = null,
     Dictionary<string, JsonElement?>? With = null,
     TaskArtifactCapture? Artifacts = null,
-    Dictionary<string, string>? SetVars = null);
+    Dictionary<string, string>? SetVars = null,
+    RecoveryDefinition? Recovery = null);
+
+public sealed record RecoveryDefinition(
+    int Budget,
+    IReadOnlyList<RecoveryHandlerDefinition> Handlers);
+
+public sealed record RecoveryHandlerDefinition(
+    string When,
+    IReadOnlyList<TaskDefinition> Tasks,
+    bool RetrySelf);
 
 public sealed record CheckFailureRepair(int Limit, TaskDefinition Task);
 

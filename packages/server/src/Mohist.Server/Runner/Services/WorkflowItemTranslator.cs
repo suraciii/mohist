@@ -104,7 +104,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Artifacts: item.Artifacts is not null && !item.Artifacts.IsEmpty ? JSON.Serialize(item.Artifacts) : null,
             SetVars: item.SetVars is not null && item.SetVars.Count > 0 ? JSON.Serialize(item.SetVars) : null,
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
-            AgentJobId: null);
+            AgentJobId: null,
+            Recovery: item.Recovery is not null ? JSON.Serialize(item.Recovery) : null);
     }
 
     private async Task<WorkDispatch> BuildChecksDispatchAsync(
@@ -399,7 +400,8 @@ public sealed class WorkflowItemTranslator : IScopedService
             Status: status,
             Output: result.Output,
             Artifacts: artifacts,
-            Detail: detail));
+            Detail: detail,
+            AddTasks: result.AddTasks is { Count: > 0 } ? result.AddTasks.ToList() : null));
     }
 
     private static InboundOutcome TranslateChecksResult(WorkItem item, WorkResult result)

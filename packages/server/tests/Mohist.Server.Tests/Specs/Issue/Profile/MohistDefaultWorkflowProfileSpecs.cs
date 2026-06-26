@@ -567,13 +567,13 @@ public class MohistDefaultWorkflowProfileSpecs
         var checkStage = reparsed.Stages[2];
         Assert.DoesNotContain(checkStage.Checks, c => c.Name == "review-passed");
         var aiReview = checkStage.Tasks.Single(t => t.Id == "ai-review");
-        Assert.NotNull(aiReview.With);
-        var recovery = aiReview.With!["recovery"]!.Value;
-        Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
-        var handler = Assert.Single(recovery.GetProperty("handlers").EnumerateArray());
-        Assert.True(handler.GetProperty("retrySelf").GetBoolean());
-        var fixReviewFindings = Assert.Single(handler.GetProperty("tasks").EnumerateArray());
-        Assert.Equal("recover:fix-review-findings", fixReviewFindings.GetProperty("id").GetString());
+        Assert.NotNull(aiReview.Recovery);
+        var recovery = aiReview.Recovery!;
+        Assert.Equal(2, recovery.Budget);
+        var handler = Assert.Single(recovery.Handlers);
+        Assert.True(handler.RetrySelf);
+        var fixReviewFindings = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -953,14 +953,15 @@ public class MohistDefaultWorkflowProfileSpecs
         var firstMarker = markers[0];
         Assert.Equal("<promise>FAIL</promise>", firstMarker.GetProperty("failIf").GetString());
 
-        var recovery = aiReview.With!["recovery"]!.Value;
-        Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
-        var handler = Assert.Single(recovery.GetProperty("handlers").EnumerateArray());
-        Assert.Equal("review-failed", handler.GetProperty("when").GetString());
-        Assert.True(handler.GetProperty("retrySelf").GetBoolean());
-        var fixReviewFindings = Assert.Single(handler.GetProperty("tasks").EnumerateArray());
-        Assert.Equal("recover:fix-review-findings", fixReviewFindings.GetProperty("id").GetString());
-        Assert.Equal("${{ prompts.auto-fix }}", fixReviewFindings.GetProperty("with").GetProperty("prompt").GetString());
+        Assert.NotNull(aiReview.Recovery);
+        var recovery = aiReview.Recovery!;
+        Assert.Equal(2, recovery.Budget);
+        var handler = Assert.Single(recovery.Handlers);
+        Assert.Equal("promise=FAIL", handler.When);
+        Assert.True(handler.RetrySelf);
+        var fixReviewFindings = Assert.Single(handler.Tasks);
+        Assert.Equal("recover:fix-review-findings", fixReviewFindings.Id);
+        Assert.Equal("${{ prompts.auto-fix }}", fixReviewFindings.With!["prompt"]!.Value.GetString());
     }
 
     private static void AssertMarkerOneOf(TaskDefinition task)
