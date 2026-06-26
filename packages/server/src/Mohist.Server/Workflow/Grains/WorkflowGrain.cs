@@ -939,119 +939,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 }
             }
             events.AddRange(run.CompleteTask());
+
+            // Recovery: the task completed and produced recovery tasks to be
+            // inserted into the current stage. The engine treats them as
+            // ordinary runtime tasks — it does not understand their semantics.
+            if (result.RecoveryTasks is { Count: > 0 })
+            {
+                var recoveryEvents = run.AddRuntimeTasks(
+                    result.RecoveryTasks.Select(t => new TaskDefinition(
+                        t.Id, t.Title, t.Uses, WorkflowDispatchHelpers.ParseWith(t.With))).ToList());
+                events.AddRange(recoveryEvents);
+                _log.LogInformation(
+                    "Workflow {Id} task {TaskId} produced {Count} recovery tasks",
+                    GrainKey, currentTask?.Id, result.RecoveryTasks.Count);
+            }
         }
         else
         {
             if (currentTask is not null) currentTask.Output = ParseOutputToJsonElement(result.Output);
-            var taskResult = new TaskResult("failed", result.Message);
-            var recoveryTasks = currentStage is not null
-                ? ResolveTaskFailureRecovery(currentStage, currentTask)
-                : null;
-            events.AddRange(recoveryTasks is { Count: > 0 }
-                ? run.RecoverTaskFailure(taskResult, recoveryTasks)
-                : run.FailTask(taskResult));
+            events.AddRange(run.FailTask(new TaskResult("failed", result.Message)));
         }
 
         return events;
-    }
-
-    private static IReadOnlyList<TaskDefinition>? ResolveTaskFailureRecovery(StageRun stage, TaskRun? task)
-    {
-        if (task?.OnFailure is not { } onFailure)
-            return null;
-
-        // Recovery budget is explicit per task definition and resets on manual retry.
-        // Lazy-create the budget entry on the first failure so recovery tasks that
-        // declare their own onFailure (e.g. recover:rebase) are also covered.
-        if (!stage.RecoveryBudget.TryGetValue(task.DefinitionId, out var budget))
-        {
-            budget = onFailure.Limit;
-            stage.RecoveryBudget[task.DefinitionId] = budget;
-        }
-        if (budget <= 0)
-            return null;
-
-        foreach (var failureCase in onFailure.Cases)
-        {
-            if (!MatchesTaskFailureCase(task.Output, failureCase.When))
-                continue;
-
-            return BuildRecoverySequence(task, failureCase, onFailure);
-        }
-
-        return null;
-    }
-
-    private static List<TaskDefinition> BuildRecoverySequence(
-        TaskRun task,
-        TaskFailureCase matchedCase,
-        TaskFailureAction onFailure)
-    {
-        var sequence = new List<TaskDefinition>(matchedCase.Tasks.Count + 1);
-        sequence.AddRange(matchedCase.Tasks);
-
-        if (matchedCase.RetrySelf)
-        {
-            sequence.Add(new TaskDefinition(
-                task.DefinitionId,
-                task.Title,
-                task.Uses,
-                CloneTaskWith(task.WithInput),
-                task.Artifacts,
-                task.SetVars,
-                task.OnFailure));
-        }
-
-        return sequence;
-    }
-
-    private static Dictionary<string, JsonElement?>? CloneTaskWith(Dictionary<string, JsonElement?>? source)
-    {
-        if (source is null) return null;
-        var clone = new Dictionary<string, JsonElement?>(source.Count, StringComparer.Ordinal);
-        foreach (var (key, value) in source)
-            clone[key] = value.HasValue ? value.Value.Clone() : null;
-        return clone;
-    }
-
-    private static bool MatchesTaskFailureCase(JsonElement? output, Dictionary<string, JsonElement?> when)
-    {
-        if (when.Count == 0) return false;
-        foreach (var (path, expected) in when)
-        {
-            if (!TryResolveFailurePath(output, path, out var actual))
-                return false;
-            if (expected.HasValue && !JsonElementEquals(actual, expected.Value))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool TryResolveFailurePath(JsonElement? output, string path, out JsonElement value)
-    {
-        value = default;
-        var segments = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (segments.Length == 0 || !string.Equals(segments[0], "output", StringComparison.Ordinal))
-            return false;
-        if (!output.HasValue || output.Value.ValueKind is not JsonValueKind.Object)
-            return false;
-
-        value = output.Value;
-        foreach (var segment in segments.Skip(1))
-        {
-            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segment, out value))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool JsonElementEquals(JsonElement actual, JsonElement expected)
-    {
-        if (actual.ValueKind == JsonValueKind.String && expected.ValueKind == JsonValueKind.String)
-            return string.Equals(actual.GetString(), expected.GetString(), StringComparison.Ordinal);
-        return string.Equals(actual.GetRawText(), expected.GetRawText(), StringComparison.Ordinal);
     }
 
     private async Task<IReadOnlyList<WorkflowEvent>?> BindArtifactUploadsAsync(

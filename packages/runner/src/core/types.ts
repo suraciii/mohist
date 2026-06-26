@@ -38,6 +38,13 @@ export interface WorkItem {
   agentJobId?: string | null
 }
 
+export interface RecoveryTaskInput {
+  id: string
+  title: string
+  uses?: string | null
+  with?: JsonObject | null
+}
+
 export interface WorkItemResult {
   status: string
   message?: string | null
@@ -46,6 +53,7 @@ export interface WorkItemResult {
   artifactUploadIds?: string[] | null
   capturedOutputs?: JsonObject | null
   cleanupAttempts?: number | null
+  recoveryTasks?: RecoveryTaskInput[] | null
 }
 
 export interface ActionContext {

@@ -31,7 +31,6 @@ public sealed class TaskRun
     public IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles { get; init; }
     public TaskArtifactCapture? Artifacts { get; init; }
     public Dictionary<string, string>? SetVars { get; init; }
-    public TaskFailureAction? OnFailure { get; init; }
     public TaskClassification Classification { get; init; } = TaskClassification.UserFacing;
     public string? CausedByFeedbackId { get; init; }
     public string? CausedByFailedTaskId { get; init; }
@@ -159,7 +158,6 @@ public static class TaskRunExtensions
                 RequiredFiles = requiredFiles.Count > 0 ? requiredFiles : null,
                 Artifacts = input.Artifacts,
                 SetVars = input.SetVars,
-                OnFailure = input.OnFailure,
                 Classification = classification,
                 CausedByFeedbackId = causedByFeedbackId,
                 CausedByFailedTaskId = causedByFailedTaskId

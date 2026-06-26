@@ -1,6 +1,6 @@
 import { rm, stat } from "node:fs/promises"
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionContext, ActionResult, JsonObject, JsonValue, WorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, JsonValue, RecoveryTaskInput, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../core/template.js"
@@ -139,6 +139,8 @@ export class WorkExecutor {
       const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
       const normalized = normalize(work, result)
       if (normalized.status !== "completed") {
+        const recoveryResult = tryRecovery(work, renderedWith, normalized)
+        if (recoveryResult) return recoveryResult
         return attachBranchStabilityEvidence(normalized, startCheck.evidence)
       }
       const endCheck = await this.checkBranchStability(work, workDir, expectedBranch, "end", signal)
@@ -983,4 +985,129 @@ function branchStabilityToJson(evidence: BranchStabilityEvidence): JsonObject {
   }
   if (evidence.observedRef !== undefined) value["observedRef"] = evidence.observedRef
   return value
+}
+
+interface RecoveryHandler {
+  when: string
+  tasks: RecoveryTaskInput[]
+  retrySelf: boolean
+}
+
+interface RecoveryConfig {
+  budget: number
+  handlers: RecoveryHandler[]
+}
+
+/**
+ * Attempt task recovery. When an action returns a failure that carries
+ * an `errorCode` in its output JSON, and the rendered `with` declares a
+ * matching `recovery.handlers[].when` with budget remaining, the task is
+ * converted to `completed` and the handler's recovery tasks (plus an
+ * optional self-retry with budget-1) are returned for the engine to
+ * insert. Returns null when the failure is not recoverable so the caller
+ * falls through to the normal failure path.
+ */
+function tryRecovery(
+  work: WorkItem,
+  renderedWith: JsonObject | null,
+  result: WorkItemResult,
+): WorkItemResult | null {
+  const recovery = readRecoveryConfig(renderedWith)
+  if (!recovery) return null
+
+  const errorCode = readErrorCode(result.output)
+  if (!errorCode) return null
+
+  const handler = recovery.handlers.find((h) => h.when === errorCode)
+  if (!handler) return null
+
+  if (recovery.budget <= 0) return null
+
+  const recoveryTasks: RecoveryTaskInput[] = [...handler.tasks]
+
+  if (handler.retrySelf) {
+    recoveryTasks.push({
+      id: work.workId,
+      title: work.title ?? work.workId,
+      uses: work.uses ?? null,
+      with: decrementRecoveryBudget(renderedWith, recovery.budget),
+    })
+  }
+
+  const label = work.title?.trim() || work.uses || work.workId
+  return {
+    status: "completed",
+    message: `${label} failed (${errorCode}); recovery scheduled`,
+    recoveryTasks,
+  }
+}
+
+function readRecoveryConfig(renderedWith: JsonObject | null): RecoveryConfig | null {
+  if (!renderedWith) return null
+  const recovery = renderedWith["recovery"]
+  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return null
+  const recoveryObj = recovery as JsonObject
+  const rawBudget = recoveryObj["budget"]
+  const budget = typeof rawBudget === "number" && Number.isFinite(rawBudget) ? Math.floor(rawBudget) : 0
+  const rawHandlers = recoveryObj["handlers"]
+  if (!Array.isArray(rawHandlers)) return null
+  const handlers: RecoveryHandler[] = []
+  for (const raw of rawHandlers) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue
+    const h = raw as JsonObject
+    const when = typeof h["when"] === "string" ? h["when"] : null
+    if (!when) continue
+    handlers.push({
+      when,
+      tasks: readRecoveryTasks(h["tasks"]),
+      retrySelf: h["retrySelf"] === true,
+    })
+  }
+  return { budget, handlers }
+}
+
+function readRecoveryTasks(raw: unknown): RecoveryTaskInput[] {
+  if (!Array.isArray(raw)) return []
+  const tasks: RecoveryTaskInput[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+    const t = entry as JsonObject
+    const id = typeof t["id"] === "string" ? t["id"] : null
+    if (!id) continue
+    const withValue = t["with"]
+    tasks.push({
+      id,
+      title: typeof t["title"] === "string" ? t["title"] : id,
+      uses: typeof t["uses"] === "string" ? t["uses"] : null,
+      with: withValue && typeof withValue === "object" && !Array.isArray(withValue) ? (withValue as JsonObject) : null,
+    })
+  }
+  return tasks
+}
+
+function readErrorCode(output: string | null | undefined): string | null {
+  if (!output) return null
+  try {
+    const parsed = JSON.parse(output) as unknown
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const code = (parsed as JsonObject)["errorCode"]
+      return typeof code === "string" && code.length > 0 ? code : null
+    }
+  } catch {
+    // output is not JSON or errorCode absent — not recoverable
+  }
+  return null
+}
+
+function decrementRecoveryBudget(renderedWith: JsonObject | null, currentBudget: number): JsonObject | null {
+  if (!renderedWith) return null
+  const recovery = renderedWith["recovery"]
+  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return renderedWith
+  return {
+    ...renderedWith,
+    recovery: {
+      ...(recovery as JsonObject),
+      budget: currentBudget - 1,
+    },
+  }
 }

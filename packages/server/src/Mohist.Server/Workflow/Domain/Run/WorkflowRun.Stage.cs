@@ -157,17 +157,9 @@ public static partial class WorkflowRunExtensions
                 failedTask.Uses,
                 failedTask.WithInput,
                 failedTask.Artifacts,
-                failedTask.SetVars,
-                failedTask.OnFailure);
+                failedTask.SetVars);
             var newTask = TaskRun.MakeTask(stage.Tasks, input);
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
-
-            // Manual retry resets the onFailure recovery budget for this task
-            // definition, giving the user a fresh allowance of automatic
-            // recoveries for the new attempt.
-            if (failedTask.OnFailure is { } onFailure)
-                stage.RecoveryBudget[failedTask.DefinitionId] = onFailure.Limit;
-
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;
             stage.Status = StageRunStatus.Running;

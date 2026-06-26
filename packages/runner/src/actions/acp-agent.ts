@@ -57,6 +57,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
       expectation: verification,
       promise,
       failIfMarker: failIfTriggered ? failIfMatch.marker : null,
+      errorCode: failIfTriggered ? "review-failed" : undefined,
     }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
   }
