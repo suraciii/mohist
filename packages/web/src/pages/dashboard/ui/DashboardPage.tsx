@@ -3,6 +3,7 @@ import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
 import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
+import { PulseZone } from '../../../widgets/dashboard-pulse'
 import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
@@ -76,6 +77,10 @@ export function DashboardPage() {
             zone.id === 'digest' ? (
               <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
                 <DashboardDigestWidget />
+              </DashboardZone>
+            ) : zone.id === 'pulse' ? (
+              <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
+                <PulseZone />
               </DashboardZone>
             ) : (
               <DashboardZone key={zone.id} id={zone.id} name={zone.name} />

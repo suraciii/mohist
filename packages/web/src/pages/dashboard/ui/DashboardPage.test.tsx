@@ -39,6 +39,16 @@ vi.mock('../../../entities/issue/api/queries', () => ({
   useArchivedIssues: (...args: unknown[]) => mocks.useArchivedIssuesMock(...args),
 }))
 
+vi.mock('@/widgets/coder-session/model/activity-cards', () => ({
+  useActivityCards: () => ({
+    activeCards: [],
+    recentCards: [],
+    waitingCards: [],
+    statusCounts: { active: 0, waiting: 0, completed: 0, failed: 0 },
+    slotUsage: { active: 0, max: 0 },
+  }),
+}))
+
 vi.mock('../../../widgets/create-project-dialog/ui/CreateProjectDialog', () => ({
   CreateProjectDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
     open ? (
@@ -123,7 +133,7 @@ describe('DashboardPage', () => {
     expect(container.querySelector('[data-testid="dashboard-zone-productivity"] [data-testid="dashboard-digest-empty"]')).toBeNull()
   })
 
-  it('mounts AttentionHero directly in the hero slot and keeps pulse/productivity as empty placeholders', () => {
+  it('mounts AttentionHero in the hero slot, mounts PulseZone in the pulse slot, and keeps productivity as the only empty placeholder', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
@@ -135,14 +145,18 @@ describe('DashboardPage', () => {
     const attention = attentionSlots[0]
     const pulse = screen.getByTestId('dashboard-zone-pulse')
     const productivity = screen.getByTestId('dashboard-zone-productivity')
+    const digest = screen.getByTestId('dashboard-zone-digest')
 
     expect(attention.className).not.toMatch(/border-dashed/)
     expect(pulse.className).toMatch(/border-dashed/)
     expect(productivity.className).toMatch(/border-dashed/)
 
     expect(attention.childElementCount).toBeGreaterThan(0)
-    expect(pulse.childElementCount).toBe(0)
+    expect(pulse.childElementCount).toBeGreaterThan(0)
     expect(productivity.childElementCount).toBe(0)
+
+    expect(pulse.contains(screen.getByTestId('pulse-zone'))).toBe(true)
+    expect(pulse.contains(screen.getByTestId('pulse-empty-state'))).toBe(true)
 
     expect(screen.getByTestId('dashboard-hero').contains(attention)).toBe(true)
     expect(screen.getByTestId('dashboard-zones').contains(attention)).toBe(false)
@@ -150,6 +164,9 @@ describe('DashboardPage', () => {
     expect(attention.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
     expect(pulse.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
     expect(productivity.querySelector('[data-testid="dashboard-digest-empty"], [data-testid="dashboard-digest-loading"], [data-testid="dashboard-digest-content"]')).toBeNull()
+
+    expect(digest.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
+    expect(productivity.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
     expect(productivity.querySelector('[data-testid="productivity-zone"]')).toBeNull()
     expect(container).toBeTruthy()
   })
