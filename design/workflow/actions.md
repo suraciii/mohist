@@ -171,8 +171,10 @@ resolve PR
 PR checks 等待阶段轮询 `gh pr checks <prNumber> --json bucket,name,state`：
 
 - `PENDING`：继续等待。
-- 全部 `PASS` / `SKIP` 或无 checks：继续 merge。
+- 全部 `PASS` / `SKIP`：继续 merge。
 - `FAIL` / cancelled / action_required：返回 `errorCode: pr-checks-failed`。
+- `gh` 非零退出且输出 `no checks reported`：分支此刻零 check run。常发生在刚 push / force push 后、GitHub 尚未把 workflow run 注册成 check 的窗口；也覆盖无 CI 的仓库。按 `PENDING` 同样继续轮询，超过 grace 窗口（默认 120s）仍零 check 才继续 merge——避免把"check 还没注册"误判成"check 失败"。
+- `gh` 其它非零退出：返回 `errorCode: pr-checks-failed`。
 - `context.signal` 触发：返回 `retry-safe`。
 
 PR checks 失败时，`merge-github-pr` 返回 action-owned JSON failure，例如：
