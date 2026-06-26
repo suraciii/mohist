@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
 
 const now = new Date('2026-06-26T12:00:00.000Z')
 const todayIso = now.toISOString()
-const yesterdayIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
 
 vi.mock('../../../entities/issue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/issue')>()

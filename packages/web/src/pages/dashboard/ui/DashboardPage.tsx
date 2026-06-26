@@ -3,13 +3,14 @@ import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { CreateProjectDialog } from '../../../widgets/create-project-dialog'
 import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
+import { FactoryStatusHeadline } from '../../../widgets/factory-status'
+import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { DashboardZone } from './DashboardZone'
 import type { DashboardZoneId } from './DashboardZone'
 
 const DASHBOARD_ZONES: { id: DashboardZoneId; name: string }[] = [
-  { id: 'attention', name: 'Attention' },
   { id: 'pulse', name: 'Pulse' },
   { id: 'productivity', name: 'Productivity' },
   { id: 'digest', name: 'Digest' },
@@ -60,19 +61,27 @@ export function DashboardPage() {
       data-project={currentProject?.name ?? ''}
       className="flex-1 overflow-y-auto p-4 md:p-6"
     >
-      <div
-        data-testid="dashboard-zones"
-        className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
-      >
-        {DASHBOARD_ZONES.map((zone) =>
-          zone.id === 'digest' ? (
-            <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
-              <DashboardDigestWidget />
-            </DashboardZone>
-          ) : (
-            <DashboardZone key={zone.id} id={zone.id} name={zone.name} />
-          ),
-        )}
+      <div className="flex flex-col gap-4 md:gap-6">
+        <div data-testid="dashboard-headline">
+          <FactoryStatusHeadline />
+        </div>
+        <div data-testid="dashboard-hero">
+          <AttentionHero />
+        </div>
+        <div
+          data-testid="dashboard-zones"
+          className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2"
+        >
+          {DASHBOARD_ZONES.map((zone) =>
+            zone.id === 'digest' ? (
+              <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
+                <DashboardDigestWidget />
+              </DashboardZone>
+            ) : (
+              <DashboardZone key={zone.id} id={zone.id} name={zone.name} />
+            ),
+          )}
+        </div>
       </div>
     </div>
   )
