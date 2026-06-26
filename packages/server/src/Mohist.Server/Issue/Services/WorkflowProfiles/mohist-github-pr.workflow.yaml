@@ -317,6 +317,8 @@ stages:
                       remote: origin
                       forceWithLease: true
                 retrySelf: true
+              - when: protection-conflict
+                retrySelf: true
 
     checks:
       - name: merge-verified

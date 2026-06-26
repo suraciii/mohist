@@ -404,7 +404,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var recovery = GetRecovery(mergePr.With!);
         Assert.Equal(2, recovery.GetProperty("budget").GetInt32());
         var handlers = recovery.GetProperty("handlers").EnumerateArray().ToList();
-        Assert.Equal(2, handlers.Count);
+        Assert.Equal(3, handlers.Count);
 
         var baseMoved = handlers.Single(h => h.GetProperty("when").GetString() == "base-moved");
         Assert.True(baseMoved.GetProperty("retrySelf").GetBoolean());
@@ -450,6 +450,10 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("mohist/push", recoverPushPrChecks.GetProperty("uses").GetString());
         Assert.Equal("${{ workspace.branch }}", recoverPushPrChecks.GetProperty("with").GetProperty("source").GetString());
         Assert.True(recoverPushPrChecks.GetProperty("with").GetProperty("forceWithLease").GetBoolean());
+
+        var protectionConflict = handlers.Single(h => h.GetProperty("when").GetString() == "protection-conflict");
+        Assert.True(protectionConflict.GetProperty("retrySelf").GetBoolean());
+        Assert.False(protectionConflict.TryGetProperty("tasks", out _));
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
