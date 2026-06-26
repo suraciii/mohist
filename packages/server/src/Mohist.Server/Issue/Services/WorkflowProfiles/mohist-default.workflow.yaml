@@ -274,6 +274,11 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
+          recovery:
+            budget: 3
+            handlers:
+              - when: retry-safe
+                retrySelf: true
       - id: integrate:rebase
         title: Rebase and squash branch
         uses: mohist/rebase
