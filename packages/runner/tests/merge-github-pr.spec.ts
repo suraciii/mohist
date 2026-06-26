@@ -96,10 +96,12 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         case "gh pr checks 42 --json bucket,name,state":
           return ghOk(JSON.stringify([{ name: "build", bucket: "PASS", state: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
           return ghOk("Merged pull request #42\n")
         case "gh pr view 42 --json state,mergeCommit,url":
@@ -123,8 +125,9 @@ describe("mohist/merge-github-pr action", () => {
     expect(ghCalls).toEqual([
       "gh --version",
       "gh auth status",
-      "gh pr view 42 --json state,mergeCommit,url,number",
+      "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus",
       "gh pr checks 42 --json bucket,name,state",
+      "gh pr view 42 --json mergeStateStatus",
       "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ",
       "gh pr view 42 --json state,mergeCommit,url",
     ])
@@ -150,7 +153,7 @@ describe("mohist/merge-github-pr action", () => {
           return ghOk("ok\n")
         case "gh pr list --head mohist/run-wr-merge-1 --base master --state open --json number,url":
           return ghOk(JSON.stringify([{ number: 9, url: "https://github.com/example/repo/pull/9" }]))
-        case "gh pr view 9 --json state,mergeCommit,url,number":
+        case "gh pr view 9 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "MERGED", number: 9, url: "https://github.com/example/repo/pull/9", mergeCommit: { oid: "merge-sha-9" } }))
         default:
           return ghFail(`unexpected gh call: ${full}`)
@@ -177,10 +180,12 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         case "gh pr checks 42 --json bucket,name,state":
           return ghOk(JSON.stringify([{ name: "build", bucket: "PASS", state: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
           return ghFail("GraphQL: Pull request is not mergeable")
         default:
@@ -226,7 +231,7 @@ describe("mohist/merge-github-pr action", () => {
           case "gh --version":
           case "gh auth status":
             return ghOk("ok\n")
-          case "gh pr view 42 --json state,mergeCommit,url,number":
+          case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
             return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
           case "gh pr checks 42 --json bucket,name,state":
             return ghOk(JSON.stringify([{ name: "build", bucket: scenario.bucket, state: scenario.state }]))
@@ -272,7 +277,7 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         case "gh pr checks 42 --json bucket,name,state":
           checksCalls += 1
@@ -280,6 +285,8 @@ describe("mohist/merge-github-pr action", () => {
             return ghFail(`no checks reported on the 'mohist/run-wr-merge-1' branch\n`)
           }
           return ghOk(JSON.stringify([{ name: "build", bucket: "PASS", state: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
           return ghOk("Merged pull request #42\n")
         case "gh pr view 42 --json state,mergeCommit,url":
@@ -321,10 +328,12 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         case "gh pr checks 42 --json bucket,name,state":
           return ghFail(`no checks reported on the 'mohist/run-wr-merge-1' branch\n`)
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
           return ghOk("Merged pull request #42\n")
         case "gh pr view 42 --json state,mergeCommit,url":
@@ -359,7 +368,7 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         case "gh pr checks 42 --json bucket,name,state":
           return ghFail("GraphQL: could not resolve check runs\n")
@@ -389,7 +398,7 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "CLOSED", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         default:
           return ghFail(`unexpected gh call: ${full}`)
@@ -420,10 +429,12 @@ describe("mohist/merge-github-pr action", () => {
         case "gh --version":
         case "gh auth status":
           return ghOk("ok\n")
-        case "gh pr view 42 --json state,mergeCommit,url,number":
+        case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
           return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
         case "gh pr checks 42 --json bucket,name,state":
           return ghOk(JSON.stringify([{ name: "build", bucket: "PASS", state: "SUCCESS" }]))
+        case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
         case "gh pr merge 42 --squash --subject Issue title --body ":
           return ghOk("Merged pull request #42\n")
         case "gh pr view 42 --json state,mergeCommit,url":
@@ -481,7 +492,7 @@ describe("mohist/merge-github-pr action", () => {
             case "gh --version":
             case "gh auth status":
               return ghOk("ok\n")
-            case "gh pr view 42 --json state,mergeCommit,url,number":
+            case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
               return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
             case "gh pr checks 42 --json bucket,name,state": {
               const checksCount = ghCalls.filter((c) => c === "gh pr checks 42 --json bucket,name,state").length
@@ -496,7 +507,9 @@ describe("mohist/merge-github-pr action", () => {
                 { name: "lint", bucket: "PASS", state: "SUCCESS" },
               ]))
             }
-            case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+            case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
+        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
               return ghOk("Merged pull request #42\n")
             case "gh pr view 42 --json state,mergeCommit,url":
               return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))
@@ -549,7 +562,7 @@ describe("mohist/merge-github-pr action", () => {
             case "gh --version":
             case "gh auth status":
               return ghOk("ok\n")
-            case "gh pr view 42 --json state,mergeCommit,url,number":
+            case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
               return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
             case "gh pr checks 42 --json bucket,name,state":
               return ghOk(JSON.stringify([{ name: "build", bucket: "PENDING", state: "" }]))
@@ -609,11 +622,13 @@ describe("mohist/merge-github-pr action", () => {
             case "gh --version":
             case "gh auth status":
               return ghOk("ok\n")
-            case "gh pr view 42 --json state,mergeCommit,url,number":
+            case "gh pr view 42 --json state,mergeCommit,url,number,mergeStateStatus":
               return ghOk(JSON.stringify({ state: "OPEN", number: 42, url: "https://github.com/example/repo/pull/42", mergeCommit: null }))
             case "gh pr checks 42 --json bucket,name,state":
               return ghOk(JSON.stringify(scenario.checks))
-            case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
+            case "gh pr view 42 --json mergeStateStatus":
+          return ghOk(JSON.stringify({ mergeStateStatus: "CLEAN" }))
+        case "gh pr merge 42 --squash --subject Use GitHub PR workflow --body ":
               return ghOk("Merged pull request #42\n")
             case "gh pr view 42 --json state,mergeCommit,url":
               return ghOk(JSON.stringify({ state: "MERGED", url: "https://github.com/example/repo/pull/42", mergeCommit: { oid: "merge-sha-1" } }))

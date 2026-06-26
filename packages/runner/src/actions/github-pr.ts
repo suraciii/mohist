@@ -593,9 +593,9 @@ export async function waitChecksAndMergePr(
   signal: AbortSignal,
   record: (name: string, command: string, exitCode: number, output: string) => void,
 ): Promise<WaitChecksAndMergeOk | WaitChecksAndMergeFailure> {
-  const viewResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number"], workDir, signal)
+  const viewResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "state,mergeCommit,url,number,mergeStateStatus"], workDir, signal)
   const viewOutput = combinedGhOutput(viewResult)
-  record("gh-pr-view", `pr view ${prNumber} --json state,mergeCommit,url,number`, viewResult.exitCode, viewOutput)
+  record("gh-pr-view", `pr view ${prNumber} --json state,mergeCommit,url,number,mergeStateStatus`, viewResult.exitCode, viewOutput)
   if (viewResult.exitCode !== 0) {
     return {
       kind: "failure",
@@ -653,6 +653,51 @@ export async function waitChecksAndMergePr(
       message: `Cancelled while waiting for PR #${prNumber} checks to settle: ${checksWait.message}`,
       prUrl: view.url ?? null,
       output: checksWait.output,
+    }
+  }
+
+  // waitForPrChecks tracks commit statuses via gh pr checks, but branch
+  // protection may also gate on reviews or check suites that aren't reported
+  // as commit statuses. The PR's mergeStateStatus is the authoritative signal.
+  const mergeStatusResult = await gh("gh", ["pr", "view", String(prNumber), "--json", "mergeStateStatus"], workDir, signal)
+  const mergeStatusOutput = combinedGhOutput(mergeStatusResult)
+  record("gh-pr-merge-ready", `pr view ${prNumber} --json mergeStateStatus`, mergeStatusResult.exitCode, mergeStatusOutput)
+  if (mergeStatusResult.exitCode !== 0) {
+    return {
+      kind: "failure",
+      errorCode: classifyGhFailure(mergeStatusResult.stdout, mergeStatusResult.stderr),
+      message: `gh pr view ${prNumber} mergeStateStatus failed: ${mergeStatusOutput}`,
+      prUrl: view.url ?? null,
+      output: mergeStatusOutput,
+    }
+  }
+  const mergeStatusView = parsePrView(mergeStatusResult.stdout)
+  const blocked = mergeStatusView?.mergeStateStatus
+  if (blocked === "BLOCKED" || blocked === "UNSTABLE") {
+    return {
+      kind: "failure",
+      errorCode: "protection-conflict",
+      message: `PR #${prNumber} merge blocked by branch protection (state=${blocked})`,
+      prUrl: view.url ?? null,
+      output: mergeStatusOutput,
+    }
+  }
+  if (blocked === "DIRTY" || blocked === "BEHIND") {
+    return {
+      kind: "failure",
+      errorCode: "base-moved",
+      message: `PR #${prNumber} is ${blocked}; rebase required.`,
+      prUrl: view.url ?? null,
+      output: mergeStatusOutput,
+    }
+  }
+  if (blocked === "DRAFT") {
+    return {
+      kind: "failure",
+      errorCode: "pr-state-conflict",
+      message: `PR #${prNumber} is still a draft.`,
+      prUrl: view.url ?? null,
+      output: mergeStatusOutput,
     }
   }
 
@@ -1005,7 +1050,7 @@ export function looksLikeProtectionConflict(text: string): boolean {
   if (lower.includes("protected branch")) return true
   if (lower.includes("required status check") || lower.includes("status check")) return true
   if (lower.includes("required review") || lower.includes("review required") || lower.includes("approving review")) return true
-  if (lower.includes("branch protection")) return true
+  if (lower.includes("branch protection") || lower.includes("branch policy")) return true
   return false
 }
 
@@ -1086,6 +1131,7 @@ interface PrViewState {
   url?: string
   mergeCommit?: { oid?: string } | null
   isDraft?: boolean
+  mergeStateStatus?: string
 }
 
 export function parsePrView(stdout: string): PrViewState | null {
@@ -1113,7 +1159,7 @@ function parsePrViewInternal(stdout: string, includeDraft: boolean): PrViewState
   const mergeCommit = rawMergeCommit && typeof rawMergeCommit === "object" && !Array.isArray(rawMergeCommit)
     ? { oid: typeof (rawMergeCommit as Record<string, unknown>)["oid"] === "string" ? ((rawMergeCommit as Record<string, unknown>)["oid"] as string) : undefined }
     : null
-  const result: PrViewState = { state, url, mergeCommit }
+  const result: PrViewState = { state, url, mergeCommit, mergeStateStatus: typeof obj["mergeStateStatus"] === "string" ? (obj["mergeStateStatus"] as string) : undefined }
   if (includeDraft) result.isDraft = obj["isDraft"] === true
   return result
 }
