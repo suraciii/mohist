@@ -1,0 +1,135 @@
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
+
+namespace Mohist.Server.Runner.Services.SignalR;
+
+/// <summary>
+/// Server-side router that delivers workflow terminal lifecycle events
+/// (<c>WorkflowRunCompleted</c>, <c>WorkflowRunStopped</c>, <c>WorkflowRunFailed</c>)
+/// to the runner that owns the workspace via the SignalR method
+/// <c>ReceiveWorkflowRunStatus({ workflowRunId, status })</c>.
+///
+/// The server stays the source of truth for workflow lifecycle facts but
+/// never schedules, scans, or performs runner filesystem deletion. The
+/// router only consults workflow grain state to discover the assigned
+/// runner; the runner owns the workspace and decides what to do with the
+/// notification.
+///
+/// Routing rules:
+/// <list type="bullet">
+/// <item>If the owning runner is offline (no <see cref="RunnerConnectionTracker"/> entry), the notification is dropped — the runner's convergence backstop (POST /workflow-runs/status) is authoritative.</item>
+/// <item>If the workflow has no assigned runner, the notification is dropped.</item>
+/// <item>Push failures are logged but do not fail the workflow event handler; lifecycle events must never be blocked on SignalR delivery.</item>
+/// </list>
+/// </summary>
+public interface IRunnerWorkflowStatusRouter
+{
+    /// <summary>
+    /// Push <c>ReceiveWorkflowRunStatus</c> to the runner currently
+    /// assigned to <paramref name="workflowRunId"/>. No-op when the run
+    /// has no assignment or the assigned runner is not connected.
+    /// </summary>
+    Task RouteAsync(string workflowRunId, WorkflowRunStatus status, CancellationToken ct = default);
+}
+
+public sealed class RunnerWorkflowStatusRouter : IRunnerWorkflowStatusRouter
+{
+    private static readonly TimeSpan PushTimeout = TimeSpan.FromSeconds(5);
+
+    private readonly IHubContext<RunnerHub> _hub;
+    private readonly RunnerConnectionTracker _connections;
+    private readonly IGrainFactory _grains;
+    private readonly ILogger<RunnerWorkflowStatusRouter> _log;
+
+    public RunnerWorkflowStatusRouter(
+        IHubContext<RunnerHub> hub,
+        RunnerConnectionTracker connections,
+        IGrainFactory grains,
+        ILogger<RunnerWorkflowStatusRouter> log)
+    {
+        _hub = hub;
+        _connections = connections;
+        _grains = grains;
+        _log = log;
+    }
+
+    public async Task RouteAsync(string workflowRunId, WorkflowRunStatus status, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId))
+            return;
+
+        IWorkflowGrain workflow;
+        try
+        {
+            workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Terminal status router: failed to resolve workflow grain for {WorkflowRunId}",
+                workflowRunId);
+            return;
+        }
+
+        string? assignedRunnerId;
+        try
+        {
+            assignedRunnerId = await workflow.GetAssignedRunnerIdAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Terminal status router: failed to read assignment for {WorkflowRunId}",
+                workflowRunId);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(assignedRunnerId))
+        {
+            _log.LogDebug(
+                "Terminal status router: no assigned runner for {WorkflowRunId}, skipping push",
+                workflowRunId);
+            return;
+        }
+
+        var connectionId = _connections.GetConnectionId(assignedRunnerId);
+        if (string.IsNullOrWhiteSpace(connectionId))
+        {
+            _log.LogDebug(
+                "Terminal status router: runner {RunnerId} for {WorkflowRunId} is not connected, skipping push (convergence backstop will reconcile)",
+                assignedRunnerId, workflowRunId);
+            return;
+        }
+
+        var payload = new WorkflowRunStatusNotification(workflowRunId, status.ToString());
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(PushTimeout);
+            await _hub.Clients
+                .Client(connectionId)
+                .SendCoreAsync("ReceiveWorkflowRunStatus", new object?[] { payload }, timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Terminal status router: failed to push ReceiveWorkflowRunStatus to {RunnerId} for {WorkflowRunId}",
+                assignedRunnerId, workflowRunId);
+        }
+    }
+}
+
+/// <summary>
+/// Wire payload for the runner-side SignalR method
+/// <c>ReceiveWorkflowRunStatus</c>. The status string is the canonical
+/// <see cref="WorkflowRunStatus"/> name (<c>Completed</c>, <c>Stopped</c>,
+/// <c>Failed</c>) and is distinguishable from any non-terminal state
+/// (e.g. <c>Running</c>, <c>Paused</c>, <c>AwaitingApproval</c>) by the
+/// runner. The runner never receives <c>null</c> in this channel: the
+/// router only fires on terminal events.
+/// </summary>
+public sealed record WorkflowRunStatusNotification(string WorkflowRunId, string Status);

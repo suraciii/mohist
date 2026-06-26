@@ -3,6 +3,7 @@ using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Agent;
@@ -96,6 +97,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<WorkflowGrainOptions>(configuration.GetSection(WorkflowGrainOptions.SectionName));
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));
         services.PostConfigure<Mohist.Server.Otel.OtelOptions>(options =>
         {
@@ -114,6 +116,7 @@ public static class MohistServiceRegistration
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
+        services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {
             CopyJsonOptions(JSON.Options, o.SerializerOptions);

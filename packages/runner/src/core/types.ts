@@ -18,6 +18,19 @@ export interface WorkDispatchResponse {
   setVars?: string | null
   ownerKind?: string | null
   agentJobId?: string | null
+  cleanupPolicy?: CleanupPolicy | null
+}
+
+/**
+ * Workspace cleanup policy delivered by the server on every poll.
+ * Each nullable field is an explicit unlimited/disabled sentinel — the
+ * runner treats `null` as "do not evict by this strategy". The server
+ * never scans runner filesystems; this is policy, not actions.
+ */
+export interface CleanupPolicy {
+  retentionDays?: number | null
+  storageBudgetBytes?: number | null
+  storageTargetWatermarkBytes?: number | null
 }
 
 export interface WorkItem {
@@ -90,6 +103,18 @@ export interface RunnerOptions {
   pollIntervalMs: number
   heartbeatIntervalMs: number
   dispatchLivenessProbeIntervalMs: number
+  // Optional override for the convergence backstop cadence (T-003).
+  // Defaults to 5 minutes inside RunnerHost. Set to a very large value
+  // to effectively disable the periodic tick while keeping startup /
+  // reconnect convergence. Used by tests to drive ticks deterministically.
+  cleanupConvergenceIntervalMs?: number
+
+  // Optional override for the cleanup loop cadence (T-004).
+  // Defaults to 2 minutes inside RunnerHost. The cleanup loop runs
+  // retention + budget eviction with pre-delete guards. Set to a very
+  // large value to effectively disable the periodic tick. Used by tests
+  // to drive ticks deterministically.
+  cleanupLoopIntervalMs?: number
 }
 
 export interface RunnerRegistration {

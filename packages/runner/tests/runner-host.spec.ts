@@ -26,6 +26,7 @@ vi.mock("../src/server/connection.js", () => ({
     heartbeat = heartbeat
     disconnect = disconnect
     poll = poll
+    getLastCleanupPolicy = () => null
   },
 }))
 
