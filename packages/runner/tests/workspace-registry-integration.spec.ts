@@ -131,7 +131,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.materialize(work("wr-001", "issue-42", 42, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-001", "issue-42", 42, repo), new AbortController().signal)
 
     const entry = registry.get("wr-001")
     expect(entry).toMatchObject({
@@ -156,7 +156,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.materialize(work("wr-marker", "issue-99", 99, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-marker", "issue-99", 99, repo), new AbortController().signal)
 
     const marker = JSON.parse(await readFile(join(info.path, ".mohist/workspace.json"), "utf8"))
     expect(Object.keys(marker).sort()).toEqual(["issueId", "issueNumber", "workflowRunId"])
@@ -176,7 +176,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     const manager = new WorkspaceManager(runnerRoot, registry)
 
     const item = work("wr-refresh", "issue-1", 1, repo)
-    await manager.materialize(item, new AbortController().signal)
+    await manager.prepare(item, new AbortController().signal)
     expect(registry.get("wr-refresh")?.materializedAt).toBe(first.toISOString())
 
     await manager.verify(item, new AbortController().signal)
@@ -198,7 +198,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     const manager = new WorkspaceManager(runnerRoot, registry)
 
     const item = work("wr-existing-only", "issue-1", 1, repo)
-    await manager.materialize(item, new AbortController().signal)
+    await manager.prepare(item, new AbortController().signal)
 
     // Drop the registry entry directly (simulate a stale / pre-registry
     // disk state) but leave the marker intact.
@@ -217,7 +217,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     const registryA = new WorkspaceRegistry(runnerRoot)
     await registryA.load()
     const managerA = new WorkspaceManager(runnerRoot, registryA)
-    await managerA.materialize(work("wr-persist", "issue-1", 1, repo), new AbortController().signal)
+    await managerA.prepare(work("wr-persist", "issue-1", 1, repo), new AbortController().signal)
 
     // Second host: fresh registry instance, simulates restart.
     const registryB = new WorkspaceRegistry(runnerRoot)
@@ -240,7 +240,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.materialize(work("wr-remove", "issue-1", 1, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-remove", "issue-1", 1, repo), new AbortController().signal)
     expect(registry.get("wr-remove")).not.toBeNull()
 
     // Stand up a SignalR client bound to the same registry. The handler
@@ -272,7 +272,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.materialize(work("wr-gone", "issue-2", 2, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-gone", "issue-2", 2, repo), new AbortController().signal)
     await rm(info.path, { recursive: true, force: true })
     expect(exists(info.path)).toBe(false)
 
@@ -291,7 +291,7 @@ describe("WorkspaceManager + WorkspaceRegistry (T-002)", () => {
     await registry.load()
     const manager = new WorkspaceManager(runnerRoot, registry)
 
-    const info = await manager.materialize(work("wr-out", "issue-3", 3, repo), new AbortController().signal)
+    const info = await manager.prepare(work("wr-out", "issue-3", 3, repo), new AbortController().signal)
 
     void new RunnerSignalRClient("http://localhost:0", "runner-test", runnerRoot, null, { registry })
     const removeHandler = builders.at(-1)!.handlers.get("RemoveWorkspace")!
