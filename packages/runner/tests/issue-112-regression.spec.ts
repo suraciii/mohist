@@ -6,7 +6,7 @@ import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { WorkExecutor, setCleanupAgentActionForTest } from "../src/runtime/executor.js"
 import { ActionRegistry } from "../src/actions/registry.js"
-import { rebaseAction, setRebaseConflictResolverForTest, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
+import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import { pushAction, setPushGitRunnerForTest } from "../src/actions/push.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionContext, ActionResult, JsonObject, WorkItem } from "../src/core/types.js"
@@ -38,7 +38,6 @@ beforeEach(async () => {
 afterEach(async () => {
   setCleanupAgentActionForTest(null)
   setRebaseGitRunnerForTest(null)
-  setRebaseConflictResolverForTest(null)
   setRebaseExistsCheckerForTest(null)
   setPushGitRunnerForTest(null)
   await rm(worktree.workDir, { recursive: true, force: true })
@@ -195,7 +194,6 @@ function installRebaseMockGit(calls: string[]) {
     }
   })
   setRebaseExistsCheckerForTest(() => false)
-  setRebaseConflictResolverForTest(async () => ({ status: "success", message: "noop", output: "" }))
 }
 
 describe("Issue #112 regression — agent leftovers are cleaned before rebase+push delivery", () => {

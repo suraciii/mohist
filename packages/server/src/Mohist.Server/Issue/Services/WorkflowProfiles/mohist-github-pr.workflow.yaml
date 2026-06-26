@@ -272,7 +272,19 @@ stages:
                       baseBranch: ${{ repository.baseBranch }}
                       remote: origin
                       squash: false
-                      conflictMode: task
+                      recovery:
+                        budget: 2
+                        handlers:
+                          - when: conflict
+                            tasks:
+                              - id: recover:resolve-rebase-conflicts
+                                title: Resolve rebase conflicts
+                                uses: mohist/acp-agent
+                                with:
+                                  session: integrate
+                                  prompt: ${{ prompts.resolve-rebase-conflicts }}
+                                  agent: ${{ vars.agent }}
+                            retrySelf: true
                   - id: recover:push
                     title: Push
                     uses: mohist/push

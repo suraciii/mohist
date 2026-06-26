@@ -1,5 +1,5 @@
 import { hostname } from "node:os"
-import type { JsonObject, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
+import type { JsonObject, RecoveryTaskInput, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 
@@ -40,6 +40,7 @@ export class ServerConnection {
       exitCode: result.exitCode,
       artifactUploadIds: result.artifactUploadIds ?? null,
       cleanupAttempts: result.cleanupAttempts ?? null,
+      recoveryTasks: serializeRecoveryTasks(result.recoveryTasks),
     }
     if (ownerKind) {
       body.ownerKind = ownerKind
@@ -253,6 +254,16 @@ function readNumber(value: unknown, path: string[]): number | null {
 function readBoolean(value: unknown, path: string[]): boolean | null {
     const found = getSegments(value, path)
   return typeof found === "boolean" ? found : null
+}
+
+function serializeRecoveryTasks(tasks: RecoveryTaskInput[] | null | undefined): Array<{ id: string; title: string; uses: string | null; with: string | null }> | null {
+  if (!tasks || tasks.length === 0) return null
+  return tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    uses: t.uses ?? null,
+    with: t.with ? JSON.stringify(t.with) : null,
+  }))
 }
 
 function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {

@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { setIssueFieldCommandRunnerForTest } from "../src/actions/issue-fields.js"
-import { applyWorkflowAgentDefault, rebaseAction, resolveRebaseConflictMode, setRebaseConflictResolverForTest, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
+import { rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 afterEach(() => {
   setRebaseGitRunnerForTest(null)
   setRebaseExistsCheckerForTest(null)
-  setRebaseConflictResolverForTest(null)
   setIssueFieldCommandRunnerForTest(null)
 })
 
@@ -410,67 +409,6 @@ describe("mohist/rebase", () => {
     expect(result.message).toContain("'message' is required")
   })
 
-  it("SquashOption_RunsOnlyAfterSuccessfulRebase", async () => {
-    const calls: string[] = []
-    let resolverRan = false
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async (resolverContext) => {
-      resolverRan = true
-      return {
-        status: "success",
-        message: "rebase completed",
-        output: `agent completed ${resolverContext.workId}`,
-      }
-    })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "fetch origin master":
-          return ok("")
-        case "status --porcelain":
-          return ok("")
-        case "rev-parse origin/master":
-          return ok("baseSha\n")
-        case "rev-parse HEAD":
-          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
-        case "rebase origin/master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok(resolverRan ? "" : "packages/runner/src/actions/rebase.ts\n")
-        case "rebase --abort":
-          return ok("aborted")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({
-      baseBranch: "master",
-      remote: "origin",
-      squash: true,
-      message: "Complete issue #217",
-      maxConflictRetries: 1,
-      conflictResolver: { with: {} },
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("rebase --abort")
-    expect(calls).not.toContain("reset --soft baseSha")
-    expect(calls).not.toContain("commit -m Complete issue #217")
-    expect(output).toMatchObject({
-      kind: "rebase",
-      squashed: false,
-      squashedHeadSha: null,
-      rebased: false,
-      failureKind: "conflict",
-    })
-  })
-
   it("RemoteFetchFails_ReportsRetrySafe", async () => {
     const calls: string[] = []
     setRebaseExistsCheckerForTest(() => false)
@@ -619,28 +557,9 @@ describe("mohist/rebase", () => {
     expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
   })
 
-  it("ConflictResolverWithoutAgentConfig_InheritsWorkflowAgentConfig", () => {
-    const withInput: JsonObject = { description: "resolve" }
-
-    applyWorkflowAgentDefault(withInput, {
-      vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
-    })
-
-    expect(withInput.agent).toEqual({ type: "opencode", model: "openai/gpt-5.4" })
-  })
-
-  it("ConflictResolverCompletesFullRebase_VerifiesWithoutContinuingForAgent", async () => {
+  it("Conflict_NoRecovery_AbortsAndReportsConflict", async () => {
     const calls: string[] = []
-    let resolverRan = false
     setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async (resolverContext) => {
-      resolverRan = true
-      return {
-        status: "success",
-        message: "rebase completed",
-        output: `agent completed ${resolverContext.workId}`,
-      }
-    })
     setRebaseGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
@@ -648,72 +567,16 @@ describe("mohist/rebase", () => {
           return ok("/fake/worktree/.git/rebase-merge\n")
         case "rev-parse --git-path rebase-apply":
           return ok("/fake/worktree/.git/rebase-apply\n")
+        case "rev-parse master":
+          return ok("baseSha\n")
         case "status --porcelain":
           return ok("")
-        case "branch --show-current":
-          return ok("feature-branch\n")
-        case "rev-parse master":
-          return ok("base\n")
-        case "rev-parse HEAD":
-          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
-        case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/acp-agent.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok(resolverRan ? "" : "packages/runner/src/actions/acp-agent.ts\n")
-        case "merge-base master HEAD":
-          return ok("base\n")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({ maxConflictRetries: 1, conflictResolver: { with: {} } }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("success")
-    expect(calls).not.toContain("add .")
-    expect(calls).not.toContain("-c core.editor=true rebase --continue")
-    expect(output.output).toContain("Merge conflict in packages/runner/src/actions/acp-agent.ts")
-    expect(output.output).toContain("agent completed rebase.1-conflict-resolve-1")
-    expect(output).toMatchObject({
-      beforeHeadSha: "before",
-      afterHeadSha: "after",
-      rebased: true,
-      resolveAttempts: 1,
-    })
-  })
-
-  it("ConflictResolverReturnsSuccessButRebaseStillInProgress_FailsWithVerificationOutput", async () => {
-    const calls: string[] = []
-    let resolverRan = false
-    setRebaseExistsCheckerForTest((path) => resolverRan && path === "/fake/worktree/.git/rebase-merge")
-    setRebaseConflictResolverForTest(async () => {
-      resolverRan = true
-      return {
-        status: "success",
-        message: "partial",
-        output: "agent stopped before git rebase --continue",
-      }
-    })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "status --porcelain":
-          return ok("")
-        case "rev-parse master":
-          return ok("base\n")
         case "rev-parse HEAD":
           return ok("before\n")
         case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/acp-agent.ts")
+          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
         case "diff --name-only --diff-filter=U":
-          return ok(resolverRan ? "" : "packages/runner/src/actions/acp-agent.ts\n")
-        case "merge-base master HEAD":
-          return ok("old-base\n")
+          return ok("packages/runner/src/actions/rebase.ts\n")
         case "rebase --abort":
           return ok("aborted")
         default:
@@ -721,24 +584,22 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ maxConflictRetries: 1, conflictResolver: { with: {} } }))
+    const result = await rebaseAction(context())
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).not.toContain("-c core.editor=true rebase --continue")
     expect(calls).toContain("rebase --abort")
-    expect(output.output).toContain("agent stopped before git rebase --continue")
-    expect(output.output).toContain("Rebase is still in progress.")
+    expect(output).toMatchObject({
+      rebased: false,
+      failureKind: "conflict",
+      rebaseLeftInProgress: false,
+    })
+    expect(result.message).toBe("Rebase failed: conflict could not be resolved")
   })
 
-  it("ConflictModeTask_OnConflict_ReturnsFailureKindConflictAndLeavesRebaseInProgress", async () => {
+  it("Conflict_WithRecovery_LeavesRebaseInProgressAndReturnsConflict", async () => {
     const calls: string[] = []
-    let resolverRan = false
     setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async () => {
-      resolverRan = true
-      return { status: "success", message: "should not run", output: "ignored" }
-    })
     setRebaseGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
@@ -762,8 +623,7 @@ describe("mohist/rebase", () => {
     })
 
     const result = await rebaseAction(context({
-      conflictMode: "task",
-      conflictResolver: { with: { prompt: "ignored" } },
+      recovery: { budget: 1, handlers: [] },
     }))
     const output = JSON.parse(result.output ?? "{}")
 
@@ -774,236 +634,18 @@ describe("mohist/rebase", () => {
       conflicts: ["packages/runner/src/actions/rebase.ts", "packages/runner/src/actions/git.ts"],
       resolveAttempts: 0,
       failureKind: "conflict",
-      conflictMode: "task",
       rebaseLeftInProgress: true,
     })
-    expect(resolverRan).toBe(false)
     expect(calls).not.toContain("rebase --abort")
     expect(result.message).toBe("Rebase in progress: conflicts require task-level resolution")
   })
 
-  it("ConflictModeTask_AcceptsConflictResolverInputButIgnoresIt", async () => {
-    const calls: string[] = []
-    let resolverRan = false
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async () => {
-      resolverRan = true
-      return { status: "success", message: "should not run", output: "ignored" }
-    })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "rev-parse master":
-          return ok("baseSha\n")
-        case "status --porcelain":
-          return ok("")
-        case "rev-parse HEAD":
-          return ok("before\n")
-        case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok("packages/runner/src/actions/rebase.ts\n")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({
-      conflictMode: "task",
-      maxConflictRetries: 5,
-      conflictResolver: { with: { prompt: "ignored" } },
-    }))
-
-    expect(result.status).toBe("failure")
-    expect(resolverRan).toBe(false)
-    expect(calls).not.toContain("rebase --abort")
-  })
-
-  it("ConflictModeTask_AcceptsStringConflictMode", async () => {
-    const calls: string[] = []
-    let resolverRan = false
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async () => {
-      resolverRan = true
-      return { status: "success", message: "should not run", output: "ignored" }
-    })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "rev-parse master":
-          return ok("baseSha\n")
-        case "status --porcelain":
-          return ok("")
-        case "rev-parse HEAD":
-          return ok("before\n")
-        case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok("packages/runner/src/actions/rebase.ts\n")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({ conflictMode: "TASK" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(output.failureKind).toBe("conflict")
-    expect(output.conflictMode).toBe("task")
-    expect(resolverRan).toBe(false)
-    expect(calls).not.toContain("rebase --abort")
-  })
-
-  it("ConflictModeResolve_Default_PreservesPriorInlineConflictResolverBehavior", async () => {
-    const calls: string[] = []
-    let resolverRan = false
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async (resolverContext) => {
-      resolverRan = true
-      return {
-        status: "success",
-        message: "rebase completed",
-        output: `agent completed ${resolverContext.workId}`,
-      }
-    })
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "status --porcelain":
-          return ok("")
-        case "branch --show-current":
-          return ok("feature-branch\n")
-        case "rev-parse master":
-          return ok("base\n")
-        case "rev-parse HEAD":
-          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
-        case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok(resolverRan ? "" : "packages/runner/src/actions/rebase.ts\n")
-        case "merge-base master HEAD":
-          return ok("base\n")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({
-      maxConflictRetries: 1,
-      conflictResolver: { with: {} },
-    }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("success")
-    expect(resolverRan).toBe(true)
-    expect(output).toMatchObject({
-      rebased: true,
-      failureKind: null,
-      conflictMode: "resolve",
-      rebaseLeftInProgress: false,
-    })
-    expect(calls).not.toContain("rebase --abort")
-  })
-
-  it("ConflictModeResolveExplicit_OnConflictWithNoResolver_AbortsAndReportsConflict", async () => {
-    const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "rev-parse master":
-          return ok("baseSha\n")
-        case "status --porcelain":
-          return ok("")
-        case "rev-parse HEAD":
-          return ok("before\n")
-        case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok("packages/runner/src/actions/rebase.ts\n")
-        case "rebase --abort":
-          return ok("aborted")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({ conflictMode: "resolve" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("rebase --abort")
-    expect(output).toMatchObject({
-      rebased: false,
-      failureKind: "conflict",
-      conflictMode: "resolve",
-      rebaseLeftInProgress: false,
-    })
-    expect(result.message).toBe("Rebase failed: conflict could not be resolved")
-  })
-
-  it("InvalidConflictMode_DefaultsToResolveBehavior", async () => {
-    const calls: string[] = []
-    setRebaseExistsCheckerForTest(() => false)
-    setRebaseGitRunnerForTest(async (_workDir, args) => {
-      calls.push(args.join(" "))
-      switch (args.join(" ")) {
-        case "rev-parse --git-path rebase-merge":
-          return ok("/fake/worktree/.git/rebase-merge\n")
-        case "rev-parse --git-path rebase-apply":
-          return ok("/fake/worktree/.git/rebase-apply\n")
-        case "rev-parse master":
-          return ok("baseSha\n")
-        case "status --porcelain":
-          return ok("")
-        case "rev-parse HEAD":
-          return ok("before\n")
-        case "rebase master":
-          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
-        case "diff --name-only --diff-filter=U":
-          return ok("packages/runner/src/actions/rebase.ts\n")
-        case "rebase --abort":
-          return ok("aborted")
-        default:
-          return fail(`unexpected git call: ${args.join(" ")}`)
-      }
-    })
-
-    const result = await rebaseAction(context({ conflictMode: "bogus" }))
-    const output = JSON.parse(result.output ?? "{}")
-
-    expect(result.status).toBe("failure")
-    expect(calls).toContain("rebase --abort")
-    expect(output.conflictMode).toBe("resolve")
-    expect(output.rebaseLeftInProgress).toBe(false)
-  })
-
-  it("ConflictModeTask_RerunAfterAbandonedInProgress_AbortsPriorRebaseThenStartsFresh", async () => {
+  it("Conflict_WithRecovery_RerunAfterAbandonedInProgress_AbortsPriorRebaseThenStartsFresh", async () => {
     const calls: string[] = []
     let rebaseStatePresent = true
     setRebaseExistsCheckerForTest((path) =>
       path === "/fake/worktree/.git/rebase-merge" && rebaseStatePresent,
     )
-    setRebaseConflictResolverForTest(async () => {
-      throw new Error("resolver should not run")
-    })
     setRebaseGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
@@ -1029,7 +671,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ conflictMode: "task" }))
+    const result = await rebaseAction(context({ recovery: { budget: 1, handlers: [] } }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
@@ -1037,12 +679,11 @@ describe("mohist/rebase", () => {
     expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
     expect(output).toMatchObject({
       failureKind: "conflict",
-      conflictMode: "task",
       rebaseLeftInProgress: true,
     })
   })
 
-  it("ConflictModeTask_SuccessfulRebase_ReportsConflictModeInOutput", async () => {
+  it("Conflict_WithRecovery_SuccessfulRebase_ReportsNormal", async () => {
     const calls: string[] = []
     setRebaseExistsCheckerForTest(() => false)
     setRebaseGitRunnerForTest(async (_workDir, args) => {
@@ -1065,14 +706,13 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ conflictMode: "task" }))
+    const result = await rebaseAction(context({ recovery: { budget: 1, handlers: [] } }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
     expect(output).toMatchObject({
       rebased: true,
       failureKind: null,
-      conflictMode: "task",
       rebaseLeftInProgress: false,
     })
   })
@@ -1106,29 +746,3 @@ function ok(stdout: string) {
 function fail(stderr: string) {
   return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
 }
-
-describe("resolveRebaseConflictMode", () => {
-  it("Missing_DefaultsToResolve", () => {
-    expect(resolveRebaseConflictMode(undefined)).toBe("resolve")
-    expect(resolveRebaseConflictMode({})).toBe("resolve")
-    expect(resolveRebaseConflictMode({ conflictMode: null })).toBe("resolve")
-  })
-
-  it("ResolveString_ReturnsResolve", () => {
-    expect(resolveRebaseConflictMode({ conflictMode: "resolve" })).toBe("resolve")
-    expect(resolveRebaseConflictMode({ conflictMode: "RESOLVE" })).toBe("resolve")
-    expect(resolveRebaseConflictMode({ conflictMode: "Resolve" })).toBe("resolve")
-  })
-
-  it("TaskString_ReturnsTask", () => {
-    expect(resolveRebaseConflictMode({ conflictMode: "task" })).toBe("task")
-    expect(resolveRebaseConflictMode({ conflictMode: "TASK" })).toBe("task")
-    expect(resolveRebaseConflictMode({ conflictMode: "Task" })).toBe("task")
-  })
-
-  it("InvalidValue_DefaultsToResolve", () => {
-    expect(resolveRebaseConflictMode({ conflictMode: "bogus" })).toBe("resolve")
-    expect(resolveRebaseConflictMode({ conflictMode: 123 })).toBe("resolve")
-    expect(resolveRebaseConflictMode({ conflictMode: true })).toBe("resolve")
-  })
-})
