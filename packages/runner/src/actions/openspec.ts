@@ -9,6 +9,13 @@ import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 
 const SPEC_SYNC_COMMIT_MESSAGE = "Sync OpenSpec specs from change delta"
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
+const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
+
+function archiveDestinationMap(variables: JsonObject): JsonObject {
+  const raw = variables[ARCHIVE_DESTINATION_VAR_KEY]
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as JsonObject
+  return {}
+}
 
 export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
   success: boolean
@@ -217,10 +224,13 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 
   const archiveDir = join(dirname(changeDir), "archive")
   const sourceName = changeDir.split(/[\\/]/).pop() ?? "change"
-  const archivePrefix = `${new Date().toISOString().slice(0, 10)}-${sourceName}`
+
+  const existingDestinationMap = archiveDestinationMap(context.variables)
+  const persistedPrefix = typeof existingDestinationMap[sourceName] === "string" ? (existingDestinationMap[sourceName] as string) : null
+  const archivePrefix = persistedPrefix ?? `${new Date().toISOString().slice(0, 10)}-${sourceName}`
 
   const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
-  const sourceHasFiles = exists(changeDir) && await hasFiles(changeDir)
+  const sourceHasFiles = exists(changeDir) && (await hasFiles(changeDir))
 
   if (existingArchive && sourceHasFiles) {
     return archiveFailure(
@@ -240,6 +250,24 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       { kind: "archive-change", source: changeDir },
     )
   } else {
+    if (!persistedPrefix) {
+      try {
+        await context.writeVars({
+          [ARCHIVE_DESTINATION_VAR_KEY]: { ...existingDestinationMap, [sourceName]: archivePrefix },
+        })
+      } catch (err) {
+        return archiveFailure(
+          "retry-safe",
+          `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
+          {
+            kind: "archive-change",
+            source: changeDir,
+            archivePrefix,
+            stage: "persist-name",
+          },
+        )
+      }
+    }
     await mkdir(archiveDir, { recursive: true })
     destination = await uniqueDestination(archiveDir, archivePrefix)
     try {

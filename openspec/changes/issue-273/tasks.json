@@ -70,7 +70,7 @@
       "type": "WRITE",
       "output": "ActionContext mid-execution write helper + baseContext wiring + idempotent archiveChangeAction + runner tests for cross-day retry and write-survives-failure",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Decision 4 + Decision 5. Fully independent of T-001/T-002 (different package: runner core/runtime/actions + runner tests, no server YAML overlap). Open questions from design: (a) patchRunVars failure policy — lean hard-fail-as-retry-safe so budget:3 re-attempts the write before the irreversible move; (b) helper signature — lean writeVars(vars) for symmetry with setVars/patchRunVars, single-key archive use case still reads cleanly; (c) internal key enforcement — runner-side convention sufficient for the closed action set. Already-archived directories from the old date-prefix scheme remain valid: findExistingArchive still matches them when the persisted name is absent on a first run."
     }
   ]
