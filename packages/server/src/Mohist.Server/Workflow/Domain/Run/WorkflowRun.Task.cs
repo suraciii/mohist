@@ -86,6 +86,10 @@ public static partial class WorkflowRunExtensions
                 insertIndex++;
             }
 
+            // Consume one recovery credit for this task definition.
+            if (current.RecoveryBudget.ContainsKey(task.DefinitionId))
+                current.RecoveryBudget[task.DefinitionId]--;
+
             current.Failure = null;
             current.Status = StageRunStatus.Running;
             run.Failure = null;
