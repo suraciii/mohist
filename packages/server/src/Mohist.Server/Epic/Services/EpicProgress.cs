@@ -43,7 +43,17 @@ public static class EpicProgress
 
     public static bool IsTerminal(string status) => TerminalStatuses.Contains(status);
 
-    private static LinkedIssueDto? SelectStartableNext(IReadOnlyList<LinkedIssueDto> undelivered)
+    /// <summary>
+    /// Shared next-issue selection used by both the read-model
+    /// (<see cref="Build"/>) and the autonomous-progression path on
+    /// <c>EpicGrain.TryStartNext</c>. Returns the highest-priority
+    /// <c>CanStart &amp;&amp; StartBlocker is null</c> undelivered
+    /// issue, or <c>null</c> if any linked issue is currently
+    /// <c>in_progress</c> (serial slot occupied) or no candidate
+    /// matches. <c>cancelled</c> issues are excluded by the
+    /// <c>undelivered</c> filter the callers pass in.
+    /// </summary>
+    public static LinkedIssueDto? SelectStartableNext(IReadOnlyList<LinkedIssueDto> undelivered)
     {
         if (undelivered.Any(i => i.Status == "in_progress"))
             return null;

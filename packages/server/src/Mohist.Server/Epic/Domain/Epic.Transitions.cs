@@ -24,7 +24,7 @@ public sealed partial class Epic
             Title = title,
             Description = resolvedDescription,
             Priority = resolvedPriority.Value,
-            Status = EpicStatus.Active,
+            Status = EpicStatus.Idle,
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         };
@@ -70,25 +70,42 @@ public sealed partial class Epic
         RecordEvent(new EpicUpdated(updatedTitle, updatedDescription, updatedPriority));
     }
 
+    public void Start(DateTime? now = null)
+    {
+        EnsureNotTerminal(EpicStatus.Running);
+        if (_status is EpicStatus.Running) return;
+        if (_status is not EpicStatus.Idle)
+            throw new EpicStartRequiresIdleException(Id, EpicStatusName.ToName(_status));
+        var oldStatus = _status;
+        _status = EpicStatus.Running;
+        Touch(now);
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
+    }
+
     public void Pause(string? reason, DateTime? now = null)
     {
         EnsureNotTerminal(EpicStatus.Paused);
         if (_status is EpicStatus.Paused) return;
+        if (_status is not EpicStatus.Running)
+            throw new EpicPauseRequiresRunningException(Id, EpicStatusName.ToName(_status));
         var oldStatus = _status;
         _status = EpicStatus.Paused;
         _pauseReason = reason;
         Touch(now);
-        RecordEvent(new EpicStatusChanged(ToStatusName(oldStatus), ToStatusName(_status)));
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
     }
 
     public void Resume(DateTime? now = null)
     {
-        if (_status is not EpicStatus.Paused) return;
+        EnsureNotTerminal(EpicStatus.Running);
+        if (_status is EpicStatus.Running) return;
+        if (_status is not EpicStatus.Paused)
+            throw new EpicResumeRequiresPausedException(Id, EpicStatusName.ToName(_status));
         var oldStatus = _status;
-        _status = EpicStatus.Active;
+        _status = EpicStatus.Running;
         _pauseReason = null;
         Touch(now);
-        RecordEvent(new EpicStatusChanged(ToStatusName(oldStatus), ToStatusName(_status)));
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
     }
 
     public void MarkDone(IReadOnlySet<int> undeliveredLinkedNumbers, DateTime? now = null)
@@ -101,7 +118,7 @@ public sealed partial class Epic
         var oldStatus = _status;
         _status = EpicStatus.Done;
         Touch(now);
-        RecordEvent(new EpicStatusChanged(ToStatusName(oldStatus), ToStatusName(_status)));
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
     }
 
     public void Close(DateTime? now = null)
@@ -110,7 +127,7 @@ public sealed partial class Epic
         var oldStatus = _status;
         _status = EpicStatus.Closed;
         Touch(now);
-        RecordEvent(new EpicStatusChanged(ToStatusName(oldStatus), ToStatusName(_status)));
+        RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
         RecordEvent(new EpicClosed());
     }
 
@@ -137,15 +154,6 @@ public sealed partial class Epic
     private void EnsureNotTerminal(EpicStatus requested)
     {
         if (_status is EpicStatus.Done or EpicStatus.Closed)
-            throw new EpicAlreadyTerminalException(ToStatusName(_status), ToStatusName(requested));
+            throw new EpicAlreadyTerminalException(EpicStatusName.ToName(_status), EpicStatusName.ToName(requested));
     }
-
-    private static string ToStatusName(EpicStatus status) => status switch
-    {
-        EpicStatus.Active => "active",
-        EpicStatus.Paused => "paused",
-        EpicStatus.Done => "done",
-        EpicStatus.Closed => "closed",
-        _ => throw new ArgumentOutOfRangeException(nameof(status), status, null),
-    };
 }

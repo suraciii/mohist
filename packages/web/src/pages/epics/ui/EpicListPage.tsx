@@ -25,13 +25,15 @@ function PriorityBadge({ priority }: { priority: string }) {
 
 function StatusBadge({ status }: { status: EpicStatus }) {
   const colors: Record<EpicStatus, string> = {
-    [EpicStatus.Active]: 'bg-green-100 text-green-700',
+    [EpicStatus.Idle]: 'bg-green-100 text-green-700',
+    [EpicStatus.Running]: 'bg-emerald-100 text-emerald-700',
     [EpicStatus.Paused]: 'bg-amber-100 text-amber-700',
     [EpicStatus.Done]: 'bg-blue-100 text-blue-700',
     [EpicStatus.Closed]: 'bg-gray-100 text-gray-700',
   }
   const labels: Record<EpicStatus, string> = {
-    [EpicStatus.Active]: 'Active',
+    [EpicStatus.Idle]: 'Idle',
+    [EpicStatus.Running]: 'Running',
     [EpicStatus.Paused]: 'Paused',
     [EpicStatus.Done]: 'Done',
     [EpicStatus.Closed]: 'Closed',
@@ -218,7 +220,7 @@ export function EpicListPage() {
   const [pendingStartIssueNumber, setPendingStartIssueNumber] = useState<number | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
-  const activeEpics = epics?.filter(e => e.status === EpicStatus.Active) ?? []
+  const activeEpics = epics?.filter(e => e.status === EpicStatus.Idle || e.status === EpicStatus.Running) ?? []
   const pausedEpics = epics?.filter(e => e.status === EpicStatus.Paused) ?? []
   const doneEpics = epics?.filter(e => e.status === EpicStatus.Done) ?? []
   const closedEpics = epics?.filter(e => e.status === EpicStatus.Closed) ?? []

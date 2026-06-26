@@ -38,7 +38,7 @@ function makeEpic(overrides: {
     title: overrides.title ?? `Epic ${overrides.id}`,
     description: '',
     priority: overrides.priority,
-    status: overrides.status ?? EpicStatus.Active,
+    status: overrides.status ?? EpicStatus.Idle,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-06-01T00:00:00.000Z',
     progress,

@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
 import { useProject } from '../../project/@x/project-context'
 import { startIssue } from '../../issue'
-import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, pauseEpic, removeEpicIssue, resumeEpic, updateEpic, type UpdateEpicInput } from './client'
+import { addEpicIssue, closeEpic, createEpic, getEpic, getEpics, markEpicDone, pauseEpic, removeEpicIssue, resumeEpic, startEpic, updateEpic, type UpdateEpicInput } from './client'
 
 export function useEpics() {
   const { projectId } = useProject()
@@ -145,6 +145,22 @@ export function useResumeEpic() {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', projectId, id] })
       toast.success('Epic resumed')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useStartEpic() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<Epic, Error, string>({
+    mutationFn: (id) => startEpic(id, projectId),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['epics'] })
+      queryClient.invalidateQueries({ queryKey: ['epics', projectId, id] })
+      toast.success('Epic started')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

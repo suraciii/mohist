@@ -26,6 +26,10 @@ function sortActiveEpics(epics: EpicWithProgress[]): EpicWithProgress[] {
   })
 }
 
+function isInProgressEpic(epic: EpicWithProgress): boolean {
+  return epic.status === EpicStatus.Idle || epic.status === EpicStatus.Running
+}
+
 interface ProgressBarProps {
   deliveredCount: number
   totalIssueCount: number
@@ -80,7 +84,7 @@ export function EpicProgressList() {
   const { data: epics } = useEpics()
 
   const { visible, remaining } = useMemo(() => {
-    const active = (epics ?? []).filter(e => e.status === EpicStatus.Active)
+    const active = (epics ?? []).filter(isInProgressEpic)
     const sorted = sortActiveEpics(active)
     return {
       visible: sorted.slice(0, VISIBLE_CAP),

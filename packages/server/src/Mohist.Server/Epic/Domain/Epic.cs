@@ -8,7 +8,7 @@ public sealed partial class Epic
     private string _title = null!;
     private string _description = "";
     private EpicPriority _priority = EpicPriority.Default;
-    private EpicStatus _status = EpicStatus.Active;
+    private EpicStatus _status;
     private string? _pauseReason;
     private DateTime _createdAt;
     private DateTime _updatedAt;

@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Auto-done on issue completion
 
 When a linked issue reaches a terminal state — delivered (`done`/`completed`, signalled by `IssueWorkCompleted`) **or** cancelled (`cancelled`, signalled by `IssueClosed`) — the epic SHALL re-evaluate using the same readiness check that backs manual "Mark Done" (all linked issues delivered). If the readiness condition is satisfied and the epic is in a non-paused, non-terminal state (`idle` or `running`), the epic SHALL automatically transition to `done` without requiring any user action.
@@ -54,37 +56,6 @@ A `paused` epic SHALL NOT automatically transition to `done` or advance the next
 - **AND** no linked issue is startable (e.g. next is `draft` or externally blocked)
 - **THEN** the epic SHALL become `running` and remain in running-but-idle until a startable issue appears
 
-### Requirement: Manual Mark Done retained
-
-The manual "Mark Done" capability SHALL remain available for edge cases (e.g. closing early, or recovering from a missed automatic trigger). Its behavior, preconditions, and error cases SHALL be unchanged.
-
-#### Scenario: Manual Mark Done still works
-- **WHEN** a user invokes "Mark Done" on an epic that is ready (all linked issues complete) and not paused
-- **THEN** the epic SHALL transition to `done`, identical to prior behavior
-
-#### Scenario: Auto-done does not block manual Mark Done
-- **WHEN** an epic has already auto-transitioned to `done`
-- **AND** a user attempts manual "Mark Done"
-- **THEN** the request SHALL behave the same as invoking "Mark Done" on an already-`done` epic today (e.g. no-op or terminal-state rejection, per existing behavior)
-
-### Requirement: Reliable and idempotent auto-done trigger
-
-The mechanism that signals issue completion to the owning epic SHALL be idempotent and race-tolerant. Duplicate or reordered completion signals SHALL NOT cause incorrect epic state (e.g. double-transition, stuck state).
-
-#### Scenario: Duplicate completion signal is safe
-- **WHEN** the same issue-completion signal is delivered more than once to an epic that is already `done`
-- **THEN** the epic SHALL remain `done`
-- **AND** SHALL NOT error or change state
-
-#### Scenario: Out-of-order completion signals converge
-- **WHEN** completion signals for multiple issues arrive in any order
-- **AND** all linked issues are complete
-- **THEN** the epic SHALL end in `done`
-
-#### Scenario: Terminal epic ignores completion signals
-- **WHEN** an issue-completion signal targets an epic that is already terminal (`done` or `closed`)
-- **THEN** the epic SHALL remain in its terminal state and SHALL NOT error
-
 ### Requirement: Reliable and idempotent terminal-event trigger
 
 The mechanism that signals a linked issue's terminal state to the owning epic SHALL be idempotent and race-tolerant. Duplicate or reordered terminal signals (`IssueWorkCompleted` and `IssueClosed`) SHALL NOT cause incorrect epic state (e.g. double-transition, stuck state, double-advance).
@@ -102,6 +73,8 @@ The mechanism that signals a linked issue's terminal state to the owning epic SH
 #### Scenario: Terminal epic ignores terminal signals
 - **WHEN** a terminal signal targets an epic that is already terminal (`done` or `closed`)
 - **THEN** the epic SHALL remain in its terminal state and SHALL NOT error
+
+## ADDED Requirements
 
 ### Requirement: Epic lifecycle state machine
 
