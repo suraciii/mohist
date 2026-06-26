@@ -69,7 +69,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         var addResult = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
             new AddTasksBatchRequest([
-                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task", """{"value":"one"}"""),
+                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task", JsonSerializer.Deserialize<JsonElement>("""{"value":"one"}""")),
                 new AddTasksBatchItem("dynamic-2", "Dynamic 2", "spec/task")
             ]));
         Assert.Equal(2, addResult.AddedCount);
@@ -174,7 +174,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
             new AddTasksBatchRequest([
                 new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent",
-                    """{"prompt":"Add the feature flag service.\n- service is registered","expect":{"files":[{"path":"src/FeatureFlags.cs"}],"markers":[{"path":"openspec/changes/issue-1/tasks.json","contains":"\"passes\": true"}]}}""")
+                    JsonSerializer.Deserialize<JsonElement>("""{"prompt":"Add the feature flag service.\n- service is registered","expect":{"files":[{"path":"src/FeatureFlags.cs"}],"markers":[{"path":"openspec/changes/issue-1/tasks.json","contains":"\"passes\": true"}]}}"""))
             ]));
 
         await ReportAsync(r1, load.WorkId, "completed");
@@ -215,7 +215,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
             new AddTasksBatchRequest([
-                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent", """{"prompt":"Implement feature"}""")
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent", JsonSerializer.Deserialize<JsonElement>("""{"prompt":"Implement feature"}"""))
             ]));
 
         await ReportAsync(r1, load.WorkId, "completed");
@@ -422,7 +422,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (task, runnerId) = await PollWorkAnyAsync();
         await ReportAsync(runnerId, task.WorkId, "completed");
 
-        await workflow.AddTaskAsync(new RuntimeTaskInput("runtime-1", "Runtime 1", "spec/runtime", """{"value":"one"}"""));
+        await workflow.AddTaskAsync(new RuntimeTaskInput("runtime-1", "Runtime 1", "spec/runtime", JsonSerializer.Deserialize<JsonElement>("""{"value":"one"}""")));
 
         var (runtimeTask, runtimeRunnerId) = await PollWorkAnyAsync();
         Assert.StartsWith("runtime-1.", runtimeTask.WorkId);

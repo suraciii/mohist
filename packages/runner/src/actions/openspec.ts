@@ -74,7 +74,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
     const title = stringInput(task, "title") ?? id
     const uses = stringInput(task, "uses") ?? defaultUses
     const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath }, context.variables)
-    return [{ id, title, uses, with: mergedWith ? JSON.stringify(mergedWith) : null }]
+    return [{ id, title, uses, with: mergedWith ?? null }]
   })
 
   if (!context.serverConnection) return { status: "failure", message: "Server connection not available" }

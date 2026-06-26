@@ -176,7 +176,7 @@ export class ServerConnection {
     return response.json() as Promise<WorkflowAgentSession>
   }
 
-  async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string; with?: string | null }>) {
+  async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string | null; with?: JsonObject | null }>) {
     const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`, {
       method: "POST",
       headers: { "content-type": "application/json" },

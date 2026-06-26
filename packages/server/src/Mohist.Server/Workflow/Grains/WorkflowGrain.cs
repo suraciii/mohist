@@ -657,7 +657,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     t.Id,
                     t.Title,
                     t.Uses,
-                    string.IsNullOrWhiteSpace(t.With) ? null : JSON.Deserialize<Dictionary<string, JsonElement?>>(t.With))).ToList();
+                    WorkflowDispatchHelpers.ParseWith(t.With))).ToList();
                 var recoveryEvents = run.AddRuntimeTasks(taskDefs);
                 events.AddRange(recoveryEvents);
                 _log.LogInformation(

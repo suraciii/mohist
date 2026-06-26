@@ -30,7 +30,7 @@ describe("mohist/openspec-tasks", () => {
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const output = JSON.parse(result.output ?? "{}")
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(output.loaded).toBe(1)
@@ -64,7 +64,7 @@ describe("mohist/openspec-tasks", () => {
       prompts: { build: "<base>build instructions</base>" },
     }))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     setPromptLoaderRegistryForTest(null)
     const resolved = await resolvePrompt(loadedWith.prompt, {
@@ -99,7 +99,7 @@ describe("mohist/openspec-tasks", () => {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     }))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.agent).toBe("${{ vars.agent }}")
@@ -125,7 +125,7 @@ describe("mohist/openspec-tasks", () => {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     }))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.agent).toBeUndefined()
@@ -163,7 +163,7 @@ describe("mohist/openspec-tasks", () => {
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     // None of these loader-internal fields should appear on the wire:
@@ -211,7 +211,7 @@ describe("mohist/openspec-tasks", () => {
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt).toBe("literal caller prompt")
@@ -237,7 +237,7 @@ describe("mohist/openspec-tasks", () => {
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt).toEqual({
@@ -266,7 +266,7 @@ describe("mohist/openspec-tasks", () => {
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt).toEqual({
@@ -293,7 +293,7 @@ describe("mohist/openspec-tasks", () => {
       task: { with: { prompt: "default-with caller prompt" } },
     }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt).toBe("default-with caller prompt")
@@ -316,7 +316,7 @@ describe("mohist/openspec-tasks", () => {
       prompts: { build: "<build>build prompt</build>" },
     }))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
@@ -339,7 +339,7 @@ describe("mohist/openspec-tasks", () => {
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
@@ -369,7 +369,7 @@ describe("mohist/openspec-tasks", () => {
       items: "items.nested",
     }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+    const loadedWith = loadedTasks[0]?.with ?? {}
 
     expect(result.status).toBe("success")
     expect(loadedWith.prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
@@ -390,7 +390,7 @@ describe("mohist/openspec-tasks", () => {
     const addTasks = vi.fn()
     const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWithList = loadedTasks.map((task: { with: string }) => JSON.parse(task.with ?? "{}"))
+    const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
     expect(result.status).toBe("success")
     expect(loadedTasks).toHaveLength(3)
@@ -439,7 +439,7 @@ describe("mohist/openspec-tasks", () => {
       prompts: { build: "<artifact id=\"build-task\">base</artifact>" },
     }))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWithList = loadedTasks.map((task: { with: string }) => JSON.parse(task.with ?? "{}"))
+    const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
     expect(loadedTasks).toHaveLength(2)
     for (const loadedWith of loadedWithList) {
@@ -486,7 +486,7 @@ describe("mohist/openspec-tasks", () => {
       },
     }, addTasks))
     const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
-    const loadedWithList = loadedTasks.map((task: { with: string }) => JSON.parse(task.with ?? "{}"))
+    const loadedWithList = loadedTasks.map((task: { with?: unknown }) => (task.with ?? {}) as Record<string, unknown>)
 
     expect(loadedWithList[0].prompt).toBe("literal override")
     expect(loadedWithList[1].prompt.uses).toBe(OPENSPEC_TASK_PROMPT_LOADER_NAME)
