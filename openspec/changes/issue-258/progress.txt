@@ -1,0 +1,16 @@
+# Issue 258 progress
+
+## T-001 — factory-status widget
+
+- Created `packages/web/src/widgets/factory-status/model/factory-status.ts` with pure `deriveFactoryStatus(issues, agentStatus)` and `isTodayLocal(iso)`.
+- Created widget `FactoryStatusHeadline.tsx` mirroring `attention-hero/` DI pattern: optional `issues?`/`agentStatus?` props with fallback to `useIssues`/`useAgentStatus`, read-only.
+- `runnerAvailable` maps only `=== true` to available; `undefined`/`false` show unavailable (not a hard down error).
+- `todayCost` always `undefined`; rendered as `—` placeholder with `data-testid="factory-cost-reserved"`, never `0`.
+- Added model + widget unit tests; all pass.
+
+## Codebase patterns
+
+- Widgets under `packages/web/src/widgets/<name>/` use `ui/` for components, `model/` for pure derivation, and `index.ts` as barrel.
+- `useProject()` is required because `useIssues`/`useAgentStatus` are enabled only when `projectId` is present; component mirrors `AttentionHero` in passing `projectId` to `useIssues`.
+- Tests use `vi.setSystemTime()` + relative ISO strings so local-calendar-day assertions remain stable across timezones.
+- Full web test suite: 2392 passed, 1 skipped.
