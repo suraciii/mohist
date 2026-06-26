@@ -1,9 +1,42 @@
+import { readdir } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, WorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
+
+export class WorkspaceMissingError extends Error {
+  readonly kind = "workspace-missing"
+  constructor(message: string, readonly workspacePath?: string, readonly cause?: unknown) {
+    super(message)
+    this.name = "WorkspaceMissingError"
+  }
+}
+
+export class WorkspaceCorruptError extends Error {
+  readonly kind = "workspace-corrupt"
+  constructor(message: string, readonly workspacePath?: string, readonly cause?: unknown) {
+    super(message)
+    this.name = "WorkspaceCorruptError"
+  }
+}
+
+export class WorkspaceIdentityMismatchError extends Error {
+  readonly kind = "workspace-identity-mismatch"
+  constructor(message: string, readonly workspacePath?: string, readonly expected?: IssueWorkspaceMarker, readonly actual?: Partial<IssueWorkspaceMarker>, readonly cause?: unknown) {
+    super(message)
+    this.name = "WorkspaceIdentityMismatchError"
+  }
+}
+
+export class WorkspaceBranchMismatchError extends Error {
+  readonly kind = "branch-invariant-violation"
+  constructor(message: string, readonly workspacePath: string, readonly expectedBranch: string, readonly observedBranch: string | null, readonly observedRef: string | null = null, readonly detail?: string) {
+    super(message)
+    this.name = "WorkspaceBranchMismatchError"
+  }
+}
 
 // The workflow workspace is just a clone of the project repo checked out
 // on a per-run branch. Preparing it is two steps: (1) have a clone at the
@@ -43,6 +76,7 @@ export class WorkspaceManager {
     const runId = stringAt(variables, ["mohist", "runId"]) ?? work.workflowRunId
     const runBranch = runBranchName(runId)
     const changeDir = stringAt(variables, ["openspecChangeDir"])
+    const marker = issueWorkspaceMarker(variables)
 
     const suppliedPath = stringAt(variables, ["workspace", "path"])
     const workspacePath = suppliedPath
@@ -192,6 +226,40 @@ export class WorkspaceManager {
     if (reset.exitCode !== 0) {
       throw new Error(`Could not restore workspace to run branch ${runBranch}: ${checkout.stderr || reset.stderr || reset.stdout}`)
     }
+  }
+
+  private async runHealthGate(workspacePath: string, runBranch: string, signal: AbortSignal): Promise<void> {
+    if (!exists(workspacePath)) return
+    if (!exists(join(workspacePath, ".git"))) return
+
+    const residual = await this.detectResidualState(workspacePath, signal)
+    if (!residual) return
+
+    if (residual === "rebase") {
+      await runCommand("git", ["-C", workspacePath, "rebase", "--abort"], workspacePath, signal)
+    } else if (residual === "merge") {
+      await runCommand("git", ["-C", workspacePath, "merge", "--abort"], workspacePath, signal)
+    } else if (residual === "cherry-pick") {
+      await runCommand("git", ["-C", workspacePath, "cherry-pick", "--abort"], workspacePath, signal)
+    }
+
+    const reset = await runCommand("git", ["-C", workspacePath, "reset", "--hard", runBranch], workspacePath, signal)
+    if (reset.exitCode !== 0) {
+      throw new Error(`runHealthGate: could not reset workspace to ${runBranch}: ${reset.stderr || reset.stdout}`)
+    }
+  }
+
+  private async detectResidualState(workspacePath: string, signal: AbortSignal): Promise<"rebase" | "merge" | "cherry-pick" | null> {
+    if (exists(join(workspacePath, ".git", "rebase-merge")) || exists(join(workspacePath, ".git", "rebase-apply"))) {
+      return "rebase"
+    }
+    if (exists(join(workspacePath, ".git", "MERGE_HEAD"))) {
+      return "merge"
+    }
+    if (exists(join(workspacePath, ".git", "CHERRY_PICK_HEAD"))) {
+      return "cherry-pick"
+    }
+    return null
   }
 }
 
