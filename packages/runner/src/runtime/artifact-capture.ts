@@ -362,10 +362,6 @@ export function summarizeCaptureFailures(failures: ReadonlyArray<ArtifactCapture
   return failures.map((failure) => `${failure.source === "declared" ? "declared" : "dynamic"} artifact '${failure.path}': ${failure.reason}`).join("; ")
 }
 
-export function captureRequiresFailures(outcome: ArtifactCaptureOutcome): ArtifactCaptureFailure[] {
-  return outcome.failures.filter((failure) => failure.source === "declared")
-}
-
 export async function ensureWorkspaceDirectoryExists(workDir: string) {
   await stat(workDir)
 }

@@ -40,9 +40,6 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
         session: plan
         prompt: ${{ prompts.specs }}
         agent: ${{ vars.agent }}
-      expect:
-        files:
-          - path: ${{ openspecChangeDir }}/specs
       artifacts:
         files:
           - path: ${{ openspecChangeDir }}/specs
@@ -124,6 +121,8 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
       uses: mohist/openspec-artifacts
       with:
         changeDir: ${{ openspecChangeDir }}
+      # proposal.md, design.md, tasks.json 是硬性要求。
+      # specs/ 可选——纯性能/重构 issue 无 spec 变更时合法缺失。
   requiresApproval: true
 
 - stage: build
@@ -219,6 +218,7 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
         session: integrate
         prompt: ${{ prompts.spec-sync }}
         agent: ${{ vars.agent }}
+      # specs/ 不存在时（纯性能/重构 issue），spec-sync 跳过，不算失败。
 
     - id: archive-change
       title: Archive change

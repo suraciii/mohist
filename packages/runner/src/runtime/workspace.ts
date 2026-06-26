@@ -96,7 +96,6 @@ export class WorkspaceManager {
       await this.createRunBranch(workspacePath, baseBranch, runBranch, signal)
     }
 
-    if (changeDir) await ensureDir(join(workspacePath, changeDir, "specs"))
     await ensureMarkerExcluded(workspacePath)
     await writeText(markerPath(workspacePath), JSON.stringify(marker, null, 2))
     if (this.registry) {

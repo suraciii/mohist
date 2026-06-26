@@ -138,18 +138,6 @@ describe("WorkspaceManager.prepare", () => {
     const head = await runCommand("git", ["-C", suppliedWorkspacePath, "rev-parse", "--abbrev-ref", "HEAD"], ".", signal)
     expect(head.stdout.trim()).toBe("mohist/run-wr-supplied")
   })
-
-  it("ChangeDir_EnsuresSpecsSubdir", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
-    const repo = await createRepo(root, "repo")
-    const runnerRoot = join(root, "runner")
-    const manager = new WorkspaceManager(runnerRoot)
-    const signal = new AbortController().signal
-
-    const result = await manager.prepare(work("wr-1", "issue-1", repo), signal)
-    expect(result.changeDir).toBe(join(result.path, "openspec/changes/issue-9"))
-    expect(exists(join(result.path, "openspec", "changes", "issue-9", "specs"))).toBe(true)
-  })
 })
 
 // Crash recovery: a rebase/merge that crashed mid-flight leaves the work

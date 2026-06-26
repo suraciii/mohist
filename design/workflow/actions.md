@@ -114,6 +114,39 @@ vars.change.url
 - 恢复 task 可以重新写同一组 `vars.*`，覆盖旧运行态事实。
 - 失败恢复匹配读取失败 task 的 raw action output，不依赖 `setVars`。
 
+## Artifacts
+
+`artifacts` 是 task 产物的捕获清单，不是硬性契约。语义是"存在则上传，不存在则跳过"。
+
+- artifact 路径不存在 → 跳过，记 debug 日志。
+- artifact 目录为空 → 跳过，记 debug 日志。
+- artifact 文件存在 → 正常捕获上传。
+- artifact 捕获失败**不让 task 失败**。
+
+`expect` 是 task 的完成契约。只有 `expect` 断言失败才让 task 失败。
+
+职责分离：
+
+- `expect.files`：断言路径必须存在（task 级硬约束）。
+- `artifacts.files`：声明要捕获哪些产物（尽力捕获，非约束）。
+
+workflow YAML 里：硬性要求的路径同时放 `expect` + `artifacts`；条件性的路径只放 `artifacts`。
+
+```yaml
+# proposal.md — 必须有
+expect:
+  files:
+    - path: ${{ openspecChangeDir }}/proposal.md
+artifacts:
+  files:
+    - path: ${{ openspecChangeDir }}/proposal.md
+
+# specs/ — 可能有，也可能没有（纯性能/重构 issue 无 spec 变更）
+artifacts:
+  files:
+    - path: ${{ openspecChangeDir }}/specs
+```
+
 ## Error Code
 
 失败可恢复性属于 action output 接口，而不是 workflow domain 类型。
