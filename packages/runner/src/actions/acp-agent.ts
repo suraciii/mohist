@@ -1,7 +1,7 @@
 import type { ActionContext, ActionResult } from "../core/types.js"
 import { resolvePrompt } from "../core/prompt.js"
 import { runCommand } from "../system/process.js"
-import { verifyExpectations } from "./expectations.js"
+import { promiseValue, verifyExpectations } from "./expectations.js"
 import { resolveAgentConfig, buildPromptLoaderContext } from "./acp/agent-config.js"
 import { emitSessionEvent } from "./acp/session-events.js"
 import { runAcpWorkflowAgentSession } from "./acp/session-strategies.js"
@@ -38,9 +38,9 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const ok = result.success && verification.satisfied && !failIfTriggered
   const agentConfig = resolveAgentConfig(context.with)
   const failureCategory = ok ? null : result.failureCategory ?? null
-  const errorCode = failIfTriggered ? failIfMatch.errorCode : null
+  const promise = promiseValue(verification.matched)
   const failureReason = ok ? null : failIfTriggered
-    ? `failIf marker matched: ${failIfMatch.marker} (errorCode: ${failIfMatch.errorCode ?? "<none>"})`
+    ? `failIf marker matched: ${failIfMatch.marker}`
     : result.error ?? verification.message
   await emitSessionEvent(context, "session.closed", { status: ok ? "completed" : "failed", failureReason, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
   return {
@@ -55,7 +55,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
       error: result.error,
       providerError: result.providerError,
       expectation: verification,
-      errorCode,
+      promise,
       failIfMarker: failIfTriggered ? failIfMatch.marker : null,
     }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),

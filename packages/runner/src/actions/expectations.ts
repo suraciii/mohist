@@ -7,7 +7,6 @@ export interface FailIfMatch {
   marker: string
   failIf: string
   path: string
-  errorCode: string | null
 }
 
 export interface TaskArtifactExpectation {
@@ -46,7 +45,7 @@ export async function verifyExpectations(context: ActionContext, agentText?: str
       if (last && accepted.includes(last)) {
         matched = last
         if (failIf && last === failIf) {
-          failIfMatches.push({ marker: last, failIf, path: OUTPUT_MARKER_PATH, errorCode: extractErrorCode(agentText) })
+          failIfMatches.push({ marker: last, failIf, path: OUTPUT_MARKER_PATH })
         }
         continue
       }
@@ -65,7 +64,7 @@ export async function verifyExpectations(context: ActionContext, agentText?: str
     if (hit) {
       matched = hit
       if (failIf && hit === failIf) {
-        failIfMatches.push({ marker: hit, failIf, path, errorCode: extractErrorCode(content) })
+        failIfMatches.push({ marker: hit, failIf, path })
       }
       continue
     }
@@ -89,7 +88,7 @@ function buildMessage(missingFiles: Array<{ path: string }>, missingArtifactMark
   const parts: string[] = []
   for (const file of missingFiles) parts.push(`missing artifact file: ${file.path}`)
   for (const marker of missingArtifactMarkers) parts.push(`missing artifact marker in ${marker.path}: ${marker.contains}`)
-  for (const fail of failIfMatches) parts.push(`failIf marker matched in ${fail.path}: ${fail.marker} (errorCode: ${fail.errorCode ?? "<none>"})`)
+  for (const fail of failIfMatches) parts.push(`failIf marker matched in ${fail.path}: ${fail.marker}`)
   return `Agent completion requirements were not satisfied: ${parts.join("; ")}`
 }
 
@@ -133,23 +132,15 @@ function stringValue(value: JsonValue | undefined) {
 }
 
 /**
- * Extract an `errorCode: <value>` declaration from an artifact body. The
- * convention mirrors how the action can publish its own errorCode alongside
- * a verdict marker (e.g. `errorCode: review-failed` in a review file). The
- * value must be a single line — no inline stripping of surrounding markdown.
+ * Extract the bare verdict from a `<promise>VALUE</promise>` marker —
+ * e.g. "PASS", "FAIL", "done", "unfinished". Returns null when the marker
+ * is absent or not a promise marker. The acp-agent action exposes this as
+ * `output.promise` so workflow onFailure cases can match on the verdict the
+ * agent actually produced (rather than an errorCode the action never
+ * synthesizes).
  */
-export function extractErrorCode(content: string): string | null {
-  if (!content) return null
-  const lines = content.split(/\r?\n/)
-  for (const raw of lines) {
-    const line = raw.trim()
-    if (!line.startsWith("errorCode")) continue
-    const colon = line.indexOf(":")
-    if (colon < 0) continue
-    const value = line.slice(colon + 1).trim()
-    if (!value) continue
-    if (value.length > 256) continue
-    return value
-  }
-  return null
+export function promiseValue(marker: string | undefined | null): string | null {
+  if (!marker) return null
+  const match = marker.match(/^<promise>\s*([^<>\s]+)\s*<\/promise>$/)
+  return match ? match[1] : null
 }

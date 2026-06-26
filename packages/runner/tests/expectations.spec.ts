@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { verifyExpectations, type TaskArtifactExpectation } from "../src/actions/expectations.js"
+import { promiseValue, verifyExpectations, type TaskArtifactExpectation } from "../src/actions/expectations.js"
 import type { ActionContext } from "../src/core/types.js"
 import { mkdirSync, writeFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -308,11 +308,11 @@ describe("verifyExpectations", () => {
     expect(result.missingArtifactMarkers).toHaveLength(0)
   })
 
-  it("FailIf_FAILMarker_FailsTaskWithErrorCode", async () => {
+  it("FailIf_FAILMarker_FailsTask", async () => {
     const dir = mkTestDir()
     writeFileSync(
       join(dir, "review.md"),
-      "errorCode: review-failed\nReviewing found issues.\n<promise>FAIL</promise>\n",
+      "Reviewing found issues.\n<promise>FAIL</promise>\n",
     )
 
     const result = await verifyExpectations(makeContext({
@@ -329,19 +329,17 @@ describe("verifyExpectations", () => {
     expect(result.failIfMatches).toHaveLength(1)
     expect(result.failIfMatches[0].marker).toBe("<promise>FAIL</promise>")
     expect(result.failIfMatches[0].failIf).toBe("<promise>FAIL</promise>")
-    expect(result.failIfMatches[0].errorCode).toBe("review-failed")
     expect(result.failIfMatches[0].path).toContain("review.md")
     expect(result.missingArtifactMarkers).toHaveLength(0)
     expect(result.matched).toBe("<promise>FAIL</promise>")
     expect(result.message).toContain("failIf marker matched")
-    expect(result.message).toContain("review-failed")
   })
 
-  it("FailIf_GithubPrProfileReviewMarker_FailsTaskWithErrorCode", async () => {
+  it("FailIf_GithubPrProfileReviewMarker_FailsTask", async () => {
     const dir = mkTestDir()
     writeFileSync(
       join(dir, "review.md"),
-      "# Review Report\n\nerrorCode: review-failed\n\n<promise>FAIL</promise>\n",
+      "# Review Report\n\n<promise>FAIL</promise>\n",
     )
 
     const result = await verifyExpectations(makeContext({
@@ -360,12 +358,11 @@ describe("verifyExpectations", () => {
     expect(result.failIfMatches[0]).toMatchObject({
       marker: "<promise>FAIL</promise>",
       failIf: "<promise>FAIL</promise>",
-      errorCode: "review-failed",
     })
     expect(result.missingArtifactMarkers).toHaveLength(0)
   })
 
-  it("FailIf_FAILMarker_NoErrorCodeInArtifact_StillFailsTask", async () => {
+  it("FailIf_FAILMarker_StillFailsTask", async () => {
     const dir = mkTestDir()
     writeFileSync(join(dir, "review.md"), "<promise>FAIL</promise>")
 
@@ -382,7 +379,6 @@ describe("verifyExpectations", () => {
     expect(result.satisfied).toBe(false)
     expect(result.failIfMatches).toHaveLength(1)
     expect(result.failIfMatches[0].marker).toBe("<promise>FAIL</promise>")
-    expect(result.failIfMatches[0].errorCode).toBeNull()
     expect(result.missingArtifactMarkers).toHaveLength(0)
   })
 
@@ -405,9 +401,9 @@ describe("verifyExpectations", () => {
     expect(result.missingArtifactMarkers).toHaveLength(1)
   })
 
-  it("FailIf_OutputMarker_FAILMarker_FailsTaskWithErrorCode", async () => {
+  it("FailIf_OutputMarker_FAILMarker_FailsTask", async () => {
     const dir = mkTestDir()
-    const agentText = "Could not finish.\nerrorCode: review-failed\n<promise>unfinished</promise>"
+    const agentText = "Could not finish.\n<promise>unfinished</promise>"
 
     const result = await verifyExpectations(makeContext({
       expect: {
@@ -422,7 +418,6 @@ describe("verifyExpectations", () => {
     expect(result.satisfied).toBe(false)
     expect(result.failIfMatches).toHaveLength(1)
     expect(result.failIfMatches[0].marker).toBe("<promise>unfinished</promise>")
-    expect(result.failIfMatches[0].errorCode).toBe("review-failed")
     expect(result.matched).toBe("<promise>unfinished</promise>")
   })
 
@@ -471,7 +466,23 @@ describe("verifyExpectations", () => {
 
     expect(result.satisfied).toBe(false)
     expect(result.failIfMatches).toHaveLength(2)
-    expect(result.failIfMatches.every((m) => m.errorCode === "review-failed")).toBe(true)
+    expect(result.failIfMatches.every((m) => m.marker === "<promise>FAIL</promise>")).toBe(true)
+  })
+})
+
+describe("promiseValue", () => {
+  it("ExtractsBareVerdictFromPromiseMarker", () => {
+    expect(promiseValue("<promise>PASS</promise>")).toBe("PASS")
+    expect(promiseValue("<promise>FAIL</promise>")).toBe("FAIL")
+    expect(promiseValue("<promise>done</promise>")).toBe("done")
+    expect(promiseValue("<promise>unfinished</promise>")).toBe("unfinished")
+  })
+
+  it("ReturnsNullForAbsentOrNonPromiseMarker", () => {
+    expect(promiseValue(undefined)).toBeNull()
+    expect(promiseValue(null)).toBeNull()
+    expect(promiseValue("not a marker")).toBeNull()
+    expect(promiseValue("<other>FAIL</other>")).toBeNull()
   })
 })
 
