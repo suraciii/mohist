@@ -414,43 +414,58 @@ internal sealed class UpdateOperations
     public async Task<int> EnsureCliWrapperAsync(string managedCliPath, string? home = null)
     {
         var wrapperPath = ResolveCliWrapperPath(home);
-        _fileSystem.CreateDirectory(Path.GetDirectoryName(wrapperPath)!);
-
-        if (_fileSystem.Exists(wrapperPath))
-        {
-            try
-            {
-                _fileSystem.Delete(wrapperPath);
-            }
-            catch (Exception ex)
-            {
-                _err.WriteLine($"Could not remove existing entry at {wrapperPath}: {ex.Message}");
-                return 1;
-            }
-        }
+        var wrapperDir = Path.GetDirectoryName(wrapperPath);
+        if (!string.IsNullOrWhiteSpace(wrapperDir))
+            _fileSystem.CreateDirectory(wrapperDir);
 
         var wrapper = "#!/bin/sh" + Environment.NewLine
             + $"exec \"{managedCliPath}\" \"$@\"" + Environment.NewLine;
+        var tempPath = $"{wrapperPath}.tmp";
+
         try
         {
-            await _fileSystem.WriteAllTextAsync(wrapperPath, wrapper);
+            await _fileSystem.WriteAllTextAsync(tempPath, wrapper);
         }
         catch (Exception ex)
         {
-            _err.WriteLine($"Could not write wrapper script at {wrapperPath}: {ex.Message}");
+            _err.WriteLine($"Could not write wrapper script to {tempPath}: {ex.Message}");
             return 1;
         }
 
-        var (chmod, _, chmodErr) = await _commandExecutor.ExecuteAsync("chmod", ["+x", wrapperPath], null);
+        var (chmod, _, chmodErr) = await _commandExecutor.ExecuteAsync("chmod", ["+x", tempPath], null);
         if (chmod != 0)
         {
             if (!string.IsNullOrWhiteSpace(chmodErr)) _err.WriteLine(chmodErr);
-            _err.WriteLine($"Could not make wrapper script at {wrapperPath} executable.");
+            _err.WriteLine($"Could not make wrapper script at {tempPath} executable.");
+            CleanupTempFile(tempPath);
             return chmod;
+        }
+
+        try
+        {
+            _fileSystem.MoveFile(tempPath, wrapperPath);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Could not install wrapper script at {wrapperPath}: {ex.Message}");
+            CleanupTempFile(tempPath);
+            return 1;
         }
 
         _out.WriteLine($"Installed CLI wrapper: {wrapperPath}");
         return 0;
+    }
+
+    private void CleanupTempFile(string path)
+    {
+        try
+        {
+            if (_fileSystem.Exists(path))
+                _fileSystem.Delete(path);
+        }
+        catch
+        {
+        }
     }
 
     public static string RuntimeIdentifier()

@@ -187,6 +187,19 @@ public class FakeFileSystem : IFileSystem
         }
     }
 
+    public void MoveFile(string source, string destination)
+    {
+        var sourceKey = Normalize(source);
+        var destKey = Normalize(destination);
+        lock (_gate)
+        {
+            if (!_files.TryGetValue(sourceKey, out var content))
+                throw new FileNotFoundException($"Fake filesystem has no file at '{source}'.");
+            _files.Remove(sourceKey);
+            _files[destKey] = content;
+        }
+    }
+
     public string ReadAllText(string path) => Read(path);
 
     public Task<string> ReadAllTextAsync(string path) => Task.FromResult(Read(path));

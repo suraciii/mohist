@@ -181,7 +181,7 @@ public class UpdateSpecs
             Assert.Equal(managedCli, commands.ExecutedCommands[3].Args[1]);
             Assert.Equal("chmod", commands.ExecutedCommands[4].FileName);
             Assert.Equal("+x", commands.ExecutedCommands[4].Args[0]);
-            Assert.Equal(wrapper, commands.ExecutedCommands[4].Args[1]);
+            Assert.Equal(wrapper + ".tmp", commands.ExecutedCommands[4].Args[1]);
             Assert.Equal($"#!/bin/sh{Environment.NewLine}exec \"{managedCli}\" \"$@\"{Environment.NewLine}", files.ReadAllText(wrapper));
             AssertManagedSkillAssetsSynced(files, tempRoot);
         }
