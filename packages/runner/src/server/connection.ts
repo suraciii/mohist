@@ -1,13 +1,18 @@
 import { hostname } from "node:os"
-import type { JsonObject, RecoveryTaskInput, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
+import type { CleanupPolicy, JsonObject, RecoveryTaskInput, RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  private lastCleanupPolicy: CleanupPolicy | null = null
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
+  }
+
+  getLastCleanupPolicy(): CleanupPolicy | null {
+    return this.lastCleanupPolicy
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
@@ -26,7 +31,34 @@ export class ServerConnection {
     const response = await fetch(this.url("poll"), { method: "POST", signal })
     if (response.status === 204) return null
     if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    return toWorkItem((await response.json()) as WorkDispatchResponse)
+    const dispatch = (await response.json()) as WorkDispatchResponse
+    this.lastCleanupPolicy = dispatch.cleanupPolicy ?? null
+    return toWorkItem(dispatch)
+  }
+
+  /**
+   * Batch status query for the runner's convergence backstop. The runner
+   * only asks about workflow runs it still tracks in its local active
+   * workspace registry; the server returns the current lifecycle status of
+   * every requested run id that exists, dropping unknown ones (per design
+   * D2 of issue-268 — never enumerate or query runs the runner did not
+   * request).
+   *
+   * The response is a partial map: keys absent from the response mean the
+   * server has no record of the run (the runner treats these as "drop
+   * the registry entry").
+   */
+  async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
+    if (workflowRunIds.length === 0) return {}
+    const response = await fetch(this.url("workflow-runs/status"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workflowRunIds }),
+      signal,
+    })
+    if (!response.ok) throw new Error(`workflowRunsStatus failed: ${response.status} ${await response.text()}`)
+    const payload = await response.json() as { statuses?: Record<string, string> }
+    return payload.statuses ?? {}
   }
 
   async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {

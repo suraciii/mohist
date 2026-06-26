@@ -277,6 +277,7 @@ stages:
                       baseBranch: ${{ repository.baseBranch }}
                       remote: origin
                       squash: false
+                      conflictMode: task
                       recovery:
                         budget: 2
                         handlers:

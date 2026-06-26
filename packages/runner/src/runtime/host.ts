@@ -3,7 +3,10 @@ import { ServerConnection } from "../server/connection.js"
 import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
-import { WorkspaceManager, defaultRunnerRoot } from "./workspace.js"
+import { WorkspaceManager } from "./workspace.js"
+import { WorkspaceRegistry } from "./workspace-registry.js"
+import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./cleanup-convergence.js"
+import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
@@ -30,6 +33,11 @@ export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
+  private readonly workspaceRegistry: WorkspaceRegistry
+  private readonly convergence: ConvergenceBackstop
+  private readonly cleanupLoop: CleanupLoop
+  private readonly cleanupConvergenceIntervalMs: number
+  private readonly cleanupLoopIntervalMs: number
   private readonly maxConcurrentWorkflows: number
   private readonly buildGitHash: string | null
   private coderModels: string[] = []
@@ -51,10 +59,30 @@ export class RunnerHost {
 
   constructor(private readonly options: RunnerOptions) {
     this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
+    this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
+    this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     const build = loadBuildInfo()
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash)
-    this.workspace = new WorkspaceManager(options.runnerRoot)
+    // Runner-local registry of workspaces this host has materialized.
+    // Loaded eagerly at startup so the in-memory cache is hot before the
+    // first dispatch or SignalR RPC (per T-002 acceptance criteria:
+    // "Registry is persisted and reloaded on runner restart; active
+    // entries remain active until a terminal transition is observed").
+    // The registry is shared with WorkspaceManager (for materialize /
+    // verify registration hooks) and RunnerSignalRClient (for the
+    // RemoveWorkspace entry-removal hook).
+    this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
+    this.convergence = new ConvergenceBackstop(
+      this.workspaceRegistry,
+      new ServerConnectionConvergenceAdapter(this.connection),
+    )
+    this.cleanupLoop = new CleanupLoop(
+      this.workspaceRegistry,
+      new DefaultCleanupRunner(),
+      options.runnerRoot,
+    )
+    this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
@@ -64,6 +92,7 @@ export class RunnerHost {
         onReconnected: () => this.onDispatchReconnected(),
         serverConnection: this.connection,
         followupTargetResolver: (workflowRunId, sessionName) => this.resolveFollowupTarget(workflowRunId, sessionName),
+        registry: this.workspaceRegistry,
       },
     )
   }
@@ -81,11 +110,29 @@ export class RunnerHost {
   async run(signal: AbortSignal) {
     this.activeSignal = signal
     try {
+      // Load the runner-local workspace registry before any dispatch /
+      // SignalR RPC can fire. A missing file is treated as an empty
+      // registry; corrupt JSON is similarly tolerated (see
+      // WorkspaceRegistry.loadFromDisk). The load is best-effort — a
+      // failed read does not block startup.
+      try {
+        await this.workspaceRegistry.load()
+      } catch (error) {
+        console.error("failed to load workspace registry; starting empty:", error)
+      }
       while (!signal.aborted) {
         await this.connectRunner(signal)
         await this.initializeSharedConnection(signal)
+        // Startup convergence: pick up any terminal events the runner
+        // missed while it was offline (e.g. completed while the previous
+        // process was down). Runs once per connect cycle, immediately
+        // after SignalR is up so the push channel is available in
+        // parallel.
+        await this.runConvergenceOnce(signal)
         const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
         const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
+        const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
+        const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
         try {
           await this.runWorkerPool(signal)
         } catch (error) {
@@ -95,12 +142,38 @@ export class RunnerHost {
         } finally {
           clearInterval(heartbeat)
           clearInterval(selfCheck)
+          clearInterval(convergenceTimer)
+          clearInterval(cleanupTimer)
           await this.shutdownSharedConnection()
           await this.shutdownConnection()
         }
       }
     } finally {
       this.activeSignal = null
+    }
+  }
+
+  private async runConvergenceOnce(signal: AbortSignal): Promise<void> {
+    try {
+      await this.convergence.runOnce(signal)
+    } catch (error) {
+      // Convergence is best-effort; the next tick or reconnect retries.
+      console.error("workspace cleanup convergence pass failed:", error)
+    }
+  }
+
+  private async runCleanupOnce(signal: AbortSignal): Promise<void> {
+    try {
+      const policy = this.connection.getLastCleanupPolicy()
+      const result = await this.cleanupLoop.runOnce(policy, signal)
+      if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0) {
+        console.log(
+          `workspace cleanup: retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} usage=${result.workspaceUsageBytes ?? "unknown"}`,
+        )
+      }
+    } catch (error) {
+      // Cleanup is best-effort; the next tick retries.
+      console.error("workspace cleanup loop failed:", error)
     }
   }
 
@@ -119,6 +192,16 @@ export class RunnerHost {
 
   private onDispatchReconnected() {
     void this.sendImmediateHeartbeat()
+    // Convergence on every reconnect: the SignalR transport just
+    // recovered, which is the cheapest moment to ask the server for the
+    // truth about every active registry entry. Push may also have queued
+    // events during the disconnect window; this catch-all reconciles
+    // whatever push did not cover (design D2 backstop).
+    const signal = this.activeSignal
+    if (signal) {
+      void this.runConvergenceOnce(signal)
+      void this.runCleanupOnce(signal)
+    }
   }
 
   private async sendImmediateHeartbeat() {

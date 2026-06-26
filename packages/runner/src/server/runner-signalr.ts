@@ -4,6 +4,9 @@ import * as signalR from "@microsoft/signalr"
 import type { ClientSideConnection } from "@agentclientprotocol/sdk"
 import { deleteDirectory, runCommand as defaultRunCommand } from "../system/process.js"
 import { WorkspaceManager } from "../runtime/workspace.js"
+import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
+import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
+import type { JsonObject, WorkItem } from "../core/types.js"
 import type { ServerConnection } from "./connection.js"
 
 export interface FollowupTarget {
@@ -20,11 +23,22 @@ export interface ReceiveFollowupPayload {
   text: string
 }
 
+// Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR
+// method when a workflow run reaches a terminal state. The status string
+// is the canonical WorkflowRunStatus enum name (`Completed`, `Stopped`,
+// `Failed` for terminal; non-terminal statuses are not delivered by the
+// router — see RunnerWorkflowStatusRouter).
+export interface ReceiveWorkflowRunStatusPayload {
+  workflowRunId: string
+  status: string
+}
+
 export interface RunnerSignalRClientOptions {
   probeTimeoutMs?: number
   onReconnected?: (connectionId: string) => void
   serverConnection?: ServerConnection | null
   followupTargetResolver?: FollowupTargetResolver | null
+  registry?: WorkspaceRegistry | null
 }
 
 let runGitCommand: typeof defaultRunCommand = defaultRunCommand
@@ -41,6 +55,7 @@ export function setRunnerSignalRExistsCheckerForTest(checker: typeof defaultExis
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
   private readonly workspaceManager: WorkspaceManager
+  private readonly registry: WorkspaceRegistry | null
   private readonly probeTimeoutMs: number
   private readonly onReconnected: ((connectionId: string) => void) | undefined
   private readonly serverConnection: ServerConnection | null
@@ -63,7 +78,8 @@ export class RunnerSignalRClient {
       .withUrl(`${baseUrl}/hubs/runner?${params.toString()}`)
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build()
-    this.workspaceManager = new WorkspaceManager(runnerRoot)
+    this.registry = options.registry ?? null
+    this.workspaceManager = new WorkspaceManager(runnerRoot, this.registry)
     this.serverConnection = options.serverConnection ?? null
     this.followupTargetResolver = options.followupTargetResolver ?? null
 
@@ -271,8 +287,17 @@ export class RunnerSignalRClient {
     })
 
     this.connection.on("RemoveWorkspace", async (query: WorkspaceQuery) => {
-      if (!query?.workspacePath) return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
+      if (!query?.workspacePath) {
+        await this.dropRegistryEntryForPath(null)
+        return removal(false, "missing", query?.workspacePath ?? null, "workspace_missing", "Workspace already removed")
+      }
       const workspacePath = resolve(query.workspacePath)
+      // Pre-resolve any matching registry entry up front. When the path
+      // exists on disk we still drop the entry after a successful delete;
+      // when it is missing we still drop the entry (the task notes
+      // require `safeRemove` to tolerate already-missing directories —
+      // the registry must stay consistent with disk reality).
+      await this.dropRegistryEntryForPath(workspacePath)
       if (!pathExists(workspacePath)) return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
       if (!isUnderRunnerRoot(this.runnerRoot, workspacePath)) {
         return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path is outside the runner-managed root")
@@ -288,6 +313,69 @@ export class RunnerSignalRClient {
     this.connection.on("ReceiveFollowup", (payload: ReceiveFollowupPayload | null | undefined) => {
       void this.handleFollowup(payload)
     })
+
+    this.connection.on("ReceiveWorkflowRunStatus", async (payload: ReceiveWorkflowRunStatusPayload | null | undefined) => {
+      await this.handleWorkflowRunStatus(payload)
+    })
+  }
+
+  // Server-pushed terminal workflow run status. Transitions the matching
+  // registry entry from `active` to `eligible` and stamps `terminalAt`.
+  // Idempotent: an already-eligible entry is returned unchanged and the
+  // on-disk file is not rewritten (per T-003 acceptance criteria).
+  //
+  // Push is a latency optimization. If the push is missed (runner offline
+  // at the moment of the event, transport drop, race with assignment),
+  // the convergence backstop wired into RunnerHost.startup / onReconnected
+  // / periodic timer is the authoritative catch-all — see
+  // `cleanup-convergence.ts`. This handler MUST NOT throw to the SignalR
+  // transport: lifecycle events must never crash the connection.
+  private async handleWorkflowRunStatus(payload: ReceiveWorkflowRunStatusPayload | null | undefined): Promise<void> {
+    if (!payload) return
+    const workflowRunId = payload.workflowRunId
+    const status = payload.status
+    if (!workflowRunId || typeof workflowRunId !== "string") return
+    if (!isTerminalWorkflowStatus(status)) {
+      // Server only pushes terminal statuses today (see
+      // RunnerWorkflowStatusRouter), but guard defensively: an unknown /
+      // non-terminal status leaves the entry active. Convergence will
+      // re-check on its next tick if needed.
+      return
+    }
+    if (!this.registry) return
+    try {
+      const updated = await this.registry.markEligible(workflowRunId)
+      if (!updated) {
+        // Push for a run the runner never materialized (e.g. an event for
+        // a workflow whose workspace lives on another runner). The runner
+        // only tracks workspaces it owns; nothing to do.
+        return
+      }
+      console.log(
+        `workspace cleanup: ${workflowRunId} transitioned to eligible (status=${status}, terminalAt=${updated.terminalAt})`,
+      )
+    } catch (error) {
+      console.error(`workspace cleanup: failed to mark ${workflowRunId} eligible from push:`, error)
+    }
+  }
+
+  // Drop the registry entry whose workspace path resolves to
+  // `workspacePath`. Called by the manual RemoveWorkspace handler so the
+  // registry stays consistent with disk reality: the entry is dropped
+  // regardless of whether the directory existed on disk, matching the
+  // T-002 contract "safeRemove must tolerate an already-missing
+  // directory (treat as removed, delete the entry)". `null` is accepted
+  // to cover the "query.workspacePath missing" branch — there is no path
+  // to match, so the registry is left untouched.
+  private async dropRegistryEntryForPath(workspacePath: string | null): Promise<void> {
+    if (!this.registry || !workspacePath) return
+    const entry = this.registry.findByWorkspacePath(workspacePath)
+    if (!entry) return
+    try {
+      await this.registry.remove(entry.workflowRunId)
+    } catch (error) {
+      console.error("workspace registry remove failed:", error)
+    }
   }
 
   private async handleFollowup(payload: ReceiveFollowupPayload | null | undefined): Promise<void> {
