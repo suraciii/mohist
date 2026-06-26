@@ -561,6 +561,9 @@ internal sealed class MohistCliApi
         WorkflowVariables,
         WorkflowProfilePrompt,
         WorkflowProfilePreview,
+        SessionMetadata,
+        SessionTranscriptSummary,
+        SessionRecovery,
     }
 
     internal static TableShape ParseTableShape(string? shape)

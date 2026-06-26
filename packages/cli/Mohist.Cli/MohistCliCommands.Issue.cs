@@ -33,6 +33,7 @@ internal static class IssueCommands
         issue.Subcommands.Add(BuildGetSub("diff", api));
         issue.Subcommands.Add(BuildGetSub("commits", api));
         issue.Subcommands.Add(BuildSessions(api));
+        issue.Subcommands.Add(BuildSession(api));
         issue.Subcommands.Add(BuildWorkflow(api));
         issue.Subcommands.Add(BuildFeedback(api));
         issue.Subcommands.Add(BuildPrereq(api));
@@ -845,6 +846,207 @@ internal static class IssueCommands
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{MohistCliCommands.Escape(number!)}/coder-sessions"),
                     mode,
                     nameof(MohistCliApi.TableShape.Sessions));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSession(MohistCliApi api)
+    {
+        var session = new Command(
+            "session",
+            "Manage one issue session. <name> is the session name from 'mo issue sessions <num>' (e.g. plan, build, check, integrate).");
+
+        session.Subcommands.Add(BuildSessionShow(api));
+        session.Subcommands.Add(BuildSessionTranscript(api));
+        session.Subcommands.Add(BuildSessionCompact(api));
+        session.Subcommands.Add(BuildSessionReset(api));
+
+        return session;
+    }
+
+    private static Argument<string> SessionNameArg() => new("name")
+    {
+        Description = "Session name from 'mo issue sessions <num>'",
+    };
+
+    private static Command BuildSessionShow(MohistCliApi api)
+    {
+        var cmd = new Command("show", "Show session metadata");
+        var numberArg = NumberArg();
+        var nameArg = SessionNameArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var name = ctx.GetValue(nameArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ShowAsync();
+
+            async Task<int> ShowAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}");
+                return await api.PrintWithOutputAsync(
+                    path,
+                    mode,
+                    nameof(MohistCliApi.TableShape.SessionMetadata));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionTranscript(MohistCliApi api)
+    {
+        var cmd = new Command("transcript", "Show session transcript summary");
+        var numberArg = NumberArg();
+        var nameArg = SessionNameArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var name = ctx.GetValue(nameArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return TranscriptAsync();
+
+            async Task<int> TranscriptAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/transcript");
+                return await api.PrintWithOutputAsync(
+                    path,
+                    mode,
+                    nameof(MohistCliApi.TableShape.SessionTranscriptSummary));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionCompact(MohistCliApi api)
+    {
+        var cmd = new Command("compact", "Compact the session and return a new session id");
+        var numberArg = NumberArg();
+        var nameArg = SessionNameArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var name = ctx.GetValue(nameArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return CompactAsync();
+
+            async Task<int> CompactAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/compact");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.SessionRecovery));
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionReset(MohistCliApi api)
+    {
+        var cmd = new Command("reset", "Reset the session and return a new session id");
+        var numberArg = NumberArg();
+        var nameArg = SessionNameArg();
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption();
+        cmd.Arguments.Add(numberArg);
+        cmd.Arguments.Add(nameArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var number = ctx.GetValue(numberArg);
+            var name = ctx.GetValue(nameArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return ResetAsync();
+
+            async Task<int> ResetAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                var path = ProjectIssuesPath(
+                    resolvedProjectId,
+                    $"/issues/{MohistCliCommands.Escape(number!)}/sessions/{MohistCliCommands.Escape(name!)}/reset");
+                return await api.PrintPostWithOutputAsync(
+                    path,
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.SessionRecovery));
             }
         });
         return cmd;
