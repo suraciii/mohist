@@ -24,9 +24,9 @@ namespace Mohist.Server.Issue.Services;
 /// <c>stages.&lt;stage&gt;.vars.agent</c> is treated as a SET target, not a
 /// PATCH target — keys removed from the agent dict must not reappear because
 /// the existing bundle's agent block had them. <see cref="VariableBundle.Patch"/>
-/// is a deep merge that does NOT support deletions, so we cannot use it on
-/// the inner agent block. Instead, the helper constructs the new vars / stages
-/// directly from the existing bundle and the requested patch, preserving
+/// is a deep merge that now treats overlay-null keys as explicit deletions,
+/// but the model/variant helper still composes the agent dict directly to
+/// keep the "set-replace the inner agent block" semantics intact, preserving
 /// non-agent keys (and untouched stages) while replacing the agent block.
 ///
 /// The route handler explicitly tracks JSON presence for each field and

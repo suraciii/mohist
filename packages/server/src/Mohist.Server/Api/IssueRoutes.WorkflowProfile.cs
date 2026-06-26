@@ -186,8 +186,16 @@ public static partial class IssueRoutes
                 variables = raw;
             else
             {
-                using var doc = JsonDocument.Parse("{}");
-                variables = doc.RootElement.Clone();
+                var configured = await issueProfileManager.GetVariablesAsync(issue.Id);
+                if (configured.Vars.HasValue && configured.Vars.Value.ValueKind == JsonValueKind.Object)
+                {
+                    variables = configured.Vars.Value.Clone();
+                }
+                else
+                {
+                    using var doc = JsonDocument.Parse("{}");
+                    variables = doc.RootElement.Clone();
+                }
             }
 
             // Issue preview: use a local engine instance (simple var expansion)

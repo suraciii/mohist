@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
 using Orleans;
 using Mohist.Server.Infrastructure;
 
@@ -16,10 +15,11 @@ namespace Mohist.Server.Workflow.Domain;
 ///       "build": { "vars": { ... } }
 ///     }
 ///   }
-/// 
+///
 /// 支持两种写语义:
 ///   Set (PUT)   - 完整替换
 ///   Patch (PATCH) - deep merge
+///
 /// </summary>
 [GenerateSerializer]
 public sealed record VariableBundle(
@@ -72,12 +72,13 @@ public sealed record VariableBundle(
 
     /// <summary>
     /// Patch 语义 - deep merge override 到 base。
-    /// base.Vars 与 override.Vars deep merge, base.Stages 与 override.Stages deep merge。
+    /// base.Vars 与 overlay.Vars deep merge, base.Stages 与 overlay.Stages deep merge。
+    /// overlay 中 JSON null 的属性被视为显式删除 (保留未出现的属性)。
     /// </summary>
     public static VariableBundle Patch(VariableBundle? @base, VariableBundle? overlay)
     {
-        if (@base is null) return overlay ?? Empty;
-        if (overlay is null) return @base;
+        if (overlay is null) return @base ?? Empty;
+        @base ??= Empty;
 
         var mergedVars = DeepMerge(@base.Vars, overlay.Vars);
         var mergedStages = MergeStages(@base.Stages, overlay.Stages);
@@ -100,15 +101,15 @@ public sealed record VariableBundle(
 
     /// <summary>
     /// Resolve the object that action templates see as `vars` for one stage.
-    /// Stage variables override top-level variables. Null-valued keys are
-    /// normalized away before persistence, so effective resolution treats
-    /// only the stored object shape as input.
+    /// Stage variables override top-level variables via deep merge: a stage's
+    /// null-valued key removes that key from the merged result (so resolution
+    /// sees the key as absent rather than falling back to the top-level value).
     /// </summary>
     public JsonElement? ResolveStageVars(string? stage)
     {
         if (!Vars.HasValue && Stages is null) return null;
 
-        var effective = Vars.HasValue && Vars.Value.ValueKind == JsonValueKind.Object
+        JsonElement? effective = Vars.HasValue && Vars.Value.ValueKind == JsonValueKind.Object
             ? Vars.Value
             : JSON.DeserializeElement("{}");
 
@@ -143,49 +144,94 @@ public sealed record VariableBundle(
     /// Deep merge 两个 JsonElement (期望都是 object)。
     /// 后者覆盖前者同名 key; 嵌套对象递归合并。
     /// 非 object 类型时后者直接替换。
+    /// overlay 中 JSON null 的属性视为显式删除: 移除 base 中同名 key,
+    /// 若 base 中不存在该 key 则保持不存在 (no-op)。
     /// </summary>
     public static JsonElement? DeepMerge(JsonElement? @base, JsonElement? overlay)
     {
         if (!overlay.HasValue) return @base;
-        if (!@base.HasValue) return overlay.Value.Clone();
+        if (!@base.HasValue) return CloneOverlay(overlay.Value);
 
         if (@base.Value.ValueKind != JsonValueKind.Object)
-            return overlay.Value.Clone();
+            return CloneOverlay(overlay.Value);
         if (overlay.Value.ValueKind != JsonValueKind.Object)
             return overlay.Value.Clone();
 
         var node = JsonNode.Parse(@base.Value.GetRawText())?.AsObject();
         if (node is null)
-            return overlay.Value.Clone();
+            return CloneOverlay(overlay.Value);
 
         foreach (var property in overlay.Value.EnumerateObject())
         {
             if (property.Value.ValueKind == JsonValueKind.Null)
+            {
+                node.Remove(property.Name);
                 continue;
+            }
             var existing = node[property.Name];
-            node[property.Name] = MergeNode(existing, property.Value);
+            if (existing is JsonObject existingObject && property.Value.ValueKind == JsonValueKind.Object)
+            {
+                MergeIntoObject(existingObject, property.Value);
+            }
+            else
+            {
+                node[property.Name] = CloneOverlayNode(property.Value);
+            }
         }
 
         return JSON.DeserializeElement(node.ToJsonString());
     }
 
-    private static JsonNode? MergeNode(JsonNode? existing, JsonElement overlay)
+    private static JsonElement CloneOverlay(JsonElement overlay)
     {
-        if (overlay.ValueKind == JsonValueKind.Null)
-            return existing;
+        if (overlay.ValueKind != JsonValueKind.Object)
+            return overlay.Clone();
 
-        if (existing is JsonObject existingObject && overlay.ValueKind == JsonValueKind.Object)
+        return JSON.DeserializeElement(CloneOverlayObject(overlay).ToJsonString());
+    }
+
+    private static JsonObject CloneOverlayObject(JsonElement overlay)
+    {
+        var node = new JsonObject();
+        foreach (var property in overlay.EnumerateObject())
         {
-            foreach (var property in overlay.EnumerateObject())
-            {
-                if (property.Value.ValueKind == JsonValueKind.Null)
-                    continue;
-                existingObject[property.Name] = MergeNode(existingObject[property.Name], property.Value);
-            }
-            return existingObject;
+            if (property.Value.ValueKind == JsonValueKind.Null)
+                continue;
+            node[property.Name] = CloneOverlayNode(property.Value);
         }
+        return node;
+    }
+
+    private static JsonNode? CloneOverlayNode(JsonElement overlay)
+    {
+        if (overlay.ValueKind == JsonValueKind.Object)
+            return CloneOverlayObject(overlay);
 
         return JsonNode.Parse(overlay.GetRawText());
+    }
+
+    private static void MergeIntoObject(JsonNode? existing, JsonElement overlay)
+    {
+        if (existing is not JsonObject existingObject || overlay.ValueKind != JsonValueKind.Object)
+            return;
+
+        foreach (var property in overlay.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.Null)
+            {
+                existingObject.Remove(property.Name);
+                continue;
+            }
+            var nestedExisting = existingObject[property.Name];
+            if (nestedExisting is JsonObject nestedObject && property.Value.ValueKind == JsonValueKind.Object)
+            {
+                MergeIntoObject(nestedObject, property.Value);
+            }
+            else
+            {
+                existingObject[property.Name] = CloneOverlayNode(property.Value);
+            }
+        }
     }
 
     private static Dictionary<string, StageVariables>? MergeStages(
@@ -194,31 +240,31 @@ public sealed record VariableBundle(
     {
         if (@base is null && overlay is null) return null;
 
-        var result = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
+        var stages = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
 
         if (@base is not null)
         {
             foreach (var (stage, stageVars) in @base)
-                result[stage] = stageVars.Copy();
+                stages[stage] = stageVars.Copy();
         }
 
         if (overlay is not null)
         {
             foreach (var (stage, stageVars) in overlay)
             {
-                if (result.TryGetValue(stage, out var existing))
+                if (stages.TryGetValue(stage, out var existing))
                 {
-                    result[stage] = new StageVariables(DeepMerge(existing.Vars, stageVars.Vars));
+                    stages[stage] = new StageVariables(DeepMerge(existing.Vars, stageVars.Vars));
                 }
                 else
                 {
-                    result[stage] = new StageVariables(
-                        stageVars.Vars.HasValue ? stageVars.Vars.Value.Clone() : null);
+                    stages[stage] = new StageVariables(
+                        stageVars.Vars.HasValue ? CloneOverlay(stageVars.Vars.Value) : null);
                 }
             }
         }
 
-        return result;
+        return stages;
     }
 
     public static readonly JsonSerializerOptions JsonOptions = JSON.Options;

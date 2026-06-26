@@ -93,6 +93,18 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.RunnerList:
                 RenderRunnerList(data, colorEnabled);
                 break;
+            case MohistCliApi.TableShape.WorkflowProfile:
+                RenderWorkflowProfile(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowVariables:
+                RenderWorkflowProfileVariables(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowProfilePrompt:
+                RenderWorkflowProfilePrompt(data);
+                break;
+            case MohistCliApi.TableShape.WorkflowProfilePreview:
+                RenderWorkflowProfilePreview(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;
