@@ -417,7 +417,18 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("${{ repository.baseBranch }}", rebaseWith.GetProperty("baseBranch").GetString());
         Assert.Equal("origin", rebaseWith.GetProperty("remote").GetString());
         Assert.False(rebaseWith.GetProperty("squash").GetBoolean());
-        Assert.Equal("task", rebaseWith.GetProperty("conflictMode").GetString());
+
+        var rebaseRecovery = rebaseWith.GetProperty("recovery");
+        Assert.Equal(2, rebaseRecovery.GetProperty("budget").GetInt32());
+        var rebaseHandlers = rebaseRecovery.GetProperty("handlers").EnumerateArray().ToList();
+        Assert.Single(rebaseHandlers);
+        var conflictHandler = rebaseHandlers.Single(h => h.GetProperty("when").GetString() == "conflict");
+        Assert.True(conflictHandler.GetProperty("retrySelf").GetBoolean());
+        var conflictTasks = conflictHandler.GetProperty("tasks").EnumerateArray().ToList();
+        Assert.Single(conflictTasks);
+        var resolveConflicts = conflictTasks.Single(t => t.GetProperty("id").GetString() == "recover:resolve-rebase-conflicts");
+        Assert.Equal("mohist/acp-agent", resolveConflicts.GetProperty("uses").GetString());
+        Assert.Equal("${{ prompts.resolve-rebase-conflicts }}", resolveConflicts.GetProperty("with").GetProperty("prompt").GetString());
 
         var recoverPushBaseMoved = baseMovedTasks.Single(t => t.GetProperty("id").GetString() == "recover:push");
         Assert.Equal("mohist/push", recoverPushBaseMoved.GetProperty("uses").GetString());
@@ -609,7 +620,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("open-draft-pr", emitted);
         Assert.Contains("merge-verified", emitted);
         Assert.Contains("github-pr-status", emitted);
-        Assert.Contains("conflictMode: task", emitted);
+        Assert.Contains("when: conflict", emitted);
         Assert.Contains("retrySelf: true", emitted);
 
         var reparsed = WorkflowYamlSerializer.FromYaml(emitted, "mohist/github-pr");

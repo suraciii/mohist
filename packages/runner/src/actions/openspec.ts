@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
-import { exists, copyDirectory } from "../system/process.js"
+import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
 import { isObject, objectInput, stringInput } from "../core/json.js"
@@ -8,7 +8,7 @@ import { resolveActionPath } from "./expectations.js"
 import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 
 const SPEC_SYNC_COMMIT_MESSAGE = "Sync OpenSpec specs from change delta"
-const ARCHIVE_CHANGE_COMMIT_MESSAGE = "Archive OpenSpec change"
+const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
 
 export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
   success: boolean
@@ -22,6 +22,35 @@ let openSpecGitRunner: OpenSpecGitRunner = defaultGit
 
 export function setOpenSpecGitRunnerForTest(runner: OpenSpecGitRunner | null) {
   openSpecGitRunner = runner ?? defaultGit
+}
+
+type ArchiveRename = (src: string, dst: string) => Promise<void>
+
+let archiveRenameForTest: ArchiveRename | null = null
+
+export function setArchiveRenameForTest(rename: ArchiveRename | null) {
+  archiveRenameForTest = rename
+}
+
+async function moveChangeDir(src: string, dst: string) {
+  try {
+    if (archiveRenameForTest) {
+      await archiveRenameForTest(src, dst)
+    } else {
+      await rename(src, dst)
+    }
+  } catch (err) {
+    if (isCrossDeviceError(err)) {
+      await copyDirectory(src, dst)
+      await deleteDirectory(src)
+      return
+    }
+    throw err
+  }
+}
+
+function isCrossDeviceError(err: unknown): boolean {
+  return Boolean(err && typeof err === "object" && (err as { code?: string }).code === "EXDEV")
 }
 
 const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
@@ -185,65 +214,82 @@ export async function openspecSyncAction(context: ActionContext): Promise<Action
 
 export async function archiveChangeAction(context: ActionContext): Promise<ActionResult> {
   const changeDir = resolveChangeDir(context)
-  if (!changeDir) return { status: "failure", message: "Archive change requires 'changeDir'" }
+  if (!changeDir) return archiveFailure("config-error", "Archive change requires 'changeDir'", { kind: "archive-change" })
 
   const archiveDir = join(dirname(changeDir), "archive")
   const sourceName = changeDir.split(/[\\/]/).pop() ?? "change"
   const archivePrefix = `${new Date().toISOString().slice(0, 10)}-${sourceName}`
+
   const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
   const sourceHasFiles = exists(changeDir) && await hasFiles(changeDir)
-  if (existingArchive && !sourceHasFiles) {
-    return {
-      status: "success",
-      message: "Change already archived; no changes to commit",
-      output: JSON.stringify({
+
+  if (existingArchive && sourceHasFiles) {
+    return archiveFailure(
+      "partial-archive",
+      `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${existingArchive}`,
+      { kind: "archive-change", source: changeDir, archive: existingArchive },
+    )
+  }
+
+  let destination: string
+  if (existingArchive) {
+    destination = existingArchive
+  } else if (!sourceHasFiles) {
+    return archiveFailure(
+      "missing-source",
+      `Change directory not found: ${changeDir}`,
+      { kind: "archive-change", source: changeDir },
+    )
+  } else {
+    await mkdir(archiveDir, { recursive: true })
+    destination = await uniqueDestination(archiveDir, archivePrefix)
+    try {
+      await moveChangeDir(changeDir, destination)
+    } catch (err) {
+      return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, {
         kind: "archive-change",
         source: changeDir,
-        destination: existingArchive,
-        changed: false,
-        noChange: true,
-      }),
+        destination,
+        stage: "rename",
+      })
     }
   }
 
-  if (!sourceHasFiles) {
-    return { status: "failure", message: `Change directory not found: ${changeDir}` }
-  }
+  const sourceRel = relativePath(context.workDir, changeDir)
+  const destinationRel = relativePath(context.workDir, destination)
+  const commitMessage = `${ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX}: ${sourceName}`
 
-  await mkdir(archiveDir, { recursive: true })
-  const destination = await uniqueDestination(archiveDir, archivePrefix)
-  await rename(changeDir, destination)
-
-  const changesPath = relativePath(context.workDir, dirname(changeDir))
-  const destinationPath = relativePath(context.workDir, destination)
-  const addResult = await openSpecGitRunner(context.workDir, ["add", "-A", changesPath], context.signal)
+  const addResult = await openSpecGitRunner(context.workDir, ["add", "-A", destinationRel], context.signal)
   if (!addResult.success) {
-    return {
-      status: "failure",
-      message: `git add archive change failed: ${addResult.combinedOutput || addResult.stderr || `exit ${addResult.exitCode}`}`,
-      output: JSON.stringify({
-        kind: "archive-change",
-        source: changeDir,
-        destination,
-        stage: "add",
-        addOutput: addResult.combinedOutput,
-      }),
-    }
+    return archiveFailure("retry-safe", `git add archive change failed: ${addResult.combinedOutput || addResult.stderr || `exit ${addResult.exitCode}`}`, {
+      kind: "archive-change",
+      source: changeDir,
+      destination,
+      stage: "add",
+      addOutput: addResult.combinedOutput,
+    })
   }
 
-  const diffResult = await openSpecGitRunner(context.workDir, ["diff", "--cached", "--name-only", "--", destinationPath], context.signal)
+  const rmResult = await openSpecGitRunner(context.workDir, ["rm", "-rf", "--cached", "--ignore-unmatch", sourceRel], context.signal)
+  if (!rmResult.success) {
+    return archiveFailure("retry-safe", `git rm --cached archive change failed: ${rmResult.combinedOutput || rmResult.stderr || `exit ${rmResult.exitCode}`}`, {
+      kind: "archive-change",
+      source: changeDir,
+      destination,
+      stage: "rm",
+      rmOutput: rmResult.combinedOutput,
+    })
+  }
+
+  const diffResult = await openSpecGitRunner(context.workDir, ["diff", "--cached", "--name-only", "--", sourceRel, destinationRel], context.signal)
   if (!diffResult.success) {
-    return {
-      status: "failure",
-      message: `git diff archive change failed: ${diffResult.combinedOutput || diffResult.stderr || `exit ${diffResult.exitCode}`}`,
-      output: JSON.stringify({
-        kind: "archive-change",
-        source: changeDir,
-        destination,
-        stage: "diff",
-        diffOutput: diffResult.combinedOutput,
-      }),
-    }
+    return archiveFailure("retry-safe", `git diff archive change failed: ${diffResult.combinedOutput || diffResult.stderr || `exit ${diffResult.exitCode}`}`, {
+      kind: "archive-change",
+      source: changeDir,
+      destination,
+      stage: "diff",
+      diffOutput: diffResult.combinedOutput,
+    })
   }
 
   const changedFiles = [...new Set(diffResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))]
@@ -257,24 +303,21 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
         destination,
         changed: false,
         noChange: true,
+        errorCode: null,
       }),
     }
   }
 
-  const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", ARCHIVE_CHANGE_COMMIT_MESSAGE, "--", changesPath], context.signal)
+  const commitResult = await openSpecGitRunner(context.workDir, ["commit", "-m", commitMessage, "--", sourceRel, destinationRel], context.signal)
   if (!commitResult.success) {
-    return {
-      status: "failure",
-      message: `git commit archive change failed: ${commitResult.combinedOutput || commitResult.stderr || `exit ${commitResult.exitCode}`}`,
-      output: JSON.stringify({
-        kind: "archive-change",
-        source: changeDir,
-        destination,
-        stage: "commit",
-        commitOutput: commitResult.combinedOutput,
-        changedFiles,
-      }),
-    }
+    return archiveFailure("retry-safe", `git commit archive change failed: ${commitResult.combinedOutput || commitResult.stderr || `exit ${commitResult.exitCode}`}`, {
+      kind: "archive-change",
+      source: changeDir,
+      destination,
+      stage: "commit",
+      commitOutput: commitResult.combinedOutput,
+      changedFiles,
+    })
   }
 
   const headResult = await openSpecGitRunner(context.workDir, ["rev-parse", "HEAD"], context.signal)
@@ -289,12 +332,19 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       destination,
       changed: true,
       noChange: false,
-      commitMessage: ARCHIVE_CHANGE_COMMIT_MESSAGE,
+      commitMessage,
       commitSha,
       commitOutput: commitResult.combinedOutput,
       changedFiles,
+      errorCode: null,
     }),
   }
+}
+
+type ArchiveErrorCode = "retry-safe" | "partial-archive" | "missing-source" | "config-error"
+
+function archiveFailure(errorCode: ArchiveErrorCode, message: string, output: Record<string, JsonValue>): ActionResult {
+  return { status: "failure", message, output: JSON.stringify({ ...output, errorCode }) }
 }
 
 function mergeTaskWith(

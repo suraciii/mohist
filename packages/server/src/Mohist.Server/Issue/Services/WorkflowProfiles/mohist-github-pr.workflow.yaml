@@ -244,6 +244,11 @@ stages:
         uses: mohist/archive-change
         with:
           changeDir: ${{ openspecChangeDir }}
+          recovery:
+            budget: 3
+            handlers:
+              - when: retry-safe
+                retrySelf: true
 
       - id: push
         title: Push
