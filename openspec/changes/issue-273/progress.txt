@@ -9,8 +9,31 @@
 - Verified `mohist-default.workflow.yaml` has no `conflictMode` to sync (confirmed none).
 - Server tests pass: 31 profile-specific tests, full suite 2785 passed / 0 failed.
 
+## T-002 Progress
+
+- Added boolean `force` input to `mohist/push` action (`packages/runner/src/actions/push.ts`):
+  - `force === true` emits `push --force <remote> <refspec>` and skips `ls-remote` entirely.
+  - `force` wins over `forceWithLease` when both are set (force branch is evaluated first).
+  - Absent/false `force` preserves existing `forceWithLease`/default behavior exactly.
+  - Output JSON now includes `force` boolean alongside existing `forceWithLease`.
+- Switched `recover:push` under the `base-moved` handler in `mohist-github-pr.workflow.yaml` from `forceWithLease: true` to `force: true`.
+- Left check-stage push and `pr-checks-failed` recovery push on `forceWithLease: true`.
+- Updated `MohistPrIssueWorkflowProfileSpecs.cs`:
+  - `recoverPushBaseMoved` asserts `force`==true and no `forceWithLease` property.
+  - `recoverPushPrChecks` still asserts `forceWithLease`==true.
+- Added runner push tests (`packages/runner/tests/push.spec.ts`):
+  - `ForceTrue_EmitsBareForceAndSkipsLsRemoteProbe`
+  - `ForceTrue_WinsOverForceWithLease`
+  - `ForceFalse_PreservesForceWithLeaseBehavior`
+  - Updated existing `ForceWithLease_ExplicitLeaseRejected_ClassifiesAsBaseMoved` to assert `force: false`.
+- Verification:
+  - `npm run typecheck -w packages/runner` passes.
+  - `npm test -w packages/runner` passes (655 passed, 23 skipped).
+  - `dotnet test Mohist.sln -p:SkipWebBuild=true` passes (2785 passed, 0 failed, 12 skipped).
+
 ## Codebase Patterns
 
 - Workflow profile YAML lives under `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/`.
 - Server-side profile assertions are in `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs`.
 - `npm test` at server root runs `dotnet test Mohist.sln`; workspace vitest failures are pre-existing environment issues in this repo.
+- Runner action tests for git operations use `setPushGitRunnerForTest` to inject a fake git runner and capture command history.

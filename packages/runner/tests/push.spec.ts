@@ -496,9 +496,101 @@ describe("mohist/push", () => {
 
     expect(result.status).toBe("failure")
     expect(output).toMatchObject({
+      force: false,
       forceWithLease: true,
       pushed: false,
       failureKind: "base-moved",
+    })
+  })
+
+  it("ForceTrue_EmitsBareForceAndSkipsLsRemoteProbe", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "push --force origin mo/issue-99:master":
+          return ok("To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ force: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse mo/issue-99",
+      "push --force origin mo/issue-99:master",
+    ])
+    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("ls-remote"))).toBe(false)
+    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("push --force-with-lease"))).toBe(false)
+    expect(output).toMatchObject({
+      force: true,
+      forceWithLease: false,
+      pushed: true,
+      landedCommit: "rewritten-sha",
+      failureKind: null,
+    })
+  })
+
+  it("ForceTrue_WinsOverForceWithLease", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "push --force origin mo/issue-99:master":
+          return ok("ok\n")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ force: true, forceWithLease: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toEqual([
+      "rev-parse mo/issue-99",
+      "push --force origin mo/issue-99:master",
+    ])
+    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith("ls-remote"))).toBe(false)
+    expect(output).toMatchObject({
+      force: true,
+      forceWithLease: false,
+      pushed: true,
+      failureKind: null,
+    })
+  })
+
+  it("ForceFalse_PreservesForceWithLeaseBehavior", async () => {
+    const calls = installGit(async (_call, history) => {
+      const command = history[history.length - 1].args.join(" ")
+      switch (command) {
+        case "rev-parse mo/issue-99":
+          return ok("rewritten-sha\n")
+        case "ls-remote origin refs/heads/master":
+          return ok("remote-tip-sha\trefs/heads/master\n")
+        case "push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master":
+          return ok("ok\n")
+        default:
+          return fail(`unexpected git call: ${command}`)
+      }
+    })
+
+    const result = await pushAction(context({ force: false, forceWithLease: true }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(workspaceCalls(calls)).toContain("ls-remote origin refs/heads/master")
+    expect(workspaceCalls(calls)).toContain("push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master")
+    expect(output).toMatchObject({
+      force: false,
+      forceWithLease: true,
+      pushed: true,
+      failureKind: null,
     })
   })
 })
