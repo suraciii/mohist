@@ -32,11 +32,11 @@
       "acceptanceCriteria": [
         "ProjectDefaultWorkflowControl renders at the top of WorkflowProfilesSection and is guarded by currentProject (renders a 'No project selected' hint when projectId is null, mirroring the repositories/label-catalog guard in SettingsPage)",
         "The control displays the current defaultTemplateId from useProjectDefaultWorkflowProfile; when null it shows copy explaining the project is inheriting the system default (e.g. 'mohist/default')",
-        "Selecting a system template (e.g. mohist/pr) calls useSetProjectDefaultWorkflowProfile with templateId 'mohist/pr' and the readback after invalidation displays defaultTemplateId 'mohist/pr'",
+        "Selecting a system template (e.g. mohist/github-pr) calls useSetProjectDefaultWorkflowProfile with templateId 'mohist/github-pr' and the readback after invalidation displays defaultTemplateId 'mohist/github-pr'",
         "A Clear action calls useClearProjectDefaultWorkflowProfile and the control returns to the unset/inheriting-system-default state",
         "When defaultTemplateId references an id absent from the system catalog, the control shows a warning with the raw id and offers Clear",
         "The static isDefault badge in WorkflowProfilesSection card (line ~138) and detail (line ~86) views is relabeled to 'System default' with a neutral slate/gray style, visually distinct from the project default control's accent",
-        "Web tests (colocated *.test.tsx) cover: readback of an existing project default; switching to mohist/pr via PUT; clearing via DELETE returning to inheriting state; the system-default badge is visually distinct from the project-default control",
+        "Web tests (colocated *.test.tsx) cover: readback of an existing project default; switching to mohist/github-pr via PUT; clearing via DELETE returning to inheriting state; the system-default badge is visually distinct from the project-default control",
         "npm run typecheck -w packages/web and npm run test:run -w packages/web pass"
       ],
       "priority": 2,
@@ -55,7 +55,7 @@
       "acceptanceCriteria": [
         "features/create-issue/ui/CreateIssueDialog.tsx (around line 225) resolves the default workflow selection from useEffectiveDefaultWorkflowProfile().effectiveTemplateId instead of workflowProfiles.find((p) => p.isDefault)",
         "widgets/issue-workflow/ui/WorkflowProfileControl.tsx (around line 47) resolves the default from useEffectiveDefaultWorkflowProfile().effectiveTemplateId instead of the hardcoded isDefault lookup",
-        "When the project default is mohist/pr, opening the create-issue dialog without choosing a workflow resolves the default selection to mohist/pr",
+        "When the project default is mohist/github-pr, opening the create-issue dialog without choosing a workflow resolves the default selection to mohist/github-pr",
         "When the project default is unset, opening the create-issue dialog falls back to the system default profile without requiring a project default to be configured",
         "Web tests cover both scenarios: create-issue inherits project default when configured, and create-issue falls back to system default when project default is unset",
         "npm run typecheck -w packages/web and npm run test:run -w packages/web pass"

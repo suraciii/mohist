@@ -193,29 +193,29 @@ describe('WorkflowProfileControl', () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
     mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/pr',
+      effectiveTemplateId: 'mohist/github-pr',
       source: 'project',
-      configuredTemplateId: 'mohist/pr',
+      configuredTemplateId: 'mohist/github-pr',
     })
 
     renderControl(makeIssue({ workflowProfileId: null }))
 
     const control = await screen.findByTestId('issue-workflow-profile-control')
-    expect(control.dataset.defaultProfile).toBe('mohist/pr')
-    expect(control.dataset.effectiveProfile).toBe('mohist/pr')
-    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/pr')
-    expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/pr')
+    expect(control.dataset.defaultProfile).toBe('mohist/github-pr')
+    expect(control.dataset.effectiveProfile).toBe('mohist/github-pr')
+    expect(screen.getByTestId('issue-workflow-profile-value')).toHaveTextContent('mohist/github-pr')
+    expect(screen.getByTestId('issue-workflow-profile-select')).toHaveValue('mohist/github-pr')
   })
 
   it('falls back to the system default profile id when the project default is unset', async () => {
     mockUseWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
     mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
@@ -240,15 +240,15 @@ describe('WorkflowProfileControl', () => {
       ],
     })
     mockUseEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/pr',
+      effectiveTemplateId: 'mohist/github-pr',
       source: 'project',
-      configuredTemplateId: 'mohist/pr',
+      configuredTemplateId: 'mohist/github-pr',
     })
 
     renderControl(makeIssue({ workflowProfileId: null }))
 
     const select = await screen.findByTestId('issue-workflow-profile-select')
-    expect(select).toHaveValue('mohist/pr')
-    expect(screen.getByRole('option', { name: 'mohist/pr' })).toBeInTheDocument()
+    expect(select).toHaveValue('mohist/github-pr')
+    expect(screen.getByRole('option', { name: 'mohist/github-pr' })).toBeInTheDocument()
   })
 })

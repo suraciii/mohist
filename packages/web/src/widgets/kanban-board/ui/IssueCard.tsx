@@ -9,7 +9,6 @@ import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useEffectiveDefaultWorkflowProfile } from '../../../entities/settings'
 import { getStageColors } from '../model/stage-colors'
 
 export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
@@ -194,7 +193,6 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
-  const { effectiveTemplateId: defaultWorkflowProfileId } = useEffectiveDefaultWorkflowProfile()
   const isAgentRunning = agentStatus.activeAgents?.some(
     (a) => a.issueNumber === issue.number,
   ) ?? false
@@ -244,7 +242,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     !isDone &&
     (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted)
   const isDraft = issue.isDraft
-  const workflowProfileId = issue.workflowProfileId ?? defaultWorkflowProfileId ?? SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID
+  const workflowProfileId = issue.workflowProfileId ?? SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID
   const waitingFor = !isDraft && issue.blocker?.kind === 'waiting-for' ? issue.blocker.issue : null
   const cardDeEmphasis = isDone
     ? 'opacity-70'

@@ -5,7 +5,7 @@ The backend already supports a project-level default workflow template (`Project
 ## What Changes
 
 - Add a **Project default workflow** control at the top of Settings → Workflows that reads `GET /api/projects/{projectRef}/workflow-profile` and answers "what will new issues inherit for this project?".
-- Let the user select a system workflow (e.g. `mohist/pr`) by writing `PUT /api/projects/{projectRef}/workflow-profile/default-template`, with readback confirming the new `defaultTemplateId`.
+- Let the user select a system workflow (e.g. `mohist/github-pr`) by writing `PUT /api/projects/{projectRef}/workflow-profile/default-template`, with readback confirming the new `defaultTemplateId`.
 - Let the user clear the project default via `DELETE /api/projects/{projectRef}/workflow-profile/default-template`; the UI then explains the project is inheriting the system default.
 - Visually separate **system default** metadata (static `isDefault` on `mohist/default`) from **this project's current default** state, renaming or re-styling the badge so it cannot be mistaken for the project default.
 - Stop hardcoding `workflowProfiles.find((p) => p.isDefault)` as the only default in create-issue / profile-selection surfaces; honor a configured project default when present.
@@ -27,5 +27,5 @@ _None._
   - `entities/settings` (or `entities/project`) API client + TanStack Query hooks/mutations for the project workflow-profile default-template endpoints.
   - `features/create-issue/ui/CreateIssueDialog.tsx` — replace the hardcoded `find((p) => p.isDefault)` default with the configured project default (falling back to system default when unset).
 - **Backend (`packages/server`)**: No change required — the `workflow-profile` and `default-template` endpoints already exist in `ProjectRoutes.cs` and operate on `ProjectWorkflowProfile.DefaultTemplateId`.
-- **Tests**: Web tests covering readback, switching to `mohist/pr`, clearing the default, and the system-vs-project default distinction.
+- **Tests**: Web tests covering readback, switching to `mohist/github-pr`, clearing the default, and the system-vs-project default distinction.
 - **Out of scope (per Non-Goals)**: workflow execution semantics, resolver precedence, new profile types, built-in YAML edits, and unrelated workflow-profile read-model bugs.

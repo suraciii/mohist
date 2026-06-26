@@ -4,24 +4,24 @@
 
 ## Repaired Items
 
-_None. The issues found require product behavior changes or acceptance-criteria judgment, so they were not repaired during review._
+_None. The issues found require product behavior, public-contract, or acceptance-criteria changes, so they were not repaired during review._
 
 ## Blocking Items
 
 - [ID: item-1]
   Severity: blocking
-  Scope: packages/web/src/pages/settings/ui/ProjectDefaultWorkflowControl.tsx
-  Evidence: The select presents an explicit `Inherit system default` option at `packages/web/src/pages/settings/ui/ProjectDefaultWorkflowControl.tsx:105`, but the `onChange` handler only mutates when `value` is truthy at `packages/web/src/pages/settings/ui/ProjectDefaultWorkflowControl.tsx:97`. Choosing the empty inherit option from an existing project default does nothing and never calls `DELETE /api/projects/{projectRef}/workflow-profile/default-template`, so the visible control offers a clear path that does not satisfy the clear-selection acceptance criterion. The separate Clear button works, but the issue explicitly asks for clearing the selection, and the rendered select option is the selection-based clearing affordance. [disallowed:product-behavior-change]
-  SuggestedAction: Treat the empty select value as clearing the project default by calling `clearDefault.mutate()`, or remove/disable the empty option when a default is configured so the only clear affordance is unambiguous. Add a test that changes the select from `mohist/pr` to `''` and asserts a DELETE request plus inherited-system readback.
-  Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes, but no test covers selecting the empty inherit option.
+  Scope: packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx
+  Evidence: The create dialog displays the project effective default in the workflow select via `workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''` at `packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx:226`, but the submit payload still only includes `workflowProfileId` when the local state is truthy at `packages/web/src/features/create-issue/ui/CreateIssueDialog.tsx:191`. When a project default such as `mohist/pr` is configured and the user does not manually touch the selector, the UI shows that profile as selected but `createIssue` omits `workflowProfileId`, so the create request does not carry the project-configured default as required by spec scenario `openspec/changes/issue-269/specs/web-ui/spec.md:51`. The newly added tests at `packages/web/src/features/create-issue/ui/CreateIssueDialog.test.tsx:481` and `packages/web/src/features/create-issue/ui/CreateIssueDialog.test.tsx:495` assert only the select value, while the existing request-contract test in `packages/web/tests/CreateIssueDialog.test.tsx:183` still expects the field to be absent when no explicit selection is made. [disallowed:product-behavior-change]
+  SuggestedAction: Decide whether the web contract should persist the project default as an explicit issue selection. If yes, submit `defaultProfileId` when the selector is displaying it and update the request-contract tests to assert the configured default is sent. If the desired contract is to omit the field and rely on backend inheritance, update the issue/spec acceptance criteria and UI copy/tests so the candidate does not claim the create request carries the project-configured value.
+  Verification: `npm run test:run -w packages/web -- CreateIssueDialog ProjectDefaultWorkflowControl WorkflowProfileControl IssueCard WorkflowProfilesSection` passed; `npm run typecheck -w packages/web` passed. These commands do not resolve the mismatch because current tests do not assert the project-default create payload.
   Status: open
 
 - [ID: item-2]
   Severity: blocking
-  Scope: packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.tsx
-  Evidence: `WorkflowProfileControl` reads the project effective default into `defaultProfileId` at `packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.tsx:47`, but it only writes that value to `data-default-profile` at `packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.tsx:72`. The displayed effective profile and selected option still resolve through `issue.workflowProfileId ?? workflowProfileYaml?.profileId ?? SYSTEM_DEFAULT_ID` at `packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.tsx:26`, so an issue with no per-issue override in a project defaulting to `mohist/pr` still visually displays/selects `mohist/default`. That violates the acceptance criterion that profile-selection surfaces resolve the default from project configuration when present, and the added test at `packages/web/src/widgets/issue-workflow/ui/WorkflowProfileControl.test.tsx:192` only asserts the hidden data attribute instead of the visible value/select state. [disallowed:product-behavior-change]
-  SuggestedAction: Use `defaultProfileId` as the fallback for unset issue/profile-yaml state, ensure the option list contains the project-default id if it is absent from the catalog, and update tests to assert `issue-workflow-profile-value` and the select value are `mohist/pr` when no issue-level selection exists.
-  Verification: `npm run typecheck -w packages/web` passes; `npm run test:run -w packages/web` passes, but the tests do not assert the user-visible per-issue default resolution.
+  Scope: workflow profile ids / Settings project default selection
+  Evidence: The issue acceptance criteria require selecting `mohist/pr` and readback showing `defaultTemplateId: "mohist/pr"`, but the real system catalog exposes `mohist/default` and `mohist/github-pr`, not `mohist/pr`: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/IssueWorkflowProfiles.cs:6` defines `GithubPrId = "mohist/github-pr"`, and `packages/server/src/Mohist.Server/Workflow/Services/ProjectWorkflowProfileManager.cs:49` adds that id to `SystemTemplates`. `ProjectDefaultWorkflowControl` only offers values from `GET /api/workflow-templates/system` at `packages/web/src/pages/settings/ui/ProjectDefaultWorkflowControl.tsx:108`, so a real user cannot select `mohist/pr`; attempting to PUT `mohist/pr` would also be outside the real catalog. The new UI test uses a mocked catalog containing `mohist/pr` at `packages/web/src/pages/settings/ui/ProjectDefaultWorkflowControl.test.tsx:18`, masking the production mismatch. [disallowed:public-contract-change]
+  SuggestedAction: Align the issue/spec/tests with the actual public id `mohist/github-pr`, or add a supported `mohist/pr` alias/template end-to-end if that is now the intended public contract. Then verify the Settings control against the real catalog ids rather than only a divergent mock fixture.
+  Verification: `npm run test:run -w packages/web -- CreateIssueDialog ProjectDefaultWorkflowControl WorkflowProfileControl IssueCard WorkflowProfilesSection` passed; `npm run typecheck -w packages/web` passed. The pass is insufficient because the relevant test fixture does not match production catalog values.
   Status: open
 
 ## Follow-up Items
@@ -29,12 +29,17 @@ _None. The issues found require product behavior changes or acceptance-criteria 
 - [ID: item-3]
   Severity: follow-up
   Scope: packages/web/src/widgets/kanban-board/ui/IssueCard.tsx
-  Evidence: `IssueCard` still displays `issue.workflowProfileId ?? SYSTEM_DEFAULT_WORKFLOW_PROFILE_ID` at `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx:245`, so backlog cards may continue showing `mohist/default` even when an unset issue would inherit a project default. This surface was not explicitly named in the issue acceptance criteria, which call out create-issue/profile selection surfaces, but it is an adjacent workflow-profile display that can confuse users after this feature lands.
-  SuggestedAction: Consider centralizing project-default display semantics for other workflow-profile badges/cards in a later issue.
+  Evidence: The candidate also changes issue-card workflow chips to fall back to `useEffectiveDefaultWorkflowProfile()` at `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx:197` and `packages/web/src/widgets/kanban-board/ui/IssueCard.tsx:247`. This is adjacent and useful, but it was not part of the named acceptance surfaces and adds an additional project-default query path to every rendered issue card.
+  SuggestedAction: Consider centralizing effective workflow-profile display semantics for list/detail/card surfaces in a dedicated follow-up so future changes do not need to wire the same fallback independently into each component.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-_None identified._
+- [ID: item-4]
+  Severity: info
+  Scope: openspec/changes/issue-269/progress.txt
+  Evidence: `openspec/changes/issue-269/progress.txt:33` says `CreateIssueDialog` intentionally omits `workflowProfileId` and lets the backend resolve the project default. That may be a valid product design, but it conflicts with the issue/spec acceptance wording that the create request carries the project-configured default. This is workflow evidence rather than a product deliverable by itself.
+  SuggestedAction: After product intent is clarified, update workflow notes/specs so traceability matches the actual accepted contract.
+  Status: out-of-scope
 
 <promise>FAIL</promise>

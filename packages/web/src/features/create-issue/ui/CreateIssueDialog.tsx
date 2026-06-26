@@ -176,9 +176,13 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     }
   }, [selectedTemplate])
 
+  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
+  const workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''
+
   const mutation = useMutation({
-    mutationFn: () =>
-      createIssue({
+    mutationFn: () => {
+      const selectedWorkflowProfileId = workflowProfileId ?? defaultProfileId ?? null
+      return createIssue({
         title,
         body: body || undefined,
         attachmentIds: extractAttachmentIds(body),
@@ -188,9 +192,10 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
-        ...(workflowProfileId ? { workflowProfileId } : {}),
+        ...(selectedWorkflowProfileId ? { workflowProfileId: selectedWorkflowProfileId } : {}),
         ...(risk ? { risk } : {}),
-      }),
+      })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       resetAndClose()
@@ -222,9 +227,6 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         : []
     return [...list, ...extras]
   }, [workflowProfiles, workflowProfileId])
-  const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
-  const workflowSelectValue = workflowProfileId ?? defaultProfileId ?? ''
-
   return (
     <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
       <DialogContent>

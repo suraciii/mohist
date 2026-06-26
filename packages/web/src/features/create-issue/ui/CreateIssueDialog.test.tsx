@@ -473,23 +473,32 @@ describe('CreateIssueDialog workflow profile default', () => {
     mocks.useWorkflowProfiles.mockReturnValue({
       data: [
         { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
-        { id: 'mohist/pr', displayName: 'PR', description: '', isDefault: false },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
       ],
     })
   }
 
-  it('inherits the project-configured default workflow profile when opening the dialog', async () => {
+  it('sends the project-configured default workflow profile when no explicit workflow is chosen', async () => {
     setupProfiles()
+    mocks.createIssue.mockResolvedValue({ id: 'issue_1', number: 1 })
     mocks.useEffectiveDefaultWorkflowProfile.mockReturnValue({
-      effectiveTemplateId: 'mohist/pr',
+      effectiveTemplateId: 'mohist/github-pr',
       source: 'project',
-      configuredTemplateId: 'mohist/pr',
+      configuredTemplateId: 'mohist/github-pr',
     })
 
     renderDialog()
 
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Project default issue' } })
     const select = await screen.findByLabelText('Workflow') as HTMLSelectElement
-    expect(select.value).toBe('mohist/pr')
+    expect(select.value).toBe('mohist/github-pr')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    expect(mocks.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      workflowProfileId: 'mohist/github-pr',
+    }))
   })
 
   it('falls back to the system default workflow profile when the project default is unset', async () => {

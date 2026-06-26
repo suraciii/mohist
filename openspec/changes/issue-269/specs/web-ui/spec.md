@@ -6,15 +6,15 @@ The Web UI Settings → Workflows page SHALL surface a project default workflow 
 
 #### Scenario: Display current project default workflow
 
-- **WHEN** a user opens Settings → Workflows for a project whose `defaultTemplateId` is `mohist/pr`
-- **THEN** the project default workflow control SHALL display `mohist/pr` as the project's current default
+- **WHEN** a user opens Settings → Workflows for a project whose `defaultTemplateId` is `mohist/github-pr`
+- **THEN** the project default workflow control SHALL display `mohist/github-pr` as the project's current default
 - **AND** the control SHALL read its value from `GET /api/projects/{projectRef}/workflow-profile`
 
 #### Scenario: Select a project default workflow
 
-- **WHEN** a user selects `mohist/pr` in the project default workflow control
-- **THEN** the UI SHALL send `PUT /api/projects/{projectRef}/workflow-profile/default-template` with `templateId: "mohist/pr"`
-- **AND** the readback SHALL confirm `defaultTemplateId: "mohist/pr"`
+- **WHEN** a user selects `mohist/github-pr` in the project default workflow control
+- **THEN** the UI SHALL send `PUT /api/projects/{projectRef}/workflow-profile/default-template` with `templateId: "mohist/github-pr"`
+- **AND** the readback SHALL confirm `defaultTemplateId: "mohist/github-pr"`
 
 #### Scenario: Clear the project default workflow
 
@@ -50,8 +50,8 @@ Create-issue and profile-selection surfaces SHALL resolve the default workflow p
 
 #### Scenario: Create issue inherits project default when configured
 
-- **WHEN** a user opens the create-issue dialog for a project whose `defaultTemplateId` is `mohist/pr` and does not choose a workflow profile
-- **THEN** the default workflow profile selection SHALL resolve to `mohist/pr`
+- **WHEN** a user opens the create-issue dialog for a project whose `defaultTemplateId` is `mohist/github-pr` and does not choose a workflow profile
+- **THEN** the default workflow profile selection SHALL resolve to `mohist/github-pr`
 - **AND** the create request SHALL carry the project-configured default rather than a value derived only from `isDefault`
 
 #### Scenario: Create issue falls back to system default when project default unset

@@ -28,7 +28,7 @@ Both ignore any configured project default.
 - Add a project default workflow control to Settings → Workflows that reads `GET .../workflow-profile`, writes `PUT .../default-template`, and clears via `DELETE .../default-template`, with readback after every write.
 - Make "system default" (static `isDefault` metadata) visually distinct from "this project's configured default" (sourced from the project read model).
 - Make create-issue and per-issue profile selection resolve the effective default from the **project configuration first**, falling back to the system default only when unset.
-- Web tests covering readback, switching to `mohist/pr`, clearing, and the system-vs-project distinction.
+- Web tests covering readback, switching to `mohist/github-pr`, clearing, and the system-vs-project distinction.
 
 **Non-Goals:**
 - No backend changes (endpoints already exist).
@@ -118,7 +118,7 @@ This is a pure Web (`packages/web`) change with **no database or server migratio
 1. Add client functions + hooks + effective-default hook in `entities/settings`.
 2. Add `ProjectDefaultWorkflowControl` and restyle the catalog badge in `WorkflowProfilesSection.tsx`.
 3. Rewire `CreateIssueDialog.tsx` and `WorkflowProfileControl.tsx` to `useEffectiveDefaultWorkflowProfile`.
-4. Add Web tests (readback, switch to `mohist/pr`, clear, system-vs-project distinction).
+4. Add Web tests (readback, switch to `mohist/github-pr`, clear, system-vs-project distinction).
 5. Verify: `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` pass.
 
 **Rollback:** Revert the Web commit(s). Existing issues and the persisted `defaultTemplateId` are untouched; the backend remains on its current behavior. No data cleanup required.

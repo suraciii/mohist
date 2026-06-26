@@ -16,6 +16,7 @@ vi.mock('../src/entities/settings', async (importOriginal) => {
   return {
     ...actual,
     useWorkflowProfiles: vi.fn(),
+    useEffectiveDefaultWorkflowProfile: vi.fn(),
     useAvailableModelIds: vi.fn(),
   }
 })
@@ -29,7 +30,7 @@ vi.mock('../src/entities/project', async (importOriginal) => {
 })
 
 const { createIssue, useLabels } = await import('../src/entities/issue')
-const { useWorkflowProfiles, useAvailableModelIds } = await import('../src/entities/settings')
+const { useWorkflowProfiles, useEffectiveDefaultWorkflowProfile, useAvailableModelIds } = await import('../src/entities/settings')
 const { useRepositories } = await import('../src/entities/project')
 
 const PROFILES = [
@@ -41,6 +42,11 @@ function mockHooks() {
   ;(useRepositories as ReturnType<typeof vi.fn>).mockReturnValue({ data: [] })
   ;(useLabels as ReturnType<typeof vi.fn>).mockReturnValue({ data: [] })
   ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({ data: PROFILES })
+  ;(useEffectiveDefaultWorkflowProfile as ReturnType<typeof vi.fn>).mockReturnValue({
+    effectiveTemplateId: 'mohist/default',
+    source: 'system',
+    configuredTemplateId: null,
+  })
   ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({ data: [], isLoading: false })
   ;(createIssue as ReturnType<typeof vi.fn>).mockResolvedValue({
     id: 'issue_1',
@@ -135,7 +141,7 @@ describe('CreateIssueDialog frontmatter detection', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload.workflowProfileId).toBeUndefined()
+    expect(payload.workflowProfileId).toBe('mohist/default')
   })
 })
 
@@ -180,7 +186,7 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
     expect(payload.workflowProfileId).toBe('mohist/default')
   })
 
-  it('omits the workflowProfileId key when no profile is chosen and no frontmatter recommendation is present', async () => {
+  it('sends the displayed effective workflowProfileId when no frontmatter recommendation is present', async () => {
     renderDialog()
 
     fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No selection' } })
@@ -191,7 +197,35 @@ describe('CreateIssueDialog recommendation override and acceptance', () => {
       expect(createIssue).toHaveBeenCalledTimes(1)
     })
     const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(payload).not.toHaveProperty('workflowProfileId')
+    expect(payload.workflowProfileId).toBe('mohist/default')
+  })
+
+  it('sends the project-configured default workflowProfileId when the selector is not manually changed', async () => {
+    ;(useWorkflowProfiles as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: [
+        { id: 'mohist/default', displayName: 'Default', description: '', isDefault: true },
+        { id: 'mohist/github-pr', displayName: 'PR', description: '', isDefault: false },
+      ],
+    })
+    ;(useEffectiveDefaultWorkflowProfile as ReturnType<typeof vi.fn>).mockReturnValue({
+      effectiveTemplateId: 'mohist/github-pr',
+      source: 'project',
+      configuredTemplateId: 'mohist/github-pr',
+    })
+
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Project default' } })
+    const workflowSelect = await screen.findByRole('combobox', { name: 'Workflow' }) as HTMLSelectElement
+    expect(workflowSelect.value).toBe('mohist/github-pr')
+
+    fireEvent.click(screen.getByText('Create'))
+
+    await waitFor(() => {
+      expect(createIssue).toHaveBeenCalledTimes(1)
+    })
+    const payload = (createIssue as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(payload.workflowProfileId).toBe('mohist/github-pr')
   })
 
   it('sends workflowProfileId=mohist/github-pr when the user explicitly selects it', async () => {

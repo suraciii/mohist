@@ -15,8 +15,8 @@ const SYSTEM_TEMPLATES = [
     isDefault: true,
   },
   {
-    id: 'mohist/pr',
-    name: 'Mohist PR',
+    id: 'mohist/github-pr',
+    name: 'Mohist GitHub PR',
     description: 'Pull-request oriented workflow.',
     isDefault: false,
   },
@@ -105,15 +105,15 @@ describe('ProjectDefaultWorkflowControl', () => {
   })
 
   it('displays the current project default read back from the workflow-profile endpoint', async () => {
-    currentDefault = 'mohist/pr'
+    currentDefault = 'mohist/github-pr'
     renderSection()
 
     await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/pr'),
+      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
     )
   })
 
-  it('selecting mohist/pr sends PUT and reads back the new default', async () => {
+  it('selecting mohist/github-pr sends PUT and reads back the new default', async () => {
     currentDefault = null
     renderSection()
 
@@ -121,24 +121,24 @@ describe('ProjectDefaultWorkflowControl', () => {
       screen.getByTestId('project-default-workflow-select'),
     )
 
-    fireEvent.change(select, { target: { value: 'mohist/pr' } })
+    fireEvent.change(select, { target: { value: 'mohist/github-pr' } })
 
     await waitFor(() => expect(requests).toHaveLength(1),
     )
     expect(requests[0].method).toBe('PUT')
-    expect(requests[0].body).toEqual({ templateId: 'mohist/pr' })
+    expect(requests[0].body).toEqual({ templateId: 'mohist/github-pr' })
 
     await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/pr'),
+      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
     )
   })
 
   it('clearing the project default sends DELETE and returns to the inherit state', async () => {
-    currentDefault = 'mohist/pr'
+    currentDefault = 'mohist/github-pr'
     renderSection()
 
     await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/pr'),
+      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
     )
 
     fireEvent.click(screen.getByTestId('project-default-workflow-clear'))
@@ -156,11 +156,11 @@ describe('ProjectDefaultWorkflowControl', () => {
   })
 
   it('selecting inherit system default sends DELETE and returns to the inherit state', async () => {
-    currentDefault = 'mohist/pr'
+    currentDefault = 'mohist/github-pr'
     renderSection()
 
     const select = await screen.findByTestId('project-default-workflow-select') as HTMLSelectElement
-    await waitFor(() => expect(select.value).toBe('mohist/pr'))
+    await waitFor(() => expect(select.value).toBe('mohist/github-pr'))
 
     fireEvent.change(select, { target: { value: '' } })
 
@@ -189,11 +189,11 @@ describe('ProjectDefaultWorkflowControl', () => {
   })
 
   it('renders the system-default badge with styling distinct from the project-default badge', async () => {
-    currentDefault = 'mohist/pr'
+    currentDefault = 'mohist/github-pr'
     renderSection()
 
     await waitFor(() =>
-      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/pr'),
+      expect(screen.getByTestId('project-default-workflow-value')).toHaveTextContent('mohist/github-pr'),
     )
     await waitFor(() =>
       expect(screen.getByTestId('workflow-profile-mohist/default')).toBeInTheDocument(),

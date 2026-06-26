@@ -68,7 +68,7 @@ beforeEach(() => {
   useQueryMock.mockReturnValue({ data: undefined, isLoading: false })
   useMutationMock.mockReturnValue({ mutate: vi.fn() })
   getProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: null })
-  setProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: 'mohist/pr' })
+  setProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: 'mohist/github-pr' })
   clearProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: null })
   getWorkflowProfilesMock.mockResolvedValue([])
 })
@@ -145,7 +145,7 @@ describe('useProjectDefaultWorkflowProfile', () => {
   })
 
   it('invokes getProjectDefaultWorkflowProfile(projectId) as the query function', async () => {
-    getProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: 'mohist/pr' })
+    getProjectDefaultWorkflowProfileMock.mockResolvedValue({ projectId: 'proj-1', defaultTemplateId: 'mohist/github-pr' })
 
     useProjectDefaultWorkflowProfile()
 
@@ -160,9 +160,9 @@ describe('useSetProjectDefaultWorkflowProfile', () => {
     useSetProjectDefaultWorkflowProfile()
 
     const config = useMutationMock.mock.calls[0][0]
-    config.mutationFn({ templateId: 'mohist/pr' })
+    config.mutationFn({ templateId: 'mohist/github-pr' })
 
-    expect(setProjectDefaultWorkflowProfileMock).toHaveBeenCalledWith('proj-1', 'mohist/pr')
+    expect(setProjectDefaultWorkflowProfileMock).toHaveBeenCalledWith('proj-1', 'mohist/github-pr')
   })
 
   it('invalidates the project workflow-profile query on success', () => {
@@ -236,14 +236,14 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
   }
 
   it('returns project source when defaultTemplateId is set', () => {
-    mockQueryData('mohist/pr', [{ id: 'mohist/default', isDefault: true }])
+    mockQueryData('mohist/github-pr', [{ id: 'mohist/default', isDefault: true }])
 
     const result = useEffectiveDefaultWorkflowProfile()
 
     expect(result).toEqual({
-      effectiveTemplateId: 'mohist/pr',
+      effectiveTemplateId: 'mohist/github-pr',
       source: 'project',
-      configuredTemplateId: 'mohist/pr',
+      configuredTemplateId: 'mohist/github-pr',
     })
   })
 
@@ -260,7 +260,7 @@ describe('useEffectiveDefaultWorkflowProfile', () => {
   })
 
   it('returns none source with the fallback id when no project or system default exists', () => {
-    mockQueryData(null, [{ id: 'mohist/pr', isDefault: false }])
+    mockQueryData(null, [{ id: 'mohist/github-pr', isDefault: false }])
 
     const result = useEffectiveDefaultWorkflowProfile()
 
