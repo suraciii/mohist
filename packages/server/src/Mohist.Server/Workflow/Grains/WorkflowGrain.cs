@@ -613,7 +613,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 {
                     var with = WorkflowDispatchHelpers.ParseWith(t.With);
                     var recovery = t.Recovery ?? WorkflowDispatchHelpers.ExtractRecoveryFromWith(with);
-                    var isMissingConfig = with is null || with.Count == 0;
+                    var isMissingConfig = with is null
+                        || with.Count == 0
+                        || (with.ContainsKey("budget") && with.ContainsKey("handlers") && !with.ContainsKey("prompt") && !with.ContainsKey("session"));
                     if (isMissingConfig && t.Id == currentTask?.DefinitionId)
                     {
                         with = currentTask.WithInput is not null
