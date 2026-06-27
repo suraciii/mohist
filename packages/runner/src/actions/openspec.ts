@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
@@ -9,6 +9,13 @@ import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 
 const SPEC_SYNC_COMMIT_MESSAGE = "Sync OpenSpec specs from change delta"
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
+const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
+
+function archiveDestinationMap(variables: JsonObject): JsonObject {
+  const raw = variables[ARCHIVE_DESTINATION_VAR_KEY]
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as JsonObject
+  return {}
+}
 
 export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
   success: boolean
@@ -216,32 +223,112 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   if (!changeDir) return archiveFailure("config-error", "Archive change requires 'changeDir'", { kind: "archive-change" })
 
   const archiveDir = join(dirname(changeDir), "archive")
-  const sourceName = changeDir.split(/[\\/]/).pop() ?? "change"
-  const archivePrefix = `${new Date().toISOString().slice(0, 10)}-${sourceName}`
+  const sourceName = basename(changeDir) || "change"
+  const sourceRel = relativePath(context.workDir, changeDir)
 
-  const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
-  const sourceHasFiles = exists(changeDir) && await hasFiles(changeDir)
-
-  if (existingArchive && sourceHasFiles) {
-    return archiveFailure(
-      "partial-archive",
-      `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${existingArchive}`,
-      { kind: "archive-change", source: changeDir, archive: existingArchive },
-    )
+  const existingDestinationMap = archiveDestinationMap(context.variables)
+  const persistedPrefix = typeof existingDestinationMap[sourceRel] === "string" ? (existingDestinationMap[sourceRel] as string) : null
+  const archivePrefix = persistedPrefix ?? `${new Date().toISOString().slice(0, 10)}-${sourceName}`
+  const invalidArchivePrefix = validateArchivePrefix(archivePrefix)
+  if (invalidArchivePrefix) {
+    return archiveFailure("config-error", `Invalid archive name for ${sourceName}: ${invalidArchivePrefix}`, {
+      kind: "archive-change",
+      source: changeDir,
+      archivePrefix,
+      stage: "validate-archive-name",
+    })
   }
 
+  const sourceHasFiles = exists(changeDir) && (await hasFiles(changeDir))
+
   let destination: string
-  if (existingArchive) {
-    destination = existingArchive
+  if (persistedPrefix) {
+    const persistedDestination = resolveArchiveDestination(archiveDir, persistedPrefix)
+    if (!persistedDestination) {
+      return archiveFailure("config-error", `Archive destination escapes archive root: ${persistedPrefix}`, {
+        kind: "archive-change",
+        source: changeDir,
+        archivePrefix: persistedPrefix,
+        stage: "resolve-destination",
+      })
+    }
+    const persistedArchiveHasFiles = exists(persistedDestination) && (await hasFiles(persistedDestination))
+    if (persistedArchiveHasFiles && sourceHasFiles) {
+      return archiveFailure(
+        "partial-archive",
+        `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${persistedDestination}`,
+        { kind: "archive-change", source: changeDir, archive: persistedDestination },
+      )
+    }
+    if (persistedArchiveHasFiles) {
+      destination = persistedDestination
+    } else if (!sourceHasFiles) {
+      return archiveFailure(
+        "missing-source",
+        `Change directory not found: ${changeDir}`,
+        { kind: "archive-change", source: changeDir },
+      )
+    } else {
+      await mkdir(archiveDir, { recursive: true })
+      if (exists(persistedDestination)) {
+        return archiveFailure(
+          "partial-archive",
+          `Archive destination already exists; refusing to overwrite: source=${changeDir} archive=${persistedDestination}`,
+          { kind: "archive-change", source: changeDir, archive: persistedDestination },
+        )
+      }
+      destination = persistedDestination
+      try {
+        await moveChangeDir(changeDir, destination)
+      } catch (err) {
+        return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, {
+          kind: "archive-change",
+          source: changeDir,
+          destination,
+          stage: "rename",
+        })
+      }
+    }
   } else if (!sourceHasFiles) {
-    return archiveFailure(
-      "missing-source",
-      `Change directory not found: ${changeDir}`,
-      { kind: "archive-change", source: changeDir },
-    )
+    const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
+    if (existingArchive) {
+      destination = existingArchive
+    } else {
+      return archiveFailure(
+        "missing-source",
+        `Change directory not found: ${changeDir}`,
+        { kind: "archive-change", source: changeDir },
+      )
+    }
   } else {
     await mkdir(archiveDir, { recursive: true })
-    destination = await uniqueDestination(archiveDir, archivePrefix)
+    const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
+    if (!resolvedDestination) {
+      return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, {
+        kind: "archive-change",
+        source: changeDir,
+        archivePrefix,
+        stage: "resolve-destination",
+      })
+    }
+    const resolvedArchiveName = basename(resolvedDestination)
+    try {
+      await context.writeVars({
+        [ARCHIVE_DESTINATION_VAR_KEY]: { ...existingDestinationMap, [sourceRel]: resolvedArchiveName },
+      })
+    } catch (err) {
+      return archiveFailure(
+        "retry-safe",
+        `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          kind: "archive-change",
+          source: changeDir,
+          archivePrefix: resolvedArchiveName,
+          stage: "persist-name",
+        },
+      )
+    }
+    destination = resolvedDestination
     try {
       await moveChangeDir(changeDir, destination)
     } catch (err) {
@@ -254,7 +341,6 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     }
   }
 
-  const sourceRel = relativePath(context.workDir, changeDir)
   const destinationRel = relativePath(context.workDir, destination)
   const commitMessage = `${ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX}: ${sourceName}`
 
@@ -405,23 +491,44 @@ function resolveChangeDir(context: ActionContext) {
   return resolveActionPath(context, changeDir)
 }
 
+function validateArchivePrefix(prefix: string): string | null {
+  if (!prefix) return "must not be empty"
+  if (prefix.trim() !== prefix) return "must not contain leading or trailing whitespace"
+  if (prefix === "." || prefix === "..") return "must not be a relative path segment"
+  if (prefix.includes("/") || prefix.includes("\\") || prefix.includes("\0")) return "must be a single path segment"
+  if (isAbsolute(prefix) || /^[A-Za-z]:/.test(prefix)) return "must not be an absolute path"
+  return null
+}
+
 async function uniqueDestination(archiveDir: string, baseName: string) {
-  let destination = resolve(join(archiveDir, baseName))
+  let destination = resolveArchiveDestination(archiveDir, baseName)
+  if (!destination) return null
   if (!exists(destination)) return destination
   for (let version = 2; ; version++) {
-    destination = resolve(join(archiveDir, `${baseName}-v${version}`))
+    destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
+    if (!destination) return null
     if (!exists(destination)) return destination
   }
 }
 
 async function findExistingArchive(archiveDir: string, baseName: string) {
-  let destination = resolve(join(archiveDir, baseName))
+  let destination = resolveArchiveDestination(archiveDir, baseName)
+  if (!destination) return null
   if (exists(destination) && await hasFiles(destination)) return destination
   for (let version = 2; ; version++) {
-    destination = resolve(join(archiveDir, `${baseName}-v${version}`))
+    destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
+    if (!destination) return null
     if (exists(destination) && await hasFiles(destination)) return destination
     if (version >= 50) return null
   }
+}
+
+function resolveArchiveDestination(archiveDir: string, name: string): string | null {
+  const archiveRoot = resolve(archiveDir)
+  const destination = resolve(join(archiveRoot, name))
+  const relativeDestination = relative(archiveRoot, destination)
+  if (!relativeDestination || relativeDestination.startsWith("..") || isAbsolute(relativeDestination)) return null
+  return destination
 }
 
 async function hasFiles(directory: string): Promise<boolean> {

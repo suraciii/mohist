@@ -284,7 +284,6 @@ stages:
                               session: integrate
                               prompt: ${{ prompts.resolve-rebase-conflicts }}
                               agent: ${{ vars.agent }}
-                        retrySelf: true
                 - id: recover:push
                   title: Push
                   uses: mohist/push
@@ -292,7 +291,7 @@ stages:
                     source: ${{ workspace.branch }}
                     target: ${{ workspace.branch }}
                     remote: origin
-                    forceWithLease: true
+                    force: true
               retrySelf: true
             - when: errorCode=pr-checks-failed
               tasks:

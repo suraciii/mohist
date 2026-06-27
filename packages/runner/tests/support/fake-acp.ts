@@ -53,6 +53,7 @@ class FakeAgent {
         } as never)
         return { stopReason: "end_turn" }
       },
+      async cancel() {},
       async authenticate() { return {} },
     }
   }

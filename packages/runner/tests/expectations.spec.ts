@@ -19,6 +19,7 @@ describe("verifyExpectations", () => {
     signal: new AbortController().signal,
     projectId: "project-1",
     issueNumber: 1,
+    writeVars: async () => {},
   })
 
   it("AllArtifactsPresent_ReturnsSatisfied", async () => {

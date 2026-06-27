@@ -264,7 +264,7 @@ describe("resolvePrompt - loader-backed prompts", () => {
 
   it("LoaderInvocation_ReceivesSpecWithMergedIntoBaseContextFields", async () => {
     const registry = new PromptLoaderRegistry()
-    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
 
@@ -295,7 +295,7 @@ describe("resolvePrompt - loader-backed prompts", () => {
 
   it("LoaderSpecWithoutWith_PassesEmptyObjectToLoaderContext", async () => {
     const registry = new PromptLoaderRegistry()
-    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
 

@@ -47,6 +47,7 @@ function context(workDir: string): ActionContext {
     variables: {},
     workDir,
     signal: new AbortController().signal,
+    writeVars: async () => {},
   }
 }
 

@@ -1341,6 +1341,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
     signal,
     projectId: "project-1",
     issueNumber: 7,
+    writeVars: async () => {},
   }
 }
 
@@ -1393,7 +1394,7 @@ class FakeAcpAgent {
       },
       async prompt(params) {
         self.promptCount += 1
-        const text = params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n")
+        const text = promptText(params.prompt)
         self.calls.push({ event: "prompt", promptCount: self.promptCount, text })
         if (self.scenario === "permission") {
           const response = await self.connection.requestPermission({ sessionId: params.sessionId, toolCall: { toolCallId: "tool-permission", title: "Run command", kind: "execute", status: "pending" }, options: [{ optionId: "reject", name: "Reject", kind: "reject_once" }, { optionId: "allow", name: "Allow", kind: "allow_once" }] })
@@ -1546,6 +1547,10 @@ function textUpdate(sessionId: string, text: string) {
   return { sessionId, update: { sessionUpdate: "agent_message_chunk" as const, content: { type: "text" as const, text } } }
 }
 
+function promptText(prompt: ReadonlyArray<{ type: string; text?: string }>): string {
+  return prompt.map((part) => part.type === "text" ? part.text ?? "" : "").join("\n")
+}
+
 function thoughtUpdate(sessionId: string, text: string) {
   return { sessionId, update: { sessionUpdate: "agent_thought_chunk" as const, content: { type: "text" as const, text } } }
 }
@@ -1579,7 +1584,7 @@ function createSharedSessionFixture(
   if (scenario === "probe-send-failed") {
     const originalPrompt = clientConnection.prompt.bind(clientConnection)
     connection.prompt = async (params: Parameters<ClientSideConnection["prompt"]>[0]) => {
-      const text = params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n")
+      const text = promptText(params.prompt)
       if (text.includes("still alive")) throw new Error("probe transport failed")
       return await originalPrompt(params)
     }
@@ -1683,7 +1688,7 @@ class FakeSharedAcpAgent {
         return {}
       },
       async prompt(params) {
-        self.calls.push({ event: "prompt", sessionId: params.sessionId, text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })
+        self.calls.push({ event: "prompt", sessionId: params.sessionId, text: promptText(params.prompt) })
         if (self.scenario === "thought-liveness") {
           for (let index = 0; index < 5; index += 1) {
             await delay(20)

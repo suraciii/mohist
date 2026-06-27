@@ -421,6 +421,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal("${{ repository.baseBranch }}", rebaseWith["baseBranch"]!.Value.GetString());
         Assert.Equal("origin", rebaseWith["remote"]!.Value.GetString());
         Assert.False(rebaseWith["squash"]!.Value.GetBoolean());
+        Assert.False(rebaseWith.ContainsKey("conflictMode"));
 
         var rebaseRecovery = recoverRebase.Recovery;
         Assert.NotNull(rebaseRecovery);
@@ -428,7 +429,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var rebaseHandlers = rebaseRecovery.Handlers.ToList();
         Assert.Single(rebaseHandlers);
         var conflictHandler = rebaseHandlers.Single(h => h.When == "errorCode=conflict");
-        Assert.True(conflictHandler.RetrySelf);
+        Assert.False(conflictHandler.RetrySelf);
         var conflictTasks = conflictHandler.Tasks.ToList();
         Assert.Single(conflictTasks);
         var resolveConflicts = conflictTasks.Single(t => t.Id == "recover:resolve-rebase-conflicts");
@@ -440,7 +441,8 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var pushWith = recoverPushBaseMoved.With!;
         Assert.Equal("${{ workspace.branch }}", pushWith["source"]!.Value.GetString());
         Assert.Equal("${{ workspace.branch }}", pushWith["target"]!.Value.GetString());
-        Assert.True(pushWith["forceWithLease"]!.Value.GetBoolean());
+        Assert.True(pushWith["force"]!.Value.GetBoolean());
+        Assert.False(pushWith.ContainsKey("forceWithLease"));
 
         var prChecksFailed = handlers.Single(h => h.When == "errorCode=pr-checks-failed");
         Assert.True(prChecksFailed.RetrySelf);

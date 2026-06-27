@@ -130,6 +130,7 @@ function rebaseContext(overrides: JsonObject = {}, variables: JsonObject = {}): 
     },
     workDir: worktree.workDir,
     signal: new AbortController().signal,
+    writeVars: async () => {},
   }
 }
 
@@ -151,6 +152,7 @@ function pushContext(overrides: JsonObject = {}, variables: JsonObject = {}): Ac
     },
     workDir: worktree.workDir,
     signal: new AbortController().signal,
+    writeVars: async () => {},
   }
 }
 
