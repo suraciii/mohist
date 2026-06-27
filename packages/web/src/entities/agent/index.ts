@@ -1,4 +1,6 @@
 export { useAgentActivity, useAgentStatus } from './api/queries'
+export { costRollupQueryKey, fetchCostRollup, useCostRollup } from './api/cost-rollup'
+export type { AgentCostMetricDto, AgentCostRollupDto } from './api/cost-rollup'
 export {
   archiveAgent,
   createAgent,
