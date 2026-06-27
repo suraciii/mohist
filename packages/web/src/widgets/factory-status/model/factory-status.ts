@@ -1,12 +1,12 @@
 import type { Issue } from '../../../entities/issue'
-import type { AgentStatus } from '../../../entities/agent'
+import type { AgentCostMetricDto, AgentStatus } from '../../../entities/agent'
 
 export interface FactoryStatusFields {
   runnerAvailable: boolean
   inFlight: number
   awaitingApproval: number
   shippedToday: number
-  todayCost: undefined
+  todayCost: AgentCostMetricDto | undefined
 }
 
 export function isTodayLocal(iso: string): boolean {
@@ -22,6 +22,7 @@ export function isTodayLocal(iso: string): boolean {
 export function deriveFactoryStatus(
   issues: Issue[] | undefined,
   agentStatus: AgentStatus | undefined,
+  todayCost?: AgentCostMetricDto,
 ): FactoryStatusFields {
   const runnerAvailable = agentStatus?.runnerAvailable === true
 
@@ -48,6 +49,6 @@ export function deriveFactoryStatus(
     inFlight,
     awaitingApproval,
     shippedToday,
-    todayCost: undefined,
+    todayCost,
   }
 }
