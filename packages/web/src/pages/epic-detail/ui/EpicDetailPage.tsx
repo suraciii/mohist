@@ -112,7 +112,7 @@ function LinkedIssueRow({
         </div>
         <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
         {showStart && (
           <Button
             type="button"
@@ -502,7 +502,7 @@ export function EpicDetailPage() {
   const hasInProgress = epic.linkedIssues.some(i => i.status === IssueStatus.InProgress)
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
+    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
       <div>
         <Button
           type="button"
@@ -515,7 +515,7 @@ export function EpicDetailPage() {
       </div>
 
       <Card className="p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-start md:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span data-testid="epic-number">
@@ -532,17 +532,17 @@ export function EpicDetailPage() {
                 </span>
               )}
             </div>
-            <h1 className="mt-2 text-2xl font-bold text-foreground">{epic.title}</h1>
+            <h1 className="mt-2 text-2xl font-bold text-foreground [overflow-wrap:anywhere]">{epic.title}</h1>
             {epic.description && (
               <div
-                className="mt-3 text-sm leading-6 text-foreground/80"
+                className="mt-3 text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]"
                 data-testid="epic-description"
               >
                 <MarkdownReader content={epic.description} baseHeadingLevel={3} />
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-start gap-2 md:justify-end">
             <Button
               type="button"
               variant="outline"
