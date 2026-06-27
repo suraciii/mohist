@@ -56,3 +56,21 @@
 - 「永不出现裸 `Epic #`」需要双重保护：`formatEpicTitle` 在没有 number 也没有 fallback 时返回 `Epic`（去掉 `#`），而不是 `Epic #`。
 - 单测里同时保留 `renderHeader`（生产 mount，Header 在 `<Routes>` 之外）和 `renderHeaderWithRoute`（Header 嵌在路由 element 里）两种 fixture：前者证明根因已修，后者防回归「Header 嵌在 `<Routes>` 内时变好但生产挂载坏掉」。
 - 一个工作流任务 = 一个 commit，commit 信息以 `T-002` 开头。
+
+## T-003 — Preserve bottom spacing for mobile bottom nav with safe-area inset
+
+完成的事：
+
+- `App.tsx:52` shell 内容容器 `pb-14 md:pb-0` → `pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0`。`3.5rem` 等价原 `pb-14`（56px），`env(safe-area-inset-bottom)` 在有 home indicator 设备为非零、让预留高度 ≥ 实际导航栏高度（含 inset）；无 home indicator 时退化为 0、整体退化为 `3.5rem`、无视觉回归。
+- 新增 `packages/web/src/app/App.test.tsx`（首个 App 集成测试），覆盖两点：
+  - shell 容器有 `pb-[calc(3.5rem+env(safe-area-inset-bottom))]` 和 `md:pb-0` 两个类。
+  - 不再含旧的 `pb-14`，防止未来回滚。
+- 全 web 包 2434 通过（1 个 skip 与本次无关）；typecheck 通过。
+
+注意点 / 经验（T-003）：
+
+- 整套 App 渲染的依赖图比单组件测试大：必须 mock `useProjects`（来自 `entities/project`，AppContent + ProjectGuard 都调）、`useEpic`（Header）、`useAgentStatus`（Header），以及 `useEventsConnection`（LiveTaskProvider，否则 jsdom 下 SignalR 真去握手 `/hubs/events`）。mock `useAgentStatus` 时必须用 `importOriginal` 透传 `useAgentActivity` 等其它导出，否则会被 `vi.mock` 整体替换、Dashboard 子树（`PulseZone` 等）取不到就崩。
+- App.tsx 内部用 `BrowserRouter`，初始路径读 `window.location.pathname`。测试里直接 `window.history.replaceState({}, '', '/demo')` 把 URL 切到项目前缀路径即可，无需 mock `BrowserRouter` 本身。
+- shell 内容容器签名 `flex-1 min-h-0 flex flex-col` 全包唯一（`rg "flex-1 min-h-0 flex flex-col" src --type ts -g "*.tsx"` 只命中 App.tsx 一处），所以直接 `[data-slot="sidebar-inset"] > .flex-1.min-h-0.flex.flex-col` 选择器拿稳；比加 testid 侵入性小。
+- Tailwind v4 任意值类名 `[...]` 在 DOM `className` 里原样保留（包括 `[calc(3.5rem+env(safe-area-inset-bottom))]` 里的圆括号、冒号、加号），所以 `className.split(/\s+/).includes('pb-[calc(3.5rem+env(safe-area-inset-bottom))]')` 直接断言即可，不需要解析转义。
+- 一个工作流任务 = 一个 commit，commit 信息以 `T-003` 开头。
