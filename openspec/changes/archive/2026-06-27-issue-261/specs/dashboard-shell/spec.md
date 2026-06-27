@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Dashboard provides four zone mount-point slots
 
 The Dashboard page SHALL expose a first-screen composition contract made of, top to bottom: (1) a full-width **factory status headline** mount-point slot at the very top; (2) a full-width **Attention Hero** slot directly below the headline; (3) three remaining equal-weight zone mount-point slots with stable identities — `Pulse`, `Productivity`, and `Digest` — rendered underneath the Hero. The `Digest` slot SHALL mount the `dashboard-recent-digest` zone content. The `Pulse` slot SHALL mount the `dashboard-pulse` zone content. The `Attention` slot SHALL mount the `AttentionHero` widget as a full-width Hero and SHALL NOT render as an equal-weight peer within the remaining zones grid. The `Productivity` slot SHALL mount the `ai-quality-metrics` zone content (the `QualityPanel`). No slot SHALL render as an empty placeholder. The headline and Hero SHALL each span the full content width, distinct from the remaining zones.
@@ -37,6 +39,8 @@ The Dashboard page SHALL expose a first-screen composition contract made of, top
 - **WHEN** the Dashboard page renders
 - **THEN** the `Pulse` slot SHALL render the `dashboard-pulse` zone content in place of the empty placeholder
 - **AND** the `Pulse` slot SHALL NOT render as an empty placeholder
+
+## ADDED Requirements
 
 ### Requirement: QualityPanel derives its quality rates exclusively from the server-side AI quality aggregation
 

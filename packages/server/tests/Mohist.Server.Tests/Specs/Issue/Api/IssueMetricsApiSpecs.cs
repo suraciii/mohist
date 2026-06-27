@@ -263,6 +263,68 @@ public class IssueMetricsApiSpecs
         Assert.Null(payload.MaxSeconds);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_ShippedIssuesWithRepairs_ReturnsBothWindowsWithRates()
+    {
+        var project = await CreateProjectAsync($"quality-present-{Guid.NewGuid():N}");
+        var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var issueId = $"issue_quality_present_{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_quality_present_{Guid.NewGuid():N}";
+
+        await SeedIssueWithQualityRunAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            workflowRunId,
+            requestedAt,
+            [
+                ("plan", [("plan-ok", "Plan ok", 0)]),
+                ("build", [("build-ok", "Build ok", 1)]),
+            ]);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        Assert.NotNull(payload.Window7d);
+        Assert.NotNull(payload.Window30d);
+
+        Assert.Equal(1, payload.Window7d.SampleCount);
+        Assert.Equal(0.0, payload.Window7d.FirstTimeRightRate);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
+
+        Assert.Equal(1, payload.Window30d.SampleCount);
+        Assert.NotNull(payload.Window30d.FirstTimeRightRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task QualityMetrics_NoShippedIssues_ReturnsEmptyResultPerWindow()
+    {
+        var project = await CreateProjectAsync($"quality-empty-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/quality");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<QualityMetricsResponse>(response);
+        Assert.Equal(0, payload.Window7d.SampleCount);
+        Assert.Null(payload.Window7d.FirstTimeRightRate);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Equal(0, payload.Window30d.SampleCount);
+        Assert.Null(payload.Window30d.FirstTimeRightRate);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string name)
     {
         using var response = await _client.PostAsJsonAsync(
@@ -519,6 +581,96 @@ public class IssueMetricsApiSpecs
             workflowRunId, json);
     }
 
+    private async Task SeedIssueWithQualityRunAsync(
+        string projectId,
+        int number,
+        string issueId,
+        string workflowRunId,
+        DateTimeOffset shipTime,
+        (string Stage, (string Name, string Title, int RepairCount)[] Checks)[] stages)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var issue = new DomainIssue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = number,
+            Title = "Quality metric issue",
+            Status = IssueStatus.Done,
+            CreatedAt = shipTime.UtcDateTime,
+            UpdatedAt = shipTime.UtcDateTime,
+            WorkflowRunId = workflowRunId,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        var source = IssueQuerier.IssueSourcePrefix + issueId;
+        var dbMax = await db.IssueEvents
+            .AsNoTracking()
+            .Where(e => e.Source == source)
+            .Select(e => (long?)e.Id)
+            .MaxAsync();
+        db.IssueEvents.Add(new IssueEventRow
+        {
+            Id = (dbMax ?? 0) + 1,
+            Source = source,
+            EventId = Guid.NewGuid().ToString(),
+            Type = IssueQuerier.WorkCompletedType,
+            Time = shipTime,
+            SpecVersion = "1.0",
+            Subject = number.ToString(),
+            DataContentType = "application/json",
+            Data = JsonSerializer.SerializeToElement(new { workflowRunId }, JSON.Options),
+            ExtensionsJson = "{}",
+        });
+        await db.SaveChangesAsync();
+
+        var stageObjects = stages.Select(s =>
+        {
+            var checks = s.Checks.Select(c => (object)new
+            {
+                Name = c.Name,
+                Title = c.Title,
+                Status = "Passed",
+                RepairCount = c.RepairCount,
+            }).ToArray();
+
+            return (object)new
+            {
+                Id = s.Stage,
+                Attempt = 1,
+                RequiresApproval = false,
+                Initialized = true,
+                Status = "Completed",
+                Tasks = new[]
+                {
+                    new { Id = $"{s.Stage}-task", DefinitionId = $"{s.Stage}-task", Attempt = 1, Title = $"{s.Stage} task", Status = "Completed", Uses = "mohist/acp-agent" },
+                },
+                Checks = checks,
+            };
+        }).ToArray();
+
+        var runState = new
+        {
+            Id = workflowRunId,
+            Metadata = new { CreatedAt = shipTime.AddMinutes(-5), Name = "test" },
+            Status = "Completed",
+            CurrentStageId = stages.Last().Stage,
+            Stages = stageObjects,
+        };
+
+        var json = JsonSerializer.Serialize(runState, JSON.Options);
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            workflowRunId, json);
+    }
+
     private static async Task<T> ReadDataAsync<T>(HttpResponseMessage response)
     {
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<T>>(JsonOptions);
@@ -542,4 +694,8 @@ public class IssueMetricsApiSpecs
         double? AverageSeconds,
         double? MedianSeconds,
         double? MaxSeconds);
+
+    private sealed record QualityMetricsWindowDto(string From, string To, int SampleCount, double? FirstTimeRightRate, StageReworkRateDto[] Stages);
+    private sealed record StageReworkRateDto(string Stage, int EnteredCount, double? ReworkRate);
+    private sealed record QualityMetricsResponse(QualityMetricsWindowDto Window7d, QualityMetricsWindowDto Window30d);
 }
