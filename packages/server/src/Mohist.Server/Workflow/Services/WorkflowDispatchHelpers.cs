@@ -135,14 +135,6 @@ internal static class WorkflowDispatchHelpers
     internal static Dictionary<string, JsonElement?>? ParseWith(JsonElement? with) =>
         with is { } el ? el.Deserialize<Dictionary<string, JsonElement?>>(JSON.Options) : null;
 
-    internal static RecoveryDefinition? ExtractRecoveryFromWith(Dictionary<string, JsonElement?>? with)
-    {
-        if (with is null || !with.TryGetValue("recovery", out var recoveryEl) || !recoveryEl.HasValue)
-            return null;
-        with.Remove("recovery");
-        return JSON.Deserialize<RecoveryDefinition>(recoveryEl.Value.GetRawText());
-    }
-
     /// <summary>
     /// Projects the most recent task outputs of the given workflow run
     /// onto the dispatch payload under the <c>tasks</c> key. Tasks whose
