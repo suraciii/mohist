@@ -5,7 +5,7 @@
     {
       "id": "T-001",
       "title": "Implement terminal/open Epic readiness rule with shared predicate and rename undelivered to open",
-      "spec": "specs/epic-lifecycle/spec.md#Auto-done on issue completion; specs/epic-lifecycle/spec.md#Manual Mark Done retained; specs/epic-lifecycle/spec.md#Epic lifecycle state machine; specs/epic-list-query/spec.md#Epic list progress correctness is preserved",
+      "spec": "specs/epic-lifecycle/spec.md#Auto-done on issue completion; specs/epic-lifecycle/spec.md#Manual Mark Done retained; specs/epic-lifecycle/spec.md#Epic lifecycle state machine; specs/epic-lifecycle/spec.md#Autonomous advancement on terminal issue events; specs/epic-lifecycle/spec.md#Resume epic autonomous progression; specs/epic-list-query/spec.md#Epic list progress correctness is preserved",
       "description": "Add shared readiness predicates (IsTerminal, IsOpen, IsReadyToComplete) to EpicProgress and route all readiness consumers through them. Change the readiness rule from 'all linked issues delivered' to 'no open linked issue' (every linked issue terminal). Rename the Epic-scope 'undelivered' concept to 'open' across the aggregate (MarkDone parameter), exception (EpicNotReadyToMarkDoneException property/message), grain method (ComputeUndeliveredLinkedNumbersAsync), read-model local variable, and API 409 payload field. Keep deliveredCount semantics unchanged (done/completed only). Rewrite all affected server tests in terminal/open domain language and add coverage for the mixed done+cancelled epic becoming completable.",
       "acceptanceCriteria": [
         "EpicProgress exposes IsTerminal(LinkedIssueDto), IsOpen(LinkedIssueDto), and IsReadyToComplete(IReadOnlyList<LinkedIssueDto>) as the single source of truth for readiness.",
