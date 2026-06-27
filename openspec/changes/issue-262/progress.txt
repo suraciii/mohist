@@ -1,0 +1,28 @@
+# Issue-262 Working Memory (T-001)
+
+## Codebase Patterns
+
+- The agent route group is `app.MapGroup("/api/projects/{projectRef}/agent").AddEndpointFilter<ProjectResolutionEndpointFilter>()` in `packages/server/src/Mohist.Server/Api/AgentRoutes.cs`. Any new sibling endpoint inherits the 404-via-filter behavior automatically.
+- `ProjectResolutionEndpointFilter` requires the resolved `ProjectInfo` to be read via `context.GetResolvedProject()` inside handlers. It also throws if the filter wasn't applied — so handlers must live on the route group, not as raw `app.MapGet(...)`.
+- The `AgentSessionQuerier.GetUsageTimeseriesAsync` method (`packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs:283`) is the template for cost rollup reads: `ListByLabelsAsync` with `ProjectId` label + `AgentSessionJsonHelper.Usage` + `HasUsage` predicate (`AgentSessionQuerier.cs:323`). The `??=` pattern for first-non-null `CostCurrency` (`AgentSessionQuerier.cs:313`) is reused.
+- `IssueQuerier.ListAsync` returns `IssueReadModel` whose `Status` is the lowercase string (`"done"`). The done count is computed in the handler with `Count(i => i.Status == "done")` — verbatim from `StatusRoutes.cs:58`.
+- `ApiResults.Ok<T>(data)` wraps responses in `{success, data}` envelope. Tests deserialize with `GetDataAsync<T>` which unwraps via `ApiEnvelope<T>` (`packages/server/tests/Mohist.Server.Tests/Support/ApiTestClient.cs:111`).
+- Tests in `packages/server/tests/Mohist.Server.Tests/Specs/Api/AgentUsageTimeseriesApiSpecs.cs` are the closest analogue: same `MohistIntegrationFixture` + `[Collection("MohistIntegration")]` + insert session via `AgentSessionRow` with serialized `AgentSessionJson.JsonOptions`. Issue insertion mirrors `ActivityWaitingApiSpecs.cs` helpers (`InsertBacklogIssueAsync` / `InsertDoneIssueAsync`).
+
+## Decisions / Notes
+
+- `GetCostRollupAsync` returns an intermediate `AgentCostRollupRawData` (totalCost + todayCost only) rather than the full `AgentCostRollupDto`. The done-issues count is composed in the handler from `IssueQuerier` per design.md D2 (no new service class). The `costPerShip` rule (`BuildCostPerShip` helper) is also composed in the handler — keeping the querier focused on per-session aggregation.
+- One unbounded `_sessionQuery.ListByLabelsAsync` query is used; todayCost is filtered in memory against `[todayUtc, tomorrowUtc)`. Avoids two SQL roundtrips and matches the in-memory filter pattern the timeseries uses (`AgentSessionQuerier.cs:299-314`).
+- `costPerShip.amount = null` is decided by two conditions: `doneIssuesCount == 0` OR `totalCost.Amount is null`. Otherwise amount is `totalCost.Amount / doneIssuesCount` with `sampleCount = 1`. A genuine `totalCost.Amount = 0` therefore yields a real `0` for costPerShip (per spec "Free shipping is a real zero, not an empty sample").
+- `AgentCostMetricDto.Amount` is `double?` and `SampleCount` is `int`. Empty metric: `(null, currency, 0)`. Real zero: `(0.0, currency, >0)`. These are distinguishable by `Amount == null` — mirrors the `QualityPanel` `sampleCount === 0` convention called out in design.md D3.
+
+## Verification
+
+- 13 integration tests in `AgentCostRollupApiSpecs` cover: envelope shape, multi-session total sum, no-usage skip, calendar-day boundary for todayCost, done-only count (7 done + 4 non-done), cost-per-ship arithmetic, real-zero free shipping, undefined zero-shipped-issues cost-per-ship, empty-spend result, independent emptiness (totalCost present, todayCost empty), 404 for unknown project, 7-day usage timeseries endpoint still works.
+- Existing `AgentUsageTimeseriesApiSpecs` + `ActivityWaitingApiSpecs` tests still pass (regression check, 12/12).
+- `dotnet build` (server + tests) succeeds with `0 Warning(s) / 0 Error(s)` under `TreatWarningsAsErrors`.
+
+## Open Items for Later Tasks
+
+- T-002 + T-003 will need the frontend hook + UI wiring. The backend contract is locked in here: `{ totalCost: { amount, currency, sampleCount }, todayCost: {...}, doneIssuesCount: int, costPerShip: {...} }`.
+- `doneIssuesCount` is intentionally a bare `int`, not an `AgentCostMetricDto` — a count has no empty state. The frontend must treat `0` as "zero shipped" (real), never as "no data".
