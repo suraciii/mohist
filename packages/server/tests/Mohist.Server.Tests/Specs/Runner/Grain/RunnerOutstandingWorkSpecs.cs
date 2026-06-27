@@ -95,6 +95,33 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task ReportWorkflowResultAsync_ForSupersededTrackedWork_RemovesStaleRunnerWork()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var (oldWork, _) = await PollWorkAnyAsync();
+
+        await workflow.RerunAsync();
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var report = await runner.ReportWorkflowResultAsync(
+            oldWork.WorkflowRunId,
+            oldWork.WorkId,
+            new WorkResult("failed", "superseded"));
+
+        Assert.True(report.Tracked);
+        Assert.Equal("stale-work", report.Reason);
+
+        var runtime = await runner.GetRuntimeStateAsync();
+        Assert.DoesNotContain(runtime.ActiveWorks, w =>
+            w.OwnerKind == WorkDispatchOwnerKinds.Workflow
+            && w.OwnerId == oldWork.WorkflowRunId
+            && w.WorkId == oldWork.WorkId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerLoss_SynthesizesFailedTaskOutcome_ViaReportChannel()

@@ -406,6 +406,36 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
+    public async Task GetRuntimeStateAsync_RemovesWorkflowWorkSupersededByRerun()
+    {
+        var runnerId = $"runner-stale-work-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "stale-work-host", "test-project"));
+
+        var workflowId = $"wf-stale-work-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: []), "test-project");
+        await workflow.StartAsync(TestInput("test-project"));
+        await workflow.AssignRunnerAsync(runnerId);
+
+        var staleWork = await runner.PollAsync();
+        Assert.NotNull(staleWork);
+
+        await workflow.RerunAsync();
+
+        var runtime = await runner.GetRuntimeStateAsync();
+
+        Assert.DoesNotContain(runtime.ActiveWorks, w =>
+            w.OwnerKind == WorkDispatchOwnerKinds.Workflow
+            && w.OwnerId == workflowId
+            && w.WorkId == staleWork!.WorkId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
     public async Task GetRuntimeStateAsync_BusyRunnerWithoutIssue_ExposesNullIssue()
     {
         var runnerId = $"runner-no-issue-{Guid.NewGuid():N}";
