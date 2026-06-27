@@ -53,21 +53,23 @@ The today-shipped field SHALL be computed from `status === 'done'` issues whose 
 
 ### Requirement: Headline reserves a today-cost field slot that ships empty
 
-The headline SHALL reserve a **today-cost** field slot positioned alongside the other status fields. This slot SHALL ship empty in this change because the cost rollup endpoint (epic issue #262) is not yet available; the empty slot SHALL NOT block delivery of the other headline fields. The slot SHALL be wired so that once the rollup endpoint lands, the today-cost value can be connected without restructuring the headline layout. The empty slot SHALL render in a way that is visibly distinct from a zero-cost value.
+The headline SHALL surface a **today-cost** field positioned alongside the runner-online, in-flight, awaiting-approval, and today-shipped fields. The field SHALL be populated from the project's agent cost rollup endpoint (`agent-cost-metrics` `todayCost`) - the slot that previously shipped empty pending that endpoint is now connected to the rollup value. The headline SHALL source the value from the rollup endpoint rather than recomputing it over the local session set. The empty/zero-sample case (the rollup returning no sessions with usage for the current day) SHALL render in a way that is visibly distinct from a literal zero-cost value, so a missing or empty rollup is not mistaken for free operation; a genuine `todayCost` of zero produced by sessions with usage that summed to zero SHALL render as a real numeric zero, distinct from the empty case.
 
-#### Scenario: Today-cost slot ships empty without blocking other fields
+#### Scenario: Today-cost field is populated from the rollup endpoint
 
-- **WHEN** the factory status headline renders in this change
-- **THEN** the runner-online, in-flight, awaiting-approval, and today-shipped fields SHALL render with real values
-- **AND** the today-cost slot SHALL render empty (or as a reserved placeholder) rather than a numeric value
+- **WHEN** the factory status headline renders and the agent cost rollup endpoint returns a `todayCost` value with a non-empty sample
+- **THEN** the today-cost field SHALL display that numeric `todayCost` value
+- **AND** the value SHALL come from the rollup endpoint rather than being recomputed locally over the session set
+- **AND** the runner-online, in-flight, awaiting-approval, and today-shipped fields SHALL continue to render their real values
 
 #### Scenario: Empty today-cost is distinct from a zero value
 
-- **WHEN** the today-cost rollup endpoint is not yet available
-- **THEN** the today-cost slot SHALL render an empty/reserved placeholder
+- **WHEN** the agent cost rollup returns the empty/zero-sample result for `todayCost` (no sessions with usage for the current day)
+- **THEN** the today-cost field SHALL render an empty/no-data placeholder
 - **AND** the slot SHALL NOT display a numeric zero that could be mistaken for an actual computed cost
 
-#### Scenario: Today-cost slot is ready to receive the rollup value later
+#### Scenario: Genuine zero today-cost renders as a real zero
 
-- **WHEN** the cost rollup endpoint (issue #262) becomes available
-- **THEN** the today-cost slot SHALL be connectable to that endpoint without changing the headline layout or the other fields
+- **WHEN** the agent cost rollup returns a `todayCost` of zero produced by sessions with usage that summed to zero
+- **THEN** the today-cost field SHALL render a numeric zero
+- **AND** it SHALL be distinguishable from the empty/zero-sample placeholder

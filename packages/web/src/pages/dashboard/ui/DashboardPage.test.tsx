@@ -34,6 +34,7 @@ vi.mock('../../../entities/project', async (importOriginal) => {
 
 vi.mock('../../../entities/agent', () => ({
   useAgentStatus: () => ({ data: mocks.agentStatus }),
+  useCostRollup: () => ({ data: undefined }),
 }))
 
 vi.mock('../../../entities/issue/api/queries', () => ({

@@ -43,7 +43,29 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.GetUsageTimeseriesAsync(project.Id, ct));
         });
 
+        group.MapGet("/cost", async (HttpContext context, AgentSessionQuerier sessions, IssueQuerier issues, CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            var cost = await sessions.GetCostRollupAsync(project.Id, ct);
+            var projectIssues = await issues.ListAsync(project.Id, project, all: true);
+            var doneIssuesCount = projectIssues.Count(i => i.Status == "done");
+            var costPerShip = BuildCostPerShip(cost.TotalCost, doneIssuesCount);
+
+            return ApiResults.Ok(new AgentCostRollupDto(
+                cost.TotalCost,
+                cost.TodayCost,
+                doneIssuesCount,
+                costPerShip));
+        });
+
         return app;
+    }
+
+    private static AgentCostMetricDto BuildCostPerShip(AgentCostMetricDto totalCost, int doneIssuesCount)
+    {
+        if (doneIssuesCount <= 0) return new AgentCostMetricDto(null, totalCost.Currency, 0);
+        if (totalCost.Amount is null) return new AgentCostMetricDto(null, totalCost.Currency, 0);
+        return new AgentCostMetricDto(totalCost.Amount.Value / doneIssuesCount, totalCost.Currency, 1);
     }
 
     private static async Task<IReadOnlyList<ActivityWaitingCardDto>> BuildWaitingCardsAsync(

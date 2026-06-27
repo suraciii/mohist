@@ -320,6 +320,49 @@ public class AgentSessionQuerier : IScopedService
             buckets.Select(b => b.ToDto()).ToList());
     }
 
+    public async Task<AgentCostRollupRawData> GetCostRollupAsync(string projectId, CancellationToken ct = default)
+    {
+        var allSessions = await _sessionQuery.ListByLabelsAsync(
+            Labels((AgentSessionQueryMetadataKeys.ProjectId, projectId)),
+            AgentSessionQueryOrder.CreatedAscending,
+            ct: ct);
+
+        var todayStart = DateTime.UtcNow.Date;
+        var todayEnd = todayStart.AddDays(1);
+
+        double totalCost = 0d;
+        int totalSamples = 0;
+        string? totalCurrency = null;
+
+        double todayCost = 0d;
+        int todaySamples = 0;
+        string? todayCurrency = null;
+
+        foreach (var record in allSessions)
+        {
+            var usage = AgentSessionJsonHelper.Usage(record.Session);
+            if (!HasUsage(usage)) continue;
+
+            var costAmount = usage.CostAmount ?? 0d;
+
+            totalCost += costAmount;
+            totalSamples++;
+            totalCurrency ??= usage.CostCurrency;
+
+            var createdAt = record.Session.Status.CreatedAt;
+            if (createdAt >= todayStart && createdAt < todayEnd)
+            {
+                todayCost += costAmount;
+                todaySamples++;
+                todayCurrency ??= usage.CostCurrency;
+            }
+        }
+
+        return new AgentCostRollupRawData(
+            new AgentCostMetricDto(totalSamples > 0 ? totalCost : null, totalCurrency, totalSamples),
+            new AgentCostMetricDto(todaySamples > 0 ? todayCost : null, todayCurrency, todaySamples));
+    }
+
     private static bool HasUsage(AgentUsageSummary usage)
     {
         return usage.InputTokens.HasValue

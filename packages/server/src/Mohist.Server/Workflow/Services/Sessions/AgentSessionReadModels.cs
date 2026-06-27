@@ -229,3 +229,18 @@ public sealed record UsageBucketDto(
     long TotalTokens,
     double CostAmount,
     string? CostCurrency);
+
+public sealed record AgentCostMetricDto(
+    double? Amount,
+    string? Currency,
+    int SampleCount);
+
+public sealed record AgentCostRollupDto(
+    AgentCostMetricDto TotalCost,
+    AgentCostMetricDto TodayCost,
+    int DoneIssuesCount,
+    AgentCostMetricDto CostPerShip);
+
+public sealed record AgentCostRollupRawData(
+    AgentCostMetricDto TotalCost,
+    AgentCostMetricDto TodayCost);
