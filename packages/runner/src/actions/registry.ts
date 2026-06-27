@@ -16,6 +16,7 @@ import { archiveChangeAction, openspecArtifactsAction, openspecSyncAction, opens
 import { rebaseAction, rebaseStatusAction } from "./rebase.js"
 import { git as defaultGit } from "./git.js"
 import { pushAction } from "./push.js"
+import { workspacePrepareAction } from "./workspace-prepare.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 type GitRunner = typeof defaultGit
@@ -58,6 +59,7 @@ export function createDefaultRegistry() {
   registry.register("mohist/mark-github-pr-ready", markGitHubPrReadyAction)
   registry.register("mohist/merge-github-pr", mergeGitHubPrAction)
   registry.register("mohist/github-pr-status", githubPrStatusAction)
+  registry.register("mohist/workspace-prepare", workspacePrepareAction)
   return registry
 }
 

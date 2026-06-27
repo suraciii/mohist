@@ -1,0 +1,44 @@
+## Codebase Patterns
+
+- Each runner action lives in its own file under `packages/runner/src/actions/`,
+  exports `xxxAction: ActionHandler`, registers via `createDefaultRegistry()`
+  in `packages/runner/src/actions/registry.ts` with key `mohist/<name>`.
+- Git-touching actions expose `setXxxGitRunnerForTest` (and optionally
+  `setXxxExistsCheckerForTest`) — same shape as `rebase.ts`/`push.ts`.
+- Tests live in `packages/runner/tests/<name>.spec.ts`, use a fake-git
+  harness that records calls and a configurable exists checker. See
+  `tests/rebase.spec.ts` and `tests/push.spec.ts` for the conventions.
+- Output JSON for actions uses `{ kind, status, failureKind, ... }` where
+  `failureKind` is null on success. The web extractor reads `failureKind`
+  first.
+- Workspace inputs come from `context.variables.workspace.{path,branch}`
+  (populated by `executor.resolvedWorkspaceToVariables`), falling back to
+  `context.workDir` for path. This matches `push.ts` and `mergeReadyAction`.
+
+## Discoveries
+
+- `rebase.ts` uses `git rev-parse --git-path X` + injected `exists` to
+  detect rebase-merge/rebase-apply dirs. We mirror this for the four-way
+  residual probe (rebase-merge, rebase-apply, MERGE_HEAD, CHERRY_PICK_HEAD).
+- `WorkspaceManager.detectResidualState` is private and not injectable
+  (per design D2 we don't refactor it). The action implements its own
+  four-way probe via the git seam.
+- HEAD detection: `git rev-parse --abbrev-ref HEAD` returns `HEAD` literally
+  when detached, so we map that to `(detached)` in the diagnostic output.
+- All probe paths in the fake git handler must return realistic absolute
+  paths (e.g. `/workspace/.git/rebase-merge`) so the injected exists
+  checker can match. Returning a generic placeholder like
+  `/workspace/.git/X` makes the exists checker's `path.endsWith(...)`
+  matching silently always return false — this caused 6 of the 10 initial
+  test failures.
+- Parallel probes via `Promise.all` make call-order assertions in tests
+  fragile. Tests use `toContain` / `hasCommand` for presence and
+  `findIndex` only for sequential steps (abort → reset → clean).
+- The verify step re-runs the full probe (`captureSnapshot`), so a test
+  that simulates a state-flipping scenario needs the exists checker or
+  fake git to evolve over call counts (e.g., return true on initial
+  probe, false on post-abort re-probe, true again on verify).
+- For the "wrong branch after cleanup" verify-failure scenario, checkout
+  can be made to "succeed" in the fake (return ok) while
+  `rev-parse --abbrev-ref HEAD` keeps returning the wrong branch — this
+  lets the action reach the verify step and fail there as intended.
