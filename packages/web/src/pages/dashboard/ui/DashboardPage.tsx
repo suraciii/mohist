@@ -8,6 +8,7 @@ import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { ProductivityZone } from '../productivity/ProductivityZone'
 import { DashboardZone } from './DashboardZone'
 import type { DashboardZoneId } from './DashboardZone'
 
@@ -83,7 +84,9 @@ export function DashboardPage() {
                 <PulseZone />
               </DashboardZone>
             ) : (
-              <DashboardZone key={zone.id} id={zone.id} name={zone.name} />
+              <DashboardZone key={zone.id} id={zone.id} name={zone.name}>
+                <ProductivityZone />
+              </DashboardZone>
             ),
           )}
         </div>

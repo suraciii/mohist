@@ -18,6 +18,7 @@ public static partial class IssueRoutes
         projectIssues.MapIssueWorkflowArtifacts();
         projectIssues.MapIssueMetrics();
         projectIssues.MapIssueApprovalMetrics();
+        projectIssues.MapIssueQualityMetrics();
 
         return app;
     }

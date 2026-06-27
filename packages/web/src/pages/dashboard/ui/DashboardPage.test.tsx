@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   epics: undefined as any[] | undefined,
   completionTrend: undefined as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] } | undefined,
   approvalWait: undefined as { window: { from: string; to: string }; sampleCount: number; averageSeconds: number | null; medianSeconds: number | null; maxSeconds: number | null } | undefined,
+  qualityMetrics: undefined as any,
 }))
 
 vi.mock('../../../entities/project', async (importOriginal) => {
@@ -73,6 +74,10 @@ vi.mock('../../../entities/issue/api/approval-wait', () => ({
   useApprovalWait: () => ({ data: mocks.approvalWait }),
 }))
 
+vi.mock('../../../entities/issue/api/quality-metrics', () => ({
+  useQualityMetrics: () => ({ data: mocks.qualityMetrics }),
+}))
+
 import { DashboardPage } from './DashboardPage'
 
 function renderPage() {
@@ -98,6 +103,7 @@ describe('DashboardPage', () => {
     mocks.epics = undefined
     mocks.completionTrend = undefined
     mocks.approvalWait = undefined
+    mocks.qualityMetrics = undefined
   })
 
   afterEach(() => {
@@ -138,7 +144,7 @@ describe('DashboardPage', () => {
     expect(container.querySelector('[data-testid="dashboard-zone-productivity"] [data-testid="dashboard-digest-empty"]')).toBeNull()
   })
 
-  it('mounts AttentionHero in the hero slot, mounts PulseZone in the pulse slot, and keeps productivity as the only empty placeholder', () => {
+  it('mounts AttentionHero in the hero slot and zone content in every dashboard zone slot', () => {
     mocks.projects = [
       { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
     ]
@@ -158,10 +164,12 @@ describe('DashboardPage', () => {
 
     expect(attention.childElementCount).toBeGreaterThan(0)
     expect(pulse.childElementCount).toBeGreaterThan(0)
-    expect(productivity.childElementCount).toBe(0)
+    expect(productivity.childElementCount).toBeGreaterThan(0)
 
     expect(pulse.contains(screen.getByTestId('pulse-zone'))).toBe(true)
     expect(pulse.contains(screen.getByTestId('pulse-empty-state'))).toBe(true)
+    expect(productivity.contains(screen.getByTestId('productivity-zone'))).toBe(true)
+    expect(productivity.contains(screen.getByTestId('productivity-quality'))).toBe(true)
 
     expect(screen.getByTestId('dashboard-hero').contains(attention)).toBe(true)
     expect(screen.getByTestId('dashboard-zones').contains(attention)).toBe(false)
@@ -172,7 +180,8 @@ describe('DashboardPage', () => {
 
     expect(digest.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
     expect(productivity.querySelector('[data-testid="pulse-zone"], [data-testid="pulse-empty-state"]')).toBeNull()
-    expect(productivity.querySelector('[data-testid="productivity-zone"]')).toBeNull()
+    expect(digest.querySelector('[data-testid="productivity-zone"], [data-testid="productivity-quality"]')).toBeNull()
+    expect(pulse.querySelector('[data-testid="productivity-zone"], [data-testid="productivity-quality"]')).toBeNull()
     expect(container).toBeTruthy()
   })
 
