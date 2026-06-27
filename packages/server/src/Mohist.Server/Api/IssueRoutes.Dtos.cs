@@ -260,3 +260,35 @@ public sealed record ApprovalWaitMetricsResponse(
 public sealed record ApprovalWaitMetricsWindowDto(
     string From,
     string To);
+
+/// <summary>
+/// Response shape for the AI quality metrics endpoint. Both trailing
+/// windows are returned together so callers can compare recent and
+/// longer-term quality in one read.
+/// </summary>
+public sealed record QualityMetricsResponse(
+    QualityMetricsWindowDto Window7d,
+    QualityMetricsWindowDto Window30d);
+
+/// <summary>
+/// One trailing window in the quality aggregation. <see cref="SampleCount"/>
+/// is the number of shipped issues in the window; it distinguishes a true
+/// zero-sample window (null rates) from a window where every issue was
+/// first-time-right (rate 1 with SampleCount > 0).
+/// </summary>
+public sealed record QualityMetricsWindowDto(
+    string From,
+    string To,
+    int SampleCount,
+    double? FirstTimeRightRate,
+    StageReworkRateDto[] Stages);
+
+/// <summary>
+/// Per-stage rework rate for a trailing window. <see cref="EnteredCount"/>
+/// is the number of shipped-in-window issues that entered the stage; a
+/// null rate means no issue entered the stage in that window.
+/// </summary>
+public sealed record StageReworkRateDto(
+    string Stage,
+    int EnteredCount,
+    double? ReworkRate);

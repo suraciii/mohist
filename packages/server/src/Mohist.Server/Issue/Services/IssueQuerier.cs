@@ -353,6 +353,224 @@ public class IssueQuerier : IScopedService
     }
 
     /// <summary>
+    /// One trailing window in the quality aggregation result.
+    /// <see cref="SampleCount"/> distinguishes a true zero-sample
+    /// window (null rates) from a window with a genuine perfect score.
+    /// </summary>
+    public sealed record QualityMetricsWindow(
+        DateTimeOffset From,
+        DateTimeOffset To,
+        int SampleCount,
+        double? FirstTimeRightRate,
+        IReadOnlyList<QualityStageReworkAggregate> Stages);
+
+    /// <summary>
+    /// Per-stage rework aggregate for one trailing window.
+    /// <see cref="EnteredCount"/> is the denominator; a null rate means
+    /// no shipped-in-window issue entered the stage.
+    /// </summary>
+    public sealed record QualityStageReworkAggregate(
+        string Stage,
+        int EnteredCount,
+        double? ReworkRate);
+
+    /// <summary>
+    /// The result of <see cref="GetQualityAsync"/>. Both windows are
+    /// returned together so callers can compare recent and longer-term
+    /// quality in a single read.
+    /// </summary>
+    public sealed record QualityMetricsResult(
+        QualityMetricsWindow Window7d,
+        QualityMetricsWindow Window30d);
+
+    /// <summary>
+    /// Aggregates AI quality signals (first-time-right rate and per-stage
+    /// rework rate) over trailing 7-day and 30-day windows. Only issues
+    /// whose status is <see cref="IssueStatus.Done"/> participate. Window
+    /// membership is anchored on the <c>com.mohist.issue.work-completed</c>
+    /// event time, matching <see cref="GetCompletionBucketsAsync"/>. Rates
+    /// are computed from the existing per-check <see cref="StageCheck.RepairCount"/>
+    /// on raw workflow runs; no new data collection is introduced.
+    /// </summary>
+    public async Task<QualityMetricsResult> GetQualityAsync(
+        string projectId,
+        DateTimeOffset now)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var window7dFrom = now.AddDays(-7);
+        var window7dTo = now;
+        var window30dFrom = now.AddDays(-30);
+        var window30dTo = now;
+
+        // Load the project's issues and their workflow runs. We need the
+        // raw WorkflowRun (not the projected view) because RepairCount is
+        // dropped by WorkflowStatusMapper.
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync();
+
+        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var issues = IssueRowMapper.ByNumber(rows, projectId)
+            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
+            .ToList();
+
+        var runs = await LoadWorkflowRunsAsync(db, issues);
+
+        // Resolve ship time per Done issue from durable events.
+        var projectIssueIds = issues.Select(i => i.Id).ToList();
+        var projectSources = projectIssueIds
+            .Select(id => IssueSourcePrefix + id)
+            .ToList();
+
+        var shipTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        if (projectSources.Count > 0)
+        {
+            var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
+            var candidates = await db.IssueEvents.AsNoTracking()
+                .Select(e => new { e.Source, e.Type, e.Time })
+                .ToListAsync();
+            foreach (var e in candidates)
+            {
+                if (e.Type != WorkCompletedType || !sourceSet.Contains(e.Source)) continue;
+                var issueId = e.Source[IssueSourcePrefix.Length..];
+                // Keep the latest work-completed time if multiple exist.
+                if (!shipTimes.TryGetValue(issueId, out var existing) || e.Time > existing)
+                    shipTimes[issueId] = e.Time;
+            }
+        }
+
+        // Single-pass classification and bucketing.
+        var window7d = new QualityAccumulator();
+        var window30d = new QualityAccumulator();
+
+        foreach (var issue in issues)
+        {
+            if (issue.Status != MohistDefaultWorkflowProjection.IssueStatusName(IssueStatus.Done)) continue;
+            if (!shipTimes.TryGetValue(issue.Id, out var shipTime)) continue;
+
+            var run = issue.WorkflowRunId is not null && runs.TryGetValue(issue.WorkflowRunId, out var r)
+                ? r
+                : null;
+
+            var (isFirstTimeRight, stageRework) = ClassifyRun(run);
+
+            if (shipTime >= window7dFrom && shipTime <= window7dTo)
+                Accumulate(window7d, isFirstTimeRight, stageRework);
+
+            if (shipTime >= window30dFrom && shipTime <= window30dTo)
+                Accumulate(window30d, isFirstTimeRight, stageRework);
+        }
+
+        return new QualityMetricsResult(
+            BuildWindow(window7dFrom, window7dTo, window7d),
+            BuildWindow(window30dFrom, window30dTo, window30d));
+    }
+
+    private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRun(WorkflowRun? run)
+    {
+        if (run is null)
+            return (true, new Dictionary<string, bool>(StringComparer.Ordinal));
+
+        var isFirstTimeRight = true;
+        var stageRework = new Dictionary<string, bool>(StringComparer.Ordinal);
+
+        foreach (var stage in run.Stages)
+        {
+            if (!stage.Initialized) continue;
+
+            var stageHasRepair = false;
+            foreach (var check in stage.Checks)
+            {
+                if (check.RepairCount > 0)
+                {
+                    stageHasRepair = true;
+                    isFirstTimeRight = false;
+                }
+            }
+
+            stageRework[stage.Id] = stageHasRepair;
+        }
+
+        return (isFirstTimeRight, stageRework);
+    }
+
+    private sealed class QualityAccumulator
+    {
+        public int SampleCount { get; set; }
+        public int FirstTimeRightCount { get; set; }
+        public Dictionary<string, int> EnteredByStage { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, int> ReworkedByStage { get; } = new(StringComparer.Ordinal);
+    }
+
+    private static void Accumulate(
+        QualityAccumulator accumulator,
+        bool isFirstTimeRight,
+        IReadOnlyDictionary<string, bool> stageRework)
+    {
+        accumulator.SampleCount++;
+        if (isFirstTimeRight) accumulator.FirstTimeRightCount++;
+
+        foreach (var (stage, reworked) in stageRework)
+        {
+            accumulator.EnteredByStage[stage] = accumulator.EnteredByStage.GetValueOrDefault(stage) + 1;
+            if (reworked)
+                accumulator.ReworkedByStage[stage] = accumulator.ReworkedByStage.GetValueOrDefault(stage) + 1;
+        }
+    }
+
+    private static QualityMetricsWindow BuildWindow(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        QualityAccumulator accumulator)
+    {
+        double? firstTimeRightRate = accumulator.SampleCount == 0
+            ? null
+            : (double)accumulator.FirstTimeRightCount / accumulator.SampleCount;
+
+        var stages = accumulator.EnteredByStage
+            .OrderBy(s => s.Key, StringComparer.Ordinal)
+            .Select(s =>
+            {
+                var entered = s.Value;
+                var reworked = accumulator.ReworkedByStage.GetValueOrDefault(s.Key);
+                return new QualityStageReworkAggregate(
+                    s.Key,
+                    entered,
+                    entered == 0 ? null : (double)reworked / entered);
+            })
+            .ToList();
+
+        return new QualityMetricsWindow(from, to, accumulator.SampleCount, firstTimeRightRate, stages);
+    }
+
+    private async Task<Dictionary<string, WorkflowRun>> LoadWorkflowRunsAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<IssueReadModel> issues)
+    {
+        var workflowRunIds = issues
+            .Select(i => i.WorkflowRunId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (workflowRunIds.Length == 0) return [];
+
+        var runRows = await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
+            .ToListAsync();
+
+        var runs = new Dictionary<string, WorkflowRun>(StringComparer.Ordinal);
+        foreach (var row in runRows)
+        {
+            var run = DeserializeRun(row.State);
+            if (run is not null)
+                runs[row.WorkflowRunId] = run;
+        }
+        return runs;
+    }
+
+    /// <summary>
     /// Aggregates approval-gate wait times (requestedAt → respondedAt) for
     /// completed approvals (`approved` or `rejected`) whose <c>respondedAt</c>
     /// falls within the trailing 7-day window [now - 7d, now]. Pending

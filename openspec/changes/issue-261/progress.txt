@@ -1,0 +1,23 @@
+# Issue 261 Progress
+
+## T-001: Implement project-level AI quality aggregation endpoint
+
+### Decisions
+- Followed design decision D2 option B: added `LoadWorkflowRunsAsync` bulk loader in `IssueQuerier` that reads raw deserialized `WorkflowRun` state, keeping `WorkflowStatusMapper` / `CheckStatusView` untouched. `RepairCount` is therefore available without widening the frontend-facing workflow status contract.
+- Followed design decision D3: window membership anchored on `IssueEvents.Time` of `com.mohist.issue.work-completed`, matching `GetCompletionBucketsAsync`. Done issues without a matching event do not contribute.
+- "Entered a stage" predicate chosen as `StageRun.Initialized == true`. This cleanly distinguishes reached stages from never-reached stages in seeded workflow run states.
+
+### Code patterns
+- Querier result types (`QualityMetricsResult`, `QualityMetricsWindow`, `QualityStageReworkAggregate`) are internal records on `IssueQuerier`, mirroring `ApprovalWaitResult`.
+- Endpoint partial `IssueRoutes.QualityMetrics.cs` mirrors `IssueRoutes.ApprovalMetrics.cs`: inject `IssueQuerier`, resolve project via `ProjectResolutionEndpointFilter`, return `ApiResults.Ok(BuildResponse(...))`.
+- DTOs in `IssueRoutes.Dtos.cs` use nullable `double?` rates + integer denominators (`SampleCount`, `EnteredCount`) for zero-sample distinguishability.
+- Tests use JSON-anonymous-object seeded `WorkflowRun` rows with `repairCount` and `initialized` fields; `JSON.Options` (web defaults) maps camelCase properties correctly.
+
+### Gotchas
+- `LoadWorkflowRunsAsync` originally typed to `IReadOnlyCollection<IssueReadModel>`; caller must materialize read models, not `IssueInfo`.
+- When seeding events in unit tests, `IssueEventRow.Id` must be unique per source; reused the existing max-id pattern from `SeedEvent`.
+- The endpoint tests seed events directly via `IssueEventRow` because the integration fixture does not emit domain events automatically.
+
+### Verification
+- Server dotnet tests pass: 2850 passed, 0 failed.
+- `npm test` runs the full `dotnet test` successfully; the subsequent workspace `test:ci` scripts fail in this environment only because `vitest` is not installed (runner/web), which is outside the scope of the server-only T-001 task.
