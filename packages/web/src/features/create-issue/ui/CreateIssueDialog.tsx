@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -10,6 +11,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { AttachmentComposer } from '@/shared/ui'
 import { createIssue, extractAttachmentIds } from '../../../entities/issue'
+import type { Issue } from '../../../entities/issue'
 import { LabelEditor } from '../../../entities/issue/lib/label-editor'
 import type { LabelMap } from '../../../entities/issue/model/labels'
 import { useAvailableModelIds, useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../../entities/settings'
@@ -196,9 +198,13 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(risk ? { risk } : {}),
       })
     },
-    onSuccess: () => {
+    onSuccess: (data: Issue) => {
+      toast.success(`Issue #${data.number} created`)
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       resetAndClose()
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to create issue')
     },
   })
 
