@@ -19,13 +19,6 @@
 - `GetRuntimeStateAsync` throws if `_lastHeartbeat` is still `DateTime.MinValue` (default for a freshly reactivated grain). Tests that reactivate a runner and read runtime state must register or heartbeat first.
 - The first migration generated from the composite-key schema had to be replaced; the final migration is a clean `CreateTable` with an auto-increment `Id` plus indexes on `(RunnerId, Status)` and `(RunnerId, OwnerKind, OwnerId, WorkId)`.
 
-## T-001 verification
-
-- T-001 was already implemented on the workflow branch: `WorkflowOptions` (`Mohist:Workflow`, 30min default), DI registration, `RunnerGrain` constructor injection of `TimeProvider`/`IOptions<WorkflowOptions>`, take points switched to `_timeProvider.GetUtcNow()`, and `WorkflowGrainFixture` wired with `FakeTimeProvider`.
-- `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings/errors.
-- Full server test suite passes: 2841 passed, 0 failed (14 skipped).
-- Heartbeat/runner-loss path remains on wall-clock `DateTime.UtcNow`, unchanged per AC #5.
-
 ## T-001 verification (2026-06-27)
 
 - T-001 implementation was already present on branch `mohist/run-wr_44b143b1760f440d93d8c389c9ec46d6` (commit a84659e9).
