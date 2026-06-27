@@ -571,6 +571,7 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
     uses: work.uses,
     variables,
     signal,
+    recovery: work.recovery,
     projectId: work.projectId,
     issueNumber: work.issueNumber,
     acpSessionManager: sessionManager,
@@ -1082,11 +1083,13 @@ function readAddTasks(raw: unknown): AddTaskInput[] {
     const id = typeof t["id"] === "string" ? t["id"] : null
     if (!id) continue
     const withValue = t["with"]
+    const recoveryValue = t["recovery"]
     tasks.push({
       id,
       title: typeof t["title"] === "string" ? t["title"] : id,
       uses: typeof t["uses"] === "string" ? t["uses"] : null,
       with: withValue && typeof withValue === "object" && !Array.isArray(withValue) ? (withValue as JsonObject) : null,
+      recovery: recoveryValue && typeof recoveryValue === "object" && !Array.isArray(recoveryValue) ? (recoveryValue as JsonObject) : null,
     })
   }
   return tasks

@@ -622,9 +622,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({
-      recovery: { budget: 1, handlers: [] },
-    }))
+    const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
@@ -638,6 +636,47 @@ describe("mohist/rebase", () => {
     })
     expect(calls).not.toContain("rebase --abort")
     expect(result.message).toBe("Rebase in progress: conflicts require task-level resolution")
+  })
+
+  it("Conflict_WithRecoveryOnlyInWith_AbortsBecauseRecoveryIsDispatchMetadata", async () => {
+    const calls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "rev-parse master":
+          return ok("baseSha\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
+          return ok("before\n")
+        case "rebase master":
+          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/rebase.ts")
+        case "diff --name-only --diff-filter=U":
+          return ok("packages/runner/src/actions/rebase.ts\n")
+        case "rebase --abort":
+          return ok("aborted")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await rebaseAction(context({
+      recovery: { budget: 1, handlers: [] },
+    }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output).toMatchObject({
+      errorCode: "conflict",
+      rebaseLeftInProgress: false,
+    })
+    expect(calls).toContain("rebase --abort")
+    expect(result.message).toBe("Rebase failed: conflict could not be resolved")
   })
 
   it("Conflict_WithRecovery_RerunAfterAbandonedInProgress_AbortsPriorRebaseThenStartsFresh", async () => {
@@ -671,7 +710,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ recovery: { budget: 1, handlers: [] } }))
+    const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
@@ -706,7 +745,7 @@ describe("mohist/rebase", () => {
       }
     })
 
-    const result = await rebaseAction(context({ recovery: { budget: 1, handlers: [] } }))
+    const result = await rebaseAction(context({}, {}, { budget: 1, handlers: [] }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
@@ -718,7 +757,7 @@ describe("mohist/rebase", () => {
   })
 })
 
-function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
+function context(withOverrides: JsonObject = {}, variables: JsonObject = {}, recovery: JsonObject | null = null): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "rebase.1",
@@ -733,6 +772,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
       ...variables,
     },
     workDir: "/fake/worktree",
+    recovery,
     projectId: "proj_1",
     issueNumber: 217,
     signal: new AbortController().signal,

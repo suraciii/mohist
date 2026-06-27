@@ -82,7 +82,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   // When the caller configured recovery, leave the rebase in-progress so the
   // recovery handler's resolve-rebase-conflicts task can take over and finish
   // it. Without recovery, abort cleanly and fail.
-  const hasRecovery = context.with?.recovery != null
+  const hasRecovery = context.recovery != null
   if (hasRecovery) {
     return rebaseOutput(false, baseBranch, remote, baseRef, baseSha, beforeSha, null, null, false, conflicts, 0, result.combinedOutput, "conflict", 1, true)
   }
