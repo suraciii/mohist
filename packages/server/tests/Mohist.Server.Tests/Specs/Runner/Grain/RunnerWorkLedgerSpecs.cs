@@ -212,6 +212,110 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
+    public async Task WorkCompletionTimeout_AfterRunnerGrainReactivation_DetectsOrphanWork()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+
+        await DeactivateRunnerAsync(runnerId);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", TestProjectId(work.WorkflowRunId)));
+        await runner.CheckWorkTimeoutsAsync();
+
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+
+        var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.Workflow, work.WorkflowRunId, work.WorkId);
+        Assert.NotNull(row);
+        Assert.Equal("failed", row!.Status);
+        Assert.Equal("timeout", row.Reason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task TimeoutThenRunnerLoss_DoesNotResynthesizeWork()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.CheckWorkTimeoutsAsync();
+
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        var runAfterTimeout = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal("timeout", runAfterTimeout.Failure?.Message);
+
+        await runner.UnregisterAsync();
+
+        var runAfterLoss = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal("timeout", runAfterLoss.Failure?.Message);
+        Assert.Equal(TaskRunStatus.Failed, runAfterLoss.Stages.Single().Tasks.Single().Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task RunnerLossThenTimeout_DoesNotResynthesizeWork()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        var runAfterLoss = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal("runner-lost", runAfterLoss.Failure?.Message);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        await runner.CheckWorkTimeoutsAsync();
+
+        var runAfterTimeout = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal("runner-lost", runAfterTimeout.Failure?.Message);
+        Assert.Equal(TaskRunStatus.Failed, runAfterTimeout.Stages.Single().Tasks.Single().Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task RunnerLoss_SynthesizesAgentJobFailure_AndUpdatesLedgerRow()
+    {
+        await ClearBacklogAsync();
+        var runnerId = $"agent-job-loss-runner-{Guid.NewGuid():N}";
+        var projectId = $"agent-job-loss-project-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+
+        var jobKey = $"agent-job-loss-{Guid.NewGuid():N}";
+        var work = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: $"agent-job-loss-work-{Guid.NewGuid():N}",
+            AgentJobId: jobKey,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+        var assigned = await runner.AssignAgentJobAsync(work);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+        await runner.UnregisterAsync();
+
+        var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, jobKey, work.WorkId);
+        Assert.NotNull(row);
+        Assert.Equal("failed", row!.Status);
+        Assert.Equal("runner-lost", row.Reason);
+        Assert.NotNull(row.FinishedAt);
+
+        var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal("runner-lost", terminal.Message);
+        Assert.Equal("runner-lost", terminal.FailureReason);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
     public async Task WorkCompletionTimeout_SynthesizesWorkflowFailure_AndUpdatesLedgerRow()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));

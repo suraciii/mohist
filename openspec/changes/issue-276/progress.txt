@@ -48,3 +48,22 @@
 - `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeded with 0 warnings/errors.
 - Full server test suite passed: 2841 passed, 14 skipped, 0 failed.
 - `RunnerWorkLedgerSpecs` filter run: 10/10 passed.
+
+## T-003 verification (2026-06-27)
+
+- T-003 implementation was already present on branch `mohist/run-wr_44b143b1760f440d93d8c389c9ec46d6` (code from prior commits).
+- Verified acceptance criteria:
+  - `RunnerGrain` implements `IRemindable` (`RunnerGrain.cs:19`), registers per-runner `work-timeout` reminder via `EnsureWorkTimeoutReminderAsync` on take (`RunnerGrain.cs:259`, `:643`), and unregisters via `MaybeUnregisterWorkTimeoutReminderAsync` when the outstanding set drains (`RunnerGrain.cs:104`, `:141`, `:808`). Uses Orleans reminder, not a grain timer.
+  - `ReceiveReminder` (`RunnerGrain.cs:92-98`) and the public `CheckWorkTimeoutsAsync` test hook (`RunnerGrain.cs:100-143`) call the same private scan that iterates only the in-memory `_activeWorks` set; zero DB reads per tick.
+  - Timeout synthesis produces `WorkResult("failed", "timeout")` and routes through `ReportWorkflowResultAsync` for workflow works (`RunnerGrain.cs:757-763`) and agent-job result/fail channel for agent-job works (`RunnerGrain.cs:765-808`). No new result state is introduced.
+  - `NotifyTrackedWorkflowRunnersLostAsync` drains the unified `_activeWorks` set covering both workflow and agent-job works (`RunnerGrain.cs:545-580`) and applies the same `ReconfirmOutstandingAsync` guard.
+  - `ReconfirmOutstandingAsync` (`RunnerGrain.cs:734-755`) snapshots keys, reconfirms both in-memory and ledger outstanding status before synthesizing, and removes stale entries; terminal ledger update is authoritative, preventing double synthesis.
+  - `IRunnerGrain.CheckWorkTimeoutsAsync()` exposed at `IRunnerGrain.cs:20`.
+- New tests added:
+  - `RunnerFailureSpecs.RunningTask_WithoutReport_TimesOutWithoutQueryingRunner` un-skipped and rewritten to use `FakeTimeProvider` + `CheckWorkTimeoutsAsync`.
+  - `RunnerWorkLedgerSpecs.WorkCompletionTimeout_AfterRunnerGrainReactivation_DetectsOrphanWork` covers cross-restart orphan timeout (#275).
+  - `RunnerWorkLedgerSpecs.TimeoutThenRunnerLoss_DoesNotResynthesizeWork` and `RunnerLossThenTimeout_DoesNotResynthesizeWork` cover non-interference.
+  - `RunnerWorkLedgerSpecs.RunnerLoss_SynthesizesAgentJobFailure_AndUpdatesLedgerRow` covers runner-loss draining agent-job work.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeded with 0 warnings/errors.
+- Full server test suite passed: 2846 passed, 13 skipped, 0 failed (skipped count dropped by 1 after un-skipping the timeout test).
+
