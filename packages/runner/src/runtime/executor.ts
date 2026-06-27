@@ -1010,11 +1010,15 @@ function tryRecovery(
     const retryId = work.workId.includes(".")
       ? work.workId.substring(0, work.workId.lastIndexOf("."))
       : work.workId
+    const nextRecovery = decrementRecoveryBudget(work.recovery, recovery.budget)
     addTasks.push({
       id: retryId,
       title: work.title ?? work.workId,
       uses: work.uses ?? null,
-      with: decrementRecoveryBudget(work.recovery, recovery.budget),
+      with: {
+        ...(work.with ?? {}),
+        ...(nextRecovery ? { recovery: nextRecovery } : {}),
+      },
     })
   }
 
