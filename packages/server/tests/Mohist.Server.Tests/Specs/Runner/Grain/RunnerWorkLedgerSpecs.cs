@@ -209,6 +209,65 @@ public class RunnerWorkLedgerSpecs : WorkflowGrainSpecs
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
+    [Fact]
+    public async Task WorkCompletionTimeout_SynthesizesWorkflowFailure_AndUpdatesLedgerRow()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var (work, runnerId) = await PollWorkAnyAsync();
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.CheckWorkTimeoutsAsync();
+
+        var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.Workflow, work.WorkflowRunId, work.WorkId);
+        Assert.NotNull(row);
+        Assert.Equal("failed", row!.Status);
+        Assert.Equal("timeout", row.Reason);
+        Assert.NotNull(row.FinishedAt);
+
+        var run = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal(TaskRunStatus.Failed, run.Stages.Single().Tasks.Single().Status);
+        Assert.Equal("timeout", run.Failure?.Message);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
+    public async Task WorkCompletionTimeout_SynthesizesAgentJobFailure_AndUpdatesLedgerRow()
+    {
+        await ClearBacklogAsync();
+        var runnerId = $"agent-job-timeout-ledger-runner-{Guid.NewGuid():N}";
+        var projectId = $"agent-job-timeout-ledger-project-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+
+        var jobKey = $"agent-job-timeout-ledger-{Guid.NewGuid():N}";
+        var work = new WorkDispatch(
+            WorkflowRunId: string.Empty,
+            WorkId: $"agent-job-timeout-work-{Guid.NewGuid():N}",
+            AgentJobId: jobKey,
+            OwnerKind: WorkDispatchOwnerKinds.AgentJob);
+        var assigned = await runner.AssignAgentJobAsync(work);
+        Assert.Equal(RunnerWorkAssignmentStatus.Assigned, assigned.Status);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        await runner.CheckWorkTimeoutsAsync();
+
+        var row = await FindRunnerWorkAsync(runnerId, WorkDispatchOwnerKinds.AgentJob, jobKey, work.WorkId);
+        Assert.NotNull(row);
+        Assert.Equal("failed", row!.Status);
+        Assert.Equal("timeout", row.Reason);
+        Assert.NotNull(row.FinishedAt);
+
+        var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal("timeout", terminal.Message);
+        Assert.Equal("timeout", terminal.FailureReason);
+    }
+
     private async Task<RunnerWorkRow?> FindRunnerWorkAsync(
         string runnerId,
         string ownerKind,

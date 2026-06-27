@@ -9,6 +9,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Agent.Grains;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
 using LedgerRunnerWork = Mohist.Server.Infrastructure.Data.Runner.RunnerWork;
@@ -17,7 +18,7 @@ using LedgerRunnerWorkStatus = Mohist.Server.Infrastructure.Data.Runner.RunnerWo
 namespace Mohist.Server.Runner.Grains;
 
 [Reentrant]
-public class RunnerGrain : Grain, IRunnerGrain
+public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
@@ -42,6 +43,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
+    private const string WorkTimeoutReminderName = "work-timeout";
+    private static readonly TimeSpan WorkTimeoutReminderPeriod = TimeSpan.FromMinutes(1);
 
     public RunnerGrain(
         WorkflowRunQuerier workflowRuns,
@@ -104,6 +107,75 @@ public class RunnerGrain : Grain, IRunnerGrain
         _heartbeatTimer?.Dispose();
         _heartbeatTimer = null;
         return Task.CompletedTask;
+    }
+
+    public Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (!string.Equals(reminderName, WorkTimeoutReminderName, StringComparison.Ordinal))
+            return Task.CompletedTask;
+
+        return CheckWorkTimeoutsAsync();
+    }
+
+    public async Task CheckWorkTimeoutsAsync()
+    {
+        await RemoveStaleWorkflowWorksAsync();
+
+        var timeout = _workflowOptions.WorkCompletionTimeout;
+        if (timeout <= TimeSpan.Zero)
+            return;
+
+        var snapshot = GetWorks()
+            .Where(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running)
+            .Select(w => new RunnerWork
+            {
+                WorkId = w.WorkId,
+                OwnerKind = w.OwnerKind,
+                OwnerId = w.OwnerId,
+                WorkType = w.WorkType,
+                Stage = w.Stage,
+                Title = w.Title,
+                Issue = w.Issue,
+                Status = w.Status,
+                CreatedAt = w.CreatedAt,
+                StartedAt = w.StartedAt,
+                DispatchSnapshot = w.DispatchSnapshot,
+            })
+            .ToList();
+
+        if (snapshot.Count == 0)
+        {
+            await MaybeUnregisterWorkTimeoutReminderAsync();
+            return;
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var synthesizedFailure = new WorkResult("failed", "timeout");
+        foreach (var work in snapshot)
+        {
+            try
+            {
+                if (now - work.CreatedAt <= timeout)
+                    continue;
+
+                if (!await ReconfirmOutstandingAsync(work))
+                    continue;
+
+                await SynthesizeFailureAsync(work, synthesizedFailure);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex,
+                    "Runner {RunnerId} failed to synthesize timeout for {OwnerKind} {OwnerId} work {WorkId}",
+                    RunnerId,
+                    work.OwnerKind,
+                    work.OwnerId,
+                    work.WorkId);
+            }
+        }
+
+        if (!GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running))
+            await MaybeUnregisterWorkTimeoutReminderAsync();
     }
 
     public async Task RegisterAsync(RunnerInfo info)
@@ -243,6 +315,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             work.WorkId,
             takenAt,
             LedgerRunnerWorkStatus.Outstanding));
+        await EnsureWorkTimeoutReminderAsync();
         _log.LogInformation("Runner {Id} assigned work {WorkId} for agent-job {AgentJobId}", RunnerId, work.WorkId, work.AgentJobId);
         return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
     }
@@ -322,6 +395,9 @@ public class RunnerGrain : Grain, IRunnerGrain
             workId,
             terminalStatus,
             reason);
+
+        if (!GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running))
+            await MaybeUnregisterWorkTimeoutReminderAsync();
 
         return new RunnerWorkReportResult(
             workflowRunId,
@@ -418,6 +494,9 @@ public class RunnerGrain : Grain, IRunnerGrain
                 terminalStatus,
                 terminalReason);
         }
+
+        if (!GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running))
+            await MaybeUnregisterWorkTimeoutReminderAsync();
 
         var reason = !accepted.Accepted
             ? $"job-rejected:{accepted.Reason ?? "unknown"}"
@@ -538,8 +617,10 @@ public class RunnerGrain : Grain, IRunnerGrain
         {
             try
             {
-                var workflowRunId = entry.OwnerId;
-                await ReportWorkflowResultAsync(workflowRunId, entry.WorkId, synthesizedFailure);
+                if (!await ReconfirmOutstandingAsync(entry))
+                    continue;
+
+                await SynthesizeFailureAsync(entry, synthesizedFailure);
             }
             catch (Exception ex)
             {
@@ -633,6 +714,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             workId,
             takenAt,
             LedgerRunnerWorkStatus.Outstanding));
+        await EnsureWorkTimeoutReminderAsync();
         return dispatch;
     }
 
@@ -745,6 +827,90 @@ public class RunnerGrain : Grain, IRunnerGrain
     private async Task PersistAsync()
     {
         await _worksState.WriteStateAsync();
+    }
+
+    private async Task EnsureWorkTimeoutReminderAsync()
+    {
+        try
+        {
+            await this.RegisterOrUpdateReminder(
+                WorkTimeoutReminderName,
+                WorkTimeoutReminderPeriod,
+                WorkTimeoutReminderPeriod);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Runner {RunnerId} failed to register work-timeout reminder", RunnerId);
+        }
+    }
+
+    private async Task MaybeUnregisterWorkTimeoutReminderAsync()
+    {
+        try
+        {
+            var reminder = await this.GetReminder(WorkTimeoutReminderName);
+            if (reminder is not null)
+                await this.UnregisterReminder(reminder);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Runner {RunnerId} failed to unregister work-timeout reminder", RunnerId);
+        }
+    }
+
+    private async Task<bool> ReconfirmOutstandingAsync(RunnerWork work)
+    {
+        if (FindWork(work.WorkId, work.OwnerKind, work.OwnerId) is null)
+            return false;
+
+        var ledger = await _runnerWorks.FindAsync(
+            RunnerId,
+            work.OwnerKind,
+            work.OwnerId,
+            work.WorkId);
+
+        if (ledger is null || ledger.Status != LedgerRunnerWorkStatus.Outstanding)
+        {
+            TryRemoveWork(work.WorkId, work.OwnerKind, work.OwnerId);
+            await PersistAsync();
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task SynthesizeFailureAsync(RunnerWork work, WorkResult result)
+    {
+        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
+        {
+            await ReportWorkflowResultAsync(work.OwnerId, work.WorkId, result);
+            return;
+        }
+
+        if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
+            await SynthesizeAgentJobFailureAsync(work, result);
+    }
+
+    private async Task SynthesizeAgentJobFailureAsync(RunnerWork work, WorkResult result)
+    {
+        if (FindWork(work.WorkId, work.OwnerKind, work.OwnerId) is null)
+            return;
+
+        var job = GrainFactory.GetGrain<IAgentJobGrain>(work.OwnerId);
+        var reportResult = await job.ReportResultAsync(RunnerId, work.WorkId, result);
+
+        if (!reportResult.Accepted)
+            await job.FailAsync(result.Message ?? "failed");
+
+        TryRemoveWork(work.WorkId, work.OwnerKind, work.OwnerId);
+        await PersistAsync();
+        var (terminalStatus, terminalReason) = ResolveTerminalStatus(result);
+        await MarkRunnerWorkTerminalAsync(
+            work.OwnerKind,
+            work.OwnerId,
+            work.WorkId,
+            terminalStatus,
+            terminalReason);
     }
 
     private async Task MarkRunnerWorkTerminalAsync(

@@ -17,6 +17,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
     Task UpdateBuildGitHashAsync(string? buildGitHash);
     Task<RunnerInfo?> GetInfoAsync();
+    Task CheckWorkTimeoutsAsync();
 
     /// <summary>
     /// Returns the current persisted dispatch capacity (slots). Sourced

@@ -13,6 +13,15 @@ public interface IAgentJobGrain : IGrainWithStringKey
     Task CheckTimeoutsAsync();
     Task<AgentJobTerminalResult> GetTerminalResultAsync();
     Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync();
+
+    /// <summary>
+    /// Force the job to a failed terminal state. Used by the runner-side
+    /// control plane when a work is synthesized as failed (timeout or
+    /// runner-loss) but the normal <see cref="ReportResultAsync"/> channel
+    /// cannot accept the report (e.g., the grain reactivated in Pending
+    /// status and no longer recognises the runner/work pair).
+    /// </summary>
+    Task FailAsync(string reason);
 }
 
 [GenerateSerializer]
