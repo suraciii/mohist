@@ -52,6 +52,16 @@ const mocks = vi.hoisted(() => ({
   })),
   useIssueTemplates: vi.fn<() => { data: unknown[]; isLoading: boolean }>(() => ({ data: [], isLoading: false })),
   useIssueTemplate: vi.fn<(id: string | null) => { data: unknown }>(() => ({ data: undefined })),
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+  },
+}))
+
+vi.mock('sonner', () => ({
+  toast: mocks.toast,
 }))
 
 vi.mock('../../../entities/issue', async (importOriginal) => ({
@@ -120,6 +130,72 @@ describe('CreateIssueDialog', () => {
     }))
 
     queryClient.clear()
+  })
+})
+
+describe('CreateIssueDialog toast feedback', () => {
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('shows a success toast with the new issue number on successful create', async () => {
+    mocks.createIssue.mockResolvedValue({ id: 'issue_223', number: 223 } as never)
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Toast test' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.createIssue).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith('Issue #223 created'))
+    expect(mocks.toast.success.mock.calls[0][0]).toBe('Issue #223 created')
+    expect(mocks.toast.success.mock.calls[0][0]).not.toMatch(/undefined/)
+    expect(mocks.toast.error).not.toHaveBeenCalled()
+  })
+
+  it('never reads the number from a { issue } wrapper (success path uses data.number)', async () => {
+    // Bare Issue response (matches `createIssue` shape in entities/issue/api/client.ts).
+    // If the dialog ever regressed to reading `data.issue.number`, this would render
+    // `Issue #undefined created` because `data.issue` does not exist on the bare response.
+    mocks.createIssue.mockResolvedValue({ id: 'issue_9', number: 9 } as never)
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'No wrapper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledTimes(1))
+    const message = mocks.toast.success.mock.calls[0][0] as string
+    expect(message).toBe('Issue #9 created')
+    expect(message).not.toMatch(/undefined/)
+  })
+
+  it('shows an error toast without any issue number when the create fails', async () => {
+    mocks.createIssue.mockRejectedValue(new Error('Server unavailable'))
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Boom' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('Server unavailable'))
+    expect(mocks.toast.success).not.toHaveBeenCalled()
+    const errorMessage = mocks.toast.error.mock.calls[0][0] as string
+    expect(errorMessage).toBe('Server unavailable')
+    expect(errorMessage).not.toMatch(/undefined/)
+    expect(errorMessage).not.toMatch(/#\d+/)
+  })
+
+  it('falls back to a generic error toast without a number when the failure has no message', async () => {
+    mocks.createIssue.mockRejectedValue(new Error(''))
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText('Issue title'), { target: { value: 'Empty err' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('Failed to create issue'))
+    const errorMessage = mocks.toast.error.mock.calls[0][0] as string
+    expect(errorMessage).toBe('Failed to create issue')
+    expect(errorMessage).not.toMatch(/undefined/)
+    expect(errorMessage).not.toMatch(/#\d+/)
   })
 })
 
