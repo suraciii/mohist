@@ -254,7 +254,111 @@ public static class RunnerRoutes
             return Results.Ok(await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents)));
         });
 
+        // Generic (non-workflow) AgentSession routes — used by the runner
+        // when it executes an agent-job dispatch whose launch minted an
+        // AgentSession id (issue-129 T-002/T-003). Identifies a session by
+        // (projectId, sessionId) without a workflowRunId/sessionName pair.
+        group.MapGet("/agent-sessions/{projectId}/{sessionId}", async (
+            string projectId, string sessionId,
+            AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            var session = await sessions.GetGrain(sessionId).GetAsync();
+            if (session is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+
+            return Results.Ok(ToRunnerGenericAgentSession(session));
+        });
+
+        group.MapPost("/agent-sessions/{projectId}/{sessionId}/open", async (
+            string runnerId, string projectId, string sessionId,
+            GenericAgentSessionOpenRequest? req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            req ??= new GenericAgentSessionOpenRequest();
+            var grain = sessions.GetGrain(sessionId);
+
+            // The session was minted up front by the launch endpoint
+            // (T-003) carrying source-kind=agent-launch + agent id/name
+            // labels. The runner's open call only contributes annotations
+            // (workId/workType/stage/title/issueNumber) for traceability
+            // — labels are intentionally left untouched so the launch
+            // identity (projectId, agentId, agentName, source-kind) is
+            // preserved by AgentSessionMetadata.Merge.
+            var session = await grain.OpenAsync(new OpenAgentSessionCommand(
+                runnerId,
+                "opencode",
+                WorkDir: req.WorkDir,
+                Metadata: BuildGenericAgentSessionMetadata(req)));
+            return Results.Ok(ToRunnerGenericAgentSession(session));
+        });
+
+        group.MapPost("/agent-sessions/{projectId}/{sessionId}/attach", async (
+            string projectId, string sessionId,
+            AgentSessionAttachRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            var grain = sessions.GetGrain(sessionId);
+            var existing = await grain.GetAsync();
+            if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+
+            try
+            {
+                var session = await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                    req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+                return Results.Ok(ToRunnerGenericAgentSession(session));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "agent_session_attach_conflict");
+            }
+        });
+
+        group.MapPost("/agent-sessions/{projectId}/{sessionId}/runtime-events", async (
+            string projectId, string sessionId,
+            AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            var grain = sessions.GetGrain(sessionId);
+            var existing = await grain.GetAsync();
+            if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+
+            var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
+                e.Type,
+                e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
+            return Results.Ok(await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents)));
+        });
+
         return app;
+    }
+
+    private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
+        new(
+            session.AgentSessionId,
+            session.Status,
+            session.WorkDir,
+            session.Model,
+            session.ResolvedModel);
+
+    /// <summary>
+    /// Builds the annotations-only metadata that the runner contributes on
+    /// open for a generic AgentSession. Labels are intentionally left null
+    /// so the launch-time labels (source-kind=agent-launch, agent-id,
+    /// agent-name, project-id) are preserved by
+    /// <see cref="AgentSessionMetadata.Merge"/>.
+    /// </summary>
+    private static AgentSessionMetadata BuildGenericAgentSessionMetadata(GenericAgentSessionOpenRequest req)
+    {
+        IReadOnlyDictionary<string, string>? annotations = null;
+        if (!string.IsNullOrWhiteSpace(req.Title) || req.IssueNumber is not null)
+        {
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(req.Title))
+                map[AgentSessionQueryMetadataKeys.Title] = req.Title!;
+            if (req.IssueNumber is not null)
+                map[AgentSessionQueryMetadataKeys.IssueNumber] = req.IssueNumber.Value.ToString();
+            annotations = map;
+        }
+        return new AgentSessionMetadata(null, annotations);
     }
 
     private static WorkflowAgentSessionContext WorkflowSessionContext(
@@ -374,6 +478,32 @@ public record RunnerReportResponse(
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
 public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("acpSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null);
 public record AgentSessionOpenRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
+/// <summary>
+/// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
+/// call. Generic (non-workflow) AgentSessions are identified by
+/// (projectId, sessionId); the launch endpoint already minted the session
+/// with source-kind=agent-launch labels, so this request only contributes
+/// optional annotations.
+/// </summary>
+public record GenericAgentSessionOpenRequest(
+    string? WorkId = null,
+    string? WorkType = null,
+    string? Stage = null,
+    string? Title = null,
+    int? IssueNumber = null,
+    string? WorkDir = null);
+/// <summary>
+/// Wire shape returned to the runner for generic AgentSession endpoints
+/// (issue-129 T-002/T-003). Mirrors the workflow response shape but drops
+/// the (projectId, workflowRunId, sessionName) key — generic sessions are
+/// addressed solely by sessionId.
+/// </summary>
+public record RunnerGenericAgentSessionResponse(
+    [property: JsonPropertyName("acpSessionId")] string? AgentSessionId,
+    string Status,
+    string? WorkDir = null,
+    string? Model = null,
+    string? ResolvedModel = null);
 public record AgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
 public record AgentSessionRuntimeEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<AgentSessionRuntimeEventRequest> RuntimeEvents);
 public record AgentSessionRuntimeEventRequest(string Type, System.Text.Json.JsonElement Payload);

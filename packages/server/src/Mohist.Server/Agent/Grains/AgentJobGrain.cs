@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -431,6 +432,46 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             "AgentJob {Id} report timeout after {Timeout}; transitioning to failed",
             Key, _options.JobTimeout);
         await FailWithReasonAsync(AgentJobFailureReasons.ReportTimeout);
+
+        // If a generic AgentSession was minted at launch (T-003), close
+        // it on the server so the session reaches a terminal state. The
+        // runner never reported a result, so the session would otherwise
+        // sit indefinitely in a non-terminal state. The synthesized
+        // session.closed event flows through the existing runtime-event
+        // pipeline (ContextExhaustionClassifier classifies it as
+        // probe_timeout / context_exhaustion_suspected when no usage is
+        // recorded, which matches the runner's liveness-quiet
+        // classification).
+        await CloseGenericSessionOnTimeoutAsync();
+    }
+
+    private async Task CloseGenericSessionOnTimeoutAsync()
+    {
+        var sessionId = _input?.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        try
+        {
+            var grain = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
+            var payload = JSON.Serialize(new Dictionary<string, object?>
+            {
+                ["status"] = "failed",
+                ["exitCode"] = (int?)null,
+                ["failureCategory"] = AgentJobFailureReasons.ReportTimeout,
+                ["reason"] = $"agent-job-timeout ({Key})",
+                ["recordedAt"] = DateTime.UtcNow.ToString("o"),
+            });
+            await grain.AppendRuntimeEventsAsync(
+                new AppendAgentSessionRuntimeEventsCommand(
+                    new[] { new AgentSessionRuntimeEventInput("session.closed", payload) }));
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentJob {Id} failed to close generic session {SessionId} on timeout",
+                Key, sessionId);
+        }
     }
 
     private bool DispatchRetryBoundExceeded()

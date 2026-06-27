@@ -284,3 +284,120 @@ section first).
   prefix. The cache-hits-test in the
   `session-strategies-reuse.spec.ts` continues to work because
   the lookup and the pre-seeded entry both use the prefixed form.
+
+## T-003 — Server: launch generic AgentSession from an Agent profile
+
+### Findings
+
+- `AgentSessionLaunchRoutes.cs` (`packages/server/src/Mohist.Server/Api/`)
+  is the product launch endpoint. Route group:
+  `POST /api/projects/{projectRef}/agents/{agentRef}/sessions` with
+  `ProjectResolutionEndpointFilter` applied so the resolved project is
+  available via `HttpContext.GetResolvedProject()`. Distinct from the
+  validation-only `AgentJobController.ValidatePath` (`/api/agent-jobs/validate`).
+- Flow:
+  1. Reject empty/whitespace prompt with 400 (`prompt_required`) **before**
+     resolving the Agent — this ordering means an empty-prompt 400 carries
+     no side effects (no grain activation, no session creation).
+  2. Resolve Agent via `AgentQuerier`: by id (when ref starts with
+     `agent_`), else by name, else by id as a final fallback so callers
+     can pass either id or friendly name on the URL.
+  3. On unknown agent, return 404 **before** minting a session.
+  4. Mint `sessionId = sessions.NewSessionId()` (Guid.NewGuid().ToString("N")).
+  5. Open the session via `IAgentSessionGrain.OpenAsync` with empty
+     `RunnerId` (runner will stamp it on its first open call) and
+     metadata built by `GenericAgentSessionMetadata.Metadata(...)`.
+  6. Submit the `AgentJobGrain` with the Agent snapshot fields
+     (`AgentId`, `AgentInstructions`, `AgentConfig`) plus the minted
+     `AgentSessionId`. `T-001`'s `ComposePromptWithEntry` then renders
+     `with.prompt` as a structured `agent-launch` object so the runner
+     sees the composed bytes.
+  7. Return 201 with `{ sessionId, agentId, agentName, status }` where
+     `status = "inactive"` (matches `AgentSessionJsonHelper.StatusName`'s
+     behaviour for a freshly-minted session with no `AgentSessionId` yet).
+- `GenericAgentSessionMetadata` (`packages/server/src/Mohist.Server/Workflow/Services/Sessions/`)
+  centralises the labels:
+  - `source-kind = "agent-launch"` (read by `AgentSessionQuery` via
+    `LabelSourceKind`).
+  - `agent-id`, `agent-name`.
+  - Optional context refs as labels with `mohist.io/agent-launch/{kind}`
+    prefix — explicitly NOT projected into the workflow-shaped lookup
+    keys (`workflow-run-id`, `session-name`), so the session is reachable
+    by `(projectId, sessionId)` alone (no `workflowRunId` lookup key
+    needed).
+- `AgentJobGrain.CloseGenericSessionOnTimeoutAsync` was added (T-003
+  alongside T-001's dispatch envelope widening): on report timeout the
+  grain appends a synthesised `session.closed` runtime event with
+  `failureCategory = "report-timeout"` so the session reaches a terminal
+  state via the existing `AgentSessionGrain.AppendRuntimeEventsAsync`
+  pipeline. `ContextExhaustionClassifier` classifies the synthesised
+  event as `probe_timeout` / `context_exhaustion_suspected` (no usage
+  recorded), which matches the runner's liveness-quiet classification.
+  No-op for raw-prompt-only AgentJobs (`_input.AgentSessionId` is null).
+- `AgentSessionGrain.OpenAsync` was taught to stamp the `RunnerId` from
+  the runner's open call exactly once when the launch minted the session
+  with an empty `RunnerId`. Already-bound `RunnerId` is left untouched so
+  workflow sessions remain sticky across reopens (the existing semantics
+  the runner-side retry flow relies on).
+- Tests in
+  `packages/server/tests/Mohist.Server.Tests/Specs/Agent/Api/AgentSessionLaunchRoutesSpecs.cs`:
+  - `Launch_ResolvesAgent_ComposesSnapshot_MintsSession_Returns201_WithIdentityAndStatus`
+    — happy path: 201 shape, agent id/name, status field, session
+    queryable by `(projectId, source-kind=agent-launch)` labels,
+    runner receives a dispatch (AgentJob snapshot shows runnerId + workId).
+  - `Launch_RecordsContextRefs_OnSessionMetadata_AsPromptContextOnly`
+    — context refs (`issueNumber`, `epicNumber`, `repository`,
+    `workspacePath`) land as `mohist.io/agent-launch/{kind}` labels and
+    do NOT project into workflow-shaped keys (`workflowRunId`,
+    `sessionName`).
+  - `Launch_EmptyOrWhitespacePrompt_Returns400_WithoutCreatingSessionOrJob`
+    (Theory: empty / whitespace / tabs+newlines) — 400 with `prompt`
+    in error; pre/post `CountAgentLaunchSessionsAsync` is unchanged.
+  - `Launch_MissingPromptField_Returns400_WithoutCreatingSessionOrJob`
+    — same as above for a body that omits `prompt` entirely.
+  - `Launch_UnknownAgent_Returns404_WithoutCreatingSessionOrJob` —
+    random `agent_{guid}` id returns 404; session count unchanged.
+  - `Launch_ResolvesAgentByName_WhenAgentRefIsFriendlyName` — name-based
+    resolution path.
+  - `Launch_IsDistinctFromValidationOnlyAgentJobsRoute` — both routes
+    respond and the launch URL is distinct from `ValidatePath`.
+  - `Launch_AgentJobTimeout_TransitionsGenericSessionToTerminalFailedState`
+    — fixture configures `JobTimeout=8s`; the test waits up to 30s for
+    the AgentJob to reach `Failed` with `FailureReason = "report-timeout"`
+    and verifies the session still carries the launch labels.
+
+### Gotchas
+
+- **Architecture rule added**: the `Agent → Sessions` domain dependency
+  (AgentJobGrain calls `IAgentSessionGrain.AppendRuntimeEventsAsync` on
+  timeout) is intentional and was added to
+  `AllowedDomainDependencies` in
+  `packages/server/tests/Mohist.Server.Tests/Architecture/ArchitectureRules.cs`.
+  The existing rule (`("Agent", "Runner")`) covered T-001; T-003
+  introduces the sessions call.
+- **The launch response status field is hardcoded to `"inactive"`** —
+  matches the `AgentSessionJsonHelper.StatusName` heuristic for a
+  freshly-minted session (no `AgentSessionId`, `LastDataAt == null`).
+  The session transitions to `"active"` once the runner reports its
+  first runtime event. The contract is "initial state at launch",
+  not "live state".
+- **RunnerId binding race**: when the launch opens the session first
+  with an empty RunnerId, the runner's subsequent `open` call sets the
+  RunnerId. `AgentSessionGrain.OpenAsync` is non-reentrant under
+  Orleans, so the two opens serialise; the second open stamps the
+  RunnerId exactly once because the branch checks for empty
+  `Runtime.RunnerId` before overwriting.
+- **Distinct from `AgentJobController.ValidatePath`** is asserted in the
+  spec by hitting both routes in a single test and comparing URL
+  shapes; the launch route also has the side effect of minting a
+  session and dispatching, whereas the validation route round-trips a
+  raw prompt through the engine and returns the terminal result.
+- **`ProjectResolutionEndpointFilter`** is applied to the launch route
+  group (same as the other `/api/projects/{projectRef}/...` routes) so
+  unknown project refs return the standard 404 from the filter instead
+  of a downstream lookup miss.
+- **The launch route calls `sessions.NewSessionId()` rather than going
+  through `Sessions.NewSessionId()` on the AgentSessionGrain** because
+  the id is needed up front to populate the AgentJob's
+  `AgentSessionId` snapshot before submission; the runner's dispatch
+  envelope then carries this id verbatim (T-001 / D2 / D4).
