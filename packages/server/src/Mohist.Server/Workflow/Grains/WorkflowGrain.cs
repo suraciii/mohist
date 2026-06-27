@@ -211,6 +211,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
 
         await ReleaseCurrentStageLocksAsync("retried");
+        _dispatchedWorkId = null;
+        _dispatchedWorkStartedAt = null;
+        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
@@ -220,6 +223,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         await ReleaseCurrentStageLocksAsync("rerun");
+        _dispatchedWorkId = null;
+        _dispatchedWorkStartedAt = null;
+        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         var events = _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
