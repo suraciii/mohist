@@ -119,8 +119,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task CheckWorkTimeoutsAsync()
     {
-        await RemoveStaleWorkflowWorksAsync();
-
         var timeout = _workflowOptions.WorkCompletionTimeout;
         if (timeout <= TimeSpan.Zero)
             return;
@@ -604,16 +602,14 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task NotifyTrackedWorkflowRunnersLostAsync()
     {
-        await RemoveStaleWorkflowWorksAsync();
-
-        var workflowWorks = GetWorks()
-            .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.Status == RunnerWorkStatus.Running)
+        var activeWorks = GetWorks()
+            .Where(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running)
             .ToList();
 
-        if (workflowWorks.Count == 0) return;
+        if (activeWorks.Count == 0) return;
 
         var synthesizedFailure = new WorkResult("failed", "runner-lost");
-        foreach (var entry in workflowWorks)
+        foreach (var entry in activeWorks)
         {
             try
             {
@@ -625,8 +621,9 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             catch (Exception ex)
             {
                 _log.LogWarning(ex,
-                    "Runner {RunnerId} failed to synthesize failed report for workflow {WorkflowRunId} work {WorkId}",
+                    "Runner {RunnerId} failed to synthesize failed report for {OwnerKind} {OwnerId} work {WorkId}",
                     RunnerId,
+                    entry.OwnerKind,
                     entry.OwnerId,
                     entry.WorkId);
             }
