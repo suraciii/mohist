@@ -55,11 +55,11 @@ internal static class MohistCliCommands
         return (project, projectId);
     }
 
-    internal static Option<string> OutputOption() =>
+    internal static Option<string> OutputOption(string defaultValue = "json") =>
         new("--output", "-o")
         {
             Description = "Output format (table, json)",
-            DefaultValueFactory = _ => "json",
+            DefaultValueFactory = _ => defaultValue,
         };
 
     internal const string NoActiveProjectMessage =

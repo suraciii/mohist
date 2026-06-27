@@ -105,6 +105,15 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.WorkflowProfilePreview:
                 RenderWorkflowProfilePreview(data);
                 break;
+            case MohistCliApi.TableShape.SessionMetadata:
+                RenderSessionMetadata(data);
+                break;
+            case MohistCliApi.TableShape.SessionTranscriptSummary:
+                RenderSessionTranscriptSummary(data);
+                break;
+            case MohistCliApi.TableShape.SessionRecovery:
+                RenderSessionRecovery(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;
