@@ -933,15 +933,15 @@ public class MohistLocalWorkflowProfileSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void DefaultWorkflowDefinition_AiReviewFailsOnReviewFailAndRecoversWithRetrySelf()
+    public void DefaultWorkflowDefinition_AiReviewRecoversOnFailPromiseWithRetrySelf()
     {
-        // Review failure is modeled on the ai-review task itself, not on
-        // a review-passed check: the task declares failIf: FAIL so the
-        // runner fails the task on a FAIL verdict, then with.recovery
-        // runs the recover:fix-review-findings (auto-fix) recovery task
-        // and retries ai-review (re-review) via retrySelf: true. There is
-        // no review-passed check; the check stage carries only health and
-        // merge-ready.
+        // The ai-review task declares an expect marker that accepts either
+        // PASS or FAIL. When the agent produces a FAIL review, the runner
+        // reports the task as completed with output.promise: FAIL, and
+        // recovery.handlers matches when: promise=FAIL to trigger the
+        // recover:fix-review-findings (auto-fix) recovery task and retries
+        // ai-review (re-review) via retrySelf: true. The check stage
+        // carries only health and merge-ready checks, no review-passed.
         var definition = MohistWorkflow.Definition;
         var check = definition.Stages[2];
         Assert.DoesNotContain(check.Checks, c => c.Name == "review-passed");
@@ -951,7 +951,8 @@ public class MohistLocalWorkflowProfileSpecs
         var expectElement = JsonSerializer.SerializeToElement(aiReview.With!["expect"]);
         Assert.True(expectElement.TryGetProperty("markers", out var markers));
         var firstMarker = markers[0];
-        Assert.Equal("<promise>FAIL</promise>", firstMarker.GetProperty("failIf").GetString());
+        Assert.True(firstMarker.TryGetProperty("oneOf", out var oneOf));
+        Assert.Contains("<promise>FAIL</promise>", oneOf.EnumerateArray().Select(e => e.GetString()));
 
         Assert.NotNull(aiReview.Recovery);
         var recovery = aiReview.Recovery!;

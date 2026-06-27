@@ -5,7 +5,6 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Artifacts;
 using Mohist.Server.Workflow.Domain.Definition;
-using Mohist.Server.Workflow.Services.Prompts;
 
 namespace Mohist.Server.Workflow.Services.Artifacts;
 
@@ -35,18 +34,15 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<WorkflowArtifactBindService> _log;
     private readonly TimeProvider _time;
-    private readonly PromptTemplateEngine _templateEngine;
 
     public WorkflowArtifactBindService(
         IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<WorkflowArtifactBindService> log,
-        TimeProvider time,
-        PromptTemplateEngine templateEngine)
+        TimeProvider time)
     {
         _dbFactory = dbFactory;
         _log = log;
         _time = time;
-        _templateEngine = templateEngine;
     }
 
     public async Task<WorkflowArtifactBindResult> BindAsync(
@@ -61,15 +57,7 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
         CancellationToken cancellationToken = default)
     {
         if (artifactUploadIds is null || artifactUploadIds.Length == 0)
-        {
-            if (declaredArtifacts is not null && !declaredArtifacts.IsEmpty)
-            {
-                return new WorkflowArtifactBindResult(
-                    [],
-                    "Task has declared artifacts but no upload ids were provided");
-            }
             return new WorkflowArtifactBindResult([]);
-        }
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
@@ -94,49 +82,6 @@ public sealed class WorkflowArtifactBindService : IWorkflowArtifactBindService
             return new WorkflowArtifactBindResult(
                 [],
                 $"Upload ids {string.Join(", ", foreignIds)} do not belong to workflow run {workflowRunId} and work item {workId}");
-        }
-
-        if (declaredArtifacts is not null && !declaredArtifacts.IsEmpty)
-        {
-            // The runner renders declared artifact `path` strings against
-            // the workflow variables before upload, so the upload
-            // records the resolved workspace path. The declared
-            // declaration still carries the unrendered template form
-            // (e.g. `${{ openspecChangeDir }}/review.md`). Render the
-            // declared paths with the same variables so both sides
-            // agree on the comparison key.
-            var uploadedPaths = pendingUploads.Select(p => p.Path).ToHashSet(StringComparer.Ordinal);
-            var missingPaths = new List<string>();
-            foreach (var declaredFile in declaredArtifacts.Files)
-            {
-                var declaredPath = declaredFile.Path ?? string.Empty;
-                var comparisonPath = declaredPath;
-                if (variables.HasValue
-                    && !string.IsNullOrEmpty(declaredPath)
-                    && declaredPath.Contains('$'))
-                {
-                    var (rendered, missing, _) = _templateEngine.Render(declaredPath, variables.Value);
-                    if (missing.Count > 0)
-                    {
-                        return new WorkflowArtifactBindResult(
-                            [],
-                            $"Declared artifact path '{declaredPath}' references undefined variable(s): {string.Join(", ", missing.Select(m => "'${{ " + m + " }}'"))}");
-                    }
-                    comparisonPath = rendered;
-                }
-
-                if (!uploadedPaths.Contains(comparisonPath))
-                {
-                    missingPaths.Add(declaredPath);
-                }
-            }
-
-            if (missingPaths.Count > 0)
-            {
-                return new WorkflowArtifactBindResult(
-                    [],
-                    $"Required declared artifacts missing: {string.Join(", ", missingPaths)}");
-            }
         }
 
         var now = _time.GetUtcNow();

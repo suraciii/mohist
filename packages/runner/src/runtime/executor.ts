@@ -137,9 +137,9 @@ export class WorkExecutor {
       }
       const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir })
       const normalized = normalize(work, result)
+      const recoveryResult = tryRecovery(work, normalized)
+      if (recoveryResult) return recoveryResult
       if (normalized.status !== "completed") {
-        const recoveryResult = tryRecovery(work, normalized)
-        if (recoveryResult) return recoveryResult
         return attachBranchStabilityEvidence(normalized, startCheck.evidence)
       }
       const endCheck = await this.checkBranchStability(work, workDir, expectedBranch, "end", signal)

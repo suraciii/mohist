@@ -240,7 +240,6 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(expect);
         var markers = GetList(expect!, "markers");
         var marker = Assert.Single(markers!.Select(NormalizeToMap));
-        Assert.Equal("<promise>FAIL</promise>", marker["failIf"]?.ToString());
         var oneOfTexts = ExtractOneOfTexts(marker);
         Assert.Contains("<promise>PASS</promise>", oneOfTexts);
         Assert.Contains("<promise>FAIL</promise>", oneOfTexts);
@@ -319,7 +318,9 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.NotNull(expect);
         var markers = GetList(expect!, "markers");
         var marker = Assert.Single(markers!.Select(NormalizeToMap));
-        Assert.Equal("<promise>FAIL</promise>", marker["failIf"]?.ToString());
+        var oneOfTexts = ExtractOneOfTexts(marker);
+        Assert.Contains("<promise>PASS</promise>", oneOfTexts);
+        Assert.Contains("<promise>FAIL</promise>", oneOfTexts);
         var recovery = aiReview.Recovery;
         Assert.NotNull(recovery);
         var handler = Assert.Single(recovery!.Handlers);

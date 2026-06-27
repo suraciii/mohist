@@ -5,9 +5,11 @@ style: ["极简，只给目标态。"]
 
 # Task Recovery
 
-Task 执行遇到可恢复失败时，runner executor 用 `when` 表达式匹配 action output 字段，匹配 task 顶级 `recovery.handlers`，构造 recovery tasks，server 机械插入。
+Task 执行完成后，runner executor 用 `when` 表达式匹配 action output 字段，匹配 task 顶级 `recovery.handlers`，构造 recovery tasks，server 机械插入。
 
 Recovery 是 task 完成的一部分，不是失败后的补救。Workflow engine 不理解 recovery 语义。
+
+Recovery 匹配与 task 成功/失败状态无关。一个 task 即使执行成功（agent 正常产出预期文件），只要其 output 满足 `when` 条件，就可以触发 recovery。例如 agent 产出了 `<promise>FAIL</promise>` 的 review——task 完成，但需要走自动修复流程。
 
 > 相关：action input/output 契约见 [`actions.md`](actions.md)；dispatch 见 [`task-dispatch.md`](task-dispatch.md)；report 链路见 [`scheduling.md`](scheduling.md)。
 
@@ -95,7 +97,7 @@ when: failureKind=conflict       # output.failureKind == "conflict"
 
 不限定字段名。每个 action 用自己的字段（`errorCode`、`failureKind`、`promise` 等），workflow YAML 的 `when` 表达式用对应字段。action 不感知 recovery，不设特殊字段。
 
-marker 驱动的失败（如 `failIf: <promise>FAIL</promise>`）不需要中介：acp-agent 的 output 天然包含 `promise` 字段，`when: promise=FAIL` 直接匹配。
+Recovery 匹配只看 output 字段，不关心 task 是通过还是失败。`expect.failIf` 不是触发 recovery 的前提——`when: promise=FAIL` 直接匹配 output.promise 字段即可。`failIf` 的唯一作用是让 action 提前退出（不进入 expect 的修复循环），与 recovery 无关。
 
 ## WorkResult 扩展
 
@@ -157,28 +159,29 @@ Engine 不需要理解 `addTasks` 里 task 的 `uses`、`with` 等内容。插�
 ```
 result = action.execute()
 
+output = parseJSON(result.output)
+
+// Recovery matching is independent of task status.
+// A successful task with a non-PASS verdict (e.g. promise=FAIL)
+// still triggers recovery through its output field.
+handler = recovery.handlers.find(h => matchesWhen(h.when, output))
+
+if handler:
+    budget = recovery.budget ?? 0
+    if budget <= 0:
+        // Budget exhausted — task still completed, just no more retries.
+        return completed
+
+    addTasks = handler.tasks
+    if handler.retrySelf:
+        addTasks += constructRetrySelf(task, budget - 1)
+
+    return completed + addTasks
+
 if result.success:
     return completed
 
-output = parseJSON(result.output)
-if !output:
-    return failed
-
-handler = recovery.handlers.find(h => matchesWhen(h.when, output))
-if !handler:
-    return failed
-
-budget = recovery.budget ?? 0
-if budget <= 0:
-    return failed
-
-# addTasks 从 handler 构造（engine dispatch 时 with 已展开，直接取值）
-addTasks = handler.tasks
-
-if handler.retrySelf:
-    addTasks += constructRetrySelf(task, budget - 1)
-
-return completed + addTasks
+return failed
 ```
 
 `retrySelf: true` 是 runner 的模板快捷方式：构造一个和原 task 相同 `uses`、相同 `with` 但 `recovery.budget - 1` 的 task（`recovery` 是顶级属性，递减不侵入 `with`）。用户不需要手写 retry task。
@@ -258,7 +261,7 @@ Recovery budget 的读取、检查、递减全部在 runner 侧完成。
         retrySelf: true
 ```
 
-`mohist/local` 的 ai-review task：
+`mohist/local` 的 ai-review task（`expect.failIf` 仅用于跳过修复循环，不参与 recovery 匹配）：
 
 ```yaml
 - id: ai-review
@@ -266,6 +269,12 @@ Recovery budget 的读取、检查、递减全部在 runner 侧完成。
   with:
     prompt: ${{ prompts.review }}
     agent: ${{ vars.agent }}
+  expect:
+    markers:
+      - path: ${{ openspecChangeDir }}/review.md
+        oneOf:
+          - <promise>PASS</promise>
+          - <promise>FAIL</promise>
   recovery:
     budget: 2
     handlers:
@@ -277,4 +286,7 @@ Recovery budget 的读取、检查、递减全部在 runner 侧完成。
               prompt: ${{ prompts.auto-fix }}
               agent: ${{ vars.agent }}
         retrySelf: true
+```
+
+流程：agent 产出 `<promise>FAIL</promise>` → `oneOf` 匹配 → action 返回 `promise: "FAIL"` → `tryRecovery` 匹配 `when: promise=FAIL` → 插入 recovery tasks + retrySelf。
 ```
