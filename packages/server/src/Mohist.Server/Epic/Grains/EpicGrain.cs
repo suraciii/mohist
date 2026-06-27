@@ -239,8 +239,8 @@ public class EpicGrain : Grain, IEpicGrain
         {
             case "done":
             {
-                var undelivered = await ComputeUndeliveredLinkedNumbersAsync(db, projectId, links);
-                domain.MarkDone(undelivered, now.UtcDateTime);
+                var open = await ComputeOpenLinkedNumbersAsync(db, projectId, links);
+                domain.MarkDone(open, now.UtcDateTime);
                 break;
             }
             case "closed":
@@ -331,12 +331,12 @@ public class EpicGrain : Grain, IEpicGrain
         if (row.Status == EpicStatusName.Paused)
             return ToDto(row);
 
-        var undelivered = await ComputeUndeliveredLinkedNumbersAsync(db, projectId, links);
-        if (undelivered.Count == 0)
+        var open = await ComputeOpenLinkedNumbersAsync(db, projectId, links);
+        if (open.Count == 0)
         {
             var domain = Materialize(row, links);
             var now = DateTimeOffset.UtcNow;
-            domain.MarkDone(undelivered, now.UtcDateTime);
+            domain.MarkDone(open, now.UtcDateTime);
             MapToRow(domain, row, now);
             ApplyPendingEvents(db, domain, projectId, epicId);
             await db.SaveChangesAsync();
@@ -375,11 +375,11 @@ public class EpicGrain : Grain, IEpicGrain
         if (linked.Any(i => i.Status == "in_progress"))
             return ToDto(row);
 
-        var undelivered = linked
-            .Where(i => !EpicProgress.IsCompleted(i) && i.Status != "cancelled")
+        var open = linked
+            .Where(EpicProgress.IsOpen)
             .ToList();
 
-        var next = EpicProgress.SelectStartableNext(undelivered);
+        var next = EpicProgress.SelectStartableNext(open);
         if (next is null)
         {
             // Running-but-idle: nothing currently startable. The read
@@ -414,13 +414,13 @@ public class EpicGrain : Grain, IEpicGrain
         var links = await db.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
             .ToListAsync();
-        var undelivered = await ComputeUndeliveredLinkedNumbersAsync(db, projectId, links);
-        if (undelivered.Count > 0)
+        var open = await ComputeOpenLinkedNumbersAsync(db, projectId, links);
+        if (open.Count > 0)
             return ToDto(row);
 
         var domain = Materialize(row, links);
         var now = DateTimeOffset.UtcNow;
-        domain.MarkDone(undelivered, now.UtcDateTime);
+        domain.MarkDone(open, now.UtcDateTime);
         MapToRow(domain, row, now);
         ApplyPendingEvents(db, domain, projectId, epicId);
         await db.SaveChangesAsync();
@@ -428,18 +428,18 @@ public class EpicGrain : Grain, IEpicGrain
         return ToDto(row);
     }
 
-    private async Task<HashSet<int>> ComputeUndeliveredLinkedNumbersAsync(
+    private async Task<HashSet<int>> ComputeOpenLinkedNumbersAsync(
         MohistDbContext db, string projectId, IReadOnlyList<EpicIssueRow> links)
     {
         if (links.Count == 0) return new HashSet<int>();
         var linked = await BuildLinkedIssueDtosAsync(db, projectId, links);
-        var undelivered = new HashSet<int>();
+        var open = new HashSet<int>();
         foreach (var dto in linked)
         {
-            if (!EpicProgress.IsCompleted(dto))
-                undelivered.Add(dto.Number);
+            if (EpicProgress.IsOpen(dto))
+                open.Add(dto.Number);
         }
-        return undelivered;
+        return open;
     }
 
     private static async Task<List<LinkedIssueDto>> BuildLinkedIssueDtosAsync(MohistDbContext db, string projectId, IReadOnlyList<EpicIssueRow> links)

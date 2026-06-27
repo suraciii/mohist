@@ -128,7 +128,7 @@ public static class EpicRoutes
         }
         catch (EpicNotReadyToMarkDoneException ex)
         {
-            return ApiResults.Conflict(ex.Message, "EPIC_NOT_READY_TO_MARK_DONE", new { undeliveredCount = ex.UndeliveredCount });
+            return ApiResults.Conflict(ex.Message, "EPIC_NOT_READY_TO_MARK_DONE", new { openCount = ex.OpenLinkedCount });
         }
         catch (EpicAlreadyTerminalException ex)
         {
