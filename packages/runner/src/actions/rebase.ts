@@ -251,7 +251,7 @@ function rebaseOutput(
     rebased,
     conflicts,
     resolveAttempts,
-    failureKind,
+    errorCode: failureKind,
     rebaseLeftInProgress,
     output: gitOutput,
   })

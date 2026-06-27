@@ -275,7 +275,7 @@ stages:
                   recovery:
                     budget: 2
                     handlers:
-                      - when: failureKind=conflict
+                      - when: errorCode=conflict
                         tasks:
                           - id: recover:resolve-rebase-conflicts
                             title: Resolve rebase conflicts

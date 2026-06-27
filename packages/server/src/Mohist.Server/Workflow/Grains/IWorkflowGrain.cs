@@ -60,7 +60,8 @@ public sealed record RuntimeTaskInput(
     [property: Id(2)] string? Uses = null,
     [property: Id(3)] JsonElement? With = null,
     [property: Id(4)] string? Stage = null,
-    [property: Id(5)] bool InvalidateChecks = false);
+    [property: Id(5)] bool InvalidateChecks = false,
+    [property: Id(6)] RecoveryDefinition? Recovery = null);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskAddedResult(

@@ -7,6 +7,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using YamlDotNet.Core;
@@ -102,6 +103,7 @@ public static partial class IssueRoutes
                 ["gitUrl"] = repository.GitUrl,
                 ["baseBranch"] = repository.BaseBranch,
             },
+            ["recovery"] = DefaultRebaseRecoveryConfig(baseBranch),
         };
 
         if (conflictResolver?.With is not null || conflictResolver?.Uses is not null)
@@ -122,6 +124,66 @@ public static partial class IssueRoutes
         }
 
         return JsonSerializer.SerializeToElement(with, JSON.Options);
+    }
+
+    private static Dictionary<string, object?> DefaultRebaseRecoveryConfig(string baseBranch)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["budget"] = 2,
+            ["handlers"] = new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["when"] = "failureKind=conflict",
+                    ["tasks"] = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["id"] = "recover:resolve-rebase-conflicts",
+                            ["title"] = "Resolve rebase conflicts",
+                            ["uses"] = "mohist/acp-agent",
+                            ["with"] = new Dictionary<string, object?>
+                            {
+                                ["session"] = "check",
+                                ["prompt"] = $"Resolve git rebase conflicts against {baseBranch}. Resolve conflicts, stage resolved files, and continue the rebase until it completes.",
+                                ["agent"] = new Dictionary<string, object?>
+                                {
+                                    ["type"] = "opencode",
+                                },
+                            },
+                        },
+                    },
+                    ["retrySelf"] = true,
+                },
+            },
+        };
+    }
+
+    internal static RecoveryDefinition BuildRebaseRecovery(string baseBranch)
+    {
+        var with = new Dictionary<string, JsonElement?>
+        {
+            ["session"] = JsonSerializer.SerializeToElement("check"),
+            ["prompt"] = JsonSerializer.SerializeToElement($"Resolve git rebase conflicts against {baseBranch}. Resolve conflicts, stage resolved files, and continue the rebase until it completes."),
+            ["agent"] = JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["type"] = "opencode" }),
+        };
+        return new RecoveryDefinition(
+            Budget: 2,
+            Handlers:
+            [
+                new RecoveryHandlerDefinition(
+                    When: "errorCode=conflict",
+                    Tasks:
+                    [
+                        new TaskDefinition(
+                            "recover:resolve-rebase-conflicts",
+                            "Resolve rebase conflicts",
+                            Uses: "mohist/acp-agent",
+                            With: with),
+                    ],
+                    RetrySelf: true),
+            ]);
     }
 
     internal static async Task<IssueWorkflowProfileResponse?> BuildIssueWorkflowProfileResponseAsync(
