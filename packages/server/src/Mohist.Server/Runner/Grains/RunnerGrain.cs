@@ -148,6 +148,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task<int> ActiveWorkflowCountAsync()
     {
+        await RemoveStaleWorkflowWorksAsync();
+
         var persistedCount = GetWorks()
             .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.Status == RunnerWorkStatus.Running)
             .Select(w => w.OwnerId)
@@ -229,7 +231,16 @@ public class RunnerGrain : Grain, IRunnerGrain
         }
 
         if (trackedEntry is null)
+        {
+            if (tracked)
+            {
+                TryRemoveWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
+                await PersistAsync();
+                return new RunnerWorkReportResult(workflowRunId, null, true, "stale-work", WorkDispatchOwnerKinds.Workflow, workflowRunId);
+            }
+
             return new RunnerWorkReportResult(workflowRunId, null, false, "untracked", WorkDispatchOwnerKinds.Workflow, workflowRunId);
+        }
 
         var outcome = await _translator.TranslateResultAsync(trackedEntry.Item, result, workflowRunId, run);
 
@@ -346,6 +357,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
+        await RemoveStaleWorkflowWorksAsync();
+
         var activeWorks = GetWorks()
             .Select(ProjectActiveWorkFromRunerWork)
             .ToList();
@@ -434,6 +447,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task NotifyTrackedWorkflowRunnersLostAsync()
     {
+        await RemoveStaleWorkflowWorksAsync();
+
         var workflowWorks = GetWorks()
             .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.Status == RunnerWorkStatus.Running)
             .ToList();
@@ -470,6 +485,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task<WorkDispatch?> PollAssignedOrAssignableWorkflowAsync()
     {
+        await RemoveStaleWorkflowWorksAsync();
+
         foreach (var workflowRunId in await _workflowRuns.FindAssignedToAsync(RunnerId))
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
@@ -561,6 +578,35 @@ public class RunnerGrain : Grain, IRunnerGrain
 
             return pendingWork.DispatchSnapshot!;
         }
+    }
+
+    private async Task RemoveStaleWorkflowWorksAsync()
+    {
+        var stale = new List<RunnerWork>();
+        foreach (var work in GetWorks()
+            .Where(w => w.OwnerKind == WorkDispatchOwnerKinds.Workflow && w.Status == RunnerWorkStatus.Running)
+            .ToList())
+        {
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(work.OwnerId);
+            var active = await workflow.GetActiveWorkAsync(work.WorkId);
+            if (active is null || !string.Equals(active.WorkId, work.WorkId, StringComparison.Ordinal))
+                stale.Add(work);
+        }
+
+        if (stale.Count == 0)
+            return;
+
+        foreach (var work in stale)
+        {
+            TryRemoveWork(work.WorkId, work.OwnerKind, work.OwnerId);
+            _log.LogInformation(
+                "Runner {RunnerId} removed stale workflow work {WorkId} for {WorkflowRunId}",
+                RunnerId,
+                work.WorkId,
+                work.OwnerId);
+        }
+
+        await PersistAsync();
     }
 
     // ── Persisted works helpers ───────────────────────────────────────────
