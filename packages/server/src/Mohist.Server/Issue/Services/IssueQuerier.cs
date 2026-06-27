@@ -371,8 +371,8 @@ public class IssueQuerier : IScopedService
         var windowTo = now;
 
         // Resolve the project's issue set from the indexed Issues table,
-        // then load each issue's workflow-run state so the projection that
-        // selects "the approval for an issue" is reused verbatim.
+        // then load each issue's workflow-run state so approval projection
+        // semantics stay shared with the read model.
         var rows = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId)
             .ToListAsync();
@@ -382,25 +382,28 @@ public class IssueQuerier : IScopedService
             .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
             .ToList();
 
-        ApplyWorkflowProjections(issues, await LoadWorkflowStatesAsync(db, issues));
+        var workflows = await LoadWorkflowStatesAsync(db, issues);
 
         var samples = new List<double>(issues.Count);
         foreach (var issue in issues)
         {
-            var approval = issue.StageApproval;
-            if (approval is null) continue;
-            if (!approval.RespondedAt.HasValue) continue;
-            if (!string.Equals(approval.Status, "approved", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(approval.Status, "rejected", StringComparison.OrdinalIgnoreCase))
+            if (issue.WorkflowRunId is null || !workflows.TryGetValue(issue.WorkflowRunId, out var workflow)) continue;
+
+            foreach (var approval in MohistDefaultWorkflowProjection.StageApprovals(workflow))
             {
-                continue;
+                if (!approval.RespondedAt.HasValue) continue;
+                if (!string.Equals(approval.Status, "approved", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(approval.Status, "rejected", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var respondedAt = new DateTimeOffset(approval.RespondedAt.Value.ToUniversalTime(), TimeSpan.Zero);
+                if (respondedAt < windowFrom || respondedAt > windowTo) continue;
+
+                var waitSeconds = (approval.RespondedAt.Value - approval.RequestedAt).TotalSeconds;
+                samples.Add(waitSeconds);
             }
-
-            var respondedAt = new DateTimeOffset(approval.RespondedAt.Value.ToUniversalTime(), TimeSpan.Zero);
-            if (respondedAt < windowFrom || respondedAt > windowTo) continue;
-
-            var waitSeconds = (approval.RespondedAt.Value - approval.RequestedAt).TotalSeconds;
-            samples.Add(waitSeconds);
         }
 
         if (samples.Count == 0)

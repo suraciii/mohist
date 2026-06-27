@@ -1146,6 +1146,40 @@ public class IssueQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task GetApprovalWaitAsync_MultipleCompletedApprovalStagesInOneRun_CountsEachGate()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-approval-multi-{Guid.NewGuid():N}", Name = "Approval Multi Project" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var planWait = TimeSpan.FromHours(1);
+        var checkWait = TimeSpan.FromHours(4);
+
+        SeedIssue(db, project, "issue_aw_multi_1", workflowRunId: "wr_aw_multi_1");
+        await db.SaveChangesAsync();
+        await SeedWorkflowRunAsync(
+            db,
+            "wr_aw_multi_1",
+            MultiApprovalRunState(
+                "wr_aw_multi_1",
+                planRequestedAt: now.AddDays(-2),
+                planWait,
+                checkRequestedAt: now.AddDays(-1),
+                checkWait));
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetApprovalWaitAsync(project.Id, now);
+
+        var expectedAverage = (planWait.TotalSeconds + checkWait.TotalSeconds) / 2;
+        Assert.Equal(2, result.SampleCount);
+        Assert.Equal(expectedAverage, result.AverageSeconds);
+        Assert.Equal(expectedAverage, result.MedianSeconds);
+        Assert.Equal(checkWait.TotalSeconds, result.MaxSeconds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task GetApprovalWaitAsync_ZeroSamples_ReturnsEmptyResultWithNullStats()
     {
         using var scope = _fixture.Services.CreateScope();
@@ -1291,6 +1325,69 @@ public class IssueQuerierSpecs
 
     private static object AwaitingApprovalRunState(string workflowRunId, DateTimeOffset requestedAt) =>
         RunState(workflowRunId, requestedAt, null, null);
+
+    private static object MultiApprovalRunState(
+        string workflowRunId,
+        DateTimeOffset planRequestedAt,
+        TimeSpan planWait,
+        DateTimeOffset checkRequestedAt,
+        TimeSpan checkWait)
+    {
+        const string planStage = "plan";
+        const string checkStage = "check";
+        return new
+        {
+            Id = workflowRunId,
+            Metadata = new { CreatedAt = planRequestedAt.AddMinutes(-5), Name = "test" },
+            Status = "Completed",
+            CurrentStageId = checkStage,
+            Stages = new[]
+            {
+                new
+                {
+                    Id = planStage,
+                    Attempt = 1,
+                    RequiresApproval = true,
+                    Status = "Completed",
+                    Tasks = new[]
+                    {
+                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/acp-agent" },
+                    },
+                    Checks = new[]
+                    {
+                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                    },
+                    ApprovalStatus = new
+                    {
+                        Result = "approved",
+                        RequestedAt = planRequestedAt.ToString("O"),
+                        RespondedAt = (planRequestedAt + planWait).ToString("O"),
+                    },
+                },
+                new
+                {
+                    Id = checkStage,
+                    Attempt = 1,
+                    RequiresApproval = true,
+                    Status = "Completed",
+                    Tasks = new[]
+                    {
+                        new { Id = "review", DefinitionId = "review", Attempt = 1, Title = "Check review", Status = "Completed", Uses = "mohist/acp-agent" },
+                    },
+                    Checks = new[]
+                    {
+                        new { Name = "check-ok", Title = "Check ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                    },
+                    ApprovalStatus = new
+                    {
+                        Result = "approved",
+                        RequestedAt = checkRequestedAt.ToString("O"),
+                        RespondedAt = (checkRequestedAt + checkWait).ToString("O"),
+                    },
+                }
+            }
+        };
+    }
 
     private static object RunState(string workflowRunId, DateTimeOffset requestedAt, DateTimeOffset? respondedAt, string? result)
     {
