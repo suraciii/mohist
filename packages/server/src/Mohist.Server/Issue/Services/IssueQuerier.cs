@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -22,6 +24,14 @@ public class IssueQuerier : IScopedService
 {
     private const string WorkStartedType = "com.mohist.issue.work-started";
     private static readonly string[] QualityStageOrder = ["plan", "build", "check", "integrate"];
+    private static readonly string[] QualityWorkflowEventTypes =
+    [
+        EventCatalog.ReverseDns.StageStarted,
+        EventCatalog.ReverseDns.CheckPassed,
+        EventCatalog.ReverseDns.CheckFailed,
+        EventCatalog.ReverseDns.CheckPending,
+        EventCatalog.ReverseDns.RepairScheduled,
+    ];
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
@@ -392,8 +402,8 @@ public class IssueQuerier : IScopedService
     /// whose status is <see cref="IssueStatus.Done"/> participate. Window
     /// membership is anchored on the <c>com.mohist.issue.work-completed</c>
     /// event time, matching <see cref="GetCompletionBucketsAsync"/>. Rates
-    /// are computed from the existing per-check <see cref="StageCheck.RepairCount"/>
-    /// on raw workflow runs; no new data collection is introduced.
+    /// are computed from existing workflow-run state and durable check events;
+    /// no new data collection is introduced.
     /// </summary>
     public async Task<QualityMetricsResult> GetQualityAsync(
         string projectId,
@@ -408,7 +418,8 @@ public class IssueQuerier : IScopedService
 
         // Load the project's issues and their workflow runs. We need the
         // raw WorkflowRun (not the projected view) because RepairCount is
-        // dropped by WorkflowStatusMapper.
+        // dropped by WorkflowStatusMapper. WorkflowRunEvents provide the
+        // durable history that mutable stage snapshots lose on rerun/retry.
         var rows = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId)
             .ToListAsync();
@@ -466,7 +477,9 @@ public class IssueQuerier : IScopedService
                 ids.Add(issue.WorkflowRunId);
         }
 
-        var runs = await LoadWorkflowRunsAsync(db, runIdsByIssue.Values.SelectMany(ids => ids));
+        var allRunIds = runIdsByIssue.Values.SelectMany(ids => ids).ToArray();
+        var runs = await LoadWorkflowRunsAsync(db, allRunIds);
+        var eventFactsByRun = await LoadWorkflowRunEventFactsAsync(db, allRunIds);
 
         // Single-pass classification and bucketing.
         var window7d = new QualityAccumulator();
@@ -479,20 +492,29 @@ public class IssueQuerier : IScopedService
 
             if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
 
+            var distinctRunIds = issueRunIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
             var lifecycleRuns = new List<WorkflowRun>();
             var hasUnknownRun = false;
-            foreach (var runId in issueRunIds
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.Ordinal))
+            foreach (var runId in distinctRunIds)
             {
                 if (runs.TryGetValue(runId, out var run))
                     lifecycleRuns.Add(run);
                 else
                     hasUnknownRun = true;
             }
+
+            var lifecycleEvents = distinctRunIds
+                .Where(eventFactsByRun.ContainsKey)
+                .SelectMany(runId => eventFactsByRun[runId])
+                .ToList();
+
             var (isFirstTimeRight, stageRework) = lifecycleRuns.Count == 0 || hasUnknownRun
                 ? (false, new Dictionary<string, bool>(StringComparer.Ordinal))
-                : ClassifyRuns(lifecycleRuns);
+                : ClassifyRuns(lifecycleRuns, lifecycleEvents);
 
             if (shipTime >= window7dFrom && shipTime <= window7dTo)
                 Accumulate(window7d, isFirstTimeRight, stageRework);
@@ -506,10 +528,13 @@ public class IssueQuerier : IScopedService
             BuildWindow(window30dFrom, window30dTo, window30d));
     }
 
-    private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRuns(IReadOnlyCollection<WorkflowRun> runs)
+    private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRuns(
+        IReadOnlyCollection<WorkflowRun> runs,
+        IReadOnlyCollection<WorkflowRunEventFact> events)
     {
         var isFirstTimeRight = true;
         var stageRework = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var checkEventCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var run in runs)
         {
@@ -531,8 +556,45 @@ public class IssueQuerier : IScopedService
             }
         }
 
+        foreach (var fact in events.OrderBy(e => e.RunId, StringComparer.Ordinal).ThenBy(e => e.Sequence))
+        {
+            if (string.IsNullOrWhiteSpace(fact.Stage)) continue;
+
+            stageRework.TryAdd(fact.Stage, false);
+
+            if (string.Equals(fact.Type, EventCatalog.ReverseDns.RepairScheduled, StringComparison.Ordinal))
+            {
+                stageRework[fact.Stage] = true;
+                isFirstTimeRight = false;
+                continue;
+            }
+
+            if (!IsCheckRunEvent(fact.Type) || string.IsNullOrWhiteSpace(fact.CheckName)) continue;
+
+            var key = string.Join('\u001f', fact.RunId, fact.Stage, fact.CheckName);
+            var count = checkEventCounts.GetValueOrDefault(key) + 1;
+            checkEventCounts[key] = count;
+            if (count > 1)
+            {
+                stageRework[fact.Stage] = true;
+                isFirstTimeRight = false;
+            }
+        }
+
         return (isFirstTimeRight, stageRework);
     }
+
+    private static bool IsCheckRunEvent(string type) =>
+        string.Equals(type, EventCatalog.ReverseDns.CheckPassed, StringComparison.Ordinal)
+        || string.Equals(type, EventCatalog.ReverseDns.CheckFailed, StringComparison.Ordinal)
+        || string.Equals(type, EventCatalog.ReverseDns.CheckPending, StringComparison.Ordinal);
+
+    private sealed record WorkflowRunEventFact(
+        string RunId,
+        long Sequence,
+        string Type,
+        string? Stage,
+        string? CheckName);
 
     private sealed class QualityAccumulator
     {
@@ -589,20 +651,6 @@ public class IssueQuerier : IScopedService
 
     private async Task<Dictionary<string, WorkflowRun>> LoadWorkflowRunsAsync(
         MohistDbContext db,
-        IReadOnlyCollection<IssueReadModel> issues)
-    {
-        var workflowRunIds = issues
-            .Select(i => i.WorkflowRunId)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Select(id => id!)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        return await LoadWorkflowRunsAsync(db, workflowRunIds);
-    }
-
-    private async Task<Dictionary<string, WorkflowRun>> LoadWorkflowRunsAsync(
-        MohistDbContext db,
         IEnumerable<string> workflowRunIds)
     {
         var ids = workflowRunIds
@@ -626,12 +674,77 @@ public class IssueQuerier : IScopedService
         return runs;
     }
 
+    private async Task<Dictionary<string, List<WorkflowRunEventFact>>> LoadWorkflowRunEventFactsAsync(
+        MohistDbContext db,
+        IEnumerable<string> workflowRunIds)
+    {
+        var runIds = workflowRunIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (runIds.Length == 0) return new Dictionary<string, List<WorkflowRunEventFact>>(StringComparer.Ordinal);
+
+        var sourcesByRunId = runIds.ToDictionary(
+            id => WorkflowRunEventPersistence.WorkflowRunSource(id),
+            id => id,
+            StringComparer.Ordinal);
+        var sources = sourcesByRunId.Keys.ToArray();
+
+        var rows = await db.WorkflowRunEvents
+            .AsNoTracking()
+            .Where(row => sources.Contains(row.Source) && QualityWorkflowEventTypes.Contains(row.Type))
+            .Select(row => new { row.Source, row.Id, row.Type, row.Data })
+            .ToListAsync();
+
+        var facts = new Dictionary<string, List<WorkflowRunEventFact>>(StringComparer.Ordinal);
+        foreach (var row in rows.OrderBy(row => row.Source, StringComparer.Ordinal).ThenBy(row => row.Id))
+        {
+            if (!sourcesByRunId.TryGetValue(row.Source, out var runId)) continue;
+
+            var fact = new WorkflowRunEventFact(
+                runId,
+                row.Id,
+                row.Type,
+                ReadWorkflowEventStage(row.Data),
+                ReadWorkflowEventCheckName(row.Data));
+
+            if (!facts.TryGetValue(runId, out var runFacts))
+            {
+                runFacts = [];
+                facts[runId] = runFacts;
+            }
+            runFacts.Add(fact);
+        }
+
+        return facts;
+    }
+
     private static string? ReadWorkflowRunId(JsonElement data)
     {
         if (data.ValueKind != JsonValueKind.Object) return null;
         if (data.TryGetProperty("workflowRunId", out var camel) && camel.ValueKind == JsonValueKind.String)
             return camel.GetString();
         if (data.TryGetProperty("WorkflowRunId", out var pascal) && pascal.ValueKind == JsonValueKind.String)
+            return pascal.GetString();
+        return null;
+    }
+
+    private static string? ReadWorkflowEventStage(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object) return null;
+        if (data.TryGetProperty("stage", out var camel) && camel.ValueKind == JsonValueKind.String)
+            return camel.GetString();
+        if (data.TryGetProperty("Stage", out var pascal) && pascal.ValueKind == JsonValueKind.String)
+            return pascal.GetString();
+        return null;
+    }
+
+    private static string? ReadWorkflowEventCheckName(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object) return null;
+        if (data.TryGetProperty("checkName", out var camel) && camel.ValueKind == JsonValueKind.String)
+            return camel.GetString();
+        if (data.TryGetProperty("CheckName", out var pascal) && pascal.ValueKind == JsonValueKind.String)
             return pascal.GetString();
         return null;
     }

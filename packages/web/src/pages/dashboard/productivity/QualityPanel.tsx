@@ -36,11 +36,19 @@ function QualityWindow({ title, window, testidSuffix }: QualityWindowProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">First-time-right</span>
-            <span
-              data-testid={`${PANEL_TESTID}-ftr-${testidSuffix}`}
-              className="text-sm font-medium tabular-nums"
-            >
-              {formatRate(window.firstTimeRightRate)}
+            <span className="flex items-center gap-2">
+              <span
+                data-testid={`${PANEL_TESTID}-ftr-${testidSuffix}`}
+                className="text-sm font-medium tabular-nums"
+              >
+                {formatRate(window.firstTimeRightRate)}
+              </span>
+              <span
+                data-testid={`${PANEL_TESTID}-ftr-${testidSuffix}-sample`}
+                className="text-xs text-muted-foreground tabular-nums"
+              >
+                n={window.sampleCount}
+              </span>
             </span>
           </div>
           <div className="space-y-1">
@@ -51,21 +59,29 @@ function QualityWindow({ title, window, testidSuffix }: QualityWindowProps) {
                 className="flex items-center justify-between"
               >
                 <span className="text-sm text-muted-foreground capitalize">{stage.stage}</span>
-                {stage.enteredCount === 0 ? (
+                <span className="flex items-center gap-2">
+                  {stage.enteredCount === 0 ? (
+                    <span
+                      data-testid={`${PANEL_TESTID}-stage-${stage.stage}-${testidSuffix}-empty`}
+                      className="text-sm text-muted-foreground tabular-nums"
+                    >
+                      —
+                    </span>
+                  ) : (
+                    <span
+                      data-testid={`${PANEL_TESTID}-stage-${stage.stage}-${testidSuffix}-rate`}
+                      className="text-sm font-medium tabular-nums"
+                    >
+                      {formatRate(stage.reworkRate)}
+                    </span>
+                  )}
                   <span
-                    data-testid={`${PANEL_TESTID}-stage-${stage.stage}-${testidSuffix}-empty`}
-                    className="text-sm text-muted-foreground tabular-nums"
+                    data-testid={`${PANEL_TESTID}-stage-${stage.stage}-${testidSuffix}-sample`}
+                    className="text-xs text-muted-foreground tabular-nums"
                   >
-                    —
+                    n={stage.enteredCount}
                   </span>
-                ) : (
-                  <span
-                    data-testid={`${PANEL_TESTID}-stage-${stage.stage}-${testidSuffix}-rate`}
-                    className="text-sm font-medium tabular-nums"
-                  >
-                    {formatRate(stage.reworkRate)}
-                  </span>
-                )}
+                </span>
               </div>
             ))}
           </div>

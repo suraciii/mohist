@@ -61,7 +61,7 @@ For each workflow stage, the system SHALL classify a stage-entered issue as **re
 
 ### Requirement: Per-stage rework rate is computed over shipped issues that entered the stage within the window
 
-For each stage, the system SHALL compute the per-stage rework rate as the share of issues shipped (reached `Done`) within a trailing window that entered that stage where that stage was reworked: the number of shipped-in-window issues that entered the stage and were reworked at it, divided by the number of shipped-in-window issues that entered that stage. Each stage SHALL produce its own independent rate. The denominator for a stage SHALL be the set of shipped-in-window issues that entered that stage, which MAY differ across stages.
+For each stage, the system SHALL compute the per-stage rework rate as the share of issues shipped (reached `Done`) within a trailing window that entered that stage where that stage was reworked: the number of shipped-in-window issues that entered the stage and were reworked at it, divided by the number of shipped-in-window issues that entered that stage. In-flight issues are outside this denominator until they ship, even if they have already entered the stage or triggered repair. Each stage SHALL produce its own independent rate. The denominator for a stage SHALL be the set of shipped-in-window issues that entered that stage, which MAY differ across stages.
 
 #### Scenario: Per-stage rate equals reworked-over-entered for that stage
 
@@ -74,6 +74,13 @@ For each stage, the system SHALL compute the per-stage rework rate as the share 
 - **WHEN** within a trailing window the `plan` stage has a rework rate of `4 / 20` and the `check` stage has a rework rate of `6 / 18`
 - **THEN** the aggregation SHALL report each stage's rate separately
 - **AND** the `plan` rate and `check` rate SHALL NOT be combined into a single number
+
+#### Scenario: In-flight repaired issues are excluded from per-stage rework rates until shipped
+
+- **WHEN** a project has one shipped issue that entered the `plan` stage without repair
+- **AND** one in-flight issue has entered the `plan` stage and triggered repair
+- **THEN** the `plan` stage denominator SHALL be `1`, counting only the shipped issue
+- **AND** the `plan` stage rework rate SHALL be `0 / 1`
 
 ### Requirement: Quality metrics use trailing 7-day and 30-day windows anchored on ship time
 

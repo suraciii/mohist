@@ -89,22 +89,32 @@ describe('QualityPanel', () => {
 
     expect(screen.getByTestId('productivity-quality-ftr-7d')).toHaveTextContent('70%')
     expect(screen.getByTestId('productivity-quality-ftr-30d')).toHaveTextContent('60%')
+    expect(screen.getByTestId('productivity-quality-ftr-7d-sample')).toHaveTextContent('n=10')
+    expect(screen.getByTestId('productivity-quality-ftr-30d-sample')).toHaveTextContent('n=25')
 
     expect(screen.getByTestId('productivity-quality-stage-plan-7d-rate')).toHaveTextContent('20%')
+    expect(screen.getByTestId('productivity-quality-stage-plan-7d-sample')).toHaveTextContent('n=10')
     expect(screen.getByTestId('productivity-quality-stage-build-7d-rate')).toHaveTextContent('0%')
+    expect(screen.getByTestId('productivity-quality-stage-build-7d-sample')).toHaveTextContent('n=8')
     expect(screen.getByTestId('productivity-quality-stage-check-7d-rate')).toHaveTextContent('30%')
+    expect(screen.getByTestId('productivity-quality-stage-check-7d-sample')).toHaveTextContent('n=9')
     expect(
       screen.getByTestId('productivity-quality-stage-integrate-7d-rate'),
     ).toHaveTextContent('10%')
+    expect(screen.getByTestId('productivity-quality-stage-integrate-7d-sample')).toHaveTextContent('n=5')
 
     expect(screen.getByTestId('productivity-quality-stage-plan-30d-rate')).toHaveTextContent('25%')
+    expect(screen.getByTestId('productivity-quality-stage-plan-30d-sample')).toHaveTextContent('n=25')
     expect(screen.getByTestId('productivity-quality-stage-build-30d-rate')).toHaveTextContent('5%')
+    expect(screen.getByTestId('productivity-quality-stage-build-30d-sample')).toHaveTextContent('n=20')
     expect(
       screen.getByTestId('productivity-quality-stage-check-30d-rate'),
     ).toHaveTextContent('35%')
+    expect(screen.getByTestId('productivity-quality-stage-check-30d-sample')).toHaveTextContent('n=22')
     expect(
       screen.getByTestId('productivity-quality-stage-integrate-30d-rate'),
     ).toHaveTextContent('15%')
+    expect(screen.getByTestId('productivity-quality-stage-integrate-30d-sample')).toHaveTextContent('n=12')
 
     expect(screen.queryByTestId('productivity-quality-empty')).not.toBeInTheDocument()
     expect(container.querySelector('[data-state="empty"]')).toBeNull()
@@ -186,6 +196,7 @@ describe('QualityPanel', () => {
 
     expect(screen.getByTestId('productivity-quality-stage-check-7d-empty')).toBeInTheDocument()
     expect(screen.getByTestId('productivity-quality-stage-check-7d-empty')).toHaveTextContent('—')
+    expect(screen.getByTestId('productivity-quality-stage-check-7d-sample')).toHaveTextContent('n=0')
 
     expect(screen.getByTestId('productivity-quality-stage-plan-7d-rate')).toHaveTextContent('20%')
     expect(screen.getByTestId('productivity-quality-stage-build-7d-rate')).toHaveTextContent('0%')
