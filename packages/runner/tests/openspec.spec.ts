@@ -837,11 +837,13 @@ describe("mohist/archive-change", () => {
     )
   })
 
-  it("ArchiveChangeWhenSourceAndArchiveBothExist_FailsWithPartialArchive", async () => {
+  it("ArchiveChangeWhenPersistedDestinationAndSourceBothExist_FailsWithPartialArchive", async () => {
     const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     const datePrefix = new Date().toISOString().slice(0, 10)
-    const archivedDir = join(workDir, "openspec", "changes", "archive", `${datePrefix}-issue-127`)
+    const sourceRel = "openspec/changes/issue-127"
+    const archiveName = `${datePrefix}-issue-127`
+    const archivedDir = join(workDir, "openspec", "changes", "archive", archiveName)
     await mkdir(join(changeDir, "specs"), { recursive: true })
     await writeFile(join(changeDir, "proposal.md"), "source proposal\n")
     await mkdir(archivedDir, { recursive: true })
@@ -853,7 +855,9 @@ describe("mohist/archive-change", () => {
       return gitFail(`unexpected git call: ${args.join(" ")}`, 1)
     })
 
-    const result = await archiveChangeAction(archiveContext(workDir, changeDir))
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      "_actions.archiveChange.destination": { [sourceRel]: archiveName },
+    }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
@@ -1046,9 +1050,80 @@ describe("mohist/archive-change", () => {
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
       "workflow-1",
-      { "_actions.archiveChange.destination": { "issue-127": `${datePrefix}-issue-127` } },
+      { "_actions.archiveChange.destination": { [sourceRel]: `${datePrefix}-issue-127` } },
       expect.any(AbortSignal),
     )
+  })
+
+  it("ArchiveChangeRetryAfterVersionedMove_ReusesExactPersistedDestination", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    await mkdir(join(changeDir, "specs"), { recursive: true })
+    await writeFile(join(changeDir, "proposal.md"), "proposal v2\n")
+    await writeFile(join(changeDir, "specs", "spec.md"), "spec\n")
+
+    const datePrefix = new Date().toISOString().slice(0, 10)
+    const sourceRel = "openspec/changes/issue-127"
+    const baseArchiveName = `${datePrefix}-issue-127`
+    const versionedArchiveName = `${baseArchiveName}-v2`
+    const baseArchiveRel = `openspec/changes/archive/${baseArchiveName}`
+    const versionedDestinationRel = `openspec/changes/archive/${versionedArchiveName}`
+    const versionedDestination = join(workDir, versionedDestinationRel)
+    await mkdir(join(workDir, baseArchiveRel), { recursive: true })
+    await writeFile(join(workDir, baseArchiveRel, "proposal.md"), "older archive\n")
+
+    let persistedVars: JsonObject = {}
+    const firstPatchRunVars = vi.fn(async (_workflowRunId: string, vars: JsonObject) => {
+      persistedVars = { ...persistedVars, ...vars }
+    })
+
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      if (key === `add -A ${versionedDestinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${versionedDestinationRel}`) {
+        return gitOk(`${versionedDestinationRel}/proposal.md\n${versionedDestinationRel}/specs/spec.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${versionedDestinationRel}`) {
+        return gitFail("pre-commit hook failed", 1)
+      }
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const firstResult = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars: firstPatchRunVars }))
+    const firstOutput = JSON.parse(firstResult.output ?? "{}")
+
+    expect(firstResult.status).toBe("failure")
+    expect(firstOutput.stage).toBe("commit")
+    expect(firstOutput.destination).toBe(versionedDestination)
+    expect(firstPatchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { "_actions.archiveChange.destination": { [sourceRel]: versionedArchiveName } },
+      expect.any(AbortSignal),
+    )
+
+    const retryPatchRunVars = vi.fn()
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      if (key === `add -A ${versionedDestinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${versionedDestinationRel}`) {
+        return gitOk(`${versionedDestinationRel}/proposal.md\n${versionedDestinationRel}/specs/spec.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${versionedDestinationRel}`) {
+        return gitOk("[main abc1234] Archive OpenSpec change: issue-127\n 2 files changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("abc1234\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const retryResult = await archiveChangeAction(archiveContext(workDir, changeDir, persistedVars, { patchRunVars: retryPatchRunVars }))
+    const retryOutput = JSON.parse(retryResult.output ?? "{}")
+
+    expect(retryResult.status).toBe("success")
+    expect(retryOutput.destination).toBe(versionedDestination)
+    expect(retryOutput.commitSha).toBe("abc1234")
+    expect(retryPatchRunVars).not.toHaveBeenCalled()
   })
 
   it("ArchiveChangeCrossDayRetry_ReusesPersistedNameAndFindsArchivedDirectory", async () => {
@@ -1078,7 +1153,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
-      "_actions.archiveChange.destination": { "issue-127": oldPrefix },
+      "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
@@ -1101,7 +1176,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
-      "_actions.archiveChange.destination": { "issue-127": unsafePrefix },
+      "_actions.archiveChange.destination": { "openspec/changes/issue-127": unsafePrefix },
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
@@ -1140,7 +1215,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
-      "_actions.archiveChange.destination": { "issue-127": oldPrefix },
+      "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 

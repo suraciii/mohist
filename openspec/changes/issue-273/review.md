@@ -1,55 +1,48 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
+
+Reviewed the post-build candidate snapshot against issue 273, the proposal, design, delta specs, tasks, self-review, all product changes, and adjacent retry/recovery/archive paths. The current snapshot satisfies the requested workflow recovery fixes and I found no unresolved blocking issues.
 
 ## Repaired Items
 
-- None.
+- None in this review pass. The current snapshot already contains the local archive idempotency and coverage repairs needed for the earlier review findings.
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: blocking
-  Scope: packages/runner/src/actions/openspec.ts
-  Evidence: `archiveChangeAction` trusts a persisted runtime variable value whenever `_actions.archiveChange.destination[sourceName]` is a string (`packages/runner/src/actions/openspec.ts:229-231`) and passes it to `findExistingArchive` / `uniqueDestination`, which resolve `join(archiveDir, baseName)` (`packages/runner/src/actions/openspec.ts:437-453`). A corrupted or user-supplied run variable such as `{ "_actions.archiveChange.destination": { "issue-127": "../../escaped" } }` escapes `openspec/changes/archive` and can cause the action to stage or move a change directory outside the intended archive root. This is a path traversal/data-safety regression introduced by the new mid-execution variable read path. [disallowed:data-safety behavior and validation policy]
-  SuggestedAction: Validate persisted archive names before use. Accept only runner-generated safe basenames, or reject `.`, `..`, path separators, absolute paths, and any resolved destination outside `archiveDir`. Add regression tests for unsafe persisted values such as `../escaped`, `../../escaped`, and `nested/name`.
-  Verification: Inspected `packages/runner/src/actions/openspec.ts:229`, `packages/runner/src/actions/openspec.ts:437`, and `packages/runner/src/actions/openspec.ts:446`. Existing archive tests cover happy-path persisted names but no unsafe persisted-name case.
-  Status: open
-
-- [ID: item-2]
-  Severity: cleanup
-  Scope: packages/runner/tests and packages/runner/tsconfig.json
-  Evidence: `ActionContext.writeVars` is now required (`packages/runner/src/core/types.ts:72-95`), but many typed runner test helpers still construct `ActionContext` without it, for example `packages/runner/tests/create-github-pr.spec.ts:39-62`, `packages/runner/tests/merge-github-pr.spec.ts:32-55`, `packages/runner/tests/expectations.spec.ts:9-22`, and `packages/runner/tests/acp/support.ts:83-104`. The normal runner typecheck does not catch this because `packages/runner/tsconfig.json:15` includes only `src`. A direct strict compile of one affected test file fails with `TS2741: Property 'writeVars' is missing ... but required in type 'ActionContext'`. [disallowed:broad test cleanup outside focused review repair scope]
-  SuggestedAction: Add a no-op `writeVars` to all typed `ActionContext` test helpers and add a test typecheck target or tsconfig that covers `packages/runner/tests`.
-  Verification: `npm run typecheck -w packages/runner` passed because tests are excluded. `npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --strict --skipLibCheck "packages/runner/tests/create-github-pr.spec.ts"` failed with TS2741.
-  Status: open
+- None.
 
 ## Follow-up Items
 
-- [ID: item-3]
+- [ID: item-1]
   Severity: follow-up
-  Scope: openspec/changes/issue-273/tasks.json
-  Evidence: `openspec/changes/issue-273/tasks.json:23` and `openspec/changes/issue-273/tasks.json:47` still mark T-001 and T-002 as `passes: false`, while `openspec/changes/issue-273/progress.txt:1-32` records those tasks as implemented and verified. This does not change the product deliverable, but it weakens workflow traceability for the build artifacts used as review evidence.
-  SuggestedAction: Keep task pass status synchronized with build completion when these artifacts are used for traceability.
+  Scope: packages/server variable namespace / packages/runner/src/actions/openspec.ts
+  Evidence: The internal archive destination variable uses the runner-side key `_actions.archiveChange.destination` (`packages/runner/src/actions/openspec.ts:12`). This is safe in the current closed action/profile set, and unsafe persisted archive names are now rejected, but the prefix is still only a convention.
+  SuggestedAction: If user-authored workflow variables or custom actions become broader public surface, reserve or validate the `_actions.*` namespace server-side.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
-- None.
+- [ID: item-2]
+  Severity: info
+  Scope: test tooling
+  Evidence: `npm test` passes, but the web test run emits a Vitest 4 deprecation warning for `test.poolOptions`. This is unrelated to issue 273 and no web files are part of the candidate product change.
+  SuggestedAction: Update the web Vitest config in a separate maintenance change.
+  Status: out-of-scope
 
-## Acceptance Evidence
+## Acceptance Criteria Evidence
 
-- AC1/AC2: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml:276-291` no longer declares `conflictMode`, and the inner `when: conflict` handler has no `retrySelf`; the parent `base-moved` handler still has `retrySelf: true` at line 300.
-- AC3/AC4: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml:292-300` switches only the base-moved `recover:push` to `force: true`; `packages/runner/src/actions/push.ts:47-54` emits `--force` and skips `ls-remote` when `force` is true.
-- AC5: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml:272-281` uses `mohist/archive-change` and has no matching rebase/push recovery config to sync.
-- AC6/AC7: `packages/runner/src/actions/openspec.ts:229-271` reads/persists the archive name, and `packages/runner/src/runtime/executor.ts:578-594` wires `writeVars` to `connection.patchRunVars` before task completion. Item-1 blocks acceptance because the persisted name is not validated before path use.
-- AC8: Runner push/archive tests and server workflow profile assertions were updated (`packages/runner/tests/push.spec.ts`, `packages/runner/tests/openspec.spec.ts`, `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs`). Item-2 leaves test-source type hygiene incomplete.
+- AC1/AC2: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-github-pr.workflow.yaml:276` to `:291` no longer declares `conflictMode`, and the inner `when: conflict` handler has no `retrySelf`. `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs:416` to `:427` asserts both absences.
+- AC3/AC4: `mohist-github-pr.workflow.yaml:292` to `:300` switches only the base-moved `recover:push` task to `force: true`; `:310` to `:317` keeps the PR-checks recovery push on `forceWithLease: true`. `packages/runner/src/actions/push.ts:24` to `:54` implements `force` winning over `forceWithLease` and emitting bare `--force` without an `ls-remote` probe.
+- AC5: `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/mohist-default.workflow.yaml:272` to `:281` only shares `mohist/archive-change`; it has no matching rebase conflict or recovery push config to sync.
+- AC6: `packages/runner/src/actions/openspec.ts:230` to `:241` reads and validates a persisted archive name. `:305` to `:319` resolves the final destination basename, persists that exact basename through `writeVars`, and does so before `moveChangeDir` at `:334`.
+- AC7: `packages/runner/src/core/types.ts:88` to `:94` adds `ActionContext.writeVars`, and `packages/runner/src/runtime/executor.ts:578` to `:594` wires it directly to `connection.patchRunVars(workflowRunId, vars, signal)`. `packages/runner/tests/executor-write-vars.spec.ts:21` to `:56` verifies the write happens immediately even when the action later fails.
+- AC8: Coverage was updated in `packages/runner/tests/push.spec.ts`, `packages/runner/tests/openspec.spec.ts`, `packages/runner/tests/executor-write-vars.spec.ts`, and `packages/server/tests/Mohist.Server.Tests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs`.
 
 ## Verification
 
 - `npm run typecheck -w packages/runner`: passed.
-- `npm test -w packages/runner`: passed, 659 passed / 23 skipped.
-- `dotnet test Mohist.sln -p:SkipWebBuild=true --no-restore`: passed, 2785 passed / 12 skipped.
-- `npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --strict --skipLibCheck "packages/runner/tests/create-github-pr.spec.ts"`: failed with TS2741, confirming item-2.
+- `npm test -w packages/runner`: passed, 664 passed / 23 skipped.
+- `npm test`: passed. Server: 2785 passed / 12 skipped. Web: 2376 passed / 1 skipped. Runner: 664 passed / 23 skipped.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>

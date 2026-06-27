@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises"
 import { exists, copyDirectory, deleteDirectory } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
@@ -223,10 +223,11 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   if (!changeDir) return archiveFailure("config-error", "Archive change requires 'changeDir'", { kind: "archive-change" })
 
   const archiveDir = join(dirname(changeDir), "archive")
-  const sourceName = changeDir.split(/[\\/]/).pop() ?? "change"
+  const sourceName = basename(changeDir) || "change"
+  const sourceRel = relativePath(context.workDir, changeDir)
 
   const existingDestinationMap = archiveDestinationMap(context.variables)
-  const persistedPrefix = typeof existingDestinationMap[sourceName] === "string" ? (existingDestinationMap[sourceName] as string) : null
+  const persistedPrefix = typeof existingDestinationMap[sourceRel] === "string" ? (existingDestinationMap[sourceRel] as string) : null
   const archivePrefix = persistedPrefix ?? `${new Date().toISOString().slice(0, 10)}-${sourceName}`
   const invalidArchivePrefix = validateArchivePrefix(archivePrefix)
   if (invalidArchivePrefix) {
@@ -238,45 +239,68 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     })
   }
 
-  const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
   const sourceHasFiles = exists(changeDir) && (await hasFiles(changeDir))
 
-  if (existingArchive && sourceHasFiles) {
-    return archiveFailure(
-      "partial-archive",
-      `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${existingArchive}`,
-      { kind: "archive-change", source: changeDir, archive: existingArchive },
-    )
-  }
-
   let destination: string
-  if (existingArchive) {
-    destination = existingArchive
-  } else if (!sourceHasFiles) {
-    return archiveFailure(
-      "missing-source",
-      `Change directory not found: ${changeDir}`,
-      { kind: "archive-change", source: changeDir },
-    )
-  } else {
-    if (!persistedPrefix) {
-      try {
-        await context.writeVars({
-          [ARCHIVE_DESTINATION_VAR_KEY]: { ...existingDestinationMap, [sourceName]: archivePrefix },
-        })
-      } catch (err) {
+  if (persistedPrefix) {
+    const persistedDestination = resolveArchiveDestination(archiveDir, persistedPrefix)
+    if (!persistedDestination) {
+      return archiveFailure("config-error", `Archive destination escapes archive root: ${persistedPrefix}`, {
+        kind: "archive-change",
+        source: changeDir,
+        archivePrefix: persistedPrefix,
+        stage: "resolve-destination",
+      })
+    }
+    const persistedArchiveHasFiles = exists(persistedDestination) && (await hasFiles(persistedDestination))
+    if (persistedArchiveHasFiles && sourceHasFiles) {
+      return archiveFailure(
+        "partial-archive",
+        `Both source and archive exist; refusing to proceed: source=${changeDir} archive=${persistedDestination}`,
+        { kind: "archive-change", source: changeDir, archive: persistedDestination },
+      )
+    }
+    if (persistedArchiveHasFiles) {
+      destination = persistedDestination
+    } else if (!sourceHasFiles) {
+      return archiveFailure(
+        "missing-source",
+        `Change directory not found: ${changeDir}`,
+        { kind: "archive-change", source: changeDir },
+      )
+    } else {
+      await mkdir(archiveDir, { recursive: true })
+      if (exists(persistedDestination)) {
         return archiveFailure(
-          "retry-safe",
-          `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
-          {
-            kind: "archive-change",
-            source: changeDir,
-            archivePrefix,
-            stage: "persist-name",
-          },
+          "partial-archive",
+          `Archive destination already exists; refusing to overwrite: source=${changeDir} archive=${persistedDestination}`,
+          { kind: "archive-change", source: changeDir, archive: persistedDestination },
         )
       }
+      destination = persistedDestination
+      try {
+        await moveChangeDir(changeDir, destination)
+      } catch (err) {
+        return archiveFailure("retry-safe", `Failed to move change directory: ${err instanceof Error ? err.message : String(err)}`, {
+          kind: "archive-change",
+          source: changeDir,
+          destination,
+          stage: "rename",
+        })
+      }
     }
+  } else if (!sourceHasFiles) {
+    const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
+    if (existingArchive) {
+      destination = existingArchive
+    } else {
+      return archiveFailure(
+        "missing-source",
+        `Change directory not found: ${changeDir}`,
+        { kind: "archive-change", source: changeDir },
+      )
+    }
+  } else {
     await mkdir(archiveDir, { recursive: true })
     const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
     if (!resolvedDestination) {
@@ -286,6 +310,23 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
         archivePrefix,
         stage: "resolve-destination",
       })
+    }
+    const resolvedArchiveName = basename(resolvedDestination)
+    try {
+      await context.writeVars({
+        [ARCHIVE_DESTINATION_VAR_KEY]: { ...existingDestinationMap, [sourceRel]: resolvedArchiveName },
+      })
+    } catch (err) {
+      return archiveFailure(
+        "retry-safe",
+        `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          kind: "archive-change",
+          source: changeDir,
+          archivePrefix: resolvedArchiveName,
+          stage: "persist-name",
+        },
+      )
     }
     destination = resolvedDestination
     try {
@@ -300,7 +341,6 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
     }
   }
 
-  const sourceRel = relativePath(context.workDir, changeDir)
   const destinationRel = relativePath(context.workDir, destination)
   const commitMessage = `${ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX}: ${sourceName}`
 
