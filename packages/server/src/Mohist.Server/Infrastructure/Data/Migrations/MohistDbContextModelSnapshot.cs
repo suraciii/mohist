@@ -385,7 +385,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<bool?>("IsDraft")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
 
                     b.Property<int?>("Number")
                         .ValueGeneratedOnAddOrUpdate()
@@ -395,12 +395,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("PrerequisiteNumbersJson")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))");
 
                     b.Property<string>("Priority")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))");
 
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
@@ -423,7 +423,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("Title")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))", true);
+                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))");
 
                     b.Property<string>("WorkflowRunId")
                         .ValueGeneratedOnAddOrUpdate()
