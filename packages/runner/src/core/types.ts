@@ -134,6 +134,7 @@ export interface AddTaskInput {
   title: string
   uses?: string | null
   with?: JsonObject | null
+  recovery?: JsonObject | null
 }
 
 export interface WorkItemResult {

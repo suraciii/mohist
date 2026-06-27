@@ -61,6 +61,7 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Passed;
+            check.FinishedAt = DateTimeOffset.UtcNow;
             check.Message = result.Message;
             check.Output = result.Output;
             var events = new List<WorkflowEvent>
@@ -76,6 +77,7 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Failed;
+            check.FinishedAt = DateTimeOffset.UtcNow;
             check.Message = result.Message;
             check.Output = result.Output;
             if (current.Failure is null)
@@ -99,6 +101,8 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Pending;
+            check.StartedAt = null;
+            check.FinishedAt = null;
             check.Message = result.Message;
             check.Output = result.Output;
             return [new CheckPending(current.Id, check.Name, result.Message)];

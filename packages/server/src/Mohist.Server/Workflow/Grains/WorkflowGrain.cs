@@ -373,11 +373,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var checksWorkId = $"checks-{stage}:{Guid.NewGuid():N}";
         var currentStage = _run!.CurrentStage();
         currentStage.ChecksWorkId = checksWorkId;
+        var now = DateTimeOffset.UtcNow;
         foreach (var item in items)
         {
             var check = currentStage.Checks.FirstOrDefault(c => c.Name == item.Name);
             if (check is not null)
+            {
                 check.Status = StageCheckStatus.Running;
+                check.StartedAt = now;
+            }
         }
         return checksWorkId;
     }
@@ -445,7 +449,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var events = await ProcessCheckOutcomeAsync(outcome);
         currentStage.ChecksWorkId = null;
         foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
+        {
             ch.Status = StageCheckStatus.Pending;
+            ch.StartedAt = null;
+        }
 
         await CommitAsync(events);
     }
@@ -604,7 +611,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 var taskDefs = addTasks.Select(t =>
                 {
                     var with = WorkflowDispatchHelpers.ParseWith(t.With);
-                    var recovery = WorkflowDispatchHelpers.ExtractRecoveryFromWith(with);
+                    var recovery = t.Recovery ?? WorkflowDispatchHelpers.ExtractRecoveryFromWith(with);
                     return new TaskDefinition(t.Id, t.Title, t.Uses, with, Recovery: recovery);
                 }).ToList();
                 var recoveryEvents = run.AddRuntimeTasks(taskDefs);
@@ -689,7 +696,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var currentStage = _run.CurrentStage();
         currentStage.ChecksWorkId = null;
         foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
+        {
             ch.Status = StageCheckStatus.Pending;
+            ch.StartedAt = null;
+        }
         return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
     }
 
@@ -702,7 +712,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             currentStage.ChecksWorkId = null;
             foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
+            {
                 ch.Status = StageCheckStatus.Pending;
+                ch.StartedAt = null;
+            }
         }
 
         var runningTask = _run?.CurrentStage().RunningTask;
