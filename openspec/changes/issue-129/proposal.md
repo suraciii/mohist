@@ -27,7 +27,7 @@ Mohist can already run external agents, but only inside a workflow tied to an is
 
 ### E. CLI entry
 
-- New CLI command(s) to launch a session from an agent profile, send a follow-up, and return the session id + status.
+- New CLI command(s) to launch a session from an agent profile, send a follow-up, cancel a running session, and return the session id + status.
 
 ## Capabilities
 
@@ -39,7 +39,7 @@ Mohist can already run external agents, but only inside a workflow tied to an is
 
 - `session-followup`: Follow-up delivery target identification generalizes beyond the `(workflowRunId, sessionName)` pair so a generic (non-workflow) AgentSession can receive follow-ups via the same SignalR → runner → ACP `prompt()` mechanism. Existing workflow-session follow-up behavior is preserved.
 - `http-api`: Adds product-level endpoints for launching a generic AgentSession from an Agent profile, sending a follow-up to a generic session, and cancel/terminate. Distinct from the existing issue-scoped follow-up route, which remains unchanged.
-- `cli-interface`: Adds CLI entry points to launch a generic session from an agent profile, send a follow-up, and report session id + status.
+- `cli-interface`: Adds CLI entry points to launch a generic session from an agent profile, send a follow-up, cancel a running session, and report session id + status.
 
 ## Impact
 
