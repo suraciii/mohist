@@ -1,0 +1,15 @@
+## Codebase Patterns
+
+- `TimeProvider` is already registered as a singleton in `MohistServiceRegistration.cs:77`; grain tests override it via `GrainTestConfig.ConfigureSilo(..., FakeTimeProvider)` and pass the same instance into the fixture (mirror `AgentJobGrainFixture`).
+- Options pattern follows `AgentJobOptions`: class with `public const string SectionName`, default values on properties, registered via `services.Configure<T>(configuration.GetSection(...))` in `MohistServiceRegistration`.
+- `RunnerActiveWorkItem` can safely carry a nullable `TakenAt` field with a new `[Id]`; existing callers and `RunnerStatusService` projection ignore it.
+
+## Decisions
+
+- Kept `GetRuntimeStateAsync` workflow projection querying `IWorkflowGrain.GetActiveWorkAsync` (instead of switching fully to `_outstandingWorkflowWorks`) so issue refs and existing status-projection tests keep working. `TakenAt` is cross-referenced from the runner-side outstanding dict for polled workflow work.
+- Did NOT switch `DequeueAssignedAgentJobAsync.MarkRunning` to `TimeProvider`; only the two explicit take points (`AssignAgentJobAsync`, `PollOneWorkflowAsync`) were changed, matching the task scope. Heartbeat/`_lastHeartbeat` remain on wall-clock `DateTime.UtcNow`.
+
+## Gotchas
+
+- After editing source, always rebuild before `--no-build` test runs; stale binaries made the status-projection specs look like they were still failing from the earlier full-runner-side projection experiment.
+- `WorkflowOptions` namespace is `Mohist.Server.Workflow.Grains`, which `MohistServiceRegistration` already imports.

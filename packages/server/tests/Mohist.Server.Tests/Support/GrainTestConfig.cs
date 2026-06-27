@@ -70,5 +70,9 @@ public static class GrainTestConfig
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
+        siloBuilder.Services.Configure<WorkflowOptions>(opts =>
+        {
+            opts.WorkCompletionTimeout = TimeSpan.FromMinutes(10);
+        });
     }
 }

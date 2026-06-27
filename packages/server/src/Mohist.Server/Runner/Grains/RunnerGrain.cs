@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Agent.Grains;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Orleans.Concurrency;
 using Orleans.Runtime;
 
@@ -33,6 +34,8 @@ public class RunnerGrain : Grain, IRunnerGrain
     private readonly RunnerDefinitionStore _definitions;
     private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<RunnerGrain> _log;
+    private readonly TimeProvider _timeProvider;
+    private readonly WorkflowOptions _workflowOptions;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
@@ -42,12 +45,16 @@ public class RunnerGrain : Grain, IRunnerGrain
         RunnerDefinitionStore definitions,
         WorkflowItemTranslator translator,
         ILogger<RunnerGrain> log,
+        TimeProvider timeProvider,
+        IOptions<WorkflowOptions> workflowOptions,
         [PersistentState("runner-works")] IPersistentState<RunnerWorksState> worksState)
     {
         _workflowRuns = workflowRuns;
         _definitions = definitions;
         _translator = translator;
         _log = log;
+        _timeProvider = timeProvider;
+        _workflowOptions = workflowOptions.Value;
         _worksState = worksState;
     }
 
@@ -192,7 +199,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             Title = work.Title,
             Issue = work.Issue,
             Status = RunnerWorkStatus.Pending,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = _timeProvider.GetUtcNow(),
             DispatchSnapshot = work,
         });
         await PersistAsync();
@@ -378,7 +385,8 @@ public class RunnerGrain : Grain, IRunnerGrain
             WorkType: work.WorkType ?? "task",
             Stage: work.Stage,
             Title: work.Title,
-            Issue: work.Issue);
+            Issue: work.Issue,
+            TakenAt: work.CreatedAt);
     }
 
     public async Task UpdateBuildGitHashAsync(string? buildGitHash)
@@ -543,7 +551,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             Title = item.Title,
             Issue = issue,
             Status = RunnerWorkStatus.Running,
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = _timeProvider.GetUtcNow(),
         });
         await PersistAsync();
         return dispatch;
@@ -573,7 +581,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             }
 
             pendingWork.Status = RunnerWorkStatus.Running;
-            pendingWork.StartedAt = DateTimeOffset.UtcNow;
+            pendingWork.StartedAt = _timeProvider.GetUtcNow();
             await PersistAsync();
 
             return pendingWork.DispatchSnapshot!;

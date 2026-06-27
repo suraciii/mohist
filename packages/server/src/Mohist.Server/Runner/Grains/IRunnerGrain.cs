@@ -141,4 +141,5 @@ public sealed record RunnerActiveWorkItem(
     [property: Id(3)] string WorkType,
     [property: Id(4)] string? Stage,
     [property: Id(5)] string? Title,
-    [property: Id(6)] WorkIssueRef? Issue = null);
+    [property: Id(6)] WorkIssueRef? Issue = null,
+    [property: Id(7)] DateTimeOffset? TakenAt = null);
