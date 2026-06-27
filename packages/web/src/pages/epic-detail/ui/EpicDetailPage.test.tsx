@@ -2141,6 +2141,13 @@ function getMobileHeaderContainer(): HTMLElement {
   return container as HTMLElement
 }
 
+function getEpicDetailPageContainer(): HTMLElement {
+  const epicNumber = screen.getByTestId('epic-number')
+  const container = epicNumber.closest('.mx-auto')
+  if (!container) throw new Error('Epic detail page container not found')
+  return container as HTMLElement
+}
+
 function getTitleBlock(): HTMLElement {
   const epicNumber = screen.getByTestId('epic-number')
   const titleBlock = epicNumber.closest('.min-w-0.flex-1')
@@ -2169,7 +2176,9 @@ describe('EpicDetailPage mobile layout structural contract', () => {
   const LONG_CHINESE_TITLE =
     '史诗详情页移动端布局修复：消除横向溢出与标题压缩，让标题和描述在窄屏下独占可读宽度，操作按钮按主次分级可见'
   const LONG_ENGLISH_TITLE =
-    'Refactor the Epic detail page header to a responsive single-column layout on mobile so long titles and descriptions never get squeezed into a per-character vertical column and the action buttons never overflow off the right edge'
+    'EpicDetailPageMobileHeaderTitleWithAnUnbrokenEnglishTokenThatMustWrapInsideTheReadableColumnAtThreeHundredTwentyPixels'
+  const LONG_ENGLISH_DESCRIPTION =
+    'EpicDetailPageMobileHeaderDescriptionWithAnUnbrokenEnglishTokenThatMustWrapInsideTheDescriptionColumnAtThreeHundredTwentyPixels'
 
   function makeEpic(overrides: Record<string, unknown> = {}) {
     return {
@@ -2229,6 +2238,17 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     expect(header.classList.contains('md:justify-between')).toBe(true)
   })
 
+  it('lets the page wrapper shrink inside the app shell at mobile widths', () => {
+    mocks.useEpic.mockReturnValue({ data: makeEpic({ status: EpicStatus.Running }), isLoading: false })
+
+    renderPage()
+
+    const container = getEpicDetailPageContainer()
+    expect(container.classList.contains('w-full')).toBe(true)
+    expect(container.classList.contains('min-w-0')).toBe(true)
+    expect(container.classList.contains('max-w-4xl')).toBe(true)
+  })
+
   it('places the title block before the action button group in DOM order on a running epic so it stacks above on mobile', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({ status: EpicStatus.Running, title: LONG_CHINESE_TITLE }),
@@ -2276,6 +2296,31 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     const titleBlock = getTitleBlock()
     expect(titleBlock.classList.contains('min-w-0')).toBe(true)
     expect(titleBlock.classList.contains('flex-1')).toBe(true)
+  })
+
+  it('adds an explicit break rule to an unbroken English title so it cannot force horizontal overflow', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({ status: EpicStatus.Idle, title: LONG_ENGLISH_TITLE }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const heading = screen.getByRole('heading', { name: LONG_ENGLISH_TITLE })
+    expect(heading.classList.contains('[overflow-wrap:anywhere]')).toBe(true)
+  })
+
+  it('adds an explicit break rule to plain description content with an unbroken English token', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({ status: EpicStatus.Running, description: LONG_ENGLISH_DESCRIPTION }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const description = screen.getByTestId('epic-description')
+    expect(description.classList.contains('[overflow-wrap:anywhere]')).toBe(true)
+    expect(description).toHaveTextContent(LONG_ENGLISH_DESCRIPTION)
   })
 
   it('uses flex-wrap on the action button group so secondary actions stay reachable on mobile', () => {

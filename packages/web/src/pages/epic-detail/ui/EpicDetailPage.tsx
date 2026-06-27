@@ -502,7 +502,7 @@ export function EpicDetailPage() {
   const hasInProgress = epic.linkedIssues.some(i => i.status === IssueStatus.InProgress)
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
+    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
       <div>
         <Button
           type="button"
@@ -532,10 +532,10 @@ export function EpicDetailPage() {
                 </span>
               )}
             </div>
-            <h1 className="mt-2 text-2xl font-bold text-foreground">{epic.title}</h1>
+            <h1 className="mt-2 text-2xl font-bold text-foreground [overflow-wrap:anywhere]">{epic.title}</h1>
             {epic.description && (
               <div
-                className="mt-3 text-sm leading-6 text-foreground/80"
+                className="mt-3 text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]"
                 data-testid="epic-description"
               >
                 <MarkdownReader content={epic.description} baseHeadingLevel={3} />
