@@ -1922,6 +1922,25 @@ public class UpdateSpecs
         return $"{{\"success\":true,\"data\":{{\"running\":{{\"gitHash\":\"{runningGitHash}\"}},\"services\":{{\"runner\":\"{runnerStatus}\"}}}}}}";
     }
 
+    private static string ExtractRunningGitHash(string systemInfoJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(systemInfoJson);
+            if (doc.RootElement.TryGetProperty("data", out var data)
+                && data.TryGetProperty("running", out var running)
+                && running.TryGetProperty("gitHash", out var gitHash)
+                && gitHash.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return gitHash.GetString() ?? "unknown";
+            }
+        }
+        catch
+        {
+        }
+        return "unknown";
+    }
+
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
@@ -2245,6 +2264,20 @@ public class UpdateSpecs
                 });
             }
 
+            if (_systemInfoJson is not null && string.Equals(path, "/api/runner/identity", StringComparison.Ordinal))
+            {
+                Requests++;
+                var runnerHash = ExtractRunningGitHash(_systemInfoJson);
+                var identityJson = $"{{\"success\":true,\"data\":{{\"buildGitHash\":\"{runnerHash}\"}}}}";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(identityJson)
+                    {
+                        Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json") }
+                    }
+                });
+            }
+
             var index = Math.Min(Requests, _responses.Length - 1);
             Requests++;
             var response = _responses[index];
@@ -2425,6 +2458,19 @@ public class UpdateSpecs
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(_systemInfoJson)
+                    {
+                        Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json") }
+                    }
+                };
+            }
+
+            if (string.Equals(path, "/api/runner/identity", StringComparison.Ordinal))
+            {
+                var runnerHash = ExtractRunningGitHash(_systemInfoJson);
+                var identityJson = $"{{\"success\":true,\"data\":{{\"buildGitHash\":\"{runnerHash}\"}}}}";
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(identityJson)
                     {
                         Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json") }
                     }

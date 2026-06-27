@@ -175,6 +175,39 @@ internal sealed class RuntimeConsistencyValidator
             $"Runner service is '{runner}'; expected 'active'");
     }
 
+    internal async Task<RuntimeCheckResult> CheckRunnerIdentityAsync(UpdateContext context, CancellationToken token)
+    {
+        var sourceHead = await TryGetSourceHeadAsync(context);
+        if (string.IsNullOrWhiteSpace(sourceHead))
+        {
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+                "Source HEAD could not be determined; skipping identity check");
+        }
+
+        var identity = await TryGetRunnerIdentityAsync(token);
+        if (identity is null)
+        {
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+                "GET /api/runner/identity did not respond");
+        }
+
+        var runnerHash = identity.BuildGitHash;
+        if (string.IsNullOrWhiteSpace(runnerHash))
+        {
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+                "Runner did not report a buildGitHash; cannot verify identity");
+        }
+
+        if (!string.Equals(runnerHash, sourceHead, StringComparison.Ordinal))
+        {
+            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
+                $"Runner buildGitHash '{runnerHash}' does not match source HEAD '{sourceHead}'");
+        }
+
+        return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Pass,
+            $"Runner identity matches source HEAD '{sourceHead}'");
+    }
+
     internal async Task<RuntimeCheckResult> CheckManagedSkillAssetsAsync(UpdateContext context, CancellationToken token)
     {
         await Task.CompletedTask;
@@ -215,6 +248,27 @@ internal sealed class RuntimeConsistencyValidator
         if (!string.IsNullOrWhiteSpace(home))
             return Path.Combine(home, ".mohist", "cli", "skill-data");
         return Path.Combine(AppContext.BaseDirectory, "skill-data");
+    }
+
+    private async Task<RunnerIdentitySnapshot?> TryGetRunnerIdentityAsync(CancellationToken token)
+    {
+        try
+        {
+            using var response = await _http.GetAsync("/api/runner/identity", HttpCompletionOption.ResponseHeadersRead, token);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
+            var root = document.RootElement;
+            if (root.TryGetProperty("data", out var data))
+                return data.Deserialize<RunnerIdentitySnapshot>(RunnerIdentitySnapshot.JsonOptions);
+            return root.Deserialize<RunnerIdentitySnapshot>(RunnerIdentitySnapshot.JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<SystemInfoSnapshot?> TryGetSystemInfoAsync(CancellationToken token)
@@ -293,6 +347,17 @@ internal sealed class RuntimeConsistencyValidator
     {
         [System.Text.Json.Serialization.JsonPropertyName("runner")]
         public string? Runner { get; set; }
+    }
+
+    private sealed class RunnerIdentitySnapshot
+    {
+        public static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+
+        [System.Text.Json.Serialization.JsonPropertyName("buildGitHash")]
+        public string? BuildGitHash { get; set; }
     }
 
     private sealed class SystemInfoSnapshot
