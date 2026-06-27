@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Orleans.Concurrency;
 using Orleans.Runtime;
+using LedgerRunnerWork = Mohist.Server.Infrastructure.Data.Runner.RunnerWork;
+using LedgerRunnerWorkStatus = Mohist.Server.Infrastructure.Data.Runner.RunnerWorkStatus;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -32,6 +34,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
+    private readonly RunnerWorkStore _runnerWorks;
     private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<RunnerGrain> _log;
     private readonly TimeProvider _timeProvider;
@@ -43,6 +46,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     public RunnerGrain(
         WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
+        RunnerWorkStore runnerWorks,
         WorkflowItemTranslator translator,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
@@ -51,6 +55,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         _workflowRuns = workflowRuns;
         _definitions = definitions;
+        _runnerWorks = runnerWorks;
         _translator = translator;
         _log = log;
         _timeProvider = timeProvider;
@@ -65,6 +70,33 @@ public class RunnerGrain : Grain, IRunnerGrain
         _slots = await _definitions.GetOrInitAsync(RunnerId, ct);
         if (!_worksState.RecordExists)
             await _worksState.ReadStateAsync();
+        await HydrateOutstandingWorksAsync(ct);
+    }
+
+    private async Task HydrateOutstandingWorksAsync(CancellationToken ct)
+    {
+        var changed = false;
+        var outstanding = await _runnerWorks.ListOutstandingAsync(RunnerId, ct);
+        foreach (var work in outstanding)
+        {
+            if (FindWork(work.WorkId, work.OwnerKind, work.OwnerId) is not null)
+                continue;
+
+            AddWork(new RunnerWork
+            {
+                WorkId = work.WorkId,
+                OwnerKind = work.OwnerKind,
+                OwnerId = work.OwnerId,
+                Status = string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal)
+                    ? RunnerWorkStatus.Pending
+                    : RunnerWorkStatus.Running,
+                CreatedAt = work.TakenAt,
+            });
+            changed = true;
+        }
+
+        if (changed)
+            await PersistAsync();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -189,6 +221,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (existing is not null)
             return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
 
+        var takenAt = _timeProvider.GetUtcNow();
         AddWork(new RunnerWork
         {
             WorkId = work.WorkId,
@@ -199,10 +232,17 @@ public class RunnerGrain : Grain, IRunnerGrain
             Title = work.Title,
             Issue = work.Issue,
             Status = RunnerWorkStatus.Pending,
-            CreatedAt = _timeProvider.GetUtcNow(),
+            CreatedAt = takenAt,
             DispatchSnapshot = work,
         });
         await PersistAsync();
+        await _runnerWorks.InsertOutstandingAsync(new LedgerRunnerWork(
+            RunnerId,
+            work.OwnerKind,
+            ownerId,
+            work.WorkId,
+            takenAt,
+            LedgerRunnerWorkStatus.Outstanding));
         _log.LogInformation("Runner {Id} assigned work {WorkId} for agent-job {AgentJobId}", RunnerId, work.WorkId, work.AgentJobId);
         return new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned);
     }
@@ -243,6 +283,12 @@ public class RunnerGrain : Grain, IRunnerGrain
             {
                 TryRemoveWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
                 await PersistAsync();
+                await MarkRunnerWorkTerminalAsync(
+                    WorkDispatchOwnerKinds.Workflow,
+                    workflowRunId,
+                    workId,
+                    LedgerRunnerWorkStatus.Failed,
+                    "stale-work");
                 return new RunnerWorkReportResult(workflowRunId, null, true, "stale-work", WorkDispatchOwnerKinds.Workflow, workflowRunId);
             }
 
@@ -268,6 +314,14 @@ public class RunnerGrain : Grain, IRunnerGrain
         }
 
         var workflowStatus = await workflow.GetRunStatusAsync();
+
+        var (terminalStatus, reason) = ResolveTerminalStatus(result);
+        await MarkRunnerWorkTerminalAsync(
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId,
+            workId,
+            terminalStatus,
+            reason);
 
         return new RunnerWorkReportResult(
             workflowRunId,
@@ -306,7 +360,16 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (item is null) return null;
 
         var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
-        return new RunnerWorkflowWork(item, dispatch, DateTimeOffset.UtcNow);
+        var ledger = await _runnerWorks.FindAsync(
+            RunnerId,
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId,
+            workId,
+            CancellationToken.None);
+        var takenAt = ledger?.TakenAt
+            ?? FindWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId)?.CreatedAt
+            ?? _timeProvider.GetUtcNow();
+        return new RunnerWorkflowWork(item, dispatch, takenAt);
     }
 
     private static WorkItem? RecoverActiveTaskWorkItem(WorkflowRun run, WorkflowActiveWorkView active)
@@ -347,6 +410,13 @@ public class RunnerGrain : Grain, IRunnerGrain
         {
             TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
             await PersistAsync();
+            var (terminalStatus, terminalReason) = ResolveTerminalStatus(result);
+            await MarkRunnerWorkTerminalAsync(
+                WorkDispatchOwnerKinds.AgentJob,
+                agentJobId,
+                workId,
+                terminalStatus,
+                terminalReason);
         }
 
         var reason = !accepted.Accepted
@@ -382,7 +452,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             WorkId: work.WorkId,
             OwnerKind: work.OwnerKind,
             OwnerId: work.OwnerId,
-            WorkType: work.WorkType ?? "task",
+            WorkType: work.WorkType ?? (work.OwnerKind == WorkDispatchOwnerKinds.AgentJob ? "agent-job" : "task"),
             Stage: work.Stage,
             Title: work.Title,
             Issue: work.Issue,
@@ -541,9 +611,11 @@ public class RunnerGrain : Grain, IRunnerGrain
             issue = new WorkIssueRef(projectId, issueId, number);
         }
 
+        var workId = item.Id ?? throw new InvalidOperationException($"Workflow '{workflowRunId}' returned a work item without an id");
+        var takenAt = _timeProvider.GetUtcNow();
         AddWork(new RunnerWork
         {
-            WorkId = item.Id!,
+            WorkId = workId,
             OwnerKind = WorkDispatchOwnerKinds.Workflow,
             OwnerId = workflowRunId,
             WorkType = item.WorkType,
@@ -551,9 +623,16 @@ public class RunnerGrain : Grain, IRunnerGrain
             Title = item.Title,
             Issue = issue,
             Status = RunnerWorkStatus.Running,
-            CreatedAt = _timeProvider.GetUtcNow(),
+            CreatedAt = takenAt,
         });
         await PersistAsync();
+        await _runnerWorks.InsertOutstandingAsync(new LedgerRunnerWork(
+            RunnerId,
+            WorkDispatchOwnerKinds.Workflow,
+            workflowRunId,
+            workId,
+            takenAt,
+            LedgerRunnerWorkStatus.Outstanding));
         return dispatch;
     }
 
@@ -577,6 +656,12 @@ public class RunnerGrain : Grain, IRunnerGrain
                     RunnerId, workId, agentJobId);
                 TryRemoveWork(workId, WorkDispatchOwnerKinds.AgentJob, agentJobId);
                 await PersistAsync();
+                await MarkRunnerWorkTerminalAsync(
+                    WorkDispatchOwnerKinds.AgentJob,
+                    agentJobId,
+                    workId,
+                    LedgerRunnerWorkStatus.Failed,
+                    "not-runnable");
                 continue;
             }
 
@@ -607,6 +692,12 @@ public class RunnerGrain : Grain, IRunnerGrain
         foreach (var work in stale)
         {
             TryRemoveWork(work.WorkId, work.OwnerKind, work.OwnerId);
+            await MarkRunnerWorkTerminalAsync(
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkId,
+                LedgerRunnerWorkStatus.Failed,
+                "stale-work");
             _log.LogInformation(
                 "Runner {RunnerId} removed stale workflow work {WorkId} for {WorkflowRunId}",
                 RunnerId,
@@ -617,8 +708,6 @@ public class RunnerGrain : Grain, IRunnerGrain
         await PersistAsync();
     }
 
-    // ── Persisted works helpers ───────────────────────────────────────────
-
     private List<RunnerWork> GetWorks()
     {
         _worksState.State ??= new RunnerWorksState();
@@ -628,7 +717,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private void AddWork(RunnerWork work)
     {
-        _worksState.State.Works.Add(work);
+        GetWorks().Add(work);
     }
 
     private RunnerWork? FindWork(string workId, string ownerKind, string ownerId)
@@ -656,6 +745,35 @@ public class RunnerGrain : Grain, IRunnerGrain
     private async Task PersistAsync()
     {
         await _worksState.WriteStateAsync();
+    }
+
+    private async Task MarkRunnerWorkTerminalAsync(
+        string ownerKind,
+        string ownerId,
+        string workId,
+        LedgerRunnerWorkStatus status,
+        string? reason)
+    {
+        await _runnerWorks.TryMarkTerminalAsync(
+            RunnerId,
+            ownerKind,
+            ownerId,
+            workId,
+            status,
+            reason,
+            _timeProvider.GetUtcNow());
+    }
+
+    private static (LedgerRunnerWorkStatus Status, string? Reason) ResolveTerminalStatus(WorkResult result)
+    {
+        var isSuccess = string.Equals(result.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "pass", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "ok", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(result.Status, "success", StringComparison.OrdinalIgnoreCase);
+
+        return isSuccess
+            ? (LedgerRunnerWorkStatus.Completed, null)
+            : (LedgerRunnerWorkStatus.Failed, string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
     }
 }
 

@@ -46,6 +46,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
+        siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
