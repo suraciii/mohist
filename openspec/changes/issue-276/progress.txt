@@ -18,3 +18,16 @@
 - `WorkflowOptions` namespace is `Mohist.Server.Workflow.Grains`, which `MohistServiceRegistration` already imports.
 - `GetRuntimeStateAsync` throws if `_lastHeartbeat` is still `DateTime.MinValue` (default for a freshly reactivated grain). Tests that reactivate a runner and read runtime state must register or heartbeat first.
 - The first migration generated from the composite-key schema had to be replaced; the final migration is a clean `CreateTable` with an auto-increment `Id` plus indexes on `(RunnerId, Status)` and `(RunnerId, OwnerKind, OwnerId, WorkId)`.
+
+## T-001 verification (2026-06-27)
+
+- T-001 implementation was already present on branch `mohist/run-wr_44b143b1760f440d93d8c389c9ec46d6` (commit a84659e9).
+- Verified acceptance criteria:
+  - `WorkflowOptions` exists at `Workflow/Grains/WorkflowOptions.cs` with `SectionName = "Mohist:Workflow"` and default `WorkCompletionTimeout = TimeSpan.FromMinutes(30)`.
+  - Registered in `MohistServiceRegistration.cs:99` via `services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName))`.
+  - `RunnerGrain` constructor resolves `TimeProvider` and `IOptions<WorkflowOptions>`; production registers `TimeProvider.System` at `MohistServiceRegistration.cs:77`.
+  - `PollOneWorkflowAsync` (`RunnerGrain.cs:632`) and `AssignAgentJobAsync` (`RunnerGrain.cs:249`) stamp `TakenAt` via `_timeProvider.GetUtcNow()`.
+  - `RunnerGrainTimeProviderSpecs` advances `WorkflowGrainFixture.TimeProvider` and asserts recorded `TakenAt` matches the fake clock for both agent-job and workflow takes.
+  - `WorkflowOptions_ResolvesToTestConfiguredWorkCompletionTimeout` confirms non-default `WorkCompletionTimeout` is observable via DI.
+  - Heartbeat/`CheckHeartbeatAsync` still reads `DateTime.UtcNow` (`RunnerGrain.cs:529`, `:584`), untouched per AC #5.
+- `dotnet build` succeeded with 0 warnings/errors; full server test suite passed (2841 passed, 14 skipped, 0 failed).
