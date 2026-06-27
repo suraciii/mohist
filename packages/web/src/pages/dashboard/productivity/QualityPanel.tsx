@@ -78,8 +78,10 @@ function QualityWindow({ title, window, testidSuffix }: QualityWindowProps) {
 export function QualityPanel() {
   const { data } = useQualityMetrics()
   const window7d = data?.window7d
+  const window30d = data?.window30d
+  const hasSamples = (window7d?.sampleCount ?? 0) > 0 || (window30d?.sampleCount ?? 0) > 0
 
-  if (!window7d || window7d.sampleCount === 0) {
+  if (!window7d || !window30d || !hasSamples) {
     return (
       <section
         data-testid={PANEL_TESTID}
@@ -114,7 +116,7 @@ export function QualityPanel() {
         <QualityWindow title="Last 7 days" window={window7d} testidSuffix="7d" />
         <QualityWindow
           title="Last 30 days"
-          window={data.window30d}
+          window={window30d}
           testidSuffix="30d"
         />
       </div>

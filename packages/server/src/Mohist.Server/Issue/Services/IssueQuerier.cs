@@ -20,6 +20,9 @@ namespace Mohist.Server.Issue.Services;
 
 public class IssueQuerier : IScopedService
 {
+    private const string WorkStartedType = "com.mohist.issue.work-started";
+    private static readonly string[] QualityStageOrder = ["plan", "build", "check", "integrate"];
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly ProjectQuerier _projects;
@@ -415,30 +418,55 @@ public class IssueQuerier : IScopedService
             .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
             .ToList();
 
-        var runs = await LoadWorkflowRunsAsync(db, issues);
-
-        // Resolve ship time per Done issue from durable events.
+        // Resolve lifecycle workflow runs and ship time per Done issue from durable events.
         var projectIssueIds = issues.Select(i => i.Id).ToList();
         var projectSources = projectIssueIds
             .Select(id => IssueSourcePrefix + id)
             .ToList();
 
         var shipTimes = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        var runIdsByIssue = issues.ToDictionary(
+            i => i.Id,
+            _ => new List<string>(),
+            StringComparer.Ordinal);
         if (projectSources.Count > 0)
         {
             var sourceSet = new HashSet<string>(projectSources, StringComparer.Ordinal);
             var candidates = await db.IssueEvents.AsNoTracking()
-                .Select(e => new { e.Source, e.Type, e.Time })
+                .Select(e => new { e.Source, e.Type, e.Time, e.Data })
                 .ToListAsync();
             foreach (var e in candidates)
             {
-                if (e.Type != WorkCompletedType || !sourceSet.Contains(e.Source)) continue;
+                if (!sourceSet.Contains(e.Source)) continue;
+
                 var issueId = e.Source[IssueSourcePrefix.Length..];
-                // Keep the latest work-completed time if multiple exist.
-                if (!shipTimes.TryGetValue(issueId, out var existing) || e.Time > existing)
-                    shipTimes[issueId] = e.Time;
+
+                if (e.Type == WorkStartedType)
+                {
+                    var workflowRunId = ReadWorkflowRunId(e.Data);
+                    if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                        ids.Add(workflowRunId);
+                }
+                else if (e.Type == WorkCompletedType)
+                {
+                    // Keep the latest work-completed time if multiple exist.
+                    if (!shipTimes.TryGetValue(issueId, out var existing) || e.Time > existing)
+                        shipTimes[issueId] = e.Time;
+
+                    var workflowRunId = ReadWorkflowRunId(e.Data);
+                    if (!string.IsNullOrWhiteSpace(workflowRunId) && runIdsByIssue.TryGetValue(issueId, out var ids))
+                        ids.Add(workflowRunId);
+                }
             }
         }
+
+        foreach (var issue in issues)
+        {
+            if (!string.IsNullOrWhiteSpace(issue.WorkflowRunId) && runIdsByIssue.TryGetValue(issue.Id, out var ids))
+                ids.Add(issue.WorkflowRunId);
+        }
+
+        var runs = await LoadWorkflowRunsAsync(db, runIdsByIssue.Values.SelectMany(ids => ids));
 
         // Single-pass classification and bucketing.
         var window7d = new QualityAccumulator();
@@ -449,11 +477,22 @@ public class IssueQuerier : IScopedService
             if (issue.Status != MohistDefaultWorkflowProjection.IssueStatusName(IssueStatus.Done)) continue;
             if (!shipTimes.TryGetValue(issue.Id, out var shipTime)) continue;
 
-            var run = issue.WorkflowRunId is not null && runs.TryGetValue(issue.WorkflowRunId, out var r)
-                ? r
-                : null;
+            if (!runIdsByIssue.TryGetValue(issue.Id, out var issueRunIds)) continue;
 
-            var (isFirstTimeRight, stageRework) = ClassifyRun(run);
+            var lifecycleRuns = new List<WorkflowRun>();
+            var hasUnknownRun = false;
+            foreach (var runId in issueRunIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal))
+            {
+                if (runs.TryGetValue(runId, out var run))
+                    lifecycleRuns.Add(run);
+                else
+                    hasUnknownRun = true;
+            }
+            var (isFirstTimeRight, stageRework) = lifecycleRuns.Count == 0 || hasUnknownRun
+                ? (false, new Dictionary<string, bool>(StringComparer.Ordinal))
+                : ClassifyRuns(lifecycleRuns);
 
             if (shipTime >= window7dFrom && shipTime <= window7dTo)
                 Accumulate(window7d, isFirstTimeRight, stageRework);
@@ -467,29 +506,29 @@ public class IssueQuerier : IScopedService
             BuildWindow(window30dFrom, window30dTo, window30d));
     }
 
-    private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRun(WorkflowRun? run)
+    private static (bool IsFirstTimeRight, IReadOnlyDictionary<string, bool> StageRework) ClassifyRuns(IReadOnlyCollection<WorkflowRun> runs)
     {
-        if (run is null)
-            return (true, new Dictionary<string, bool>(StringComparer.Ordinal));
-
         var isFirstTimeRight = true;
         var stageRework = new Dictionary<string, bool>(StringComparer.Ordinal);
 
-        foreach (var stage in run.Stages)
+        foreach (var run in runs)
         {
-            if (!stage.Initialized) continue;
-
-            var stageHasRepair = false;
-            foreach (var check in stage.Checks)
+            foreach (var stage in run.Stages)
             {
-                if (check.RepairCount > 0)
-                {
-                    stageHasRepair = true;
-                    isFirstTimeRight = false;
-                }
-            }
+                if (!stage.Initialized) continue;
 
-            stageRework[stage.Id] = stageHasRepair;
+                var stageHasRepair = false;
+                foreach (var check in stage.Checks)
+                {
+                    if (check.RepairCount > 0)
+                    {
+                        stageHasRepair = true;
+                        isFirstTimeRight = false;
+                    }
+                }
+
+                stageRework[stage.Id] = stageRework.GetValueOrDefault(stage.Id) || stageHasRepair;
+            }
         }
 
         return (isFirstTimeRight, stageRework);
@@ -528,14 +567,18 @@ public class IssueQuerier : IScopedService
             ? null
             : (double)accumulator.FirstTimeRightCount / accumulator.SampleCount;
 
-        var stages = accumulator.EnteredByStage
-            .OrderBy(s => s.Key, StringComparer.Ordinal)
-            .Select(s =>
+        var observedStages = accumulator.EnteredByStage.Keys
+            .Where(stage => !QualityStageOrder.Contains(stage, StringComparer.Ordinal))
+            .OrderBy(stage => stage, StringComparer.Ordinal);
+
+        var stages = QualityStageOrder
+            .Concat(observedStages)
+            .Select(stage =>
             {
-                var entered = s.Value;
-                var reworked = accumulator.ReworkedByStage.GetValueOrDefault(s.Key);
+                var entered = accumulator.EnteredByStage.GetValueOrDefault(stage);
+                var reworked = accumulator.ReworkedByStage.GetValueOrDefault(stage);
                 return new QualityStageReworkAggregate(
-                    s.Key,
+                    stage,
                     entered,
                     entered == 0 ? null : (double)reworked / entered);
             })
@@ -551,13 +594,26 @@ public class IssueQuerier : IScopedService
         var workflowRunIds = issues
             .Select(i => i.WorkflowRunId)
             .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        if (workflowRunIds.Length == 0) return [];
+
+        return await LoadWorkflowRunsAsync(db, workflowRunIds);
+    }
+
+    private async Task<Dictionary<string, WorkflowRun>> LoadWorkflowRunsAsync(
+        MohistDbContext db,
+        IEnumerable<string> workflowRunIds)
+    {
+        var ids = workflowRunIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (ids.Length == 0) return [];
 
         var runRows = await db.WorkflowRuns
             .AsNoTracking()
-            .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
+            .Where(row => ids.Contains(row.WorkflowRunId))
             .ToListAsync();
 
         var runs = new Dictionary<string, WorkflowRun>(StringComparer.Ordinal);
@@ -568,6 +624,16 @@ public class IssueQuerier : IScopedService
                 runs[row.WorkflowRunId] = run;
         }
         return runs;
+    }
+
+    private static string? ReadWorkflowRunId(JsonElement data)
+    {
+        if (data.ValueKind != JsonValueKind.Object) return null;
+        if (data.TryGetProperty("workflowRunId", out var camel) && camel.ValueKind == JsonValueKind.String)
+            return camel.GetString();
+        if (data.TryGetProperty("WorkflowRunId", out var pascal) && pascal.ValueKind == JsonValueKind.String)
+            return pascal.GetString();
+        return null;
     }
 
     /// <summary>

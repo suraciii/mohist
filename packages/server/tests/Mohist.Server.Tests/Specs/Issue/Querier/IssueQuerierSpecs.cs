@@ -1262,7 +1262,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_ftr_1", workflowRunId: "wr_quality_ftr_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_ftr_1");
         await SeedWorkflowRunAsync(db, "wr_quality_ftr_1", QualityRunState("wr_quality_ftr_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -1290,7 +1290,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_rework_1", workflowRunId: "wr_quality_rework_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_rework_1");
         await SeedWorkflowRunAsync(db, "wr_quality_rework_1", QualityRunState("wr_quality_rework_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 1)]),
@@ -1321,7 +1321,7 @@ public class IssueQuerierSpecs
         SeedIssue(db, project, "issue_quality_status_backlog", workflowRunId: null, status: IssueStatus.Backlog);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, shipped.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
+        SeedEvent(db, shipped.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_status_shipped");
         await SeedWorkflowRunAsync(db, "wr_quality_status_shipped", QualityRunState("wr_quality_status_shipped", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_status_inprogress", QualityRunState("wr_quality_status_inprogress", [("plan", [("plan-ok", "Plan ok", 1)])]));
         await db.SaveChangesAsync();
@@ -1337,7 +1337,7 @@ public class IssueQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public async Task GetQualityAsync_NeverEnteredStage_IsExcludedFromStageRate()
+    public async Task GetQualityAsync_NeverEnteredStage_IsReturnedWithNullStageRate()
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -1346,7 +1346,7 @@ public class IssueQuerierSpecs
 
         var issue = SeedIssue(db, project, "issue_quality_stage_1", workflowRunId: "wr_quality_stage_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
-        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_stage_1");
         await SeedWorkflowRunAsync(db, "wr_quality_stage_1", QualityRunState("wr_quality_stage_1", [
             ("plan", [("plan-ok", "Plan ok", 0)]),
             ("build", [("build-ok", "Build ok", 0)]),
@@ -1359,7 +1359,12 @@ public class IssueQuerierSpecs
 
         Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1);
         Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1);
-        Assert.DoesNotContain(result.Window7d.Stages, s => s.Stage == "integrate");
+        var check = Assert.Single(result.Window7d.Stages, s => s.Stage == "check");
+        Assert.Equal(0, check.EnteredCount);
+        Assert.Null(check.ReworkRate);
+        var integrate = Assert.Single(result.Window7d.Stages, s => s.Stage == "integrate");
+        Assert.Equal(0, integrate.EnteredCount);
+        Assert.Null(integrate.ReworkRate);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
@@ -1377,9 +1382,9 @@ public class IssueQuerierSpecs
         var old = SeedIssue(db, project, "issue_quality_win_old", workflowRunId: "wr_quality_win_old", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, recent.Id, IssueQuerier.WorkCompletedType, now.AddDays(-3));
-        SeedEvent(db, mid.Id, IssueQuerier.WorkCompletedType, now.AddDays(-20));
-        SeedEvent(db, old.Id, IssueQuerier.WorkCompletedType, now.AddDays(-40));
+        SeedEvent(db, recent.Id, IssueQuerier.WorkCompletedType, now.AddDays(-3), "wr_quality_win_recent");
+        SeedEvent(db, mid.Id, IssueQuerier.WorkCompletedType, now.AddDays(-20), "wr_quality_win_mid");
+        SeedEvent(db, old.Id, IssueQuerier.WorkCompletedType, now.AddDays(-40), "wr_quality_win_old");
 
         await SeedWorkflowRunAsync(db, "wr_quality_win_recent", QualityRunState("wr_quality_win_recent", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_win_mid", QualityRunState("wr_quality_win_mid", [("plan", [("plan-ok", "Plan ok", 0)])]));
@@ -1413,7 +1418,10 @@ public class IssueQuerierSpecs
 
         Assert.Equal(0, result.Window7d.SampleCount);
         Assert.Null(result.Window7d.FirstTimeRightRate);
-        Assert.Empty(result.Window7d.Stages);
+        Assert.Contains(result.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(result.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(result.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(result.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
         Assert.Equal(0, result.Window30d.SampleCount);
         Assert.Null(result.Window30d.FirstTimeRightRate);
     }
@@ -1432,8 +1440,8 @@ public class IssueQuerierSpecs
         var onlyPlan = SeedIssue(db, project, "issue_quality_denom_plan", workflowRunId: "wr_quality_denom_plan", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, reachedIntegrate.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
-        SeedEvent(db, onlyPlan.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2));
+        SeedEvent(db, reachedIntegrate.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_denom_integrate");
+        SeedEvent(db, onlyPlan.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_denom_plan");
 
         await SeedWorkflowRunAsync(db, "wr_quality_denom_integrate", QualityRunState("wr_quality_denom_integrate", [
             ("plan", [("plan-ok", "Plan ok", 1)]),
@@ -1460,6 +1468,95 @@ public class IssueQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task GetQualityAsync_PriorLifecycleRunRepair_PreventsFirstTimeRight()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-lifecycle-{Guid.NewGuid():N}", Name = "Quality Lifecycle Project" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        var issue = SeedIssue(db, project, "issue_quality_lifecycle_1", workflowRunId: "wr_quality_lifecycle_final", status: IssueStatus.Done);
+        await db.SaveChangesAsync();
+
+        SeedEvent(db, issue.Id, "com.mohist.issue.work-started", now.AddDays(-5), "wr_quality_lifecycle_first");
+        SeedEvent(db, issue.Id, "com.mohist.issue.work-started", now.AddDays(-2), "wr_quality_lifecycle_final");
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-1), "wr_quality_lifecycle_final");
+
+        await SeedWorkflowRunAsync(db, "wr_quality_lifecycle_first", QualityRunState("wr_quality_lifecycle_first", [
+            ("plan", [("plan-repair", "Plan repair", 1)]),
+        ]));
+        await SeedWorkflowRunAsync(db, "wr_quality_lifecycle_final", QualityRunState("wr_quality_lifecycle_final", [
+            ("plan", [("plan-ok", "Plan ok", 0)]),
+            ("build", [("build-ok", "Build ok", 0)]),
+        ]));
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        Assert.Equal(1, result.Window7d.SampleCount);
+        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
+        var plan = Assert.Single(result.Window7d.Stages, s => s.Stage == "plan");
+        Assert.Equal(1, plan.EnteredCount);
+        Assert.Equal(1.0, plan.ReworkRate);
+        var build = Assert.Single(result.Window7d.Stages, s => s.Stage == "build");
+        Assert.Equal(1, build.EnteredCount);
+        Assert.Equal(0.0, build.ReworkRate);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_MissingWorkflowRun_CountsAsNotFirstTimeRight()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-missing-run-{Guid.NewGuid():N}", Name = "Quality Missing Run Project" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        var issue = SeedIssue(db, project, "issue_quality_missing_run_1", workflowRunId: "wr_quality_missing_run_1", status: IssueStatus.Done);
+        await db.SaveChangesAsync();
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_missing_run_1");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        Assert.Equal(1, result.Window7d.SampleCount);
+        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
+        Assert.All(result.Window7d.Stages, stage => Assert.Equal(0, stage.EnteredCount));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task GetQualityAsync_UnreadableWorkflowRun_CountsAsNotFirstTimeRight()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-quality-corrupt-run-{Guid.NewGuid():N}", Name = "Quality Corrupt Run Project" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+
+        var issue = SeedIssue(db, project, "issue_quality_corrupt_run_1", workflowRunId: "wr_quality_corrupt_run_1", status: IssueStatus.Done);
+        await db.SaveChangesAsync();
+        SeedEvent(db, issue.Id, IssueQuerier.WorkCompletedType, now.AddDays(-2), "wr_quality_corrupt_run_1");
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            "wr_quality_corrupt_run_1",
+            "{\"workflowRunId\":\"wr_quality_corrupt_run_1\",\"status\":\"not-a-status\",\"stages\":[]}");
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetQualityAsync(project.Id, now);
+
+        Assert.Equal(1, result.Window7d.SampleCount);
+        Assert.Equal(0.0, result.Window7d.FirstTimeRightRate);
+        Assert.All(result.Window7d.Stages, stage => Assert.Equal(0, stage.EnteredCount));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task GetQualityAsync_ProjectScoping_OnlyCountsTargetProjectsIssues()
     {
         using var scope = _fixture.Services.CreateScope();
@@ -1470,8 +1567,8 @@ public class IssueQuerierSpecs
         var b1 = SeedIssue(db, projectB, "issue_quality_scope_b_1", workflowRunId: "wr_quality_scope_b_1", status: IssueStatus.Done);
         await db.SaveChangesAsync();
 
-        SeedEvent(db, a1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero));
-        SeedEvent(db, b1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero));
+        SeedEvent(db, a1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_a_1");
+        SeedEvent(db, b1.Id, IssueQuerier.WorkCompletedType, new DateTimeOffset(2026, 6, 18, 12, 0, 0, TimeSpan.Zero), "wr_quality_scope_b_1");
 
         await SeedWorkflowRunAsync(db, "wr_quality_scope_a_1", QualityRunState("wr_quality_scope_a_1", [("plan", [("plan-ok", "Plan ok", 0)])]));
         await SeedWorkflowRunAsync(db, "wr_quality_scope_b_1", QualityRunState("wr_quality_scope_b_1", [("plan", [("plan-ok", "Plan ok", 1)])]));
@@ -1522,7 +1619,8 @@ public class IssueQuerierSpecs
         MohistDbContext db,
         string issueId,
         string type,
-        DateTimeOffset time)
+        DateTimeOffset time,
+        string? workflowRunId = null)
     {
         var source = IssueQuerier.IssueSourcePrefix + issueId;
         var dbMax = db.IssueEvents
@@ -1546,7 +1644,9 @@ public class IssueQuerierSpecs
             SpecVersion = "1.0",
             Subject = "1",
             DataContentType = "application/json",
-            Data = System.Text.Json.JsonDocument.Parse("null").RootElement,
+            Data = workflowRunId is null
+                ? JsonDocument.Parse("null").RootElement
+                : JsonSerializer.SerializeToElement(new { workflowRunId }, JSON.Options),
             ExtensionsJson = "{}",
         });
     }
@@ -1709,4 +1809,3 @@ public class IssueQuerierSpecs
         };
     }
 }
-

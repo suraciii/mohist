@@ -1,6 +1,7 @@
 import { CompletionTrend } from './CompletionTrend'
 import { EpicProgressList } from './EpicProgressList'
 import { InvestmentPanel } from './InvestmentPanel'
+import { QualityPanel } from './QualityPanel'
 import { SnapshotRow } from './SnapshotRow'
 
 export function ProductivityZone() {
@@ -13,6 +14,7 @@ export function ProductivityZone() {
       <SnapshotRow />
       <EpicProgressList />
       <CompletionTrend />
+      <QualityPanel />
       <InvestmentPanel />
     </div>
   )

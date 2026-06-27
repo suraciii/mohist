@@ -296,6 +296,8 @@ public class IssueMetricsApiSpecs
         Assert.Equal(0.0, payload.Window7d.FirstTimeRightRate);
         Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 1 && s.ReworkRate == 0.0);
         Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 1 && s.ReworkRate == 1.0);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
 
         Assert.Equal(1, payload.Window30d.SampleCount);
         Assert.NotNull(payload.Window30d.FirstTimeRightRate);
@@ -315,7 +317,10 @@ public class IssueMetricsApiSpecs
         var payload = await ReadDataAsync<QualityMetricsResponse>(response);
         Assert.Equal(0, payload.Window7d.SampleCount);
         Assert.Null(payload.Window7d.FirstTimeRightRate);
-        Assert.Empty(payload.Window7d.Stages);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "plan" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "build" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "check" && s.EnteredCount == 0 && s.ReworkRate == null);
+        Assert.Contains(payload.Window7d.Stages, s => s.Stage == "integrate" && s.EnteredCount == 0 && s.ReworkRate == null);
         Assert.Equal(0, payload.Window30d.SampleCount);
         Assert.Null(payload.Window30d.FirstTimeRightRate);
     }
@@ -621,7 +626,7 @@ public class IssueMetricsApiSpecs
             SpecVersion = "1.0",
             Subject = number.ToString(),
             DataContentType = "application/json",
-            Data = JsonDocument.Parse("null").RootElement,
+            Data = JsonSerializer.SerializeToElement(new { workflowRunId }, JSON.Options),
             ExtensionsJson = "{}",
         });
         await db.SaveChangesAsync();

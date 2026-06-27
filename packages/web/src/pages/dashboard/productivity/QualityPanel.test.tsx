@@ -110,7 +110,7 @@ describe('QualityPanel', () => {
     expect(container.querySelector('[data-state="empty"]')).toBeNull()
   })
 
-  it('renders the empty state when the 7-day window has no samples', () => {
+  it('renders each window empty state independently', () => {
     useQualityMetricsMock.mockReturnValue({
       data: makeQualityResponse({
         window7d: makeWindow(0, null, []),
@@ -121,14 +121,32 @@ describe('QualityPanel', () => {
 
     const section = screen.getByTestId('productivity-quality')
     expect(section).toBeInTheDocument()
-    expect(section).toHaveAttribute('data-state', 'empty')
+    expect(section).not.toHaveAttribute('data-state', 'empty')
 
-    const empty = screen.getByTestId('productivity-quality-empty')
+    const empty = screen.getByTestId('productivity-quality-window-7d-empty')
     expect(empty).toBeInTheDocument()
-    expect(empty.textContent ?? '').toMatch(/no quality data/i)
+    expect(empty.textContent ?? '').toMatch(/no shipped issues/i)
 
     expect(screen.queryByTestId('productivity-quality-ftr-7d')).not.toBeInTheDocument()
-    expect(container.querySelector('[data-testid="productivity-quality-ftr-30d"]')).toBeNull()
+    expect(screen.getByTestId('productivity-quality-ftr-30d')).toHaveTextContent('60%')
+    expect(screen.queryByTestId('productivity-quality-empty')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-testid="productivity-quality-window-30d-empty"]')).toBeNull()
+  })
+
+  it('renders the panel empty state when both windows have no samples', () => {
+    useQualityMetricsMock.mockReturnValue({
+      data: makeQualityResponse({
+        window7d: makeWindow(0, null, []),
+        window30d: makeWindow(0, null, []),
+      }),
+    })
+
+    renderPanel()
+
+    const section = screen.getByTestId('productivity-quality')
+    expect(section).toHaveAttribute('data-state', 'empty')
+    expect(screen.getByTestId('productivity-quality-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('productivity-quality-ftr-30d')).not.toBeInTheDocument()
   })
 
   it('distinguishes a zero-sample window from a perfect first-time-right score', () => {
