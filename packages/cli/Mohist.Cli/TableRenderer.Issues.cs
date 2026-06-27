@@ -298,4 +298,100 @@ internal sealed partial class TableRenderer
         foreach (var line in body.Split('\n'))
             _out.WriteLine($"  {line}");
     }
+
+    private void RenderSessionMetadata(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var name = StringOf(data, "sessionName");
+        var status = StringOf(data, "status");
+        var model = StringOf(data, "model");
+        var stage = StringOf(data, "stage");
+        var createdAt = StringOf(data, "createdAt");
+        var metadata = data["metadata"] as JsonObject;
+        var partCount = NumberOf(metadata, "partCount");
+        var toolCount = NumberOf(metadata, "toolCount");
+        var usage = data["usage"] as JsonObject;
+        var inputTokens = NumberOf(usage, "inputTokens");
+        var outputTokens = NumberOf(usage, "outputTokens");
+        var totalTokens = NumberOf(usage, "totalTokens");
+        var contextWindowUsed = NumberOf(usage, "contextWindowUsed");
+        var contextWindowSize = NumberOf(usage, "contextWindowSize");
+        var contextUsagePercent = NumberOf(usage, "contextUsagePercent");
+        var healthStatus = StringOf(usage, "healthStatus");
+        var tokenUsage = FormatTokenUsage(inputTokens, outputTokens, totalTokens);
+
+        _out.WriteLine($"name:      {name}");
+        _out.WriteLine($"status:    {status}");
+        _out.WriteLine($"model:     {model}");
+        _out.WriteLine($"stage:     {stage}");
+        _out.WriteLine($"created:   {createdAt}");
+        _out.WriteLine($"parts:     {partCount}");
+        _out.WriteLine($"tools:     {toolCount}");
+        _out.WriteLine($"tokens:    {tokenUsage}");
+        _out.WriteLine($"context:   {contextWindowUsed}/{contextWindowSize} ({contextUsagePercent})");
+        _out.WriteLine($"health:    {healthStatus}");
+    }
+
+    private static string FormatTokenUsage(string inputTokens, string outputTokens, string totalTokens)
+    {
+        if (!string.IsNullOrEmpty(totalTokens))
+        {
+            if (!string.IsNullOrEmpty(inputTokens) || !string.IsNullOrEmpty(outputTokens))
+                return $"{totalTokens} (input {inputTokens}, output {outputTokens})";
+            return totalTokens;
+        }
+
+        if (!string.IsNullOrEmpty(inputTokens) || !string.IsNullOrEmpty(outputTokens))
+            return $"input {inputTokens}, output {outputTokens}";
+
+        return "";
+    }
+
+    private void RenderSessionTranscriptSummary(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var turns = data["turns"] as JsonArray ?? new JsonArray();
+        var turnCount = turns.Count.ToString();
+        var partCount = NumberOf(data, "partCount");
+        var firstActivity = turns.Count > 0 ? StringOf(turns[0], "startedAt") : "";
+        var lastActivity = StringOf(data, "lastActivityAt");
+
+        _out.WriteLine($"turns:          {turnCount}");
+        _out.WriteLine($"parts:          {partCount}");
+        _out.WriteLine($"first activity: {firstActivity}");
+        _out.WriteLine($"last activity:  {lastActivity}");
+    }
+
+    private void RenderSessionRecovery(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var agentSessionId = StringOf(data, "agentSessionId");
+        var operation = StringOf(data, "operation");
+        var wasCompacted = BoolOf(data, "wasCompacted") ? "true" : "false";
+        var contextWindowUsedBefore = NumberOf(data, "contextWindowUsedBefore");
+        var contextWindowUsed = NumberOf(data, "contextWindowUsed");
+        var contextUsagePercent = NumberOf(data, "contextUsagePercent");
+        var status = StringOf(data, "status");
+
+        _out.WriteLine($"New session: {agentSessionId}");
+        _out.WriteLine($"operation:   {operation}");
+        _out.WriteLine($"compacted:   {wasCompacted}");
+        _out.WriteLine($"context:     {contextWindowUsedBefore} → {contextWindowUsed} ({contextUsagePercent})");
+        _out.WriteLine($"status:      {status}");
+    }
 }
