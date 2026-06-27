@@ -75,6 +75,81 @@ function buildWork(artifacts: unknown, uses = "test/action"): WorkItem {
 }
 
 describe("WorkExecutor artifact capture", () => {
+  it("taskRecoveryPreservesNestedRecoveryOnAddedTasks", async () => {
+    const connection = new FakeServerConnection()
+    const executor = new WorkExecutor(
+      makeRegistry(async () => ({
+        status: "failure",
+        message: "base moved",
+        output: JSON.stringify({ errorCode: "base-moved" }),
+      })),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      connection as never,
+      {} as never,
+      null,
+      workDir,
+    )
+
+    const result = await executor.execute({
+      ...buildWork(null),
+      title: "Merge PR",
+      recovery: {
+        budget: 2,
+        handlers: [
+          {
+            when: "errorCode=base-moved",
+            tasks: [
+              {
+                id: "recover:rebase",
+                title: "Rebase after base moved",
+                uses: "mohist/rebase",
+                with: { baseBranch: "master" },
+                recovery: {
+                  budget: 1,
+                  handlers: [
+                    {
+                      when: "errorCode=conflict",
+                      tasks: [
+                        {
+                          id: "recover:resolve-rebase-conflicts",
+                          title: "Resolve rebase conflicts",
+                          uses: "mohist/acp-agent",
+                          with: { session: "integrate" },
+                        },
+                      ],
+                      retrySelf: true,
+                    },
+                  ],
+                },
+              },
+            ],
+            retrySelf: true,
+          },
+        ],
+      },
+    }, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(result.addTasks?.[0]).toMatchObject({
+      id: "recover:rebase",
+      recovery: {
+        budget: 1,
+        handlers: [
+          {
+            when: "errorCode=conflict",
+            retrySelf: true,
+          },
+        ],
+      },
+    })
+    expect(result.addTasks?.[1]).toMatchObject({
+      id: "work-1",
+      recovery: {
+        budget: 1,
+      },
+    })
+  })
+
   it("completesTaskAndIncludesUploadIdsWhenAllDeclaredArtifactsExist", async () => {
     await writeFile(join(workDir, "review.md"), "looks good", "utf8")
     await writeFile(join(workDir, "design.md"), "the design", "utf8")

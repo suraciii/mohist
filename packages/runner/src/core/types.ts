@@ -159,6 +159,7 @@ export interface ActionContext {
   variables: JsonObject
   workDir: string
   signal: AbortSignal
+  recovery?: JsonObject | null
   projectId?: string | null
   issueNumber?: number | null
   acpSessionManager?: import("../runtime/acp-connection.js").AcpSessionManager | null
