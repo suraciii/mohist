@@ -9,5 +9,9 @@ public class IssueRow
     public string? Status { get; set; }
     public string? WorkflowRunId { get; set; }
     public bool? IsArchived { get; set; }
+    public string? Title { get; set; }
+    public string? Priority { get; set; }
+    public bool? IsDraft { get; set; }
+    public string? PrerequisiteNumbersJson { get; set; }
     public string? Risk { get; set; }
 }

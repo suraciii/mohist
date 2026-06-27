@@ -237,6 +237,14 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
             entity.Property(e => e.WorkflowRunId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true);
+            entity.Property(e => e.Title)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))", stored: true);
+            entity.Property(e => e.Priority)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))", stored: true);
+            entity.Property(e => e.IsDraft)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))", stored: true);
+            entity.Property(e => e.PrerequisiteNumbersJson)
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))", stored: true);
             entity.Property(e => e.IsArchived)
                 .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
