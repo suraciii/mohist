@@ -112,7 +112,7 @@ function LinkedIssueRow({
         </div>
         <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
         {showStart && (
           <Button
             type="button"
@@ -515,7 +515,7 @@ export function EpicDetailPage() {
       </div>
 
       <Card className="p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-start md:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span data-testid="epic-number">
@@ -542,7 +542,7 @@ export function EpicDetailPage() {
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap justify-start gap-2 md:justify-end">
             <Button
               type="button"
               variant="outline"

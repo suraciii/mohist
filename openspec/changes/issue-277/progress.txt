@@ -1,0 +1,29 @@
+# Issue #277 — Progress
+
+## Codebase Patterns
+
+- packages/web 用 vitest + jsdom。`getComputedStyle` 不响应 Tailwind 的响应式断点，`window.matchMedia` 在 jsdom 下也只是 stub。所以**结构契约单测**只能断言 class 字符串和 DOM 顺序，而不能直接验证像素级溢出。
+- 单测渲染器统一在 `EpicDetailPage.test.tsx` 内 `vi.hoisted` 一组 `mocks` 并通过 `vi.mock('../../../entities/{epic,issue,project}', ...)` 注入到被测组件，再用 `MemoryRouter` + `Routes` + `/epic/:id` 路径挂载组件。
+- 现有 epic 详情页测试已经有针对状态机/守卫的多个 `describe`，新增移动端结构契约测试应该单独建一个 describe 块，避免污染既有断言。
+- `data-testid` 列表里关键元素已经够用：`epic-number`（页头编号）、`edit-epic-button` / `start-epic-trigger` / `pause-epic-trigger` / `resume-epic-trigger` / `mark-epic-done` / `close-epic-trigger`（动作按钮组）、`linked-issue-start`（LinkedIssueRow 的 Start）。
+- `LinkedIssueRow` 内部动作容器没有专属 testid，但可以通过 `screen.getByTestId('linked-issue-start').parentElement` 取到，再校验 className。
+- 详情页头部有 `flex flex-col gap-4 md:flex-row md:flex-wrap md:items-start md:justify-between` 的唯一 class 组合，可以用 `screen.getByTestId('epic-number').closest('.flex.flex-col.gap-4')` 直接定位 header container；title 块用 `.closest('.min-w-0.flex-1')` 拿。
+
+## T-001 — Epic detail page responsive mobile layout
+
+完成的事：
+
+- 头部容器：`flex flex-wrap items-start justify-between gap-4` → `flex flex-col gap-4 md:flex-row md:flex-wrap md:items-start md:justify-between`。移动端单列，标题/描述块在动作按钮组之上；桌面端（>=768px）保持原 `flex-row + justify-between + items-start` 单行布局。
+- 标题块维持 `min-w-0 flex-1`，确保移动端可收缩到非零宽度以便长标题换行。
+- 动作按钮组：`flex flex-wrap gap-2` → `flex flex-wrap justify-start gap-2 md:justify-end`，移动端左对齐换行，桌面端随 `justify-between` 推到右侧。
+- `LinkedIssueRow` 动作容器：`flex shrink-0 gap-2` → `flex shrink-0 flex-wrap gap-2`，确保 320px 下 Start/Remove 可换行。
+- 新增 12 个结构契约单测：mobile/desktop class 切换、标题块在动作组前的 DOM 顺序、标题块 min-w-0+flex-1 保持、动作组 flex-wrap、按状态的主动作（idle=Start，running=Pause，paused=Resume）和次要动作（Edit/Mark Done/Close Epic）的可达性、done/closed 状态不出现生命周期动作、LinkedIssueRow 动作容器 flex-wrap、桌面端类名保留。
+- 全部 83 个 detail page 测试 + 全 web 包 2426 测试通过（1 个 skip 与本次无关）。
+- typecheck 通过。
+
+## 注意点 / 经验
+
+- jsdom 下无法测量真实 `scrollWidth/clientWidth`，所以 jsdom 套件只能作为结构契约代理；像素级 `scrollWidth <= clientWidth` 校验按 design 留给真实浏览器（Playwright a11y 配置已经存在，但本任务不在范围内引入新 e2e）。
+- 给 header container 加 className 选择器时，`md:flex-row` 等带冒号需要 CSS 转义（`.flex.flex-col.gap-4.md\\:flex-row`），但用最稳的稳定部分（`.flex.flex-col.gap-4`）就够了——冒号类在断言里通过 `classList.contains('md:flex-row')` 直接读。
+- 长标题（中英文）都是字符串字面量放进单测，不需要 mock `useEpic` 返回值结构——`title` 字段直接传给 h1。
+- 提交时一个工作流任务 = 一个 commit，commit 信息以 `T-001` 开头。
