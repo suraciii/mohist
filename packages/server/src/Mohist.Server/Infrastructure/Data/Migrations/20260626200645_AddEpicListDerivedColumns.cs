@@ -15,32 +15,28 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 table: "Issues",
                 type: "INTEGER",
                 nullable: true,
-                computedColumnSql: "COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))",
-                stored: true);
+                computedColumnSql: "COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
 
             migrationBuilder.AddColumn<string>(
                 name: "PrerequisiteNumbersJson",
                 table: "Issues",
                 type: "TEXT",
                 nullable: true,
-                computedColumnSql: "COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))",
-                stored: true);
+                computedColumnSql: "COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))");
 
             migrationBuilder.AddColumn<string>(
                 name: "Priority",
                 table: "Issues",
                 type: "TEXT",
                 nullable: true,
-                computedColumnSql: "COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))",
-                stored: true);
+                computedColumnSql: "COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))");
 
             migrationBuilder.AddColumn<string>(
                 name: "Title",
                 table: "Issues",
                 type: "TEXT",
                 nullable: true,
-                computedColumnSql: "COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))",
-                stored: true);
+                computedColumnSql: "COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))");
         }
 
         /// <inheritdoc />

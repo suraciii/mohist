@@ -238,13 +238,13 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.WorkflowRunId)
                 .HasComputedColumnSql("COALESCE(json_extract(State, '$.workflowRunId'), json_extract(State, '$.WorkflowRunId'))", stored: true);
             entity.Property(e => e.Title)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))");
             entity.Property(e => e.Priority)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))");
             entity.Property(e => e.IsDraft)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
             entity.Property(e => e.PrerequisiteNumbersJson)
-                .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))", stored: true);
+                .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))");
             entity.Property(e => e.IsArchived)
                 .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
             entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
