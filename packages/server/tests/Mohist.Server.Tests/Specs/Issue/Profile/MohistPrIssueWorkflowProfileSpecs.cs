@@ -427,7 +427,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Equal(2, rebaseRecovery!.Budget);
         var rebaseHandlers = rebaseRecovery.Handlers.ToList();
         Assert.Single(rebaseHandlers);
-        var conflictHandler = rebaseHandlers.Single(h => h.When == "failureKind=conflict");
+        var conflictHandler = rebaseHandlers.Single(h => h.When == "errorCode=conflict");
         Assert.True(conflictHandler.RetrySelf);
         var conflictTasks = conflictHandler.Tasks.ToList();
         Assert.Single(conflictTasks);
@@ -629,7 +629,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.Contains("open-draft-pr", emitted);
         Assert.Contains("merge-verified", emitted);
         Assert.Contains("github-pr-status", emitted);
-        Assert.Contains("when: failureKind=conflict", emitted);
+        Assert.Contains("when: errorCode=conflict", emitted);
         Assert.Contains("retrySelf: true", emitted);
 
         var reparsed = WorkflowYamlSerializer.FromYaml(emitted, "mohist/github-pr");

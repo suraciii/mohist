@@ -254,7 +254,7 @@ describe("Issue #112 regression — agent leftovers are cleaned before rebase+pu
       remote: "origin",
       squashed: true,
       squashedHeadSha: "squashed-sha",
-      failureKind: null,
+      errorCode: null,
     })
 
     const pushCalls: { workDir: string; command: string }[] = []

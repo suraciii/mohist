@@ -1,8 +1,10 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
@@ -41,7 +43,8 @@ public static partial class IssueRoutes
                 $"Rebase onto {baseBranch}",
                 "mohist/rebase",
                 BuildRebaseTaskWith(baseBranch, issue.Repository!, req?.ConflictResolver),
-                InvalidateChecks: true);
+                InvalidateChecks: true,
+                Recovery: BuildRebaseRecovery(baseBranch));
 
             var added = await workflow.AddTaskAsync(task);
             return ApiResults.Ok(new

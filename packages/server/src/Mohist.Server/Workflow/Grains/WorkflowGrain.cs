@@ -237,7 +237,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _dispatchedWorkStartedAt = null;
         CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         var with = WorkflowDispatchHelpers.ParseWith(task.With);
-        var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
+        var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with, Recovery: task.Recovery), task.Stage, task.InvalidateChecks);
 
         var stage = _run.CurrentStageId ?? "unknown";
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);

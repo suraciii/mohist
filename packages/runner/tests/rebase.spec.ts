@@ -63,7 +63,7 @@ describe("mohist/rebase", () => {
       rebased: true,
       conflicts: [],
       resolveAttempts: 0,
-      failureKind: null,
+      errorCode: null,
     })
   })
 
@@ -118,7 +118,7 @@ describe("mohist/rebase", () => {
       squashed: false,
       squashedHeadSha: null,
       rebased: true,
-      failureKind: null,
+      errorCode: null,
     })
     expect(result.message).toBe("Rebase completed")
   })
@@ -237,7 +237,7 @@ describe("mohist/rebase", () => {
       squashed: true,
       squashedHeadSha: "squashedHead",
       rebased: true,
-      failureKind: null,
+      errorCode: null,
     })
     expect(result.message).toBe("Rebase and squash completed")
   })
@@ -322,7 +322,7 @@ describe("mohist/rebase", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(output.failureKind).toBe("retry-safe")
+    expect(output.errorCode).toBe("retry-safe")
     expect(output.output).toContain("mo issue show 217 failed")
     expect(output.output).toContain("issue not found")
     expect(calls).toEqual([
@@ -361,7 +361,7 @@ describe("mohist/rebase", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(output.failureKind).toBe("retry-safe")
+    expect(output.errorCode).toBe("retry-safe")
     expect(output.output).toContain("Unsupported messageFrom source 'issue.summary'")
     expect(calls).toEqual([
       "rev-parse --git-path rebase-merge",
@@ -404,7 +404,7 @@ describe("mohist/rebase", () => {
       squashed: false,
       squashedHeadSha: null,
       rebased: false,
-      failureKind: "squash-message-missing",
+      errorCode: "squash-message-missing",
     })
     expect(result.message).toContain("'message' is required")
   })
@@ -441,7 +441,7 @@ describe("mohist/rebase", () => {
       remote: "origin",
       baseRef: "origin/master",
       rebased: false,
-      failureKind: "retry-safe",
+      errorCode: "retry-safe",
     })
   })
 
@@ -472,7 +472,7 @@ describe("mohist/rebase", () => {
     expect(output).toMatchObject({
       kind: "rebase",
       rebased: false,
-      failureKind: "retry-safe",
+      errorCode: "retry-safe",
     })
   })
 
@@ -591,7 +591,7 @@ describe("mohist/rebase", () => {
     expect(calls).toContain("rebase --abort")
     expect(output).toMatchObject({
       rebased: false,
-      failureKind: "conflict",
+      errorCode: "conflict",
       rebaseLeftInProgress: false,
     })
     expect(result.message).toBe("Rebase failed: conflict could not be resolved")
@@ -633,7 +633,7 @@ describe("mohist/rebase", () => {
       rebased: false,
       conflicts: ["packages/runner/src/actions/rebase.ts", "packages/runner/src/actions/git.ts"],
       resolveAttempts: 0,
-      failureKind: "conflict",
+      errorCode: "conflict",
       rebaseLeftInProgress: true,
     })
     expect(calls).not.toContain("rebase --abort")
@@ -678,7 +678,7 @@ describe("mohist/rebase", () => {
     expect(calls).toContain("rebase --abort")
     expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
     expect(output).toMatchObject({
-      failureKind: "conflict",
+      errorCode: "conflict",
       rebaseLeftInProgress: true,
     })
   })
@@ -712,7 +712,7 @@ describe("mohist/rebase", () => {
     expect(result.status).toBe("success")
     expect(output).toMatchObject({
       rebased: true,
-      failureKind: null,
+      errorCode: null,
       rebaseLeftInProgress: false,
     })
   })
