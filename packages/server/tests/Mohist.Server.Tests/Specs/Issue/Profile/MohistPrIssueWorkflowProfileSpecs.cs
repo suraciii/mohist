@@ -209,7 +209,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var orderedIds = plan.Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(
-            new[] { "proposal", "specs", "design", "tasks", "self-review", "open-draft-pr" },
+            new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "open-draft-pr" },
             orderedIds);
 
         var openDraftPr = plan.Tasks.Last();
@@ -287,7 +287,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var prBuild = pr.Stages.Single(s => s.Stage == "build");
         var defBuild = def.Stages.Single(s => s.Stage == "build");
 
-        Assert.Equal(new[] { "load-tasks" }, prBuild.Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { "workspace-prepare", "load-tasks" }, prBuild.Tasks.Select(t => t.Id).ToArray());
         var prLoad = prBuild.Tasks.Single(t => t.Id == "load-tasks");
         var defLoad = defBuild.Tasks.Single(t => t.Id == "load-tasks");
         AssertTaskWithMapsMatchExcept(prLoad, defLoad);
@@ -309,7 +309,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var check = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "check");
 
         var orderedIds = check.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "ai-review", "push", "mark-pr-ready" }, orderedIds);
+        Assert.Equal(new[] { "workspace-prepare", "ai-review", "push", "mark-pr-ready" }, orderedIds);
 
         var aiReview = check.Tasks.Single(t => t.Id == "ai-review");
         Assert.Equal("mohist/acp-agent", aiReview.Uses);
@@ -363,7 +363,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         var integrate = MohistWorkflow.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "integrate");
 
         var orderedIds = integrate.Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "spec-sync", "archive-change", "push", "merge-pr" }, orderedIds);
+        Assert.Equal(new[] { "workspace-prepare", "spec-sync", "archive-change", "push", "merge-pr" }, orderedIds);
 
         Assert.Equal("sequential", integrate.LockBehavior);
         Assert.Contains("project-integration", integrate.Resources!);
@@ -585,7 +585,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
 
         var planIds = definition.Stages[0].Tasks.Select(t => t.Id).ToArray();
         Assert.Equal(
-            new[] { "proposal", "specs", "design", "tasks", "self-review", "open-draft-pr" },
+            new[] { "workspace-prepare", "proposal", "specs", "design", "tasks", "self-review", "open-draft-pr" },
             planIds);
         Assert.Contains("mohist/create-github-pr", definition.Stages[0].Tasks.Select(t => t.Uses).ToArray());
 
@@ -603,7 +603,7 @@ public class MohistGithubPrIssueWorkflowProfileSpecs
         Assert.DoesNotContain("merge-ready", checkChecks);
 
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "spec-sync", "archive-change", "push", "merge-pr" }, integrateIds);
+        Assert.Equal(new[] { "workspace-prepare", "spec-sync", "archive-change", "push", "merge-pr" }, integrateIds);
         Assert.Contains("mohist/merge-github-pr", definition.Stages[3].Tasks.Select(t => t.Uses).ToArray());
 
         var integrateChecks = JsonSerializer.Serialize(definition.Stages[3].Checks);

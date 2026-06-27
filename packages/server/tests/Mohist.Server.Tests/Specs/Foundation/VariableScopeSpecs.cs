@@ -181,6 +181,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     {
         await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
 
+        var (prepare, prepareRunner) = await PollWorkAnyAsync();
+        Assert.Equal("task", prepare.WorkType);
+        Assert.Equal("plan", prepare.Stage);
+        Assert.Equal("mohist/workspace-prepare", prepare.Uses);
+        await ReportAsync(prepareRunner, prepare.WorkId, "completed");
+
         var (proposal, _) = await PollWorkAnyAsync();
 
         Assert.Equal("task", proposal.WorkType);
