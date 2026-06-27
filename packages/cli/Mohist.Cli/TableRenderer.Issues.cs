@@ -316,10 +316,14 @@ internal sealed partial class TableRenderer
         var partCount = NumberOf(metadata, "partCount");
         var toolCount = NumberOf(metadata, "toolCount");
         var usage = data["usage"] as JsonObject;
+        var inputTokens = NumberOf(usage, "inputTokens");
+        var outputTokens = NumberOf(usage, "outputTokens");
+        var totalTokens = NumberOf(usage, "totalTokens");
         var contextWindowUsed = NumberOf(usage, "contextWindowUsed");
         var contextWindowSize = NumberOf(usage, "contextWindowSize");
         var contextUsagePercent = NumberOf(usage, "contextUsagePercent");
         var healthStatus = StringOf(usage, "healthStatus");
+        var tokenUsage = FormatTokenUsage(inputTokens, outputTokens, totalTokens);
 
         _out.WriteLine($"name:      {name}");
         _out.WriteLine($"status:    {status}");
@@ -328,8 +332,24 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"created:   {createdAt}");
         _out.WriteLine($"parts:     {partCount}");
         _out.WriteLine($"tools:     {toolCount}");
+        _out.WriteLine($"tokens:    {tokenUsage}");
         _out.WriteLine($"context:   {contextWindowUsed}/{contextWindowSize} ({contextUsagePercent})");
         _out.WriteLine($"health:    {healthStatus}");
+    }
+
+    private static string FormatTokenUsage(string inputTokens, string outputTokens, string totalTokens)
+    {
+        if (!string.IsNullOrEmpty(totalTokens))
+        {
+            if (!string.IsNullOrEmpty(inputTokens) || !string.IsNullOrEmpty(outputTokens))
+                return $"{totalTokens} (input {inputTokens}, output {outputTokens})";
+            return totalTokens;
+        }
+
+        if (!string.IsNullOrEmpty(inputTokens) || !string.IsNullOrEmpty(outputTokens))
+            return $"input {inputTokens}, output {outputTokens}";
+
+        return "";
     }
 
     private void RenderSessionTranscriptSummary(JsonNode? data)

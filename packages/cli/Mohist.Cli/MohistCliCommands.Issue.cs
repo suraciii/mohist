@@ -921,7 +921,7 @@ internal static class IssueCommands
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
@@ -966,7 +966,7 @@ internal static class IssueCommands
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
@@ -1012,7 +1012,7 @@ internal static class IssueCommands
         var numberArg = NumberArg();
         var nameArg = SessionNameArg();
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
-        var outputOpt = MohistCliCommands.OutputOption();
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
         cmd.Arguments.Add(numberArg);
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(projectOpt);
