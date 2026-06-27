@@ -25,6 +25,9 @@ stages:
   - stage: plan
     requiresApproval: true
     tasks:
+      - id: workspace-prepare
+        title: Prepare workspace
+        uses: mohist/workspace-prepare
       - id: proposal
         title: Generate proposal
         uses: mohist/acp-agent
@@ -131,6 +134,9 @@ stages:
 
   - stage: build
     tasks:
+      - id: workspace-prepare
+        title: Prepare workspace
+        uses: mohist/workspace-prepare
       - id: load-tasks
         title: Load tasks from plan
         uses: mohist/openspec-tasks
@@ -166,6 +172,9 @@ stages:
   - stage: check
     requiresApproval: true
     tasks:
+      - id: workspace-prepare
+        title: Prepare workspace
+        uses: mohist/workspace-prepare
       - id: ai-review
         title: AI review
         uses: mohist/acp-agent
@@ -226,6 +235,9 @@ stages:
     resources:
       - project-integration
     tasks:
+      - id: workspace-prepare
+        title: Prepare workspace
+        uses: mohist/workspace-prepare
       - id: spec-sync
         title: Sync specs
         uses: mohist/acp-agent

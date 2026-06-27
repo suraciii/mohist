@@ -113,13 +113,13 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.True(definition.Stages[0].RequiresApproval);
         Assert.True(definition.Stages[2].RequiresApproval);
 
-        var proposal = definition.Stages[0].Tasks[0];
+        var proposal = definition.Stages[0].Tasks[1];
         Assert.Equal("proposal", proposal.Id);
         Assert.Equal("mohist/acp-agent", proposal.Uses);
         Assert.Contains("proposal.md", JsonSerializer.Serialize(proposal.With));
 
         var build = definition.Stages[1];
-        var loadTask = build.Tasks[0];
+        var loadTask = build.Tasks[1];
         Assert.Equal("load-tasks", loadTask.Id);
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
@@ -129,7 +129,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Equal("sequential", definition.Stages[3].LockBehavior);
         Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         var integrateIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(new[] { "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push" }, integrateIds);
+        Assert.Equal(new[] { "workspace-prepare", "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push" }, integrateIds);
         Assert.DoesNotContain("integrate:merge", integrateIds);
         Assert.Equal("mohist/rebase", rebase.Uses);
         var rebaseWithJson = JsonSerializer.Serialize(rebase.With);
@@ -143,7 +143,7 @@ public class MohistLocalWorkflowProfileSpecs
         Assert.Contains("workspace.branch", pushWithJson);
         Assert.Contains("repository.baseBranch", pushWithJson);
         var integrateTaskIds = definition.Stages[3].Tasks.Select(t => t.Id).ToArray();
-        Assert.Equal(["integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push"], integrateTaskIds);
+        Assert.Equal(["workspace-prepare", "integrate:spec-sync", "integrate:archive-change", "integrate:rebase", "integrate:push"], integrateTaskIds);
         foreach (var task in definition.Stages[3].Tasks)
         {
             Assert.NotEqual("mohist/merge", task.Uses);
@@ -194,7 +194,7 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageTaskTemplateUsesAcpAgentWithPromptLoaderSpec()
     {
-        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[0];
+        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[1];
         var withJson = JsonSerializer.Serialize(loadTask.With);
 
         Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
@@ -211,7 +211,7 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void DefaultWorkflowDefinition_BuildStagePromptLoaderConfigExposesFileItemsAndBase()
     {
-        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[0];
+        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[1];
         var with = loadTask.With ?? throw new InvalidOperationException("load-tasks must have a with map");
         var taskElement = with["task"] ?? throw new InvalidOperationException("load-tasks with must contain 'task'");
         var taskTemplate = taskElement.GetProperty("with");
@@ -229,7 +229,7 @@ public class MohistLocalWorkflowProfileSpecs
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageRetainsExistingLoaderKeys()
     {
-        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[0];
+        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[1];
         var with = loadTask.With ?? throw new InvalidOperationException("load-tasks must have a with map");
         var pathElement = with["path"] ?? throw new InvalidOperationException("load-tasks with must contain 'path'");
 
@@ -560,7 +560,7 @@ public class MohistLocalWorkflowProfileSpecs
         // removed from the check-repair model; the serialized check
         // carries only the repair task.
         Assert.DoesNotContain("verifyTask:", yaml);
-        Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
+        Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[1].Uses);
         // Review failure is modeled on the ai-review task itself
         // (failIf + with.recovery + retrySelf), not on a review-passed
         // check. The check stage no longer carries review-passed.

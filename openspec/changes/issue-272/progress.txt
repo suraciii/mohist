@@ -42,3 +42,29 @@
   can be made to "succeed" in the fake (return ok) while
   `rev-parse --abbrev-ref HEAD` keeps returning the wrong branch — this
   lets the action reach the verify step and fail there as intended.
+- Adding `workspace-prepare` as the literal first task in every stage's
+  `tasks:` list (no `init`/`preTasks` schema field) means every server-side
+  test that asserted `Stages[i].Tasks[0].Id == "<x>"` had to be shifted
+  to `Tasks[1]`, and every assertion that compared an entire task-id
+  array (e.g. `["proposal", "specs", ...]`) had to be prepended with
+  `"workspace-prepare"`. The 7-line cascade hits ~10 tests across
+  `MohistLocalWorkflowProfileSpecs` and `MohistPrIssueWorkflowProfileSpecs`.
+- `MohistWorkflowDispatchesAgentWorkWithoutExecutingAgent` is a Grain
+  test that starts the real `MohistWorkflow.Definition` and expects the
+  FIRST polled work to be `proposal`. With the new `workspace-prepare`
+  first task, this test must first poll/complete the prepare task before
+  polling for `proposal` — otherwise the runner grain dispatches the
+  prepare task first.
+- `mohist/workspace-prepare` is NOT a substring of `mohist/prepare`
+  (the characters after `mohist/` differ: `w` vs `p`). The legacy
+  `not.toContain("mohist/prepare")` assertion still passes after the
+  prepended task is in place.
+- For text-based YAML inspection in runner tests, the regex
+  `/\n\s*-\s+id:/` skips the first `- id:` line at the start of a string
+  (no leading `\n`). Use `/(?:^|\n)\s*-\s+id:/` to also match the first
+  list entry, otherwise the "first task of stage X is workspace-prepare"
+  assertion silently returns the second task.
+- `sliceStageTasksList` must end at `\n    checks:` (4-space indent) and
+  NOT at `\n        recovery:` (8-space indent), because `recovery:` can
+  legitimately appear INSIDE a task in the stage's tasks list and that
+  would prematurely truncate the list slice.
