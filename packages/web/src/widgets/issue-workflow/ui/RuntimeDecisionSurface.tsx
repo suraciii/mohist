@@ -4,6 +4,7 @@ import { ActivityIcon, AlertCircleIcon, CheckCircle2Icon, ClockIcon, PauseCircle
 import { Button } from '@/shared/ui/components/button'
 import {
   approveIssue,
+  invalidateApprovalWait,
   rejectIssue,
   retryIssue,
   resumeIssue,
@@ -255,6 +256,7 @@ export function RuntimeDecisionSurface({
     }
     queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+    invalidateApprovalWait(queryClient)
   }
 
   const approveMutation = useMutation({

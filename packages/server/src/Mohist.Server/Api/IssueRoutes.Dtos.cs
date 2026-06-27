@@ -243,3 +243,20 @@ public sealed record CompletionMetricsResponse(
 public sealed record CompletionMetricsWindowDto(
     string From,
     string To);
+
+/// <summary>
+/// Response shape for the approval-wait metrics endpoint. <c>Window</c>
+/// is the trailing 7-day range the aggregation covers. <c>SampleCount</c>
+/// distinguishes a true zero-sample window (null stats) from a completed
+/// approval with a measurable or zero wait.
+/// </summary>
+public sealed record ApprovalWaitMetricsResponse(
+    ApprovalWaitMetricsWindowDto Window,
+    int SampleCount,
+    double? AverageSeconds,
+    double? MedianSeconds,
+    double? MaxSeconds);
+
+public sealed record ApprovalWaitMetricsWindowDto(
+    string From,
+    string To);

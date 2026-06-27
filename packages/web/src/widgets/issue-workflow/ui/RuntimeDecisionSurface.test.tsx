@@ -363,6 +363,7 @@ describe('RuntimeDecisionSurface', () => {
   })
 
   it('invokes approveIssue when the surface approve button is clicked', async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
     mockedApprove.mockResolvedValueOnce({ issue: makeIssue(), context: null, message: 'ok' })
 
     const issue = makeIssue({
@@ -402,6 +403,50 @@ describe('RuntimeDecisionSurface', () => {
     expect(mockedRerun).not.toHaveBeenCalled()
     expect(mockedStart).not.toHaveBeenCalled()
     expect(mockedStop).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+    })
+    invalidateSpy.mockRestore()
+  })
+
+  it('invalidates approval-wait metrics when the surface send-back button resolves', async () => {
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+    mockedReject.mockResolvedValueOnce({ issue: makeIssue(), message: 'sent back' })
+
+    const issue = makeIssue({
+      workflowStage: WorkflowStage.Check,
+      health: IssueHealth.Paused,
+      approvalState: {
+        status: 'awaiting',
+        stage: WorkflowStage.Check,
+        requestedAt: '2026-01-01T00:00:00.000Z',
+      },
+      recovery: {
+        currentWorkItem: null,
+        latestAttemptState: null,
+        workflowSummaryState: 'awaiting-approval',
+        allowedActions: ['approve', 'reject'],
+      },
+    })
+    const timeline: WorkflowTimeline = {
+      workflowRunId: 'wr-6',
+      status: 'AwaitingApproval',
+      currentStage: WorkflowStage.Check,
+      pendingWork: null,
+      stages: [],
+      availableActions: [{ name: 'reject', label: 'Send back', target: null }],
+    }
+
+    renderSurface({ issue, timeline })
+
+    screen.getByTestId('runtime-action-send-back').click()
+
+    await waitFor(() => expect(mockedReject).toHaveBeenCalledTimes(1))
+    expect(mockedReject).toHaveBeenCalledWith(121, {}, 'test-project')
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+    })
+    invalidateSpy.mockRestore()
   })
 
   describe('restrained background with colored edge accent', () => {

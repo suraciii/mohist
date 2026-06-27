@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
 import { screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
 import { WorkflowView } from './WorkflowView'
@@ -595,6 +596,7 @@ describe('WorkflowView', () => {
     });
 
     it('Approve action calls approveIssue', async () => {
+      const invalidateSpy = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
       mockRequestChangesMutation()
       mockedUseWorkflowTimeline.mockReturnValue(({
         data: makeAwaitingApprovalTimeline(),
@@ -615,6 +617,10 @@ describe('WorkflowView', () => {
       await waitFor(() => {
         expect(mockedApproveIssue).toHaveBeenCalledWith(1, 'test-project')
       })
+      await waitFor(() => {
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+      })
+      invalidateSpy.mockRestore()
     })
 
     it('Cancel button closes the feedback input and discards the text', () => {

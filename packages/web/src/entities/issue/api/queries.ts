@@ -4,6 +4,7 @@ import { useProject } from '../../project/@x/project-context'
 import type { ApprovalFeedback, Issue, IssueWorkflowProfileYamlResponse } from '../model/types'
 import type { CreateFeedbackRequest, IssueWorkflowArtifactListParams } from './client'
 import { deleteIssueWorkflowProfileTemplate, getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssueEvents, getIssues, getIssueWorkflowArtifactContent, getIssueWorkflowArtifacts, getIssueWorkflowProfileYaml, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorkspaceStatus, requestChangesIssue, unarchiveIssue, updateIssue, updateIssueWorkflowProfileYaml } from './client'
+import { invalidateApprovalWait } from './approval-wait'
 
 export function useIssueWorkflowArtifacts(issueNumber: number, params: IssueWorkflowArtifactListParams = {}, enabled: boolean = true) {
   const { projectId } = useProject()
@@ -202,6 +203,7 @@ export function useRequestChangesIssue() {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['issues', variables.issueNumber, projectId, 'workflow-timeline'] })
+      invalidateApprovalWait(queryClient)
     },
   })
 }

@@ -31,16 +31,7 @@ public static class MohistDefaultWorkflowProjection
         string issueStage,
         WorkflowStatusView? workflow)
     {
-        var approval = workflow?.Stages
-            .Select(s => s.ApprovalStatus is null ? null : new StageApproval
-            {
-                Stage = s.Stage,
-                Status = s.ApprovalStatus.Result ?? "awaiting",
-                RequestedAt = ParseDateTime(s.ApprovalStatus.RequestedAt),
-                RespondedAt = ParseNullableDateTime(s.ApprovalStatus.RespondedAt),
-            })
-            .Where(a => a is not null)
-            .LastOrDefault();
+        var approval = StageApprovals(workflow).LastOrDefault();
         var attention = ProjectAttention(workflow);
         if (workflow is null)
         {
@@ -62,6 +53,25 @@ public static class MohistDefaultWorkflowProjection
             attention,
             ChangeDir(issueNumber),
             workflow.Status == "completed");
+    }
+
+    public static IEnumerable<StageApproval> StageApprovals(WorkflowStatusView? workflow)
+    {
+        if (workflow is null) yield break;
+
+        foreach (var stage in workflow.Stages)
+        {
+            var approval = stage.ApprovalStatus;
+            if (approval is null) continue;
+
+            yield return new StageApproval
+            {
+                Stage = stage.Stage,
+                Status = approval.Result ?? "awaiting",
+                RequestedAt = ParseDateTime(approval.RequestedAt),
+                RespondedAt = ParseNullableDateTime(approval.RespondedAt),
+            };
+        }
     }
 
     private static WorkflowAttention? ProjectAttention(WorkflowStatusView? workflow)
