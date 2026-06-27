@@ -601,11 +601,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
             if (outcome.AddTasks is { Count: > 0 } addTasks)
             {
-                var taskDefs = addTasks.Select(t => new TaskDefinition(
-                    t.Id,
-                    t.Title,
-                    t.Uses,
-                    WorkflowDispatchHelpers.ParseWith(t.With))).ToList();
+                var taskDefs = addTasks.Select(t =>
+                {
+                    var with = WorkflowDispatchHelpers.ParseWith(t.With);
+                    var recovery = WorkflowDispatchHelpers.ExtractRecoveryFromWith(with);
+                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, Recovery: recovery);
+                }).ToList();
                 var recoveryEvents = run.AddRuntimeTasks(taskDefs);
                 events.AddRange(recoveryEvents);
                 _log.LogInformation(
