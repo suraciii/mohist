@@ -612,23 +612,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 var taskDefs = addTasks.Select(t =>
                 {
                     var with = WorkflowDispatchHelpers.ParseWith(t.With);
-                    var recovery = t.Recovery ?? WorkflowDispatchHelpers.ExtractRecoveryFromWith(with);
-                    var isMissingConfig = with is null
-                        || with.Count == 0
-                        || (with.ContainsKey("budget") && with.ContainsKey("handlers") && !with.ContainsKey("prompt") && !with.ContainsKey("session"));
-                    if (isMissingConfig && t.Id == currentTask?.DefinitionId)
-                    {
-                        with = currentTask.WithInput is not null
-                            ? new Dictionary<string, JsonElement?>(currentTask.WithInput, StringComparer.Ordinal)
-                            : null;
-                        recovery ??= currentTask.Recovery is { Budget: > 0 } r
-                            ? new RecoveryDefinition(r.Budget - 1, r.Handlers)
-                            : null;
-                        _log.LogWarning(
-                            "Workflow {Id} task {TaskId} recovery added {RetryTaskId}: with was missing, copied from original task",
-                            GrainKey, taskRunId, t.Id);
-                    }
-                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, Recovery: recovery);
+                    return new TaskDefinition(t.Id, t.Title, t.Uses, with, Recovery: t.Recovery);
                 }).ToList();
                 var recoveryEvents = run.AddRuntimeTasks(taskDefs);
                 events.AddRange(recoveryEvents);
