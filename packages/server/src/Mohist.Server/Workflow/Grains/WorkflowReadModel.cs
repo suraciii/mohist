@@ -28,10 +28,8 @@ public sealed class WorkflowReadModel
         if (currentStage is null) return null;
 
         var activeTask = currentStage.RunningTask;
-        var deliveryWorkId = run.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? run.WorkDelivery.WorkId
-            : _owner.DispatchedWorkId;
-        if (!string.Equals(activeTask?.WorkId ?? deliveryWorkId, workId, StringComparison.Ordinal))
+        var checksWorkId = currentStage.ChecksWorkId;
+        if (!string.Equals(activeTask?.WorkId ?? checksWorkId, workId, StringComparison.Ordinal))
             return null;
 
         var projectId = _owner.GetProjectId();
