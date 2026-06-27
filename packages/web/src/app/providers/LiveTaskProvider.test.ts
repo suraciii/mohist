@@ -1,6 +1,54 @@
-import { describe, expect, it } from 'vitest'
-import { __testing__ } from './LiveTaskProvider'
+import { createElement } from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, render } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ProjectProvider } from '../../entities/project'
+import { REVERSE_DNS_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
+import { LiveTaskProvider, __testing__ } from './LiveTaskProvider'
 import { dispatchTimelineEvent, onTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
+
+const mocks = vi.hoisted(() => ({
+  useEventsConnection: vi.fn(),
+  useAgentStatus: vi.fn(),
+  toastInfo: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}))
+
+vi.mock('../../shared/api/events-hub', () => ({
+  useEventsConnection: (...args: unknown[]) => mocks.useEventsConnection(...args),
+}))
+
+vi.mock('../../entities/agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../entities/agent')>()),
+  useAgentStatus: () => mocks.useAgentStatus(),
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    info: (...args: unknown[]) => mocks.toastInfo(...args),
+    error: (...args: unknown[]) => mocks.toastError(...args),
+    success: (...args: unknown[]) => mocks.toastSuccess(...args),
+  },
+}))
+
+const TEST_PROJECT = {
+  id: 'test-project',
+  name: 'Test Project',
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+  repositories: [{ name: 'main', gitUrl: 'https://example.com/test.git', baseBranch: 'main', isDefault: true }],
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mocks.useAgentStatus.mockReturnValue({
+    data: {
+      running: false,
+      runnerAvailable: true,
+    },
+  })
+})
 
 describe('LiveTaskProvider transcript routing', () => {
   it('unwraps transcript envelopes with runtime metadata and payload', () => {
@@ -152,5 +200,40 @@ describe('LiveTaskProvider timeline forwarding', () => {
     expect(observed).toEqual(['forward:merge_completed'])
 
     off()
+  })
+
+  it('invalidates approval-wait metrics when a stage approval is resolved live', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    render(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(
+          ProjectProvider,
+          {
+            initialProjectId: TEST_PROJECT.id,
+            initialProjects: [TEST_PROJECT],
+            children: createElement(
+              LiveTaskProvider,
+              { children: createElement('div', null, 'child') },
+            ),
+          },
+        ),
+      ),
+    )
+
+    const handleEvent = mocks.useEventsConnection.mock.calls[0][1] as (eventName: string, data: unknown) => void
+    act(() => {
+      handleEvent(REVERSE_DNS_EVENT_TYPES.StageApprovalResolved, {
+        issueId: 'issue-1',
+        issueNumber: 42,
+      })
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-activity'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['issues', 'metrics', 'approval-wait'] })
   })
 })

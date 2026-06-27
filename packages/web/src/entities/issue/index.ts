@@ -2,7 +2,7 @@ export { useArchivedIssues, useCommitDiff, useIssue, useIssueCommits, useIssueDi
 export { addComment, addPrerequisite, approveIssue, rejectIssue, archiveAllCompleted, archiveIssue, cleanupIssueWorkspace, closeIssue, commentAttachmentContentPath, createIssue, deleteComment, deleteIssueWorkflowProfileTemplate, extractAttachmentIds, forceStopIssue, getFileContent, getIssueEvents, getIssueFeedback, getIssueWorkflowVariables, getIssueWorkflowArtifacts, getIssueWorkflowArtifactContent, issueAttachmentContentPath, listIssueFeedback, patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar, rebaseIssue, removePrerequisite, reopenIssue, requestChangesIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue, updateIssue } from './api/client'
 export { fetchCompletionTrend, useCompletionTrend } from './api/completion-trend'
 export type { CompletionBucketPoint, CompletionTrendResponse } from './api/completion-trend'
-export { fetchApprovalWait, useApprovalWait } from './api/approval-wait'
+export { approvalWaitQueryKey, fetchApprovalWait, invalidateApprovalWait, useApprovalWait } from './api/approval-wait'
 export type { ApprovalWaitMetricsResponse, ApprovalWaitMetricsWindow } from './api/approval-wait'
 export { statusBadge, statusLabel } from './lib/status-badge'
 export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'

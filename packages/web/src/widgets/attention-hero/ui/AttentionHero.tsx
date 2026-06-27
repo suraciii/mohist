@@ -5,6 +5,7 @@ import { AlertTriangleIcon, CheckCircle2Icon, PlayIcon, ShieldOffIcon } from 'lu
 import {
   approveIssue,
   deriveAttentionItems,
+  invalidateApprovalWait,
   resumeIssue,
   useApprovalWait,
   useIssues,
@@ -60,7 +61,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', 'metrics', 'approval-wait'] })
+      invalidateApprovalWait(queryClient)
     },
   })
 

@@ -1122,6 +1122,30 @@ public class IssueQuerierSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
+    public async Task GetApprovalWaitAsync_RejectedApproval_ContributesLikeApproved()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-approval-rejected-{Guid.NewGuid():N}", Name = "Approval Rejected Project" };
+        var now = new DateTimeOffset(2026, 6, 19, 12, 0, 0, TimeSpan.Zero);
+        var wait = TimeSpan.FromHours(4);
+
+        SeedIssue(db, project, "issue_aw_rejected_1", workflowRunId: "wr_aw_rejected_1");
+        await db.SaveChangesAsync();
+        await SeedWorkflowRunAsync(db, "wr_aw_rejected_1", ApprovalRunState("wr_aw_rejected_1", now.AddDays(-1), wait, "rejected"));
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var result = await service.GetApprovalWaitAsync(project.Id, now);
+
+        Assert.Equal(1, result.SampleCount);
+        Assert.Equal(wait.TotalSeconds, result.AverageSeconds);
+        Assert.Equal(wait.TotalSeconds, result.MedianSeconds);
+        Assert.Equal(wait.TotalSeconds, result.MaxSeconds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
     public async Task GetApprovalWaitAsync_ZeroSamples_ReturnsEmptyResultWithNullStats()
     {
         using var scope = _fixture.Services.CreateScope();

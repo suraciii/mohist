@@ -171,9 +171,12 @@ public class IssueMetricsApiSpecs
     {
         var project = await CreateProjectAsync($"approval-wait-present-{Guid.NewGuid():N}");
         var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
-        var wait = TimeSpan.FromHours(3.2);
+        var approvedWait = TimeSpan.FromHours(3.2);
+        var rejectedWait = TimeSpan.FromHours(1.4);
         var issueId = $"issue_approval_present_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_approval_present_{Guid.NewGuid():N}";
+        var rejectedIssueId = $"issue_approval_rejected_{Guid.NewGuid():N}";
+        var rejectedWorkflowRunId = $"wr_approval_rejected_{Guid.NewGuid():N}";
 
         await SeedIssueWithCompletedApprovalAsync(
             project.Id,
@@ -181,8 +184,16 @@ public class IssueMetricsApiSpecs
             issueId,
             workflowRunId,
             requestedAt,
-            wait,
+            approvedWait,
             "approved");
+        await SeedIssueWithCompletedApprovalAsync(
+            project.Id,
+            number: 2,
+            rejectedIssueId,
+            rejectedWorkflowRunId,
+            requestedAt,
+            rejectedWait,
+            "rejected");
 
         var before = DateTimeOffset.UtcNow;
         using var response = await _client.GetAsync(
@@ -195,10 +206,10 @@ public class IssueMetricsApiSpecs
         var windowFrom = DateTimeOffset.Parse(payload.Window.From);
         Assert.True(windowTo >= before && windowTo <= after, "Window.To should be the server request time.");
         Assert.Equal(windowTo.AddDays(-7), windowFrom);
-        Assert.Equal(1, payload.SampleCount);
-        Assert.Equal(wait.TotalSeconds, payload.AverageSeconds);
-        Assert.Equal(wait.TotalSeconds, payload.MedianSeconds);
-        Assert.Equal(wait.TotalSeconds, payload.MaxSeconds);
+        Assert.Equal(2, payload.SampleCount);
+        Assert.Equal((approvedWait.TotalSeconds + rejectedWait.TotalSeconds) / 2, payload.AverageSeconds);
+        Assert.Equal((approvedWait.TotalSeconds + rejectedWait.TotalSeconds) / 2, payload.MedianSeconds);
+        Assert.Equal(approvedWait.TotalSeconds, payload.MaxSeconds);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

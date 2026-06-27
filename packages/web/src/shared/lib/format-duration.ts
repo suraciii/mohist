@@ -7,13 +7,17 @@ export function formatDuration(seconds: number | null | undefined): string {
   const minutes = totalSeconds / 60
 
   if (days >= 1) {
-    return `${days.toFixed(days >= 10 ? 0 : 1)}d`
+    return `${compactDurationValue(days, days >= 10 ? 0 : 1)}d`
   }
   if (hours >= 1) {
-    return `${hours.toFixed(hours >= 10 ? 0 : 1)}h`
+    return `${compactDurationValue(hours, hours >= 10 ? 0 : 1)}h`
   }
   if (minutes >= 1) {
     return `${Math.round(minutes)}m`
   }
   return '<1m'
+}
+
+function compactDurationValue(value: number, digits: number): string {
+  return value.toFixed(digits).replace(/\.0$/, '')
 }

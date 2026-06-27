@@ -772,7 +772,7 @@ describe('AttentionHero - approval-wait metric', () => {
       </QueryClientProvider>,
     )
 
-    expect(screen.getByTestId('approval-wait-value')).toHaveTextContent('5.0h')
+    expect(screen.getByTestId('approval-wait-value')).toHaveTextContent('5h')
     expect(screen.queryByTestId('approval-wait-empty')).not.toBeInTheDocument()
   })
 

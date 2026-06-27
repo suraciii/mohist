@@ -20,15 +20,16 @@ describe('formatDuration', () => {
   })
 
   it('renders hours for waits between 1h and 1d', () => {
-    expect(formatDuration(3_600)).toBe('1.0h')
+    expect(formatDuration(3_600)).toBe('1h')
     expect(formatDuration(3_600 * 3.2)).toBe('3.2h')
     expect(formatDuration(3_600 * 10)).toBe('10h')
     expect(formatDuration(86_399)).toBe('24h')
   })
 
   it('renders days for waits of 1d or more', () => {
-    expect(formatDuration(86_400)).toBe('1.0d')
-    expect(formatDuration(86_400 * 5)).toBe('5.0d')
+    expect(formatDuration(86_400)).toBe('1d')
+    expect(formatDuration(86_400 * 5)).toBe('5d')
+    expect(formatDuration(86_400 * 5.5)).toBe('5.5d')
     expect(formatDuration(86_400 * 12.5)).toBe('13d')
     expect(formatDuration(86_400 * 10)).toBe('10d')
   })
