@@ -6,9 +6,9 @@ Verifiable current state in `packages/web`:
 
 - `createIssue` (`entities/issue/api/client.ts:21`) returns `request<Issue>(...)`. The resolved value is a **bare `Issue`** whose number lives at `Issue.number` (`model/issue.ts:83`, a required `number`).
 - The sibling mutation helpers — `startIssue`, `closeIssue`, `reopenIssue` (`client.ts:51-60`) — return a **wrapper** `{ issue: Issue; message: string }`.
-- The create `useMutation` in `CreateIssueDialog.tsx:199` declares `onSuccess: () => { ... }` — it discards the API response entirely, so it cannot render the number even if a toast were added naively.
+- The create `useMutation` in `CreateIssueDialog.tsx:199` declares `onSuccess: () => { ... }` — it discards the API response entirely and emits no toast, so users get no creation confirmation today.
 
-Root cause of the `undefined`: the create response is a bare `Issue`, but the number was read through a `.issue` wrapper-shaped path (the convention used by start/close). `data.issue` is `undefined` on the bare create response, so `data.issue.number` (or optional-chained variants) renders `undefined`. The backend returns the correct number; this is purely a Web response-shape mismatch.
+Root cause of the reported `undefined`: the create response is a bare `Issue` (number at `Issue.number`), but the sibling mutation helpers (`startIssue`/`closeIssue`/`reopenIssue`, `client.ts:51-60`) wrap their results as `{ issue: Issue; message: string }`. Any toast that follows the sibling convention and reads `data.issue.number` against the bare create response yields `undefined`, because `data.issue` does not exist on the create response. The fix must therefore read `data.number` from the bare response. The backend returns the correct number; this is purely a Web response-shape mismatch.
 
 The codebase already standardizes on `sonner` (`import { toast } from 'sonner'`) for success/error toasts — used by `entities/epic`, `entities/settings`, `entities/label-catalog`, `entities/project`, and `LiveTaskProvider`.
 
