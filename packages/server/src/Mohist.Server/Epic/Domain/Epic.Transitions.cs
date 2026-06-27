@@ -108,13 +108,13 @@ public sealed partial class Epic
         RecordEvent(new EpicStatusChanged(EpicStatusName.ToName(oldStatus), EpicStatusName.ToName(_status)));
     }
 
-    public void MarkDone(IReadOnlySet<int> undeliveredLinkedNumbers, DateTime? now = null)
+    public void MarkDone(IReadOnlySet<int> openLinkedNumbers, DateTime? now = null)
     {
         if (_status is EpicStatus.Paused)
             throw new EpicPausedCannotMarkDoneException(Id);
         EnsureNotTerminal(EpicStatus.Done);
-        if (undeliveredLinkedNumbers.Count > 0)
-            throw new EpicNotReadyToMarkDoneException(Id, undeliveredLinkedNumbers.Count);
+        if (openLinkedNumbers.Count > 0)
+            throw new EpicNotReadyToMarkDoneException(Id, openLinkedNumbers.Count);
         var oldStatus = _status;
         _status = EpicStatus.Done;
         Touch(now);

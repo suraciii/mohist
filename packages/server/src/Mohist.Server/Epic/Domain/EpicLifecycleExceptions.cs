@@ -16,13 +16,13 @@ public class EpicAlreadyTerminalException : InvalidOperationException
 public class EpicNotReadyToMarkDoneException : InvalidOperationException
 {
     public string EpicId { get; }
-    public int UndeliveredCount { get; }
+    public int OpenLinkedCount { get; }
 
-    public EpicNotReadyToMarkDoneException(string epicId, int undeliveredCount)
-        : base($"Epic {epicId} has {undeliveredCount} undelivered linked issue(s); mark done is not allowed.")
+    public EpicNotReadyToMarkDoneException(string epicId, int openLinkedCount)
+        : base($"Epic {epicId} has {openLinkedCount} open linked issue(s); mark done is not allowed.")
     {
         EpicId = epicId;
-        UndeliveredCount = undeliveredCount;
+        OpenLinkedCount = openLinkedCount;
     }
 }
 

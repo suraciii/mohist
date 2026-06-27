@@ -282,8 +282,10 @@ public class EpicAutoDoneHandlerSpecs
     public async Task ClosedHandler_DuplicateClosedEvents_AreIdempotent()
     {
         // Duplicate terminal signals must converge to the same state
-        // without erroring. ReconcileAfterTerminalAsync is idempotent,
-        // so calling it multiple times is safe.
+        // without erroring. After the terminal/open readiness change,
+        // a running epic with only a cancelled linked issue has no open
+        // linked issue and auto-marks done on the first reconcile;
+        // subsequent duplicate events see a terminal epic and no-op.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "running");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
@@ -299,14 +301,9 @@ public class EpicAutoDoneHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
 
         Assert.Equal(3, grains.Calls.Count);
-        // Epic remains running (TryStartNext on cancelled-in-progress
-        // finds no other startable issue to advance; the test grain
-        // doesn't model TryStartNext wiring, but the epic state
-        // surface verifies the call flowed through the reconcile
-        // entry point without erroring).
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("running", stored.Status);
+        Assert.Equal("done", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

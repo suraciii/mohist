@@ -26,7 +26,7 @@ public class EpicLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task MarkDone_WhenNotAllLinkedIssuesDelivered_Returns4xxAndLeavesStatusUnchanged()
+    public async Task MarkDone_WhenOpenLinkedIssuesRemain_Returns4xxAndLeavesStatusUnchanged()
     {
         var project = await CreateProjectAsync();
         var delivered = await CreateIssueAsync(project.Id, "Delivered");
@@ -45,10 +45,65 @@ public class EpicLifecycleSpecs
         Assert.False(envelope!.Success);
         Assert.Equal("EPIC_NOT_READY_TO_MARK_DONE", envelope.Code);
         Assert.NotNull(envelope.Details);
-        Assert.Equal(1, envelope.Details!.UndeliveredCount);
+        Assert.Equal(1, envelope.Details!.OpenLinkedCount);
 
         var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("idle", after.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task MarkDone_WhenAllLinkedIssuesCancelled_SucceedsAndChangesStatusToDone()
+    {
+        // cancelled is terminal for readiness but not counted as
+        // delivered; an epic whose linked issues are all cancelled is
+        // ready to Mark Done.
+        var project = await CreateProjectAsync();
+        var first = await CreateIssueAsync(project.Id, "First cancelled");
+        await CancelIssueAsync(project.Id, first);
+        var second = await CreateIssueAsync(project.Id, "Second cancelled");
+        await CancelIssueAsync(project.Id, second);
+        var epic = await CreateEpicAsync(project.Id, "All cancelled epic");
+        await LinkIssueAsync(project.Id, epic.Id, first.Number);
+        await LinkIssueAsync(project.Id, epic.Id, second.Number);
+
+        var marked = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+
+        Assert.Equal("done", marked.Status);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.Equal("done", detail.Status);
+        Assert.Equal(0, detail.Progress.DeliveredCount);
+        Assert.Equal(2, detail.Progress.TotalIssueCount);
+        Assert.True(detail.Progress.ReadyToMarkDone);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task MarkDone_WithMixedDoneAndCancelledLinkedIssues_SucceedsAndDeliveredCountCountsOnlyDone()
+    {
+        // Epic #18 scenario: at least one done issue and at least one
+        // cancelled issue; all linked issues are terminal so the epic
+        // is ready to Mark Done. deliveredCount counts only the done
+        // issue.
+        var project = await CreateProjectAsync();
+        var done = await CreateIssueAsync(project.Id, "Done");
+        await CompleteIssueAsync(project.Id, done);
+        var cancelled = await CreateIssueAsync(project.Id, "Cancelled");
+        await CancelIssueAsync(project.Id, cancelled);
+        var epic = await CreateEpicAsync(project.Id, "Mixed done+cancelled epic");
+        await LinkIssueAsync(project.Id, epic.Id, done.Number);
+        await LinkIssueAsync(project.Id, epic.Id, cancelled.Number);
+
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        Assert.True(detail.Progress.ReadyToMarkDone);
+        Assert.Equal(1, detail.Progress.DeliveredCount);
+        Assert.Equal(2, detail.Progress.TotalIssueCount);
+
+        var marked = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
+        Assert.Equal("done", marked.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
@@ -429,6 +484,12 @@ public class EpicLifecycleSpecs
         await grain.CompleteWorkAsync(wrId);
     }
 
+    private async Task CancelIssueAsync(string projectId, IssueDto issueInfo)
+    {
+        var grain = _grains.GetGrain<IIssueGrain>(issueInfo.Id);
+        await grain.CancelAsync();
+    }
+
     private async Task<EpicDto> CreateEpicAsync(string projectId, string title)
     {
         return await _client.PostDataAsync<EpicDto>($"/api/projects/{projectId}/epics", new { title, description = "lifecycle test", priority = "p2" });
@@ -457,5 +518,5 @@ public class EpicLifecycleSpecs
     private sealed record EpicProgressIssueDto(string Id, int Number, string Title, string Health);
     private sealed record EpicNextIssueDto(string Id, int Number, string Title);
     private sealed record ConflictEnvelope(bool Success, string? Code = null, string? Error = null, ConflictDetailsDto? Details = null);
-    private sealed record ConflictDetailsDto(string CurrentStatus, string RequestedStatus, int UndeliveredCount);
+    private sealed record ConflictDetailsDto(string CurrentStatus, string RequestedStatus, [property: System.Text.Json.Serialization.JsonPropertyName("openCount")] int OpenLinkedCount);
 }

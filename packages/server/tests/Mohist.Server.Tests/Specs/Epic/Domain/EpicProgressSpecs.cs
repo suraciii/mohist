@@ -77,6 +77,92 @@ public class EpicProgressSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public void IsTerminal_OnLinkedIssueDone_ReturnsTrue()
+    {
+        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "done", Stage: "", Health: "active", Priority: "p2");
+        Assert.True(EpicProgress.IsTerminal(dto));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsTerminal_OnLinkedIssueCancelled_ReturnsTrue()
+    {
+        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "cancelled", Stage: "", Health: "cancelled", Priority: "p2");
+        Assert.True(EpicProgress.IsTerminal(dto));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsTerminal_OnLinkedIssueInProgress_ReturnsFalse()
+    {
+        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "in_progress", Stage: "", Health: "active", Priority: "p2");
+        Assert.False(EpicProgress.IsTerminal(dto));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsTerminal_OnLinkedIssueBacklog_ReturnsFalse()
+    {
+        var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "backlog", Stage: "", Health: "queued", Priority: "p2");
+        Assert.False(EpicProgress.IsTerminal(dto));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsOpen_IsInverseOfIsTerminal()
+    {
+        var samples = new[]
+        {
+            new LinkedIssueDto("i1", 1, "Done", "done", "", "active", "p2"),
+            new LinkedIssueDto("i2", 2, "Cancelled", "cancelled", "", "cancelled", "p2"),
+            new LinkedIssueDto("i3", 3, "Backlog", "backlog", "", "queued", "p2"),
+            new LinkedIssueDto("i4", 4, "InProgress", "in_progress", "", "active", "p2"),
+        };
+        foreach (var dto in samples)
+            Assert.Equal(!EpicProgress.IsTerminal(dto), EpicProgress.IsOpen(dto));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsReadyToComplete_OnAllTerminal_True()
+    {
+        var linked = new[]
+        {
+            new LinkedIssueDto("i1", 1, "Done", "done", "", "active", "p2"),
+            new LinkedIssueDto("i2", 2, "Cancelled", "cancelled", "", "cancelled", "p2"),
+        };
+        Assert.True(EpicProgress.IsReadyToComplete(linked));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsReadyToComplete_OnEmpty_False()
+    {
+        Assert.False(EpicProgress.IsReadyToComplete(Array.Empty<LinkedIssueDto>()));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public void IsReadyToComplete_OnAnyOpen_False()
+    {
+        var linked = new[]
+        {
+            new LinkedIssueDto("i1", 1, "Done", "done", "", "active", "p2"),
+            new LinkedIssueDto("i2", 2, "Backlog", "backlog", "", "queued", "p2"),
+        };
+        Assert.False(EpicProgress.IsReadyToComplete(linked));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public void IsCompleted_IgnoresHealth()
     {
         var dto = new LinkedIssueDto(Id: "i", Number: 1, Title: "t", Status: "done", Stage: "", Health: "blocked", Priority: "p2");
@@ -114,7 +200,7 @@ public class EpicProgressSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public void Build_HasUndelivered_NotReadyToMarkDone()
+    public void Build_HasOpenLinkedIssue_NotReadyToMarkDone()
     {
         var linked = new[]
         {

@@ -118,8 +118,13 @@ public class EpicAutoDoneSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task AutoMarkDoneIfReadyAsync_CancelledIssueNotTreatedAsComplete_StaysIdle()
+    public async Task AutoMarkDoneIfReadyAsync_MixedDoneAndCancelledLinkedIssues_TransitionsToDone()
     {
+        // After the terminal/open rule change, every linked issue is
+        // terminal (issue_1 done, issue_2 cancelled) — no open linked
+        // issue remains, so the epic auto-marks done. deliveredCount
+        // still counts only the done issue; cancelled is terminal for
+        // readiness but not counted as delivered.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
@@ -131,10 +136,10 @@ public class EpicAutoDoneSpecs
         var result = await grain.AutoMarkDoneIfReadyAsync();
 
         Assert.NotNull(result);
-        Assert.Equal("idle", result!.Status);
+        Assert.Equal("done", result!.Status);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("idle", stored.Status);
+        Assert.Equal("done", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
@@ -230,8 +235,11 @@ public class EpicAutoDoneSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ResumeAsync_PausedEpicWithCancelledIssueOnly_DoesNotAutoDone()
+    public async Task ResumeAsync_PausedEpicWithCancelledIssueOnly_AutoDoneAfterResume()
     {
+        // Cancelled is a terminal state, so an epic whose only linked
+        // issue is cancelled has no open linked issues. Resume re-evaluates
+        // via the shared readiness rule and auto-transitions to done.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "paused");
         await SeedIssueAsync(database, projectId: "project_1", epicId: "epic_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
@@ -240,10 +248,10 @@ public class EpicAutoDoneSpecs
 
         var result = await grain.ResumeAsync();
 
-        Assert.Equal("running", result.Status);
+        Assert.Equal("done", result.Status);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("running", stored.Status);
+        Assert.Equal("done", stored.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

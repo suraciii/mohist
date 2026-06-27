@@ -139,12 +139,49 @@ public class EpicProgressBuildSpecs
     }
 
     [Fact]
-    public void ReadyToMarkDone_IsFalse_WhenAnyUndelivered_RegardlessOfNextIssueStartability()
+    public void ReadyToMarkDone_IsTrue_WhenAllLinkedIssuesTerminal_DeliveredCountExcludesCancelled()
+    {
+        // All-linked-terminal (done + cancelled) is the new readiness rule.
+        // deliveredCount counts only the done issue; cancelled is terminal
+        // but never counts as delivered.
+        var linked = new[]
+        {
+            Issue("issue_done", number: 1, title: "Done A", status: "done"),
+            Issue("issue_cancelled", number: 2, title: "Cancelled B", status: "cancelled"),
+        };
+
+        var progress = EpicProgress.Build(linked);
+
+        Assert.True(progress.ReadyToMarkDone);
+        Assert.Equal(1, progress.DeliveredCount);
+        Assert.Equal(2, progress.TotalIssueCount);
+    }
+
+    [Fact]
+    public void ReadyToMarkDone_IsTrue_WhenOnlyCancelledLinkedIssuesRemain()
+    {
+        var linked = new[]
+        {
+            Issue("issue_1", number: 1, title: "Cancelled A", status: "cancelled"),
+            Issue("issue_2", number: 2, title: "Cancelled B", status: "cancelled"),
+        };
+
+        var progress = EpicProgress.Build(linked);
+
+        Assert.True(progress.ReadyToMarkDone);
+        Assert.Equal(0, progress.DeliveredCount);
+        Assert.Equal(2, progress.TotalIssueCount);
+        Assert.Null(progress.NextIssue);
+        Assert.Null(progress.NextIssueReason);
+    }
+
+    [Fact]
+    public void ReadyToMarkDone_IsFalse_WhenAnyOpenLinkedIssueRemains_RegardlessOfNextIssueStartability()
     {
         var linked = new[]
         {
             Issue("issue_1", number: 1, title: "Done A", status: "done"),
-            Issue("issue_2", number: 2, title: "Undelivered but blocked", status: "in_progress",
+            Issue("issue_2", number: 2, title: "Open but blocked", status: "in_progress",
                 canStart: false, blocker: WaitingFor(99)),
         };
 
@@ -170,7 +207,7 @@ public class EpicProgressBuildSpecs
     }
 
     [Fact]
-    public void GrainPath_ReadyToMarkDone_DependsOnlyOnDeliveredCounts()
+    public void GrainPath_ReadyToMarkDone_FollowsOpenLinkedIssueRule()
     {
         var grainPathLinked = new[]
         {
@@ -186,8 +223,10 @@ public class EpicProgressBuildSpecs
     }
 
     [Fact]
-    public void GrainPath_ReadyToMarkDone_True_WhenAllDelivered_EvenWithNoStartabilityData()
+    public void GrainPath_ReadyToMarkDone_True_WhenAllTerminal_EvenWithNoStartabilityData()
     {
+        // No startability data (CanStart=false, StartBlocker=null) doesn't
+        // change readiness — the rule is purely on terminal/open status.
         var grainPathLinked = new[]
         {
             Issue("issue_1", number: 1, title: "Done A", status: "done"),

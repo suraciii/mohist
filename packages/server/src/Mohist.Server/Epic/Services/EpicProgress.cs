@@ -12,12 +12,12 @@ public static class EpicProgress
     public static EpicProgressDto Build(IReadOnlyList<LinkedIssueDto> linked)
     {
         var completed = linked.Where(IsCompleted).ToList();
-        var undelivered = linked.Where(i => !IsCompleted(i) && i.Status != "cancelled").ToList();
+        var open = linked.Where(IsOpen).ToList();
 
-        var next = SelectStartableNext(undelivered);
-        var nextIssueReason = next is null ? BuildNextIssueReason(undelivered) : null;
+        var next = SelectStartableNext(open);
+        var nextIssueReason = next is null ? BuildNextIssueReason(open) : null;
 
-        var inProgress = undelivered.Where(i => i.Status == "in_progress").ToList();
+        var inProgress = open.Where(i => i.Status == "in_progress").ToList();
         var blocked = inProgress
             .Where(i => string.Equals(i.Health, HealthBlocked, StringComparison.Ordinal))
             .Select(ToProgressIssue)
@@ -34,10 +34,35 @@ public static class EpicProgress
             active,
             next is null ? null : new EpicNextIssueDto(next.Id, next.Number, next.Title),
             nextIssueReason,
-            linked.Count > 0 && completed.Count == linked.Count);
+            IsReadyToComplete(linked));
     }
 
     public static bool IsCompleted(LinkedIssueDto issue) => issue.Status is "done" or "completed";
+
+    /// <summary>
+    /// A linked issue is terminal when it has no remaining execution:
+    /// delivered (<c>done</c>/<c>completed</c>) or cancelled
+    /// (<c>cancelled</c>). Terminal issues neither block readiness nor
+    /// count toward <c>deliveredCount</c> when cancelled.
+    /// </summary>
+    public static bool IsTerminal(LinkedIssueDto issue) => IsCompleted(issue) || issue.Status == "cancelled";
+
+    /// <summary>
+    /// An open linked issue is anything still capable of advancing the
+    /// product goal: backlog, draft, in-progress, blocked, paused, etc.
+    /// Used by the readiness rule, the next-issue selection, and the
+    /// advancement path.
+    /// </summary>
+    public static bool IsOpen(LinkedIssueDto issue) => !IsTerminal(issue);
+
+    /// <summary>
+    /// The single source of truth for whether an epic may transition to
+    /// <c>done</c>. An epic is ready to complete when it has at least
+    /// one linked issue AND every linked issue is terminal. A
+    /// <c>cancelled</c> remaining issue does NOT keep readiness false.
+    /// </summary>
+    public static bool IsReadyToComplete(IReadOnlyList<LinkedIssueDto> linked) =>
+        linked.Count > 0 && !linked.Any(IsOpen);
 
     public static bool IsTerminal(EpicStatus status) => status is EpicStatus.Done or EpicStatus.Closed;
 
@@ -47,18 +72,18 @@ public static class EpicProgress
     /// Shared next-issue selection used by both the read-model
     /// (<see cref="Build"/>) and the autonomous-progression path on
     /// <c>EpicGrain.TryStartNext</c>. Returns the highest-priority
-    /// <c>CanStart &amp;&amp; StartBlocker is null</c> undelivered
+    /// <c>CanStart &amp;&amp; StartBlocker is null</c> open
     /// issue, or <c>null</c> if any linked issue is currently
     /// <c>in_progress</c> (serial slot occupied) or no candidate
     /// matches. <c>cancelled</c> issues are excluded by the
-    /// <c>undelivered</c> filter the callers pass in.
+    /// <c>open</c> filter the callers pass in.
     /// </summary>
-    public static LinkedIssueDto? SelectStartableNext(IReadOnlyList<LinkedIssueDto> undelivered)
+    public static LinkedIssueDto? SelectStartableNext(IReadOnlyList<LinkedIssueDto> open)
     {
-        if (undelivered.Any(i => i.Status == "in_progress"))
+        if (open.Any(i => i.Status == "in_progress"))
             return null;
 
-        return undelivered
+        return open
             .Where(i => i.Status != "in_progress" && i.CanStart && i.StartBlocker is null)
             .OrderBy(i => PriorityRank(i.Priority))
             .ThenBy(i => i.Number)
@@ -66,17 +91,17 @@ public static class EpicProgress
             .FirstOrDefault();
     }
 
-    private static string? BuildNextIssueReason(IReadOnlyList<LinkedIssueDto> undelivered)
+    private static string? BuildNextIssueReason(IReadOnlyList<LinkedIssueDto> open)
     {
-        if (undelivered.Count == 0) return null;
+        if (open.Count == 0) return null;
 
-        var running = undelivered
+        var running = open
             .OrderBy(i => i.Number)
             .FirstOrDefault(i => i.Status == "in_progress");
         if (running is not null)
             return $"Waiting for #{running.Number} to complete";
 
-        var blocker = undelivered
+        var blocker = open
             .OrderBy(i => PriorityRank(i.Priority))
             .ThenBy(i => i.Number)
             .Select(i => ReasonFor(i))

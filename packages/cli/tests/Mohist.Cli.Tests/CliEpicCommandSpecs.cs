@@ -121,7 +121,7 @@ public class CliEpicCommandSpecs
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
-                "Epic has 2 undelivered linked issues",
+                "Epic has 2 open linked issue(s)",
                 "EPIC_NOT_READY_TO_MARK_DONE",
                 HttpStatusCode.Conflict)));
 
@@ -188,7 +188,7 @@ public class CliEpicCommandSpecs
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
-                "Epic has undelivered linked issues",
+                "Epic has open linked issues",
                 "EPIC_NOT_READY_TO_MARK_DONE",
                 HttpStatusCode.Conflict)));
 

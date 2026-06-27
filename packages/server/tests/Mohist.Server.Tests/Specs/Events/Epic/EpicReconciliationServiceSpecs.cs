@@ -106,11 +106,11 @@ public class EpicReconciliationServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileOnceAsync_IdleEpicWithIncompleteIssue_StaysIdleAndGrainNoOps()
+    public async Task ReconcileOnceAsync_IdleEpicWithOpenIssue_StaysIdleAndGrainNoOps()
     {
         // Sweep reaches the idle epic (it IS a candidate) but the
         // grain's ReconcileAfterTerminalAsync short-circuits on
-        // undelivered > 0 for an idle epic (no TryStartNext on idle);
+        // open > 0 for an idle epic (no TryStartNext on idle);
         // the epic stays idle.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
@@ -181,11 +181,13 @@ public class EpicReconciliationServiceSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task ReconcileOnceAsync_IdleEpicWithCancelledIssueOnly_StaysIdle()
+    public async Task ReconcileOnceAsync_IdleEpicWithCancelledIssueOnly_TransitionsToDone()
     {
-        // Cancelled issues are not treated as complete by the readiness
-        // check; the sweep should reach the epic (it's idle) and the
-        // grain should no-op because undelivered is non-empty.
+        // Cancelled is terminal for readiness, so an epic whose only
+        // linked issue is cancelled has no open linked issues. The
+        // sweep reaches the grain via the same ReconcileAfterTerminal
+        // path that drives auto-done on terminal events; the grain
+        // must now mark the epic done.
         await using var database = CreateDatabase();
         await SeedEpicAsync(database, status: "idle");
         await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
@@ -199,7 +201,7 @@ public class EpicReconciliationServiceSpecs
 
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
-        Assert.Equal("idle", stored.Status);
+        Assert.Equal("done", stored.Status);
         Assert.Single(grains.Calls);
     }
 
