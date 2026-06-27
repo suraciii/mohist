@@ -354,12 +354,15 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             {
                 TryRemoveWork(workId, WorkDispatchOwnerKinds.Workflow, workflowRunId);
                 await PersistAsync();
-                await MarkRunnerWorkTerminalAsync(
-                    WorkDispatchOwnerKinds.Workflow,
-                    workflowRunId,
-                    workId,
-                    LedgerRunnerWorkStatus.Failed,
-                    "stale-work");
+                if (await IsRunnerWorkOutstandingAsync(WorkDispatchOwnerKinds.Workflow, workflowRunId, workId))
+                {
+                    await MarkRunnerWorkTerminalAsync(
+                        WorkDispatchOwnerKinds.Workflow,
+                        workflowRunId,
+                        workId,
+                        LedgerRunnerWorkStatus.Failed,
+                        "stale-work");
+                }
                 return new RunnerWorkReportResult(workflowRunId, null, true, "stale-work", WorkDispatchOwnerKinds.Workflow, workflowRunId);
             }
 
@@ -880,6 +883,13 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
         {
+            var (terminalStatus, terminalReason) = ResolveTerminalStatus(result);
+            await MarkRunnerWorkTerminalAsync(
+                work.OwnerKind,
+                work.OwnerId,
+                work.WorkId,
+                terminalStatus,
+                terminalReason);
             await ReportWorkflowResultAsync(work.OwnerId, work.WorkId, result);
             return;
         }
@@ -925,6 +935,12 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             status,
             reason,
             _timeProvider.GetUtcNow());
+    }
+
+    private async Task<bool> IsRunnerWorkOutstandingAsync(string ownerKind, string ownerId, string workId)
+    {
+        var ledger = await _runnerWorks.FindAsync(RunnerId, ownerKind, ownerId, workId);
+        return ledger?.Status == LedgerRunnerWorkStatus.Outstanding;
     }
 
     private static (LedgerRunnerWorkStatus Status, string? Reason) ResolveTerminalStatus(WorkResult result)
