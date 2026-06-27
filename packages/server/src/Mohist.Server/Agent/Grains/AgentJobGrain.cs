@@ -336,10 +336,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ? null
             : JSON.Serialize(payload);
 
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["prompt"] = JSON.SerializeToElement(input.Prompt),
-        };
+        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        ComposePromptWithEntry(with, input);
         if (!string.IsNullOrWhiteSpace(input.Model))
             with["model"] = JSON.SerializeToElement(input.Model);
         var withJson = JSON.Serialize(with);
@@ -354,7 +352,43 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             Stage: "agent",
             Title: "Agent Job",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: Key);
+            AgentJobId: Key,
+            ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
+            AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId);
+    }
+
+    /// <summary>
+    /// Populates the <c>with.prompt</c> entry on the dispatch envelope. When
+    /// an Agent profile is supplied, the Agent's <c>Instructions</c> and
+    /// <c>AgentConfig</c> snapshot are composed with the caller's prompt
+    /// into a single execution input so the installed external agent
+    /// receives the composed bytes rather than the bare prompt. When no
+    /// Agent profile is supplied (raw-prompt-only AgentJob), the caller's
+    /// prompt is passed through unchanged.
+    /// </summary>
+    internal static void ComposePromptWithEntry(
+        Dictionary<string, JsonElement?> with,
+        AgentJobInput input)
+    {
+        var hasAgent = !string.IsNullOrWhiteSpace(input.AgentId)
+            || !string.IsNullOrWhiteSpace(input.AgentInstructions)
+            || input.AgentConfig is not null;
+
+        if (!hasAgent)
+        {
+            with["prompt"] = JSON.SerializeToElement(input.Prompt);
+            return;
+        }
+
+        var composed = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
+            composed["instructions"] = input.AgentInstructions;
+        if (input.AgentConfig is { ValueKind: not JsonValueKind.Undefined } configElement)
+            composed["config"] = configElement.Clone();
+        composed["prompt"] = input.Prompt;
+
+        with["prompt"] = JSON.SerializeToElement(
+            new Dictionary<string, object?> { ["agent-launch"] = composed });
     }
 
     private async Task ScheduleNextDispatchAsync()

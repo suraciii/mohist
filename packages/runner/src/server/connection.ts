@@ -236,6 +236,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
     setVars: dispatch.setVars ? (parseObject(dispatch.setVars) as Record<string, string> | null) : null,
     ownerKind: dispatch.ownerKind ?? undefined,
     agentJobId: dispatch.agentJobId ?? undefined,
+    agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
   }
 }

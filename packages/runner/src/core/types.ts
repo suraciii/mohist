@@ -83,6 +83,14 @@ export type WorkDispatchResponse = {
   setVars?: string | null
   ownerKind?: string | null
   agentJobId?: string | null
+  /**
+   * Minted AgentSession id for agent-job dispatches whose launch
+   * created a generic (non-workflow) AgentSession. The runner uses
+   * this as the session identity for runtime events. Null for
+   * workflow dispatches and raw-prompt-only AgentJob validation
+   * dispatches. Mirrors `WorkDispatch.AgentSessionId` on the server.
+   */
+  agentSessionId?: string | null
   cleanupPolicy?: CleanupPolicy | null
   recovery?: string | null
 }
@@ -126,6 +134,14 @@ export interface RenderedWorkItem {
   setVars?: Record<string, string> | null
   ownerKind?: string | null
   agentJobId?: string | null
+  /**
+   * Minted AgentSession id for agent-job dispatches whose launch
+   * created a generic (non-workflow) AgentSession. The runner uses
+   * this as the session identity for runtime events when the
+   * dispatch is owner-kind "agent-job". Null for workflow
+   * dispatches. Mirrors `WorkDispatch.AgentSessionId` on the server.
+   */
+  agentSessionId?: string | null
   recovery?: JsonObject | null
 }
 

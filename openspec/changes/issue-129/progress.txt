@@ -1,0 +1,130 @@
+# Issue 129 — generic AgentSession launch
+
+Working memory for the issue-level workflow. Append findings as you go;
+later steps read the latest entries (and the `## Codebase Patterns`
+section first).
+
+## Codebase Patterns
+
+- `WorkDispatch` is the server-side dispatch record; `WorkDispatchResponse`
+  is its wire DTO mirrored to the runner. New optional fields are added
+  at the end of the constructor with `null` defaults so workflow
+  translators continue to compile and produce byte-identical workflow
+  dispatches.
+- `AgentJobGrain` is the authoritative owner of a standalone agent job.
+  It is in-memory only (no `[PersistentState]`) and non-reentrant, so
+  timer-driven dispatch retries cannot race `ReportResultAsync`. Any new
+  state must respect non-reentrancy and timer disposal in
+  `OnDeactivateAsync`.
+- `JSON.SerializeToElement` and `JSON.Serialize` are the canonical
+  serialization helpers; the runner-facing `with`/`variables` strings
+  are produced through them.
+- Tests for `AgentJobGrain` live under
+  `packages/server/tests/Mohist.Server.Tests/Specs/Agent/Grain/`. The
+  fixture (`AgentJobGrainFixture`) shares an in-memory Orleans cluster
+  with `[Collection("WorkflowGrain")]`; specs that register a runner
+  must clear the global runner registry to avoid stale cross-spec
+  interference.
+- `RunnerRoutes.PollAsync` projects a `WorkDispatch` into a
+  `WorkDispatchResponse`. For workflow dispatches the project id lives
+  on `Issue.ProjectId`; for agent-job dispatches (no `Issue`) it must
+  fall through to the new top-level `ProjectId` field. The `Issue ??`
+  fallback in the route is the consolidation point.
+- The runner reads the `WorkDispatchResponse` JSON wire shape via
+  `JSON.parse`; adding optional fields is wire-compatible. The runner
+  side `WorkDispatchResponse` and `RenderedWorkItem` types are kept in
+  lockstep.
+
+## T-001 — Server: AgentJob consumes Agent definition + widen dispatch envelope
+
+### Findings
+
+- `AgentJobInput` previously only carried `Prompt`, `Model`,
+  `WorkspacePath`, `ProjectId`, `Uses`. Added three optional Agent
+  snapshot fields:
+  - `AgentId: string?` — resolved Agent identity (traceability).
+  - `AgentInstructions: string?` — resolved Agent `Instructions`.
+  - `AgentConfig: JsonElement?` — resolved Agent `AgentConfig`
+    snapshot.
+  - Plus `AgentSessionId: string?` for the launch-side minting flow
+    (used to populate the dispatch envelope; T-003 mints it before
+    dispatch).
+  Orleans serializes `JsonElement?` via the existing
+  `JsonElementSurrogate`; no extra registration needed.
+
+- `WorkDispatch` (in `IRunnerGrain.cs`) gained two additive optional
+  fields: `ProjectId` and `AgentSessionId`. They are null for
+  workflow dispatches (workflow projects still surface via
+  `Issue.ProjectId`) and set by `AgentJobGrain.BuildDispatch` for
+  agent-job dispatches. Old-field consumers ignore the new fields.
+
+- `AgentJobGrain.BuildDispatch` now reads `input.ProjectId` and
+  `input.AgentSessionId` onto the dispatch envelope. Workflow dispatch
+  (`WorkflowItemTranslator.BuildTaskDispatchAsync` /
+  `BuildChecksDispatchAsync`) keeps using named-argument constructor
+  calls — the new fields default to `null`, so the workflow path is
+  byte-identical.
+
+- `AgentJobGrain.ComposePromptWithEntry` (extracted as
+  `internal static`) is the single composition point for
+  `with.prompt`. When `AgentId` or any Agent field is set,
+  `with.prompt` becomes a structured object rooted at `agent-launch`
+  carrying `instructions` / `config` / `prompt` so the runner's
+  `resolvePrompt` path renders it via the existing structured-prompt
+  machinery. When no Agent fields are set, `with.prompt` is the bare
+  string — the raw-prompt-only AgentJob path is unchanged.
+
+- `RunnerRoutes` projects the new fields into `WorkDispatchResponse`.
+  `ProjectId` falls through `Issue.ProjectId ?? work.ProjectId` so
+  workflow and agent-job both yield an authoritative project id in the
+  response (workflow still reads from `Issue`, agent-job from the new
+  field). `AgentSessionId` is passed through verbatim (null for
+  workflow and raw-prompt-only validation dispatches).
+
+- Runner-side `WorkDispatchResponse` and `RenderedWorkItem` gained an
+  optional `agentSessionId?: string | null` field. The runner's
+  `toWorkItem` parses it from the dispatch response. Workflow
+  dispatched items leave it `undefined`.
+
+- Tests cover:
+  - `ComposePromptWithEntry` unit tests: raw-prompt-only, instructions
+    only, instructions + config, AgentId-only (structured prompt shape
+    always has `agent-launch.prompt`).
+  - Integration tests (grain + polled dispatch):
+    agent-sourced composition populates `with.prompt` as a structured
+    object rooted at `agent-launch` and populates `ProjectId` /
+    `AgentSessionId` on the dispatch.
+  - Raw-prompt-only path keeps `with.prompt` as a bare string and
+    leaves `AgentSessionId` null.
+  - Dispatch envelope population: `ProjectId` always set when the input
+    carries one; `AgentSessionId` set when supplied, null otherwise.
+  - Workflow dispatch path is unchanged (existing tests still pass;
+    `WorkflowItemTranslator` constructors leave the new fields null
+    via the default).
+
+### Gotchas
+
+- The new fields are at `[property: Id(15)]` and `[property: Id(16)]`
+  on `WorkDispatch`. The existing `Id(10)` slot was already
+  retired (gap in the sequence). Adding past the retired slot is
+  safe; Orleans `GenerateSerializer` honors the explicit `Id(N)`
+  assignments.
+- `WorkDispatchResponse` previously had `CleanupPolicyDto?` and
+  `Recovery` after `AgentJobId`. Adding `AgentSessionId` between
+  them is wire-compatible: the runner uses field-name JSON parsing,
+  and the `JsonPropertyName` defaults match the C# property names
+  (camelCase).
+- `AgentJobGrain.BuildDispatch` is private. To unit-test the
+  composition logic without spinning up the full grain, the
+  composition helper was extracted as `internal static` (test
+  assembly has `InternalsVisibleTo`).
+- The agent-sourced `with.prompt` is a structured object with root
+  key `agent-launch`. The runner's `resolvePrompt` recognizes single-
+  root-key structured objects and renders them via the existing
+  `renderStructuredPrompt` path; this keeps the runner side unchanged
+  for T-001 (T-002 will generalize the session target).
+- `ProjectId` in `WorkDispatchResponse` falls through `Issue.ProjectId
+  ?? work.ProjectId`. Workflow dispatches leave `work.ProjectId` null
+  but supply `work.Issue.ProjectId`, so they remain unchanged.
+  Agent-job dispatches have no `Issue`, so they fall through to
+  `work.ProjectId`. Both shapes yield an authoritative project id.

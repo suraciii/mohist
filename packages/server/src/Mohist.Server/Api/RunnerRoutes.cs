@@ -107,13 +107,14 @@ public static class RunnerRoutes
                 work.WorkType,
                 work.Stage,
                 work.Title,
-                work.Issue?.ProjectId,
+                work.Issue?.ProjectId ?? work.ProjectId,
                 work.Issue?.IssueId,
                 work.Issue?.IssueNumber,
                 work.Artifacts,
                 work.SetVars,
                 work.OwnerKind,
                 work.AgentJobId,
+                AgentSessionId: work.AgentSessionId,
                 CleanupPolicy: ToCleanupPolicyDto(cleanupPolicyOptions.Value),
                 Recovery: work.Recovery));
         });
@@ -392,6 +393,14 @@ public record WorkDispatchResponse(
     string? SetVars = null,
     string? OwnerKind = null,
     string? AgentJobId = null,
+    /// <summary>
+    /// AgentSession id for the dispatch envelope. Set for agent-job
+    /// dispatches whose launch minted a generic (non-workflow)
+    /// AgentSession; the runner uses it verbatim as the session
+    /// identity for runtime events. Null for workflow dispatches and
+    /// raw-prompt-only AgentJob validation dispatches.
+    /// </summary>
+    string? AgentSessionId = null,
     CleanupPolicyDto? CleanupPolicy = null,
     string? Recovery = null);
 

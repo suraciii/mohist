@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Agent.Grains;
@@ -45,13 +46,50 @@ public enum AgentJobStatus
     Failed
 }
 
+/// <summary>
+/// Input snapshot for a standalone AgentJob. When the launch resolves a
+/// project-scoped <c>Agent</c> profile, the resolved snapshot (id,
+/// instructions, and config) is captured here so the executed bytes are
+/// stable for the lifetime of the job — even if the Agent is edited
+/// concurrently. A raw-prompt-only AgentJob remains supported: when
+/// <see cref="AgentId"/> is null, the runner receives the bare
+/// <see cref="Prompt"/>.
+/// </summary>
 [GenerateSerializer]
 public sealed record AgentJobInput(
     [property: Id(0)] string Prompt,
     [property: Id(1)] string? Model = null,
     [property: Id(2)] string? WorkspacePath = null,
     [property: Id(3)] string? ProjectId = null,
-    [property: Id(4)] string? Uses = null);
+    [property: Id(4)] string? Uses = null,
+    /// <summary>
+    /// Resolved Agent profile identity captured at launch time. Carried
+    /// through to dispatch for traceability. Null when the job is a
+    /// raw-prompt-only AgentJob.
+    /// </summary>
+    [property: Id(5)] string? AgentId = null,
+    /// <summary>
+    /// Resolved Agent <c>Instructions</c> snapshot captured at launch
+    /// time. The dispatch composes this with the caller prompt and
+    /// AgentConfig so the runner sees a single composed execution
+    /// input. Null when no Agent definition was supplied.
+    /// </summary>
+    [property: Id(6)] string? AgentInstructions = null,
+    /// <summary>
+    /// Resolved Agent <c>AgentConfig</c> snapshot captured at launch
+    /// time. Composed into the dispatch with the Agent instructions
+    /// and the caller's prompt. Null when no Agent definition was
+    /// supplied or the Agent has no config.
+    /// </summary>
+    [property: Id(7)] JsonElement? AgentConfig = null,
+    /// <summary>
+    /// Minted AgentSession id used by the runner to record runtime
+    /// events against a generic (non-workflow) AgentSession. Optional;
+    /// when null the dispatch envelope leaves <c>AgentSessionId</c>
+    /// unset (workflow-shaped path or a raw-prompt-only validation
+    /// dispatch).
+    /// </summary>
+    [property: Id(8)] string? AgentSessionId = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(
