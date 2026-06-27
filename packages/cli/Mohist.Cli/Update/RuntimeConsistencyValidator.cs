@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace Mohist.Cli;
 
 /// <summary>
-/// Performs the five runtime consistency checks against the freshly built and restarted Mohist
+/// Performs runtime consistency checks against the freshly built and restarted Mohist
 /// components. Extracted from <see cref="SourceCodeUpdater"/> so the facade no longer mixes
 /// stage orchestration with check implementation. Each <c>Check*Async</c> method is internal so
 /// it can be unit-tested directly without going through the full update pipeline.
