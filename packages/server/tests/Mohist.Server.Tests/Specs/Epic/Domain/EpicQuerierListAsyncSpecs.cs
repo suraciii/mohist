@@ -92,7 +92,55 @@ public class EpicQuerierListAsyncSpecs
         var epic = Assert.Single(result);
         Assert.Equal(1, epic.Progress.DeliveredCount);
         Assert.Equal(3, epic.Progress.TotalIssueCount);
+        // backlog is open → readiness false.
         Assert.False(epic.Progress.ReadyToMarkDone);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ListAsync_MixedDoneAndCancelled_ReadyToMarkDone_DeliveredCountCountsOnlyDone()
+    {
+        // Epic #18: done + cancelled, all linked issues terminal, epic
+        // is ready to Mark Done. deliveredCount counts only the done
+        // issue.
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
+        await SeedIssueAsync(database, "proj_1", "issue_done", 1, IssueStatus.Done);
+        await SeedIssueAsync(database, "proj_1", "issue_cancelled", 2, IssueStatus.Cancelled);
+        await SeedLinkAsync(database, "epic_1", "issue_done", 1, "proj_1");
+        await SeedLinkAsync(database, "epic_1", "issue_cancelled", 2, "proj_1");
+
+        var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
+        var result = await querier.ListAsync("proj_1");
+
+        var epic = Assert.Single(result);
+        Assert.True(epic.Progress.ReadyToMarkDone);
+        Assert.Equal(1, epic.Progress.DeliveredCount);
+        Assert.Equal(2, epic.Progress.TotalIssueCount);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task ListAsync_CancelledOnlyRemaining_ReadyToMarkDone()
+    {
+        // No delivered, but every linked issue is terminal; readyToMarkDone
+        // is true (the new terminal/open rule).
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, "proj_1", "epic_1", 1);
+        await SeedIssueAsync(database, "proj_1", "issue_cancelled_a", 1, IssueStatus.Cancelled);
+        await SeedIssueAsync(database, "proj_1", "issue_cancelled_b", 2, IssueStatus.Cancelled);
+        await SeedLinkAsync(database, "epic_1", "issue_cancelled_a", 1, "proj_1");
+        await SeedLinkAsync(database, "epic_1", "issue_cancelled_b", 2, "proj_1");
+
+        var querier = new EpicQuerier(database.Factory, new ThrowingIssueQuerier());
+        var result = await querier.ListAsync("proj_1");
+
+        var epic = Assert.Single(result);
+        Assert.True(epic.Progress.ReadyToMarkDone);
+        Assert.Equal(0, epic.Progress.DeliveredCount);
+        Assert.Equal(2, epic.Progress.TotalIssueCount);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

@@ -311,18 +311,18 @@ public class EpicTransitionsSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public void MarkDone_WhenUndeliveredSetHasThree_ThrowsNotReadyToMarkDoneWithCount()
+    public void MarkDone_WhenOpenLinkedSetHasThree_ThrowsNotReadyToMarkDoneWithCount()
     {
         var epic = NewIdleEpic();
         epic.LinkIssue("issue_1", 1, UtcNow);
 
-        var undelivered = new HashSet<int> { 1, 2, 3 };
+        var open = new HashSet<int> { 1, 2, 3 };
 
         var ex = Assert.Throws<EpicNotReadyToMarkDoneException>(() =>
-            epic.MarkDone(undelivered, UtcNow));
+            epic.MarkDone(open, UtcNow));
 
         Assert.Equal(epic.Id, ex.EpicId);
-        Assert.Equal(3, ex.UndeliveredCount);
+        Assert.Equal(3, ex.OpenLinkedCount);
         Assert.Equal(EpicStatus.Idle, epic.Status);
         Assert.Empty(EpicEventAssertions.OfType<EpicStatusChanged>(epic.PendingEvents));
     }
