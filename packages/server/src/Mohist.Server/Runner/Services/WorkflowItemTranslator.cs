@@ -350,21 +350,6 @@ public sealed class WorkflowItemTranslator : IScopedService
         var detail = NormalizeDetail(result, status);
         IReadOnlyList<ArtifactRef>? artifacts = null;
 
-        if (status == OutcomeStatus.Passed
-            && item.Artifacts is { IsEmpty: false }
-            && (result.ArtifactUploadIds is null || result.ArtifactUploadIds.Length == 0))
-        {
-            // Declared artifacts are required for a passing task — drop to
-            // failed with a deterministic detail so the grain treats it
-            // uniformly with other failures.
-            return new InboundOutcome.Task(new TaskOutcome(
-                WorkId: workId,
-                Status: OutcomeStatus.Failed,
-                Output: result.Output,
-                Artifacts: null,
-                Detail: "Required declared artifacts were not uploaded"));
-        }
-
         if (result.ArtifactUploadIds is { Length: > 0 })
         {
             var bindResult = await _artifactBindService.BindAsync(

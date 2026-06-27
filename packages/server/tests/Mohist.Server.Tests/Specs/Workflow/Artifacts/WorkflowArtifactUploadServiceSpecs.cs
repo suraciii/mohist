@@ -628,8 +628,7 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         var bindService = new WorkflowArtifactBindService(
             _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             NullLogger<WorkflowArtifactBindService>.Instance,
-            new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)),
-            _fixture.Services.GetRequiredService<Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine>());
+            new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)));
         var bindResult = await bindService.BindAsync(
             workflowRunId, workId, taskRunId, [uploaded.Pending!.UploadId], declaredArtifacts: null);
         Assert.True(bindResult.IsSuccess, bindResult.Error);
@@ -700,8 +699,7 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         var bindService = new WorkflowArtifactBindService(
             _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             NullLogger<WorkflowArtifactBindService>.Instance,
-            new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)),
-            _fixture.Services.GetRequiredService<Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine>());
+            new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)));
         var declaredArtifacts = new TaskArtifactCapture(
             new List<TaskArtifactDeclaration>
             {
@@ -728,12 +726,13 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
     [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task BindAsync_DeclaredPathWithMissingTemplateVariable_ReturnsInformativeError()
+    public async Task BindAsync_DeclaredPathWithMissingTemplateVariable_BindsUploadRegardless()
     {
-        // If the declared path references a variable that the
-        // workflow does not define, the bind service should surface a
-        // clear error naming the missing variable rather than
-        // misreporting the artifact as missing.
+        // With best-effort artifacts, declared path template validation
+        // is the runner's responsibility at capture time. The bind
+        // service no longer cross-checks declared paths against
+        // uploaded paths, so an undefined template variable does not
+        // prevent binding.
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var workId = $"task-1.1_{Guid.NewGuid():N}";
         var taskRunId = $"task-1.1";
@@ -754,14 +753,12 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
         });
         Assert.Equal(WorkflowArtifactUploadResultKind.Created, uploaded.Kind);
 
-        // Variables do not include openspecChangeDir.
         var variables = JsonDocument.Parse("{}").RootElement.Clone();
 
         var bindService = new WorkflowArtifactBindService(
             _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
             NullLogger<WorkflowArtifactBindService>.Instance,
-            new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)),
-            _fixture.Services.GetRequiredService<Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine>());
+            new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)));
         var declaredArtifacts = new TaskArtifactCapture(
             new List<TaskArtifactDeclaration>
             {
@@ -771,9 +768,8 @@ public class WorkflowArtifactUploadServiceSpecs : IDisposable
             workflowRunId, workId, taskRunId,
             [uploaded.Pending!.UploadId], declaredArtifacts, variables: variables);
 
-        Assert.False(bindResult.IsSuccess);
-        Assert.NotNull(bindResult.Error);
-        Assert.Contains("openspecChangeDir", bindResult.Error);
+        Assert.True(bindResult.IsSuccess, bindResult.Error ?? "expected success");
+        Assert.Single(bindResult.ArtifactRecordedEvents);
     }
 }
 

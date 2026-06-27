@@ -48,7 +48,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
             WorkflowGrainTestHelpers.CreateEmptyConfigService(), runProfileManager,
             new Mohist.Server.Issue.Services.WorkflowProfiles.EffectiveWorkflowProfileResolver(registry));
         _bindService = new WorkflowArtifactBindService(
-            factory, BindNullLogger, TimeProvider.System, new PromptTemplateEngine());
+            factory, BindNullLogger, TimeProvider.System);
         _translator = new WorkflowItemTranslator(_profileManager, _bindService, TranslatorNullLogger);
 
         using var initDb = new MohistDbContext(_options);
@@ -272,7 +272,7 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task TranslateResult_PassedTaskMissingDeclaredArtifacts_FailsWithDeterministicDetail()
+    public async Task TranslateResult_PassedTaskMissingDeclaredArtifacts_PassesWithoutArtifacts()
     {
         var runId = $"wr-{Guid.NewGuid():N}";
         var projectId = "proj-result-3";
@@ -284,9 +284,8 @@ public class WorkflowItemTranslatorSpecs : IAsyncLifetime
         var outcome = await _translator.TranslateResultAsync(item, result, runId, run);
 
         var task = Assert.IsType<WorkflowItemTranslator.InboundOutcome.Task>(outcome);
-        Assert.Equal(OutcomeStatus.Failed, task.Value.Status);
-        Assert.NotNull(task.Value.Detail);
-        Assert.Contains("Required declared artifacts were not uploaded", task.Value.Detail);
+        Assert.Equal(OutcomeStatus.Passed, task.Value.Status);
+        Assert.Null(task.Value.Artifacts);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

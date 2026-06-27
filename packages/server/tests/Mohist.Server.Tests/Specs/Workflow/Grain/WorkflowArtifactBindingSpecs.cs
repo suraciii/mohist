@@ -52,7 +52,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public async Task CompletedTask_MissingDeclaredArtifact_FailsTask()
+    public async Task CompletedTask_MissingDeclaredArtifact_CompletesWithBestEffort()
     {
         var definition = SingleStage(
             tasks: [
@@ -68,7 +68,7 @@ public class WorkflowArtifactBindingSpecs : WorkflowGrainSpecs
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
         var status = await workflow.GetRunStatusAsync();
-        Assert.Equal("Failed", status);
+        Assert.Equal("Completed", status);
 
         await using var db = CreateDb();
         var artifacts = await db.WorkflowArtifacts

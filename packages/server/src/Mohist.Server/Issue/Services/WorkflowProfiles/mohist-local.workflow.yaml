@@ -203,7 +203,6 @@ stages:
                 oneOf:
                   - <promise>PASS</promise>
                   - <promise>FAIL</promise>
-                failIf: <promise>FAIL</promise>
         recovery:
           budget: 2
           handlers:
