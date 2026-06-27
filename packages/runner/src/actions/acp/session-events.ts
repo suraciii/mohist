@@ -1,6 +1,7 @@
 import type { SessionNotification } from "@agentclientprotocol/sdk"
 import type { ActionContext, JsonObject } from "../../core/types.js"
 import { stringInput } from "../../core/json.js"
+import type { SessionTarget } from "../../runtime/acp-connection.js"
 import type { CompactionEventPayload, CompactionStrategy } from "./compaction.js"
 
 const SESSION_INPUT_EVENT = "session.input"
@@ -44,22 +45,37 @@ export function sessionNameFromContext(context: ActionContext) {
   return stringInput(context.with, "session") ?? context.workId
 }
 
-export function sessionTargetFromContext(context: ActionContext): { projectId: string; workflowRunId: string; sessionName: string } | null {
-  const sessionName = sessionNameFromContext(context)
+export function sessionTargetFromContext(context: ActionContext): SessionTarget | null {
   const projectId = context.projectId
-  if (!sessionName || !projectId) return null
-  return { projectId, workflowRunId: context.workflowRunId, sessionName }
+  if (!projectId) return null
+
+  if (context.ownerKind === "agent-job" && context.agentSessionId) {
+    return { kind: "generic", projectId, sessionId: context.agentSessionId }
+  }
+
+  const sessionName = sessionNameFromContext(context)
+  if (!sessionName) return null
+  return { kind: "workflow", projectId, workflowRunId: context.workflowRunId, sessionName }
 }
 
 export async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
   const target = sessionTargetFromContext(context)
   if (!target || !context.serverConnection) return
 
-  await context.serverConnection.workflowAgentSessionRuntimeEvents(
+  const body = { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] }
+  if (target.kind === "workflow") {
+    await context.serverConnection.workflowAgentSessionRuntimeEvents(
+      target.projectId,
+      target.workflowRunId,
+      target.sessionName,
+      body,
+      context.signal)
+    return
+  }
+  await context.serverConnection.agentSessionRuntimeEvents(
     target.projectId,
-    target.workflowRunId,
-    target.sessionName,
-    { workId: context.workId, workType: context.workType, stage: context.stage, runtimeEvents: [{ type, payload }] },
+    target.sessionId,
+    body,
     context.signal)
 }
 
@@ -462,11 +478,20 @@ export async function attachSessionToServer(context: ActionContext, agentSession
   const target = sessionTargetFromContext(context)
   if (!target || !context.serverConnection) return
 
-  await context.serverConnection.attachWorkflowAgentSession(
+  const body = { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }
+  if (target.kind === "workflow") {
+    await context.serverConnection.attachWorkflowAgentSession(
+      target.projectId,
+      target.workflowRunId,
+      target.sessionName,
+      body,
+      context.signal)
+    return
+  }
+  await context.serverConnection.attachAgentSession(
     target.projectId,
-    target.workflowRunId,
-    target.sessionName,
-    { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) },
+    target.sessionId,
+    body,
     context.signal)
 }
 

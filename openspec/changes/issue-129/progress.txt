@@ -128,3 +128,159 @@ section first).
   but supply `work.Issue.ProjectId`, so they remain unchanged.
   Agent-job dispatches have no `Issue`, so they fall through to
   `work.ProjectId`. Both shapes yield an authoritative project id.
+
+## T-002 — Runner: generalized session target abstraction
+
+### Findings
+
+- New exported type `SessionTarget` (in
+  `packages/runner/src/runtime/acp-connection.ts`) is the
+  discriminated union used everywhere a session identity is carried
+  in the runner:
+  `{ kind: "workflow"; projectId; workflowRunId; sessionName }` or
+  `{ kind: "generic"; projectId; sessionId }`. Adopting the target
+  shape unifies runner caches, key derivation, and server method
+  dispatch.
+
+- `AcpSessionManager.key()` now takes a `SessionTarget` and returns a
+  prefixed key: `workflow:{workflowRunId}:{sessionName}` for
+  workflow-shaped sessions, `generic:{sessionId}` for generic-shaped
+  sessions. Two explicit helpers (`workflowKey`/`genericKey`) exist
+  for callers that already know the shape (e.g. existing
+  `host.resolveFollowupTarget`, the test fixtures, the generic
+  strategy). The different prefixes close the
+  `":<sessionName>"` collision that an agent-job would otherwise
+  hit when `workflowRunId` is empty and the session name happened to
+  match a workflow's `":"`-delimited key.
+
+- `sessionTargetFromContext` (`session-events.ts`) returns a
+  `SessionTarget | null`:
+  - `ownerKind === "agent-job"` + `agentSessionId` present +
+    `projectId` set → generic shape (uses the
+    agent-job-minted session id directly as the identity, ignores
+    the workflow-shaped `with.session`).
+  - Otherwise → workflow shape (existing semantics: derives
+    `sessionName` from `with.session` or `workId`).
+  - `projectId` gate is retained; without it both branches return
+    `null`. An agent-job without a minted `agentSessionId` falls
+    through to the workflow shape (this is the raw-prompt-only
+    AgentJob path that never had a session to attach to).
+
+- `emitSessionEvent` and `attachSessionToServer` now branch on
+  `target.kind`:
+  - Workflow branch → `workflowAgentSessionRuntimeEvents` /
+    `attachWorkflowAgentSession` (unchanged URLs and signatures).
+  - Generic branch → new
+    `agentSessionRuntimeEvents` / `attachAgentSession` (new
+    `agent-sessions/{projectId}/{sessionId}/...` URLs).
+  Both branches share the same `body` shape so the existing
+  server-side session event pipeline receives identical payloads.
+
+- `ServerConnection` (`packages/runner/src/server/connection.ts`)
+  gained four new methods that hit distinct URL paths:
+  - `getAgentSession(projectId, sessionId)` →
+    `GET /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}`
+  - `openAgentSession(projectId, sessionId, body)` →
+    `POST .../open`
+  - `attachAgentSession(projectId, sessionId, body)` →
+    `POST .../attach`
+  - `agentSessionRuntimeEvents(projectId, sessionId, body)` →
+    `POST .../runtime-events`
+  The existing `*WorkflowAgentSession` methods and URLs are
+  untouched and remain byte-identical; an alias `AgentSession =
+  WorkflowAgentSession` is exported so generic callers do not need
+  a new type.
+
+- `runAcpWorkflowAgentSession`
+  (`session-strategies.ts`) now branches on owner-kind at the top:
+  when `ownerKind === "agent-job"` and `agentSessionId` is present,
+  it delegates to a sibling
+  `runAcpGenericAgentSession` that uses the new
+  `getAgentSession` / `openAgentSession` connection methods, keys
+  the `AcpSessionManager` cache by the generic prefix, and runs the
+  same cached/resumed/new-session logic (sharing
+  `runPromptOnExistingWorkflowAgentSession`,
+  `runResumedWorkflowAgentSession`,
+  `runNewWorkflowAgentSession`, and
+  `runEphemeralWorkflowAgentSession`). The
+  existing `runAcpWorkflowAgentSession` body — including all the
+  call sites in `acp-agent.ts` — is unchanged for workflow-shaped
+  work items, so call sequence and wire shape are byte-identical.
+  The generic path falls back to the ephemeral path only when
+  `manager` / `serverConnection` / `projectId` / `agentSessionId`
+  are missing (same fail-mode contract as the workflow path).
+
+- `ActionContext` (`packages/runner/src/core/types.ts`) gained
+  `ownerKind?: string | null` and `agentSessionId?: string | null`
+  fields, propagated from `RenderedWorkItem` by
+  `baseContext` in `packages/runner/src/runtime/executor.ts`. These
+  are set by the server for agent-job dispatches (T-001) and the
+  raw-prompt-only AgentJob validation path leaves them null.
+
+- Tests added:
+  - `tests/acp-connection.spec.ts` — `AcpSessionManager keys` block
+    (prefixed keys, helpers, workflow-vs-generic coexistence
+    without collision).
+  - `tests/acp/session-target.spec.ts` — new spec; covers generic
+    vs workflow target derivation across
+    owner-kind / agentSessionId / projectId / session-name
+    combinations, including the "agent-job without
+    sessionId falls through to workflow shape" edge case
+    (raw-prompt-only AgentJob).
+  - `tests/server-connection-generic-session.spec.ts` — new spec;
+    covers each new `*AgentSession` connection method's URL path
+    and body, distinctness from the workflow URL space, and the
+    404 / 500 contracts.
+  - `tests/acp/session-strategies-generic.spec.ts` — new spec;
+    covers generic dispatch routing
+    (agent-job → `getAgentSession` / `openAgentSession` /
+    `attachAgentSession` / `agentSessionRuntimeEvents` only,
+    no workflow call),
+    workflow dispatch routing (unchanged),
+    cached-entry under the `generic:` key,
+    and runtime-event delivery to the generic URL.
+
+- Existing test fixtures updated for the new `key()` signature:
+  `tests/acp-agent.spec.ts` and `tests/acp/support.ts` now use
+  `acpSessionManager.workflowKey(...)` when populating the cached
+  session entry. `host.resolveFollowupTarget` (which still knows
+  the caller is a workflow followup) was updated to call
+  `workflowKey`.
+
+### Gotchas
+
+- The URL substring check `/sessions/project-1/...` collides with
+  `/agent-sessions/project-1/...` (the generic URL contains the
+  workflow URL as a substring). New tests assert the full runner-
+  prefixed URL via regex, not `toContain`, to avoid the
+  false-positive on the workflow path.
+
+- The `mock.calls[N]` index is shared across `fetchMock` invocations
+  in a test — when capturing the URL of the second call, use
+  `mock.calls[1]`, not `mock.calls[0]`. Easy to misread when the
+  variable name doesn't reflect the call order.
+
+- The existing `*WorkflowAgentSession` server methods are NOT
+  changed; the agent-job wire path now goes to the new
+  `*AgentSession` endpoints, and an older server that has not yet
+  shipped the generic endpoints will return 404 for an agent-job
+  dispatch. This is a coordinated T-002/T-003 change on the server
+  side; T-003 mints the `AgentSession` and adds the endpoints.
+
+- `acp-agent.ts` continues to call
+  `runAcpWorkflowAgentSession`; the function itself
+  internally dispatches to the generic strategy. The agent-job
+  call sequence in `acp-agent.ts` is unchanged.
+
+- `acpSessionManager.set(workflowKey(...))` in the existing
+  shared-session fixture used to be
+  `acpSessionManager.set(key("workflow-1", "shared-session"))`,
+  which previously produced `workflow-1:shared-session`. After
+  T-002 the same fixture produces
+  `workflow:workflow-1:shared-session`. The
+  `AcpSessionManager` cache lookup in
+  `runAcpWorkflowAgentSession` was updated to use
+  `manager.workflowKey(...)` so both sides agree on the new
+  prefix. The cache-hits-test in the
+  `session-strategies-reuse.spec.ts` continues to work because
+  the lookup and the pre-seeded entry both use the prefixed form.

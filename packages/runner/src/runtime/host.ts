@@ -99,7 +99,7 @@ export class RunnerHost {
 
   private resolveFollowupTarget(workflowRunId: string, sessionName: string): { connection: ClientSideConnection; sessionId: string; projectId: string } | null {
     if (!this.sharedAcpConnection) return null
-    const key = this.sessionManager.key(workflowRunId, sessionName)
+    const key = this.sessionManager.workflowKey(workflowRunId, sessionName)
     const entry = this.sessionManager.get(key)
     if (!entry) return null
     const projectId = this.options.projectId ?? ""

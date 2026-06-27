@@ -1,0 +1,263 @@
+import { afterEach, describe, expect, it } from "vitest"
+import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
+import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
+import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../../src/actions/acp-agent.js"
+import { setPromptLoaderRegistryForTest } from "../../src/core/prompt.js"
+import type { ActionContext } from "../../src/core/types.js"
+import { AcpSessionManager, type SessionTarget, type SharedAcpConnection } from "../../src/runtime/acp-connection.js"
+import { ServerConnection } from "../../src/server/connection.js"
+
+afterEach(() => {
+  setAcpProcessFactoryForTest(null)
+  setPromptLoaderRegistryForTest(null)
+})
+
+function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
+  return {
+    workflowRunId: "wf-1",
+    workId: "work-1",
+    workType: "agent-job",
+    stage: "agent",
+    title: "Agent Job",
+    uses: "mohist/acp-agent",
+    with: {} as never,
+    variables: {} as never,
+    workDir: "D:/work",
+    signal: new AbortController().signal,
+    projectId: "project-1",
+    ownerKind: "agent-job",
+    agentSessionId: "session-abc",
+    agentJobId: "agent-job-1",
+    writeVars: async () => {},
+    ...overrides,
+  }
+}
+
+function linkedStreams(): [Stream, Stream] {
+  const clientToAgent = new TransformStream()
+  const agentToClient = new TransformStream()
+  return [
+    { writable: clientToAgent.writable, readable: agentToClient.readable },
+    { writable: agentToClient.writable, readable: clientToAgent.readable },
+  ]
+}
+
+class GenericFakeAgent {
+  readonly calls: any[] = []
+  private connection!: AgentSideConnection
+
+  bind(connection: AgentSideConnection) {
+    this.connection = connection
+  }
+
+  handler(): Agent {
+    const self = this
+    return {
+      async initialize() {
+        return { protocolVersion: PROTOCOL_VERSION, agentInfo: { name: "fake-generic-acp-agent", version: "0.1.0" }, agentCapabilities: {} }
+      },
+      async newSession() {
+        self.calls.push({ event: "newSession" })
+        return { sessionId: "acp-session-1" }
+      },
+      async resumeSession(params: { sessionId: string }) {
+        self.calls.push({ event: "resumeSession", sessionId: params.sessionId })
+        return {}
+      },
+      async setSessionConfigOption() {
+        return { configOptions: [] }
+      },
+      async unstable_setSessionModel(params: { sessionId: string; modelId: string }) {
+        self.calls.push({ event: "unstable_setSessionModel", ...params })
+        return {}
+      },
+      async prompt(params: { sessionId: string }) {
+        self.calls.push({ event: "prompt", sessionId: params.sessionId })
+        await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" } } } as never)
+        return { stopReason: "end_turn" }
+      },
+      async closeSession(params: { sessionId: string }) {
+        self.calls.push({ event: "closeSession", sessionId: params.sessionId })
+      },
+      async cancel() {},
+      async authenticate() { return {} },
+    }
+  }
+}
+
+class FakeServerConnection {
+  readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string; sessionId?: string }> = []
+  nextGenericSession: { acpSessionId?: string; workDir?: string; model?: string | null } = { acpSessionId: "acp-session-1", workDir: "D:/work" }
+
+  async getAgentSession(_projectId: string, sessionId: string) {
+    this.calls.push({ event: "getAgentSession", sessionId })
+    return null
+  }
+
+  async openAgentSession(_projectId: string, sessionId: string, body: unknown) {
+    this.calls.push({ event: "openAgentSession", sessionId, body })
+    return this.nextGenericSession
+  }
+
+  async attachAgentSession(_projectId: string, sessionId: string, body: unknown) {
+    this.calls.push({ event: "attachAgentSession", sessionId, body })
+  }
+
+  async agentSessionRuntimeEvents(_projectId: string, sessionId: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
+    const events = payload?.events ?? payload?.runtimeEvents ?? []
+    for (const event of events) this.calls.push({ event: "agentSessionRuntimeEvents", sessionId, type: event.type, payload: event.payload })
+  }
+
+  async getWorkflowAgentSession() {
+    this.calls.push({ event: "getWorkflowAgentSession" })
+    return null
+  }
+
+  async openWorkflowAgentSession() {
+    this.calls.push({ event: "openWorkflowAgentSession" })
+    return { acpSessionId: "wf-acp-1", workDir: "D:/work" }
+  }
+
+  async attachWorkflowAgentSession() {
+    this.calls.push({ event: "attachWorkflowAgentSession" })
+  }
+
+  async workflowAgentSessionRuntimeEvents() {
+    this.calls.push({ event: "workflowAgentSessionRuntimeEvents" })
+  }
+}
+
+function createGenericFixture() {
+  const agent = new GenericFakeAgent()
+  const [clientStream, agentStream] = linkedStreams()
+  const sessionUpdateHandlers = new Map<string, (notification: SessionNotification) => Promise<void>>()
+  const permissionHandlers = new Map<string, (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>>()
+  const clientConnection = new ClientSideConnection(() => ({
+    sessionUpdate: async (notification) => {
+      await (sessionUpdateHandlers.get(notification.sessionId) ?? (async () => {}))(notification)
+    },
+    requestPermission: async (params) => await (permissionHandlers.get(params.sessionId) ?? (async () => ({ outcome: { outcome: "cancelled" } } as RequestPermissionResponse)))(params),
+  }), clientStream)
+  const agentConnection = new AgentSideConnection(() => agent.handler(), agentStream)
+  agent.bind(agentConnection)
+
+  const serverConnection = new FakeServerConnection()
+  const acpSessionManager = new AcpSessionManager()
+  const acpConnection: SharedAcpConnection = {
+    connection: clientConnection,
+    processPid: 9999,
+    setSessionHandlers(sessionId, sessionUpdate, requestPermission) {
+      sessionUpdateHandlers.set(sessionId, sessionUpdate)
+      permissionHandlers.set(sessionId, requestPermission)
+    },
+    clearSessionHandlers(sessionId) {
+      sessionUpdateHandlers.delete(sessionId)
+      permissionHandlers.delete(sessionId)
+    },
+    async shutdown() {},
+  }
+  setAcpProcessFactoryForTest(() => createFakeProcess(agent))
+
+  return {
+    agent,
+    serverConnection,
+    acpSessionManager,
+    context(overrides: Partial<ActionContext> = {}): ActionContext {
+      return {
+        ...baseContext(overrides),
+        acpConnection,
+        acpSessionManager,
+        serverConnection: serverConnection as unknown as ServerConnection,
+        ...overrides,
+      }
+    },
+  }
+}
+
+function createFakeProcess(agent: GenericFakeAgent): AcpProcessHandle {
+  const [, agentStream] = linkedStreams()
+  const [clientStream] = linkedStreams()
+  const connection = new AgentSideConnection(() => agent.handler(), agentStream)
+  agent.bind(connection)
+  return {
+    stream: clientStream,
+    processPid: 1234,
+    spawnFailure: new Promise<never>(() => {}),
+    exitFailure: new Promise<never>(() => {}),
+    markInitialized() {},
+    exitCode() { return 0 },
+    async cleanup() {},
+  }
+}
+
+describe("runAcpAgentSession — generic session dispatch", () => {
+  it("AgentJobWithSessionId_DispatchesToGenericConnectionMethods_NotWorkflowOnes", async () => {
+    const fixture = createGenericFixture()
+
+    const result = await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+
+    expect(result.status).toBe("success")
+    const events = fixture.serverConnection.calls.map((entry) => entry.event)
+    expect(events).toContain("getAgentSession")
+    expect(events).toContain("openAgentSession")
+    expect(events).toContain("attachAgentSession")
+    expect(events).toContain("agentSessionRuntimeEvents")
+    expect(events).not.toContain("getWorkflowAgentSession")
+    expect(events).not.toContain("openWorkflowAgentSession")
+    expect(events).not.toContain("attachWorkflowAgentSession")
+    expect(events).not.toContain("workflowAgentSessionRuntimeEvents")
+  })
+
+  it("GenericSession_StoresCachedEntryUnderGenericKey", async () => {
+    const fixture = createGenericFixture()
+
+    await acpAgentAction(fixture.context({ with: { prompt: "first" } as never }))
+
+    const target: SessionTarget = { kind: "generic", projectId: "project-1", sessionId: "session-abc" }
+    const expectedKey = fixture.acpSessionManager.key(target)
+    expect(expectedKey).toBe("generic:session-abc")
+    const cached = fixture.acpSessionManager.get(expectedKey)
+    expect(cached).toBeTruthy()
+    expect(cached?.sessionId).toBe("acp-session-1")
+  })
+
+  it("GenericSession_RuntimeEventsIncludeSessionInputAndClosed", async () => {
+    const fixture = createGenericFixture()
+
+    await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+
+    const runtimeEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "agentSessionRuntimeEvents")
+      .map((entry) => ({ type: entry.type, sessionId: entry.sessionId }))
+    expect(runtimeEvents.some((event) => event.type === "session.input" && event.sessionId === "session-abc")).toBe(true)
+    expect(runtimeEvents.some((event) => event.type === "session.closed" && event.sessionId === "session-abc")).toBe(true)
+  })
+
+  it("WorkflowOwnerKind_StillUsesWorkflowConnectionMethods", async () => {
+    const fixture = createGenericFixture()
+    fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never })
+
+    await acpAgentAction(fixture.context({ ownerKind: "workflow", agentSessionId: undefined, workflowRunId: "wf-1", with: { session: "build", prompt: "do the work" } as never }))
+
+    const events = fixture.serverConnection.calls.map((entry) => entry.event)
+    expect(events).toContain("getWorkflowAgentSession")
+    expect(events).toContain("openWorkflowAgentSession")
+    expect(events).toContain("attachWorkflowAgentSession")
+    expect(events).toContain("workflowAgentSessionRuntimeEvents")
+    expect(events).not.toContain("getAgentSession")
+    expect(events).not.toContain("openAgentSession")
+    expect(events).not.toContain("attachAgentSession")
+    expect(events).not.toContain("agentSessionRuntimeEvents")
+  })
+
+  it("GenericSession_AttachBodyCarriesProjectAndSessionId", async () => {
+    const fixture = createGenericFixture()
+
+    await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
+
+    const attachCall = fixture.serverConnection.calls.find((entry) => entry.event === "attachAgentSession")
+    expect(attachCall).toBeTruthy()
+    expect(attachCall?.sessionId).toBe("session-abc")
+    expect(attachCall?.body).toMatchObject({ agentSessionId: "acp-session-1", workDir: "D:/work" })
+  })
+})

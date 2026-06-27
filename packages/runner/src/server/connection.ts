@@ -203,6 +203,27 @@ export class ServerConnection {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`, body, signal)
   }
 
+  async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`), { method: "GET", signal })
+    if (response.status === 404) return null
+    if (!response.ok) throw new Error(`agent session lookup failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSession>
+  }
+
+  async openAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
+    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`agent session open failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<AgentSession>
+  }
+
+  async attachAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal) {
+    await this.post(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`, body, signal)
+  }
+
+  async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: unknown, signal: AbortSignal) {
+    await this.post(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`, body, signal)
+  }
+
   private async post(path: string, body: unknown, signal: AbortSignal) {
     const response = await fetch(this.url(path), { method: "POST", headers: body === undefined ? undefined : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
@@ -219,6 +240,8 @@ export interface WorkflowAgentSession {
   model?: string | null
   resolvedModel?: string | null
 }
+
+export type AgentSession = WorkflowAgentSession
 
 function toWorkItem(dispatch: WorkDispatchResponse): RenderedWorkItem {
   return {
