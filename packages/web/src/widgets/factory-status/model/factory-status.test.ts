@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentStatus } from '../../../entities/agent'
+import type { AgentCostMetricDto, AgentStatus } from '../../../entities/agent'
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { deriveFactoryStatus, isTodayLocal } from './factory-status'
 
@@ -29,6 +29,15 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
     issueNumber: null,
     activeAgents: [],
     capacity: { active: 0, max: 1 },
+    ...overrides,
+  }
+}
+
+function makeTodayCost(overrides: Partial<AgentCostMetricDto> = {}): AgentCostMetricDto {
+  return {
+    amount: 1.25,
+    currency: 'USD',
+    sampleCount: 1,
     ...overrides,
   }
 }
@@ -138,7 +147,28 @@ describe('deriveFactoryStatus', () => {
     })
   })
 
-  it('leaves todayCost undefined', () => {
+  it('leaves todayCost undefined when no metric is supplied', () => {
     expect(deriveFactoryStatus([], makeAgentStatus()).todayCost).toBeUndefined()
+  })
+
+  it('threads a populated todayCost metric through without collapsing sampleCount', () => {
+    const metric = makeTodayCost({ amount: 4.20, currency: 'USD', sampleCount: 7 })
+    const fields = deriveFactoryStatus([], makeAgentStatus(), metric)
+
+    expect(fields.todayCost).toEqual({ amount: 4.20, currency: 'USD', sampleCount: 7 })
+  })
+
+  it('preserves a real zero todayCost (sampleCount > 0, amount === 0)', () => {
+    const metric = makeTodayCost({ amount: 0, currency: 'USD', sampleCount: 3 })
+    const fields = deriveFactoryStatus([], makeAgentStatus(), metric)
+
+    expect(fields.todayCost).toEqual({ amount: 0, currency: 'USD', sampleCount: 3 })
+  })
+
+  it('threads an empty todayCost metric (sampleCount === 0) distinct from a real zero', () => {
+    const metric = makeTodayCost({ amount: null, currency: null, sampleCount: 0 })
+    const fields = deriveFactoryStatus([], makeAgentStatus(), metric)
+
+    expect(fields.todayCost).toEqual({ amount: null, currency: null, sampleCount: 0 })
   })
 })

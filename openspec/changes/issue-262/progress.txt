@@ -1,4 +1,4 @@
-# Issue-262 Working Memory (T-001 → T-002)
+# Issue-262 Working Memory (T-001 → T-003)
 
 ## Codebase Patterns
 
@@ -38,3 +38,22 @@
 - T-003 will need the factory-status headline today-cost wiring. The backend contract is locked in: `{ totalCost: { amount, currency, sampleCount }, todayCost: {...}, doneIssuesCount: int, costPerShip: {...} }`.
 - `doneIssuesCount` is intentionally a bare `int`, not an `AgentCostMetricDto` — a count has no empty state. The frontend must treat `0` as "zero shipped" (real), never as "no data".
 - T-003 will reuse `useCostRollup` (not re-create it). Threading plan: `FactoryStatusHeadline` calls `useCostRollup()`, passes `todayCost` (a metric, NOT collapsed to amount) into `deriveFactoryStatus`. `data-state="empty"` / `—` rendering is preserved only when `todayCost.sampleCount === 0`; otherwise render `formatCost(amount, currency)` (yields `$0.00` for genuine zero).
+
+## Codebase Patterns (T-003 additions)
+
+- The shared `Stat` subcomponent in `FactoryStatusHeadline.tsx` was generalized to take an optional `valueAriaLabel` prop so the today-cost slot can set `aria-label="Today cost unavailable"` when the em-dash placeholder is shown. The other four fields keep their default a11y label so the existing test assertions for them stay green.
+- `FactoryStatusHeadline` injects an optional `todayCost?: AgentCostMetricDto` prop alongside `issues` / `agentStatus`. The same `props.X ?? query.data` precedence pattern from the prior two fields is reused — prop wins when provided, otherwise the query. This keeps component-level tests independent of the network.
+
+## Decisions / Notes (T-003)
+
+- `FactoryStatusFields.todayCost` is now `AgentCostMetricDto | undefined` (was `undefined`). `deriveFactoryStatus` accepts an optional third `todayCost` arg and threads it through without collapsing `sampleCount` — empty metric `(null, null, 0)` and real-zero metric `(0.0, currency, >0)` are both preserved verbatim.
+- The rendering rule is `todayCost?.sampleCount > 0 ? formatCost(amount, currency) : '—'`. `formatCost` handles the real-zero case ($0.00) so the distinction is automatic; the `—` branch is only hit when the metric is missing entirely OR `sampleCount === 0`.
+- The legacy `factory-cost-reserved` testid is removed and replaced by `factory-status-today-cost`. The "reserved" semantics are gone — the slot is now a real data field sourced from the rollup endpoint. A regression test asserts the legacy testid is no longer in the document.
+
+## Verification
+
+- T-003: 6 new `FactoryStatusHeadline.test.tsx` cases cover rollup-missing placeholder (`—`), empty/zero-sample placeholder (`—`), populated `$1.25`, real-zero `$0.00`, prop-over-query precedence with EUR, and a combined "all four other fields still render" check. 3 new `factory-status.test.ts` model cases cover the populated thread-through, real-zero preservation, and empty thread-through.
+- T-003: `factory-cost-reserved` legacy testid is asserted absent.
+- T-003: `npm run typecheck -w packages/web` passes.
+- T-003: `npm run test:run -w packages/web` passes — 171 test files, 2449 tests, 1 skipped (+9 vs T-002 baseline).
+- T-003: full repo `npm test` passes — server (T-001 + regression), runner, web.
