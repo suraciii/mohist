@@ -1087,6 +1087,32 @@ describe("mohist/archive-change", () => {
     expect(patchRunVars).not.toHaveBeenCalled()
   })
 
+  it.each(["../escaped", "../../escaped", "nested/name"])("ArchiveChangeRejectsUnsafePersistedName_%s", async (unsafePrefix) => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    await mkdir(join(changeDir, "specs"), { recursive: true })
+    await writeFile(join(changeDir, "proposal.md"), "proposal\n")
+
+    const calls: string[][] = []
+    const patchRunVars = vi.fn()
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      calls.push(args)
+      return gitFail(`unexpected git call: ${args.join(" ")}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      "_actions.archiveChange.destination": { "issue-127": unsafePrefix },
+    }, { patchRunVars }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("config-error")
+    expect(output.stage).toBe("validate-archive-name")
+    expect(output.archivePrefix).toBe(unsafePrefix)
+    expect(calls).toEqual([])
+    expect(patchRunVars).not.toHaveBeenCalled()
+  })
+
   it("ArchiveChangeRetryWithPersistedNameAndNoMove_ReusesNameAndMovesToPersistedDestination", async () => {
     const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
@@ -1271,6 +1297,7 @@ describe("mohist/openspec-artifacts", () => {
       variables: {} as never,
       workDir,
       signal: new AbortController().signal,
+      writeVars: vi.fn(),
     })
     const output = JSON.parse(result.output ?? "{}")
 

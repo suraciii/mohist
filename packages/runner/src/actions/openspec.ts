@@ -228,6 +228,15 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   const existingDestinationMap = archiveDestinationMap(context.variables)
   const persistedPrefix = typeof existingDestinationMap[sourceName] === "string" ? (existingDestinationMap[sourceName] as string) : null
   const archivePrefix = persistedPrefix ?? `${new Date().toISOString().slice(0, 10)}-${sourceName}`
+  const invalidArchivePrefix = validateArchivePrefix(archivePrefix)
+  if (invalidArchivePrefix) {
+    return archiveFailure("config-error", `Invalid archive name for ${sourceName}: ${invalidArchivePrefix}`, {
+      kind: "archive-change",
+      source: changeDir,
+      archivePrefix,
+      stage: "validate-archive-name",
+    })
+  }
 
   const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
   const sourceHasFiles = exists(changeDir) && (await hasFiles(changeDir))
@@ -269,7 +278,16 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       }
     }
     await mkdir(archiveDir, { recursive: true })
-    destination = await uniqueDestination(archiveDir, archivePrefix)
+    const resolvedDestination = await uniqueDestination(archiveDir, archivePrefix)
+    if (!resolvedDestination) {
+      return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, {
+        kind: "archive-change",
+        source: changeDir,
+        archivePrefix,
+        stage: "resolve-destination",
+      })
+    }
+    destination = resolvedDestination
     try {
       await moveChangeDir(changeDir, destination)
     } catch (err) {
@@ -433,23 +451,44 @@ function resolveChangeDir(context: ActionContext) {
   return resolveActionPath(context, changeDir)
 }
 
+function validateArchivePrefix(prefix: string): string | null {
+  if (!prefix) return "must not be empty"
+  if (prefix.trim() !== prefix) return "must not contain leading or trailing whitespace"
+  if (prefix === "." || prefix === "..") return "must not be a relative path segment"
+  if (prefix.includes("/") || prefix.includes("\\") || prefix.includes("\0")) return "must be a single path segment"
+  if (isAbsolute(prefix) || /^[A-Za-z]:/.test(prefix)) return "must not be an absolute path"
+  return null
+}
+
 async function uniqueDestination(archiveDir: string, baseName: string) {
-  let destination = resolve(join(archiveDir, baseName))
+  let destination = resolveArchiveDestination(archiveDir, baseName)
+  if (!destination) return null
   if (!exists(destination)) return destination
   for (let version = 2; ; version++) {
-    destination = resolve(join(archiveDir, `${baseName}-v${version}`))
+    destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
+    if (!destination) return null
     if (!exists(destination)) return destination
   }
 }
 
 async function findExistingArchive(archiveDir: string, baseName: string) {
-  let destination = resolve(join(archiveDir, baseName))
+  let destination = resolveArchiveDestination(archiveDir, baseName)
+  if (!destination) return null
   if (exists(destination) && await hasFiles(destination)) return destination
   for (let version = 2; ; version++) {
-    destination = resolve(join(archiveDir, `${baseName}-v${version}`))
+    destination = resolveArchiveDestination(archiveDir, `${baseName}-v${version}`)
+    if (!destination) return null
     if (exists(destination) && await hasFiles(destination)) return destination
     if (version >= 50) return null
   }
+}
+
+function resolveArchiveDestination(archiveDir: string, name: string): string | null {
+  const archiveRoot = resolve(archiveDir)
+  const destination = resolve(join(archiveRoot, name))
+  const relativeDestination = relative(archiveRoot, destination)
+  if (!relativeDestination || relativeDestination.startsWith("..") || isAbsolute(relativeDestination)) return null
+  return destination
 }
 
 async function hasFiles(directory: string): Promise<boolean> {

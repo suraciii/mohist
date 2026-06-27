@@ -1,5 +1,5 @@
-import type { WorkItem } from "../../core/types.js"
-import type { WorkspaceManager, WorkspaceInfo } from "../../runtime/workspace.js"
+import type { WorkItem } from "../../src/core/types.js"
+import type { WorkspaceManager, WorkspaceInfo } from "../../src/runtime/workspace.js"
 
 // Test helper: build a `WorkspaceManager` mock that satisfies the contract
 // used by `WorkExecutor`. Tests that just want to say "the workspace is

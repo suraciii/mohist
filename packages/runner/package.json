@@ -13,7 +13,7 @@
     "start": "node dist/cli.js",
     "test": "vitest run",
     "test:ci": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.21.0",

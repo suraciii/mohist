@@ -57,6 +57,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     projectId: "proj_1",
     issueNumber: 248,
     signal: new AbortController().signal,
+    writeVars: async () => {},
   }
 }
 

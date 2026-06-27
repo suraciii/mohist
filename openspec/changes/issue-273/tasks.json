@@ -20,7 +20,7 @@
       "type": "WRITE",
       "output": "Corrected mohist-github-pr.workflow.yaml recovery block + updated MohistPrIssueWorkflowProfileSpecs.cs assertions",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Decision 1 + Decision 3. Pure config/test change; the rebase action never reads conflictMode and the agent prompt already completes the rebase. The base-moved handler's own retrySelf (retry of merge-pr) is intentionally kept. Confirm mohist-default.workflow.yaml has no conflictMode to sync (design confirms it does not)."
     },
     {
@@ -44,7 +44,7 @@
       "type": "WRITE",
       "output": "push.ts with force input + force-mode push tests + switched recover:push YAML + updated server profile assertions",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Decision 2. Depends on T-001 because both edit the same YAML file and same server test file region; sequential execution avoids merge conflicts. Rationale: mohist/run-<runId> is single-owner with no remote-tracking ref, so --force-with-lease always fails and is misclassified as base-moved; --force bypasses that. The existing `looksLikeNonFastForward` matching of 'stale info' becomes irrelevant for this push path."
     },
     {
