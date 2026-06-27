@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
+import { execFile } from "node:child_process"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { performance } from "node:perf_hooks"
+import { join } from "node:path"
+import { promisify } from "node:util"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import {
   setWorkspacePrepareExistsCheckerForTest,
@@ -11,6 +17,7 @@ type GitCall = { workDir: string; args: string[] }
 
 const WORKSPACE_PATH = "/workspace"
 const EXPECTED_BRANCH = "mohist/run-wr-prepare-1"
+const exec = promisify(execFile)
 
 afterEach(() => {
   setWorkspacePrepareGitRunnerForTest(null)
@@ -102,10 +109,13 @@ describe("mohist/workspace-prepare", () => {
     setWorkspacePrepareExistsCheckerForTest(() => false)
     const calls = installGit(cleanProbeResponses())
 
+    const startedAt = performance.now()
     const result = await workspacePrepareAction(context())
+    const elapsedMs = performance.now() - startedAt
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("success")
+    expect(elapsedMs).toBeLessThan(1000)
     expect(result.message).toBe("Workspace prepared")
     expect(output).toMatchObject({
       kind: "workspace-prepare",
@@ -124,6 +134,112 @@ describe("mohist/workspace-prepare", () => {
     expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommand(calls, "clean -fd")).toBe(false)
+  })
+
+  it("FastPass_CleanRealGitWorkspace_CompletesUnderOneSecond", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-prepare-fastpass-"))
+    try {
+      await exec("git", ["init", "--initial-branch=main", "-q"], { cwd: root })
+      await exec("git", ["config", "user.email", "test@example.com"], { cwd: root })
+      await exec("git", ["config", "user.name", "Workspace Prepare Test"], { cwd: root })
+      await exec("git", ["config", "commit.gpgsign", "false"], { cwd: root })
+      await writeFile(join(root, "README.md"), "clean\n", "utf8")
+      await exec("git", ["add", "README.md"], { cwd: root })
+      await exec("git", ["commit", "-m", "init", "-q"], { cwd: root })
+
+      const startedAt = performance.now()
+      const result = await workspacePrepareAction(context({ workspace: { path: root, branch: "main", changeDir: null } }))
+      const elapsedMs = performance.now() - startedAt
+      const status = await exec("git", ["status", "--porcelain"], { cwd: root })
+
+      expect(result.status).toBe("success")
+      expect(elapsedMs).toBeLessThan(1000)
+      expect(status.stdout).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("InitialStatusProbeFails_ReportsWorkspaceSetupFailure", async () => {
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    const calls = installGit(cleanProbeResponses((call) => {
+      if (commandOf(call) === "status --porcelain") return fail("fatal: status unavailable")
+      return null
+    }))
+
+    const result = await workspacePrepareAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("git status --porcelain failed")
+    expect(output).toMatchObject({
+      kind: "workspace-prepare",
+      status: "failure",
+      failureKind: "workspace-setup",
+      step: "status",
+      expectedBranch: EXPECTED_BRANCH,
+      head: { commit: "clean-head-sha", ref: EXPECTED_BRANCH },
+      residual: { rebaseMerge: false, rebaseApply: false, mergeHead: false, cherryPickHead: false },
+    })
+    expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
+    expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
+  })
+
+  it("InitialHeadProbeFails_ReportsWorkspaceSetupFailure", async () => {
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    const calls = installGit(cleanProbeResponses((call) => {
+      if (commandOf(call) === "rev-parse HEAD") return fail("fatal: bad HEAD")
+      return null
+    }))
+
+    const result = await workspacePrepareAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("git rev-parse HEAD failed")
+    expect(output.step).toBe("head")
+    expect(output.failureKind).toBe("workspace-setup")
+    expect(output.head).toMatchObject({ commit: "", ref: EXPECTED_BRANCH })
+    expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
+    expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
+  })
+
+  it("InitialHeadRefProbeFails_ReportsWorkspaceSetupFailure", async () => {
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    const calls = installGit(cleanProbeResponses((call) => {
+      if (commandOf(call) === "rev-parse --abbrev-ref HEAD") return fail("fatal: cannot resolve ref")
+      return null
+    }))
+
+    const result = await workspacePrepareAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("git rev-parse --abbrev-ref HEAD failed")
+    expect(output.step).toBe("head-ref")
+    expect(output.failureKind).toBe("workspace-setup")
+    expect(output.head).toMatchObject({ commit: "clean-head-sha", ref: "(detached)" })
+    expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
+    expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
+  })
+
+  it("InitialResidualProbeFails_ReportsWorkspaceSetupFailure", async () => {
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    const calls = installGit(cleanProbeResponses((call) => {
+      if (commandOf(call) === "rev-parse --git-path rebase-merge") return fail("fatal: git dir unreadable")
+      return null
+    }))
+
+    const result = await workspacePrepareAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("git rev-parse --git-path rebase-merge failed")
+    expect(output.step).toBe("residual")
+    expect(output.failureKind).toBe("workspace-setup")
+    expect(output.residual).toMatchObject({ rebaseMerge: false, rebaseApply: false, mergeHead: false, cherryPickHead: false })
+    expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
+    expect(hasCommandStartingWith(calls, "checkout")).toBe(false)
   })
 
   it("RebaseInProgress_AbortsAndReprobesBeforeCheckout", async () => {
@@ -342,6 +458,42 @@ describe("mohist/workspace-prepare", () => {
     expect(output.failureKind).toBe("workspace-setup")
     expect(hasCommand(calls, "reset --hard HEAD")).toBe(false)
     expect(hasCommand(calls, "clean -fd")).toBe(false)
+  })
+
+  it("DirtyTreeOnDifferentBranch_ResetsAndCleansBeforeCheckout", async () => {
+    setWorkspacePrepareExistsCheckerForTest(() => false)
+    let cleaned = false
+    let checkoutIssued = false
+    const calls = installGit(cleanProbeResponses((call) => {
+      const command = commandOf(call)
+      if (command === "status --porcelain") return cleaned ? ok("") : ok(" M dirty-file.txt\n?? untracked.txt\n")
+      if (command === "rev-parse --abbrev-ref HEAD") return ok(checkoutIssued ? `${EXPECTED_BRANCH}\n` : "feature/other\n")
+      if (command === "reset --hard HEAD") return ok("HEAD is now clean\n")
+      if (command === "clean -fd") {
+        cleaned = true
+        return ok("Removing untracked.txt\n")
+      }
+      if (command === `checkout ${EXPECTED_BRANCH}`) {
+        if (!cleaned) return fail("error: Your local changes would be overwritten by checkout")
+        checkoutIssued = true
+        return ok(`Switched to branch '${EXPECTED_BRANCH}'\n`)
+      }
+      return null
+    }))
+
+    const result = await workspacePrepareAction(context())
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.head.ref).toBe(EXPECTED_BRANCH)
+    const resetIdx = calls.findIndex((c) => commandOf(c) === "reset --hard HEAD")
+    const cleanIdx = calls.findIndex((c) => commandOf(c) === "clean -fd")
+    const checkoutIdx = calls.findIndex((c) => commandOf(c) === `checkout ${EXPECTED_BRANCH}`)
+    expect(resetIdx).toBeGreaterThanOrEqual(0)
+    expect(cleanIdx).toBeGreaterThanOrEqual(0)
+    expect(checkoutIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeLessThan(cleanIdx)
+    expect(cleanIdx).toBeLessThan(checkoutIdx)
   })
 
   it("DirtyTree_ResetsAndCleans", async () => {
