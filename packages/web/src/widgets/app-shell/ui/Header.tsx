@@ -5,24 +5,40 @@ import { PlusIcon } from 'lucide-react'
 import { useAgentStatus } from '../../../entities/agent'
 import { useEpic } from '../../../entities/epic'
 
+function findEpicIdSegment(pathname: string): string | null {
+  const segments = pathname.split('/').filter(Boolean)
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    if (segments[i] === 'epics') return segments[i + 1] || null
+  }
+  return null
+}
+
+function formatEpicTitle(
+  epicLoading: boolean,
+  epic: { number: number | null } | undefined,
+  fallbackSegment: string | null,
+): string {
+  if (epicLoading) return 'Epic #\u2026'
+  if (typeof epic?.number === 'number') return `Epic #${epic.number}`
+  if (fallbackSegment) return `Epic #${fallbackSegment.slice(0, 8)}`
+  return 'Epic'
+}
+
 function usePageTitle(): string {
   const location = useLocation()
   const params = useParams<{ number?: string; id?: string; section?: string }>()
   const segments = location.pathname.split('/').filter(Boolean)
   const firstSegment = segments[0] ?? ''
   const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
-
-  const { data: epic, isLoading: epicLoading } = useEpic(params.id ?? '')
+  const epicIdSegment = findEpicIdSegment(location.pathname)
+  const { data: epic, isLoading: epicLoading } = useEpic(epicIdSegment ?? '')
 
   if (firstSegment === 'issues') {
     return segments.length > 1 ? `Issue #${params.number ?? segments[1]}` : 'Issues'
   }
   if (firstSegment === 'activity') return 'Activity'
   if (firstSegment === 'epics') {
-    if (segments.length > 1) {
-      if (epicLoading) return 'Epic #\u2026'
-      return `Epic #${epic?.number ?? ''}`
-    }
+    if (segments.length > 1) return formatEpicTitle(epicLoading, epic, epicIdSegment)
     return 'Epics'
   }
   if (firstSegment === 'archived') return 'Archived'
@@ -37,8 +53,7 @@ function usePageTitle(): string {
   if (section.startsWith('/activity')) return 'Activity'
   if (section === '/epics') return 'Epics'
   if (section.startsWith('/epics/')) {
-    if (epicLoading) return 'Epic #\u2026'
-    return `Epic #${epic?.number ?? ''}`
+    return formatEpicTitle(epicLoading, epic, epicIdSegment)
   }
   if (section.startsWith('/issues/')) {
     return `Issue #${params.number ?? section.split('/')[2]}`

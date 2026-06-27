@@ -173,4 +173,58 @@ describe('Header', () => {
     renderHeaderWithRoute('/demo/issues/42', '/:projectName/issues/:number')
     expect(screen.getByRole('heading', { level: 1, name: 'Issue #42' })).toBeInTheDocument()
   })
+
+  it('shows Epic #<number> on project-prefixed route with production mount (outside <Routes>)', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-99', number: 3, title: 'Production Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeader('/demo/epics/3')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #3' })).toBeInTheDocument()
+  })
+
+  it('shows Epic #<number> on legacy /epics/<id> route with production mount (outside <Routes>)', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-99', number: 7, title: 'Legacy Mount', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeader('/epics/epic-99')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #7' })).toBeInTheDocument()
+  })
+
+  it('shows Epic #… while loading on production mount (outside <Routes>)', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    })
+    renderHeader('/demo/epics/epic-loading')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #\u2026' })).toBeInTheDocument()
+  })
+
+  it('falls back to a short id prefix when an epic has loaded without a number on production mount', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-fallback-001', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeader('/demo/epics/epic-fallback-001')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
+  })
+
+  it('falls back to a short id prefix when an epic has loaded without a number on legacy route', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: { id: 'epic-fallback-002', number: null, title: 'No Number', description: '', priority: 'p1', status: 'active', createdAt: '', updatedAt: '' },
+      isLoading: false,
+    })
+    renderHeaderWithRoute('/epics/epic-fallback-002', '/epics/:id')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epic #epic-fal' })).toBeInTheDocument()
+  })
+
+  it('never displays a bare "Epic #" when the epic has loaded with no number and no path segment fallback', () => {
+    epicMocks.useEpic.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+    })
+    renderHeader('/epics')
+    expect(screen.queryByRole('heading', { level: 1, name: /^Epic #$/ })).not.toBeInTheDocument()
+  })
 })
