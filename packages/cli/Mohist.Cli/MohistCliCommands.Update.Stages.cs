@@ -198,7 +198,7 @@ internal sealed partial class SourceCodeUpdater
 
         if (context.DryRun)
         {
-            _out.WriteLine("Dry run: would verify CLI binary, server identity, web assets, runner connection, and managed skill assets.");
+            _out.WriteLine("Dry run: would verify CLI binary, server identity, web assets, runner connection, runner identity, and managed skill assets.");
             context.Outcome = UpdateOutcome.Ready;
             context.RecordStage(StageLabels.VerifyRuntime, "skipped (dry run)");
             return 0;
@@ -210,6 +210,7 @@ internal sealed partial class SourceCodeUpdater
             await _validator.CheckServerIdentityAsync(context, token),
             await _validator.CheckWebAssetsAsync(context, token),
             await _validator.CheckRunnerConnectionAsync(context, token),
+            await _validator.CheckRunnerIdentityAsync(context, token),
             await _validator.CheckManagedSkillAssetsAsync(context, token),
         };
 

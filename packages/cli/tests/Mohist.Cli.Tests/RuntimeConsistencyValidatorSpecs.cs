@@ -229,6 +229,114 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
+    public async Task CheckRunnerIdentityAsync_MatchingRunnerHash_ReportsPass()
+    {
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            var respBody = "{\"data\":{\"buildGitHash\":\"abc123\"}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(respBody, System.Text.Encoding.UTF8, "application/json"),
+            });
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var validator = BuildValidator(http);
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Pass, result.Outcome);
+        Assert.Equal("Runner identity", result.Component);
+        Assert.Equal("Runner identity matches source HEAD 'abc123'", result.Message);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_DifferingRunnerHash_ReportsWarn()
+    {
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            var respBody = "{\"data\":{\"buildGitHash\":\"def456\"}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(respBody, System.Text.Encoding.UTF8, "application/json"),
+            });
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var validator = BuildValidator(http);
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal("Runner identity", result.Component);
+        Assert.Equal("Runner buildGitHash 'def456' does not match source HEAD 'abc123'", result.Message);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_MissingRunnerHash_ReportsWarn()
+    {
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            var respBody = "{\"data\":{\"buildGitHash\":null}}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(respBody, System.Text.Encoding.UTF8, "application/json"),
+            });
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var validator = BuildValidator(http);
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal("Runner identity", result.Component);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_SourceHeadUnavailable_ReportsWarn()
+    {
+        var validator = BuildValidator(new HttpClient());
+
+        var result = await validator.CheckRunnerIdentityAsync(
+            BuildContext(repoRoot: "/repo"),
+            CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal("Runner identity", result.Component);
+        Assert.Contains("Source HEAD", result.Message);
+    }
+
+    [Fact]
+    public async Task CheckRunnerIdentityAsync_EndpointUnreachable_ReportsWarn()
+    {
+        var handler = new RecordingHttpHandler((req, _) =>
+        {
+            Assert.Equal("/api/runner/identity", req.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:0") };
+
+        var validator = BuildValidator(http);
+        var context = BuildContext(repoRoot: "/repo");
+        context.SourceHead = "abc123";
+
+        var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
+
+        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal("Runner identity", result.Component);
+    }
+
+    [Fact]
     public async Task CheckManagedSkillAssetsAsync_NoAssetRoot_ReportsWarn()
     {
         var fs = new FakeFileSystem();
