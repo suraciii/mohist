@@ -1015,10 +1015,8 @@ function tryRecovery(
       id: retryId,
       title: work.title ?? work.workId,
       uses: work.uses ?? null,
-      with: {
-        ...(work.with ?? {}),
-        ...(nextRecovery ? { recovery: nextRecovery } : {}),
-      },
+      with: work.with,
+      recovery: nextRecovery,
     })
   }
 
