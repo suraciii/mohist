@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Tests.Support;
@@ -162,6 +164,105 @@ public class IssueMetricsApiSpecs
         Assert.Equal(0, day.Failed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ApprovalWaitMetrics_HasCompletedApprovals_ReturnsWindowSampleCountAndStats()
+    {
+        var project = await CreateProjectAsync($"approval-wait-present-{Guid.NewGuid():N}");
+        var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var approvedWait = TimeSpan.FromHours(3.2);
+        var rejectedWait = TimeSpan.FromHours(1.4);
+        var issueId = $"issue_approval_present_{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_approval_present_{Guid.NewGuid():N}";
+        var rejectedIssueId = $"issue_approval_rejected_{Guid.NewGuid():N}";
+        var rejectedWorkflowRunId = $"wr_approval_rejected_{Guid.NewGuid():N}";
+
+        await SeedIssueWithCompletedApprovalAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            workflowRunId,
+            requestedAt,
+            approvedWait,
+            "approved");
+        await SeedIssueWithCompletedApprovalAsync(
+            project.Id,
+            number: 2,
+            rejectedIssueId,
+            rejectedWorkflowRunId,
+            requestedAt,
+            rejectedWait,
+            "rejected");
+
+        var before = DateTimeOffset.UtcNow;
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/approval-wait");
+        var after = DateTimeOffset.UtcNow;
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<ApprovalWaitMetricsResponse>(response);
+        var windowTo = DateTimeOffset.Parse(payload.Window.To);
+        var windowFrom = DateTimeOffset.Parse(payload.Window.From);
+        Assert.True(windowTo >= before && windowTo <= after, "Window.To should be the server request time.");
+        Assert.Equal(windowTo.AddDays(-7), windowFrom);
+        Assert.Equal(2, payload.SampleCount);
+        Assert.Equal((approvedWait.TotalSeconds + rejectedWait.TotalSeconds) / 2, payload.AverageSeconds);
+        Assert.Equal((approvedWait.TotalSeconds + rejectedWait.TotalSeconds) / 2, payload.MedianSeconds);
+        Assert.Equal(approvedWait.TotalSeconds, payload.MaxSeconds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ApprovalWaitMetrics_MultipleCompletedApprovalStagesInOneRun_CountsEachGate()
+    {
+        var project = await CreateProjectAsync($"approval-wait-multi-{Guid.NewGuid():N}");
+        var requestedAt = DateTimeOffset.UtcNow.AddDays(-1);
+        var planWait = TimeSpan.FromHours(1);
+        var checkWait = TimeSpan.FromHours(4);
+        var issueId = $"issue_approval_multi_{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_approval_multi_{Guid.NewGuid():N}";
+
+        await SeedIssueWithCompletedApprovalsAsync(
+            project.Id,
+            number: 1,
+            issueId,
+            workflowRunId,
+            requestedAt,
+            planWait,
+            checkWait);
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/approval-wait");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<ApprovalWaitMetricsResponse>(response);
+        var expectedAverage = (planWait.TotalSeconds + checkWait.TotalSeconds) / 2;
+        Assert.Equal(2, payload.SampleCount);
+        Assert.Equal(expectedAverage, payload.AverageSeconds);
+        Assert.Equal(expectedAverage, payload.MedianSeconds);
+        Assert.Equal(checkWait.TotalSeconds, payload.MaxSeconds);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ApprovalWaitMetrics_NoQualifyingApprovals_ReturnsEmptyResult()
+    {
+        var project = await CreateProjectAsync($"approval-wait-empty-{Guid.NewGuid():N}");
+
+        using var response = await _client.GetAsync(
+            $"/api/projects/{project.Id}/issues/metrics/approval-wait");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await ReadDataAsync<ApprovalWaitMetricsResponse>(response);
+        Assert.Equal(0, payload.SampleCount);
+        Assert.Null(payload.AverageSeconds);
+        Assert.Null(payload.MedianSeconds);
+        Assert.Null(payload.MaxSeconds);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string name)
     {
         using var response = await _client.PostAsJsonAsync(
@@ -256,6 +357,168 @@ public class IssueMetricsApiSpecs
         await db.SaveChangesAsync();
     }
 
+    private async Task SeedIssueWithCompletedApprovalAsync(
+        string projectId,
+        int number,
+        string issueId,
+        string workflowRunId,
+        DateTimeOffset requestedAt,
+        TimeSpan wait,
+        string result)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var issue = new DomainIssue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = number,
+            Title = "Approval metric issue",
+            Status = IssueStatus.Done,
+            CreatedAt = requestedAt.UtcDateTime,
+            UpdatedAt = requestedAt.UtcDateTime,
+            WorkflowRunId = workflowRunId,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        const string stage = "plan";
+        var respondedAt = requestedAt + wait;
+        var runState = new
+        {
+            Id = workflowRunId,
+            Metadata = new { CreatedAt = requestedAt.AddMinutes(-5), Name = "test" },
+            Status = "Completed",
+            CurrentStageId = stage,
+            Stages = new[]
+            {
+                new
+                {
+                    Id = stage,
+                    Attempt = 1,
+                    RequiresApproval = true,
+                    Status = "Completed",
+                    Tasks = new[]
+                    {
+                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/acp-agent" },
+                    },
+                    Checks = new[]
+                    {
+                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                    },
+                    ApprovalStatus = new
+                    {
+                        Result = result,
+                        RequestedAt = requestedAt.ToString("O"),
+                        RespondedAt = respondedAt.ToString("O"),
+                    },
+                }
+            }
+        };
+
+        var json = JsonSerializer.Serialize(runState, JSON.Options);
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            workflowRunId, json);
+    }
+
+    private async Task SeedIssueWithCompletedApprovalsAsync(
+        string projectId,
+        int number,
+        string issueId,
+        string workflowRunId,
+        DateTimeOffset requestedAt,
+        TimeSpan planWait,
+        TimeSpan checkWait)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var issue = new DomainIssue
+        {
+            Id = issueId,
+            ProjectId = projectId,
+            Number = number,
+            Title = "Approval metric issue",
+            Status = IssueStatus.Done,
+            CreatedAt = requestedAt.UtcDateTime,
+            UpdatedAt = requestedAt.UtcDateTime,
+            WorkflowRunId = workflowRunId,
+        };
+        db.Issues.Add(new IssueRow
+        {
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        const string planStage = "plan";
+        const string checkStage = "check";
+        var checkRequestedAt = requestedAt.AddHours(2);
+        var runState = new
+        {
+            Id = workflowRunId,
+            Metadata = new { CreatedAt = requestedAt.AddMinutes(-5), Name = "test" },
+            Status = "Completed",
+            CurrentStageId = checkStage,
+            Stages = new[]
+            {
+                new
+                {
+                    Id = planStage,
+                    Attempt = 1,
+                    RequiresApproval = true,
+                    Status = "Completed",
+                    Tasks = new[]
+                    {
+                        new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/acp-agent" },
+                    },
+                    Checks = new[]
+                    {
+                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                    },
+                    ApprovalStatus = new
+                    {
+                        Result = "approved",
+                        RequestedAt = requestedAt.ToString("O"),
+                        RespondedAt = (requestedAt + planWait).ToString("O"),
+                    },
+                },
+                new
+                {
+                    Id = checkStage,
+                    Attempt = 1,
+                    RequiresApproval = true,
+                    Status = "Completed",
+                    Tasks = new[]
+                    {
+                        new { Id = "review", DefinitionId = "review", Attempt = 1, Title = "Check review", Status = "Completed", Uses = "mohist/acp-agent" },
+                    },
+                    Checks = new[]
+                    {
+                        new { Name = "check-ok", Title = "Check ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                    },
+                    ApprovalStatus = new
+                    {
+                        Result = "approved",
+                        RequestedAt = checkRequestedAt.ToString("O"),
+                        RespondedAt = (checkRequestedAt + checkWait).ToString("O"),
+                    },
+                }
+            }
+        };
+
+        var json = JsonSerializer.Serialize(runState, JSON.Options);
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+            workflowRunId, json);
+    }
+
     private static async Task<T> ReadDataAsync<T>(HttpResponseMessage response)
     {
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<T>>(JsonOptions);
@@ -271,4 +534,12 @@ public class IssueMetricsApiSpecs
     private sealed record CompletionMetricsBucketDto(string Boundary, int Completed, int Failed);
     private sealed record CompletionMetricsWindowDto(string From, string To);
     private sealed record CompletionMetricsResponse(string Bucket, CompletionMetricsWindowDto Window, CompletionMetricsBucketDto[] Buckets);
+
+    private sealed record ApprovalWaitMetricsWindowDto(string From, string To);
+    private sealed record ApprovalWaitMetricsResponse(
+        ApprovalWaitMetricsWindowDto Window,
+        int SampleCount,
+        double? AverageSeconds,
+        double? MedianSeconds,
+        double? MaxSeconds);
 }

@@ -6,6 +6,7 @@ import { dispatchAgentEvent, AGENT_DETAIL_EVENTS, useAgentStatus } from '../../e
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { dispatchTimelineEvent, type TimelineLiveEvent } from '../../entities/issue/model/timeline-events'
+import { invalidateApprovalWait } from '../../entities/issue'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
@@ -523,6 +524,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           case REVERSE_DNS_EVENT_TYPES.StageApprovalResolved: {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+            invalidateApprovalWait(queryClient)
             break
           }
         }

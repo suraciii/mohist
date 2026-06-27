@@ -5,11 +5,15 @@ import { AlertTriangleIcon, CheckCircle2Icon, PlayIcon, ShieldOffIcon } from 'lu
 import {
   approveIssue,
   deriveAttentionItems,
+  invalidateApprovalWait,
   resumeIssue,
+  useApprovalWait,
   useIssues,
+  type ApprovalWaitMetricsResponse,
   type AttentionItem,
   type Issue,
 } from '../../../entities/issue'
+import { formatDuration } from '@/shared/lib/format-duration'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { cn } from '@/shared/lib/utils'
@@ -27,6 +31,7 @@ function isResumableItem(item: AttentionItem): boolean {
 export interface AttentionHeroProps {
   issues?: Issue[]
   agentStatus?: AgentStatus
+  approvalWait?: ApprovalWaitMetricsResponse
 }
 
 export function AttentionHero(props: AttentionHeroProps = {}) {
@@ -36,9 +41,11 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
 
   const issuesQuery = useIssues(projectId ? { projectId } : undefined)
   const agentStatusQuery = useAgentStatus()
+  const approvalWaitQuery = useApprovalWait()
 
   const issues = props.issues ?? issuesQuery.data
   const agentStatus = props.agentStatus ?? agentStatusQuery.data
+  const approvalWait = props.approvalWait ?? approvalWaitQuery.data
   const issuesResolved = props.issues !== undefined || issuesQuery.data !== undefined
 
   const items = useMemo(
@@ -54,6 +61,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      invalidateApprovalWait(queryClient)
     },
   })
 
@@ -70,7 +78,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
   }
 
   if (!hasAttention) {
-    return <AllClearState />
+    return <AllClearState approvalWait={approvalWait} />
   }
 
   const isPending = approveMutation.isPending || resumeMutation.isPending
@@ -92,6 +100,7 @@ export function AttentionHero(props: AttentionHeroProps = {}) {
         </span>
         <span className="text-xs text-amber-700/80 font-medium">({totalCount})</span>
       </div>
+      <ApprovalWaitSummary approvalWait={approvalWait} />
       <ul className="flex flex-col gap-2" data-testid="attention-items">
         {items.map((item) => (
           <AttentionItemRow
@@ -232,7 +241,35 @@ function RunnerDownEntry({ agentStatus, toProjectPath }: RunnerDownEntryProps) {
   )
 }
 
-function AllClearState() {
+interface AllClearStateProps {
+  approvalWait?: ApprovalWaitMetricsResponse
+}
+
+function ApprovalWaitSummary({ approvalWait }: { approvalWait?: ApprovalWaitMetricsResponse }) {
+  if (!approvalWait) return null
+
+  const hasData = approvalWait.sampleCount > 0 && approvalWait.averageSeconds != null
+  if (!hasData) {
+    return (
+      <p
+        data-testid="approval-wait-empty"
+        data-state="empty"
+        className="text-xs text-muted-foreground"
+      >
+        Approval wait metric appears once an approval is completed.
+      </p>
+    )
+  }
+
+  return (
+    <p data-testid="approval-wait-value" data-state="value" className="text-sm text-foreground">
+      Your approvals averaged{' '}
+      <span className="font-semibold">{formatDuration(approvalWait.averageSeconds)}</span> over the last 7 days.
+    </p>
+  )
+}
+
+function AllClearState({ approvalWait }: AllClearStateProps) {
   return (
     <section
       data-testid="dashboard-zone-attention"
@@ -253,12 +290,13 @@ function AllClearState() {
       </p>
       <div
         data-testid="productivity-placeholder"
-        className="rounded-md border border-dashed border-emerald-200 bg-background/40 p-3"
+        className="rounded-md border border-dashed border-emerald-200 bg-background/40 p-3 mb-3"
       >
         <p className="text-xs text-muted-foreground">
           Productivity preview will appear here once it ships.
         </p>
       </div>
+      <ApprovalWaitSummary approvalWait={approvalWait} />
     </section>
   )
 }

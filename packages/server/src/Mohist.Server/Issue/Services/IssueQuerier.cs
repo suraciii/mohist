@@ -194,6 +194,23 @@ public class IssueQuerier : IScopedService
         DateTimeOffset WindowTo,
         IReadOnlyList<CompletionBucketPoint> Buckets);
 
+    /// <summary>
+    /// The trailing window returned by <see cref="GetApprovalWaitAsync"/>.
+    /// </summary>
+    public sealed record ApprovalWaitWindow(DateTimeOffset From, DateTimeOffset To);
+
+    /// <summary>
+    /// The result of <see cref="GetApprovalWaitAsync"/>. <see cref="SampleCount"/>
+    /// distinguishes a true zero-sample window (null stats) from a completed
+    /// approval with no measurable wait (SampleCount 1, stats 0).
+    /// </summary>
+    public sealed record ApprovalWaitResult(
+        ApprovalWaitWindow Window,
+        int SampleCount,
+        double? AverageSeconds,
+        double? MedianSeconds,
+        double? MaxSeconds);
+
     // CloudEvents reverse-DNS bus types that mark a terminal transition.
     // <c>com.mohist.issue.work-completed</c> → <c>completed</c> (Done).
     // <c>com.mohist.issue.closed</c> → <c>failed</c> (Cancelled).
@@ -333,6 +350,85 @@ public class IssueQuerier : IScopedService
             WindowFrom: windowFrom,
             WindowTo: windowTo,
             Buckets: points);
+    }
+
+    /// <summary>
+    /// Aggregates approval-gate wait times (requestedAt → respondedAt) for
+    /// completed approvals (`approved` or `rejected`) whose <c>respondedAt</c>
+    /// falls within the trailing 7-day window [now - 7d, now]. Pending
+    /// (`awaiting`) approvals are excluded — they have no <c>respondedAt</c>
+    /// and surface separately as attention items. Statistics are computed in
+    /// memory because EF Core SQLite cannot translate <c>DateTimeOffset</c>
+    /// comparisons against the TEXT <c>WorkflowRuns.State</c> column.
+    /// </summary>
+    public async Task<ApprovalWaitResult> GetApprovalWaitAsync(
+        string projectId,
+        DateTimeOffset now)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var windowFrom = now.AddDays(-7);
+        var windowTo = now;
+
+        // Resolve the project's issue set from the indexed Issues table,
+        // then load each issue's workflow-run state so approval projection
+        // semantics stay shared with the read model.
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId)
+            .ToListAsync();
+
+        var projectDefaultTemplateId = await LoadProjectDefaultTemplateAsync(db, projectId);
+        var issues = IssueRowMapper.ByNumber(rows, projectId)
+            .Select(issue => ToReadModel(ToInfo(issue, project: null, projectDefaultTemplateId)))
+            .ToList();
+
+        var workflows = await LoadWorkflowStatesAsync(db, issues);
+
+        var samples = new List<double>(issues.Count);
+        foreach (var issue in issues)
+        {
+            if (issue.WorkflowRunId is null || !workflows.TryGetValue(issue.WorkflowRunId, out var workflow)) continue;
+
+            foreach (var approval in MohistDefaultWorkflowProjection.StageApprovals(workflow))
+            {
+                if (!approval.RespondedAt.HasValue) continue;
+                if (!string.Equals(approval.Status, "approved", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(approval.Status, "rejected", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var respondedAt = new DateTimeOffset(approval.RespondedAt.Value.ToUniversalTime(), TimeSpan.Zero);
+                if (respondedAt < windowFrom || respondedAt > windowTo) continue;
+
+                var waitSeconds = (approval.RespondedAt.Value - approval.RequestedAt).TotalSeconds;
+                samples.Add(waitSeconds);
+            }
+        }
+
+        if (samples.Count == 0)
+        {
+            return new ApprovalWaitResult(
+                new ApprovalWaitWindow(windowFrom, windowTo),
+                SampleCount: 0,
+                AverageSeconds: null,
+                MedianSeconds: null,
+                MaxSeconds: null);
+        }
+
+        samples.Sort();
+        var average = samples.Average();
+        var max = samples[^1];
+        var median = samples.Count % 2 == 1
+            ? samples[samples.Count / 2]
+            : (samples[samples.Count / 2 - 1] + samples[samples.Count / 2]) / 2.0;
+
+        return new ApprovalWaitResult(
+            new ApprovalWaitWindow(windowFrom, windowTo),
+            SampleCount: samples.Count,
+            AverageSeconds: average,
+            MedianSeconds: median,
+            MaxSeconds: max);
     }
 
     /// <summary>

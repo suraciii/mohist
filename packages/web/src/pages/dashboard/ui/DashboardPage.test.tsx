@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   useArchivedIssuesMock: vi.fn(),
   epics: undefined as any[] | undefined,
   completionTrend: undefined as { bucket: string; window: { from: string; to: string }; buckets: { boundary: string; completed: number; failed: number }[] } | undefined,
+  approvalWait: undefined as { window: { from: string; to: string }; sampleCount: number; averageSeconds: number | null; medianSeconds: number | null; maxSeconds: number | null } | undefined,
 }))
 
 vi.mock('../../../entities/project', async (importOriginal) => {
@@ -68,6 +69,10 @@ vi.mock('../../../entities/issue/api/completion-trend', () => ({
   useCompletionTrend: () => ({ data: mocks.completionTrend }),
 }))
 
+vi.mock('../../../entities/issue/api/approval-wait', () => ({
+  useApprovalWait: () => ({ data: mocks.approvalWait }),
+}))
+
 import { DashboardPage } from './DashboardPage'
 
 function renderPage() {
@@ -88,11 +93,11 @@ describe('DashboardPage', () => {
     vi.clearAllMocks()
     mocks.projects = []
     mocks.isLoading = false
-    // Default: queries disabled (no projectId), widget renders empty state.
     mocks.useIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
     mocks.useArchivedIssuesMock.mockReturnValue({ data: undefined, isLoading: false })
     mocks.epics = undefined
     mocks.completionTrend = undefined
+    mocks.approvalWait = undefined
   })
 
   afterEach(() => {

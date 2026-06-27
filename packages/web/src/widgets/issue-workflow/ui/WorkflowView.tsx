@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { MessageSquareIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { approveIssue, resumeIssue, startIssue, getFileContent, useRequestChangesIssue } from '../../../entities/issue'
+import { approveIssue, invalidateApprovalWait, resumeIssue, startIssue, getFileContent, useRequestChangesIssue } from '../../../entities/issue'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
@@ -829,6 +829,7 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      invalidateApprovalWait(queryClient)
     },
   })
 

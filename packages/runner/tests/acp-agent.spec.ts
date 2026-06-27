@@ -1147,7 +1147,7 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
   })
 
   it("SharedSessionCancelHangs_NoProcessIsKilled", async () => {
-    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
+    const shared = createSharedSessionFixture("cancel-hangs", { sessionRecord: { acpSessionId: "server-session-1" } })
     shared.agent.cancelHangs = true
 
     const result = await acpAgentAction(contextWithOverrides({
@@ -1161,7 +1161,7 @@ describe("mohist/acp-agent cancelAndReturn bounded cleanup", () => {
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toContain("Timed out")
     expect(shared.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
-  })
+  }, 10_000)
 })
 
 describe("mohist/acp-agent monitorPrompt prompt_timeout diagnostics", () => {
@@ -1551,7 +1551,7 @@ function thoughtUpdate(sessionId: string, text: string) {
 }
 
 function createSharedSessionFixture(
-  scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
+  scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction" | "cancel-hangs",
   options?: {
     cachedModel?: string
     newSessionId?: string
@@ -1649,7 +1649,7 @@ class FakeSharedAcpAgent {
   cancelHangs = false
 
   constructor(
-    private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
+    private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction" | "cancel-hangs",
     private readonly options: { newSessionId?: string } = {},
   ) {}
 
@@ -1690,6 +1690,8 @@ class FakeSharedAcpAgent {
             self.calls.push({ event: "thought", index })
             await self.connection.sessionUpdate(thoughtUpdate(params.sessionId, `thinking-${index}`))
           }
+        } else if (self.scenario === "cancel-hangs") {
+          await new Promise(() => {})
         } else if (self.scenario === "probe-send-failed") {
           await delay(80)
         } else if (self.scenario === "resolved-model") {
