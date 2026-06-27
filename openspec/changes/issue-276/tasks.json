@@ -45,7 +45,7 @@
       "type": "WRITE",
       "output": "packages/server/src/Mohist.Server: RunnerWork record + RunnerWorkRow.cs + RunnerWorkStore.cs + MohistDbContext mapping + EF migration + RunnerGrain ledger integration (take/activate/report/recover); green typecheck + tests.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Design D1 (EF table, NOT [PersistentState] — filtered read avoids loading unbounded history on activation) and D3 (unified record, both owner kinds). RunnerWorkRow/RunnerWorkStore mirror WorkflowRunRow/WorkflowRunStore and RunnerRow/AddRunnerDefinitionTable. Report's terminal ledger update becomes the authoritative status source that T-003's synthesis reconfirms against (D4). The WorkKey shape (\"{ownerKind}\\u001f{ownerId}\\u001f{workId}\", RunnerGrain.cs:568) is the natural (RunnerId x WorkKey) identity for the row."
     },
     {

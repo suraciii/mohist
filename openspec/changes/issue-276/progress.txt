@@ -31,3 +31,20 @@
   - `WorkflowOptions_ResolvesToTestConfiguredWorkCompletionTimeout` confirms non-default `WorkCompletionTimeout` is observable via DI.
   - Heartbeat/`CheckHeartbeatAsync` still reads `DateTime.UtcNow` (`RunnerGrain.cs:529`, `:584`), untouched per AC #5.
 - `dotnet build` succeeded with 0 warnings/errors; full server test suite passed (2841 passed, 14 skipped, 0 failed).
+
+## T-002 verification (2026-06-27)
+
+- T-002 implementation was already present on branch `mohist/run-wr_44b143b1760f440d93d8c389c9ec46d6` (commit 2bf439af).
+- Verified acceptance criteria:
+  - `RunnerWork` domain record at `Infrastructure/Data/Runner/RunnerWork.cs` with `OwnerKind`, `OwnerId`, `WorkId`, `TakenAt`, `Status`, `Reason`, `FinishedAt`.
+  - `RunnerWorkRow` EF entity at `Infrastructure/Data/Runner/RunnerWorkRow.cs` + mapping in `MohistDbContext.cs:500-514` with indexes on `(RunnerId, Status)` and `(RunnerId, OwnerKind, OwnerId, WorkId)`.
+  - `RunnerWorkStore` registered `AddScoped` in `MohistServiceRegistration.cs:125` and `GrainTestConfig.cs:49`.
+  - `OnActivateAsync` hydrates outstanding rows once via `HydrateOutstandingWorksAsync` → `RunnerWorkStore.ListOutstandingAsync`.
+  - `PollOneWorkflowAsync` (`RunnerGrain.cs:633-640`) and `AssignAgentJobAsync` (`RunnerGrain.cs:250-257`) insert outstanding rows for both owner kinds using `_timeProvider.GetUtcNow()`.
+  - `ReportWorkflowResultAsync` (`RunnerGrain.cs:299-307`) and `ReportAgentJobResultAsync` (`RunnerGrain.cs:394-402`) call `TryMarkTerminalAsync` with `Reason` + `FinishedAt`; terminal rows are not deleted and `TryMarkTerminalAsync` only updates rows still `outstanding`.
+  - `RecoverActiveWorkflowWorkAsync` (`RunnerGrain.cs:339-345`) reloads original `TakenAt` from the ledger; no `DateTimeOffset.UtcNow` reset.
+  - Migration `20260627072538_AddRunnerWorksTable.cs` creates the table and indexes; `dotnet ef migrations add` produces no pending changes.
+- Specs in `RunnerWorkLedgerSpecs.cs` cover take-insert, terminal-update-no-delete, reactivation hydrate, agent-job ledger home, runner-loss ledger update, and timeout synthesis ledger update.
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeded with 0 warnings/errors.
+- Full server test suite passed: 2841 passed, 14 skipped, 0 failed.
+- `RunnerWorkLedgerSpecs` filter run: 10/10 passed.
