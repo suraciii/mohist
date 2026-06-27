@@ -63,6 +63,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
     workDir: WORKSPACE_PATH,
     issueNumber: 217,
     signal: new AbortController().signal,
+    writeVars: async () => {},
   }
 }
 

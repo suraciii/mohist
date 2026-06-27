@@ -1,0 +1,70 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { ActionRegistry } from "../src/actions/registry.js"
+import type { ActionContext, JsonObject, WorkItem } from "../src/core/types.js"
+import { WorkExecutor } from "../src/runtime/executor.js"
+import type { ServerConnection } from "../src/server/connection.js"
+import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+
+let workDir: string
+
+beforeEach(async () => {
+  workDir = await mkdtemp(join(tmpdir(), "mohist-executor-write-vars-"))
+})
+
+afterEach(async () => {
+  await rm(workDir, { recursive: true, force: true })
+})
+
+describe("WorkExecutor mid-execution variable writes", () => {
+  it("passes writeVars through to patchRunVars immediately even when the action fails", async () => {
+    const signal = new AbortController().signal
+    const events: string[] = []
+    const patchCalls: Array<{ workflowRunId: string; vars: JsonObject; signal: AbortSignal }> = []
+    const connection = {
+      async patchRunVars(workflowRunId: string, vars: JsonObject, patchSignal: AbortSignal) {
+        events.push("patchRunVars")
+        patchCalls.push({ workflowRunId, vars, signal: patchSignal })
+      },
+    } as Partial<ServerConnection>
+
+    const registry = new ActionRegistry()
+    registry.register("test/write-vars", async (ctx: ActionContext) => {
+      events.push("action-start")
+      await ctx.writeVars({ checkpoint: "before-failure" })
+      events.push("action-after-write")
+      return { status: "failure", message: "boom" }
+    })
+
+    const executor = new WorkExecutor(
+      registry,
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null, changeDir: null }),
+      connection as ServerConnection,
+      {} as never,
+      null,
+      workDir,
+    )
+
+    const result = await executor.execute(buildWork(), signal)
+
+    expect(result.status).toBe("failed")
+    expect(result.message).toBe("boom")
+    expect(events).toEqual(["action-start", "patchRunVars", "action-after-write"])
+    expect(patchCalls).toEqual([{ workflowRunId: "wf-write-vars", vars: { checkpoint: "before-failure" }, signal }])
+  })
+})
+
+function buildWork(): WorkItem {
+  return {
+    workflowRunId: "wf-write-vars",
+    workId: "work-write-vars",
+    workType: "task",
+    stage: "check",
+    title: "Write runtime vars",
+    uses: "test/write-vars",
+    with: {},
+    variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+  }
+}

@@ -101,6 +101,7 @@ export function baseContext(withInput: Record<string, unknown>, signal = new Abo
     signal,
     projectId: "project-1",
     issueNumber: 7,
+    writeVars: async () => {},
   }
 }
 
@@ -128,14 +129,14 @@ export class FakeAcpAgent {
         self.timeline?.push({ event: "newSession" })
         self.calls.push({ event: "newSession", cwd: params.cwd, _meta: params._meta })
         if (self.scenario === "resolved-model") {
-          return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1" } }
+          return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1", availableModels: [] } }
         }
         return { sessionId: "fake-session-1" }
       },
       async resumeSession(params) {
         self.timeline?.push({ event: "resumeSession" })
         self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd })
-        return { sessionId: params.sessionId }
+        return {}
       },
       async setSessionConfigOption(params) {
         self.timeline?.push({ event: "setSessionConfigOption" })
@@ -151,7 +152,7 @@ export class FakeAcpAgent {
       },
       async prompt(params) {
         self.promptCount += 1
-        const text = params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n")
+        const text = promptText(params.prompt)
         self.calls.push({ event: "prompt", promptCount: self.promptCount, text })
         if (self.scenario === "permission") {
           const response = await self.connection.requestPermission({ sessionId: params.sessionId, toolCall: { toolCallId: "tool-permission", title: "Run command", kind: "execute", status: "pending" }, options: [{ optionId: "reject", name: "Reject", kind: "reject_once" }, { optionId: "allow", name: "Allow", kind: "allow_once" }] })
@@ -277,7 +278,7 @@ export class FakeAcpAgent {
   }
 
   private extractCwd() {
-    const newSession = this.calls.findLast?.((entry) => entry.event === "newSession") ?? [...this.calls].reverse().find((entry) => entry.event === "newSession")
+    const newSession = [...this.calls].reverse().find((entry) => entry.event === "newSession")
     return typeof newSession?.cwd === "string" ? newSession.cwd : tmpdir()
   }
 
@@ -295,6 +296,10 @@ export class FakeAcpAgent {
 
 export function textUpdate(sessionId: string, text: string) {
   return { sessionId, update: { sessionUpdate: "agent_message_chunk" as const, content: { type: "text" as const, text } } }
+}
+
+function promptText(prompt: ReadonlyArray<{ type: string; text?: string }>): string {
+  return prompt.map((part) => part.type === "text" ? part.text ?? "" : "").join("\n")
 }
 
 export function thoughtUpdate(sessionId: string, text: string) {
@@ -330,7 +335,7 @@ export function createSharedSessionFixture(
   if (scenario === "probe-send-failed") {
     const originalPrompt = clientConnection.prompt.bind(clientConnection)
     connection.prompt = async (params: Parameters<ClientSideConnection["prompt"]>[0]) => {
-      const text = params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n")
+      const text = promptText(params.prompt)
       if (text.includes("still alive")) throw new Error("probe transport failed")
       return await originalPrompt(params)
     }
@@ -388,10 +393,6 @@ export class FakeServerConnection {
     this.calls.push({ event: "attachWorkflowAgentSession", sessionName, body })
   }
 
-  async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { runtimeEvents: Array<{ type: string; payload: unknown }> }) {
-    for (const event of payload.runtimeEvents) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
-  }
-
   async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, sessionName: string, payload: { events?: Array<{ type: string; payload: unknown }>; runtimeEvents?: Array<{ type: string; payload: unknown }> }) {
     const events = payload?.events ?? payload?.runtimeEvents ?? []
     for (const event of events) this.calls.push({ event: "workflowAgentSessionEvents", sessionName, type: event.type, payload: event.payload })
@@ -401,6 +402,7 @@ export class FakeServerConnection {
 export class FakeSharedAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
+  cancelHangs = false
 
   constructor(
     private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model" | "compaction",
@@ -421,13 +423,13 @@ export class FakeSharedAcpAgent {
         self.calls.push({ event: "newSession", _meta: params._meta })
         return { sessionId: self.options.newSessionId ?? "shared-session-1" }
       },
-        async resumeSession(params) {
-          self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd, _meta: params._meta })
-          if (self.scenario === "resolved-model") {
-            return { sessionId: params.sessionId, models: { currentModelId: "anthropic/claude-haiku-4-5" } }
-          }
-          return {}
-        },
+      async resumeSession(params) {
+        self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd, _meta: params._meta })
+        if (self.scenario === "resolved-model") {
+          return { models: { currentModelId: "anthropic/claude-haiku-4-5", availableModels: [] } }
+        }
+        return {}
+      },
       async setSessionConfigOption(params) {
         self.calls.push({ event: "setSessionConfigOption", ...params })
         return { configOptions: [] }
@@ -437,7 +439,7 @@ export class FakeSharedAcpAgent {
         return {}
       },
       async prompt(params) {
-        self.calls.push({ event: "prompt", sessionId: params.sessionId, text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })
+        self.calls.push({ event: "prompt", sessionId: params.sessionId, text: promptText(params.prompt) })
         if (self.scenario === "thought-liveness") {
           for (let index = 0; index < 5; index += 1) {
             await delay(20)

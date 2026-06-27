@@ -562,7 +562,22 @@ function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject 
 }
 
 function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
-  return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, projectId: work.projectId, issueNumber: work.issueNumber, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
+  return {
+    workflowRunId: work.workflowRunId,
+    workId: work.workId,
+    workType: work.workType,
+    stage: work.stage,
+    title: work.title,
+    uses: work.uses,
+    variables,
+    signal,
+    projectId: work.projectId,
+    issueNumber: work.issueNumber,
+    acpSessionManager: sessionManager,
+    acpConnection,
+    serverConnection: connection,
+    writeVars: async (vars) => connection.patchRunVars(work.workflowRunId, vars, signal),
+  }
 }
 
 // Build a failure result for when the runner could not prepare the

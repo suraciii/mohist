@@ -361,7 +361,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
 
   it("UsesFormPrompt_ActionResolvesThroughRegisteredLoaderBeforeMohistContextWrapper", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<PromptLoader>(async () => "loader produced task prompt")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "loader produced task prompt")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/loader", loader)
     setPromptLoaderRegistryForTest(registry)
@@ -399,7 +399,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
 
   it("UsesFormPrompt_LoaderReceivesContextWithWorkflowVariablesWorkDirWorkIdTitleAndStage", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)
@@ -428,7 +428,7 @@ describe("mohist/acp-agent new and ephemeral sessions", () => {
 
   it("UsesFormPrompt_LoaderReceivesContextWithNullTitleAndStageWhenAbsent", async () => {
     const fixture = createFixture("basic")
-    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const loader = vi.fn<[PromptLoaderContext], ReturnType<PromptLoader>>(async () => "ok")
     const registry = new PromptLoaderRegistry()
     registry.register("fake/echo-loader", loader)
     setPromptLoaderRegistryForTest(registry)

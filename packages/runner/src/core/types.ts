@@ -164,6 +164,13 @@ export interface ActionContext {
   acpSessionManager?: import("../runtime/acp-connection.js").AcpSessionManager | null
   acpConnection?: import("../runtime/acp-connection.js").SharedAcpConnection | null
   serverConnection?: import("../server/connection.js").ServerConnection | null
+  /**
+   * Persist workflow runtime variables immediately, before the task completes.
+   * This is distinct from declarative `setVars`, which only patches variables
+   * after a task succeeds. Mid-execution writes are best-effort and are NOT
+   * rolled back if the task later fails, so retries can observe the value.
+   */
+  writeVars(vars: JsonObject): Promise<void>
 }
 
 export interface ActionResult {
