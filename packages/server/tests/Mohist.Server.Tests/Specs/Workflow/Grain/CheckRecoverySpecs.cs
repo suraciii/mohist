@@ -33,7 +33,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         Assert.StartsWith("checks-", recoveredWorkId);
         var run = await LoadRunAsync(checkWork.WorkflowRunId);
         var check = run.Stages.Single().Checks.Single();
-        Assert.Equal(StageCheckStatus.Pending, check.Status);
+        Assert.Equal(StageCheckStatus.Running, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -50,7 +50,7 @@ public class CheckRecoverySpecs : WorkflowGrainSpecs
         var check = run.Stages.Single().Checks.Single();
 
         Assert.Equal(runnerId, run.Assignment!.RunnerId);
-        Assert.Equal(StageCheckStatus.Pending, check.Status);
+        Assert.Equal(StageCheckStatus.Running, check.Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

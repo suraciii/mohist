@@ -35,8 +35,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     /// </summary>
     private string? _lastKnownRunnerId;
     private bool _runDirty;
-    private string? _dispatchedWorkId;
-    private DateTimeOffset? _dispatchedWorkStartedAt;
     private readonly IWorkflowRunStore _runStore;
     private readonly WorkflowProfileManager _profileManager;
     private readonly WorkflowSessionHealthService _sessionHealth;
@@ -50,13 +48,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     /// the field to become <c>internal</c>.
     /// </summary>
     internal WorkflowRun? RunOrNull => _run;
-
-    /// <summary>
-    /// Internal accessor for the in-grain dispatched work id bookkeeping,
-    /// used by the composed read model and any other grain-internal helpers
-    /// that need to consult the most recent dispatch.
-    /// </summary>
-    internal string? DispatchedWorkId => _dispatchedWorkId;
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
@@ -78,12 +69,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run = await _runStore.LoadAsync(GrainKey);
 
         _lastKnownRunnerId = _run?.Assignment?.RunnerId;
-        _dispatchedWorkId = _run?.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? _run.WorkDelivery.WorkId
-            : null;
-        _dispatchedWorkStartedAt = _run?.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? _run.WorkDelivery.StartedAt
-            : null;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -151,9 +136,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await ClearExecutableStateAsync(reason ?? "stopped");
         var events = new List<WorkflowEvent>(stopEvents);
 
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         await SaveRunAsync();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
@@ -211,9 +193,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
 
         await ReleaseCurrentStageLocksAsync("retried");
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
@@ -223,9 +202,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         await ReleaseCurrentStageLocksAsync("rerun");
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         var events = _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
@@ -239,9 +215,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (string.IsNullOrWhiteSpace(task.Title))
             throw new InvalidOperationException("Runtime task requires title");
 
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
         var with = WorkflowDispatchHelpers.ParseWith(task.With);
         var events = _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with, Recovery: task.Recovery), task.Stage, task.InvalidateChecks);
 
@@ -322,7 +295,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
             return WorkItem.Task(
                 stage: currentStage.Id,
-                id: runningTask.Id,
+                id: runningTask.WorkId ?? runningTask.Id,
                 title: runningTask.Title,
                 uses: runningTask.Uses,
                 with: runningTask.WithInput,
@@ -330,19 +303,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 setVars: runningTask.SetVars);
         }
 
-        var deliveryWorkId = run.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? run.WorkDelivery.WorkId
-            : _dispatchedWorkId;
-        if (deliveryWorkId is null)
+        var checksWorkId = currentStage.ChecksWorkId;
+        if (checksWorkId is null)
             return null;
-        _dispatchedWorkId = deliveryWorkId;
-        _dispatchedWorkStartedAt ??= run.WorkDelivery?.StartedAt ?? DateTimeOffset.UtcNow;
 
         var pendingChecks = currentStage.Checks
             .Where(c => c.Status == StageCheckStatus.Pending)
             .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
             .ToList();
-        return WorkItem.Checks(currentStage.Id, deliveryWorkId, pendingChecks);
+        return WorkItem.Checks(currentStage.Id, checksWorkId, pendingChecks);
     }
 
     private async Task<WorkItem?> ToWorkItemAsync(WorkflowWork work, string runnerId)
@@ -391,12 +360,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var workId = logicalTaskId;
         var events = _run!.StartTask(workId, runnerId);
-        _run!.WorkDelivery = new WorkflowWorkDelivery(
-            workId,
-            "task",
-            current.Id,
-            WorkflowWorkDeliveryStatus.Started,
-            currentTask?.StartedAt ?? DateTimeOffset.UtcNow);
         await SaveRunAsync(events);
         foreach (var e in events)
             await On(e);
@@ -408,14 +371,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private string MarkChecksRunning(string stage, IReadOnlyList<CheckItem> items)
     {
         var checksWorkId = $"checks-{stage}:{Guid.NewGuid():N}";
-        _dispatchedWorkId = checksWorkId;
-        _dispatchedWorkStartedAt ??= DateTimeOffset.UtcNow;
-        _run!.WorkDelivery = new WorkflowWorkDelivery(
-            checksWorkId,
-            "checks",
-            stage,
-            WorkflowWorkDeliveryStatus.Started,
-            _dispatchedWorkStartedAt.Value);
+        var currentStage = _run!.CurrentStage();
+        currentStage.ChecksWorkId = checksWorkId;
+        foreach (var item in items)
+        {
+            var check = currentStage.Checks.FirstOrDefault(c => c.Name == item.Name);
+            if (check is not null)
+                check.Status = StageCheckStatus.Running;
+        }
         return checksWorkId;
     }
 
@@ -427,10 +390,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         if (_run.CurrentStageId is null)
             throw new InvalidOperationException("Workflow has no current stage");
-
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
 
         var current = _run.CurrentStage();
         if (!current.Initialized)
@@ -462,24 +421,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null || !_run.IsAssignedTo(runnerId)) return;
         var stage = _run.CurrentStage();
         var activeTask = stage.FindRunningTaskByWork(workId, runnerId);
-        var activeDeliveryWorkId = _run.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? _run.WorkDelivery.WorkId
-            : _dispatchedWorkId;
-        if (activeTask is null
-            && (activeDeliveryWorkId is null || !string.Equals(activeDeliveryWorkId, workId, StringComparison.Ordinal)))
+        if (activeTask is null)
             return;
 
         _log.LogInformation("Workflow {Id} received task outcome for {WorkId}: {Status} detail={Detail}",
             GrainKey, workId, outcome.Status, outcome.Detail ?? "(none)");
 
-        var events = await ProcessTaskOutcomeAsync(outcome, activeTask?.Id ?? workId, workId);
-
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Completed);
-        if (activeTask is null)
-        {
-            _dispatchedWorkId = null;
-            _dispatchedWorkStartedAt = null;
-        }
+        var events = await ProcessTaskOutcomeAsync(outcome, activeTask.Id, workId);
 
         await CommitAsync(events);
     }
@@ -487,20 +435,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task ReportCheckOutcomeAsync(string runnerId, string workId, CheckOutcome outcome)
     {
         if (_run is null || !_run.IsAssignedTo(runnerId)) return;
-        var activeDeliveryWorkId = _run.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? _run.WorkDelivery.WorkId
-            : _dispatchedWorkId;
-        if (activeDeliveryWorkId is null || !string.Equals(activeDeliveryWorkId, workId, StringComparison.Ordinal))
+        var currentStage = _run.CurrentStage();
+        if (currentStage.ChecksWorkId is null || !string.Equals(currentStage.ChecksWorkId, workId, StringComparison.Ordinal))
             return;
 
         _log.LogInformation("Workflow {Id} received check outcome for stage {Stage}: {Count} results",
             GrainKey, outcome.Stage, outcome.Results.Count);
 
         var events = await ProcessCheckOutcomeAsync(outcome);
-
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Completed);
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
+        currentStage.ChecksWorkId = null;
+        foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
+            ch.Status = StageCheckStatus.Pending;
 
         await CommitAsync(events);
     }
@@ -531,10 +476,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var stage = _run?.CurrentStage();
         if (stage is null) return Task.FromResult<string?>(null);
-        var deliveryWorkId = _run?.WorkDelivery?.Status == WorkflowWorkDeliveryStatus.Started
-            ? _run.WorkDelivery.WorkId
-            : _dispatchedWorkId;
-        return Task.FromResult(stage.RunningTask?.WorkId ?? deliveryWorkId);
+        return Task.FromResult(stage.RunningTask?.WorkId ?? stage.ChecksWorkId);
     }
 
     public Task<WorkflowActiveWorkView?> GetActiveWorkAsync(string workId)
@@ -743,30 +685,24 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (repairTasks is null)
             return null;
 
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
+        var currentStage = _run.CurrentStage();
+        currentStage.ChecksWorkId = null;
+        foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
+            ch.Status = StageCheckStatus.Pending;
         return _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
-    }
-
-    private void CompleteWorkDelivery(WorkflowWorkDeliveryStatus status)
-    {
-        if (_run?.WorkDelivery is null || _run.WorkDelivery.Status != WorkflowWorkDeliveryStatus.Started)
-            return;
-
-        _run.WorkDelivery = _run.WorkDelivery with
-        {
-            Status = status,
-            FinishedAt = DateTimeOffset.UtcNow,
-        };
     }
 
     private async Task ClearExecutableStateAsync(string reason)
     {
         await ReleaseCurrentStageLocksAsync(reason);
-        _dispatchedWorkId = null;
-        _dispatchedWorkStartedAt = null;
-        CompleteWorkDelivery(WorkflowWorkDeliveryStatus.Failed);
+
+        var currentStage = _run?.CurrentStage();
+        if (currentStage is not null)
+        {
+            currentStage.ChecksWorkId = null;
+            foreach (var ch in currentStage.Checks.Where(c => c.Status == StageCheckStatus.Running))
+                ch.Status = StageCheckStatus.Pending;
+        }
 
         var runningTask = _run?.CurrentStage().RunningTask;
         if (runningTask is not null)

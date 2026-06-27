@@ -222,15 +222,16 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         var (work, runnerId) = await PollWorkAnyAsync();
         var running = await LoadRunAsync(work.WorkflowRunId);
-        Assert.Equal(WorkflowWorkDeliveryStatus.Started, running.WorkDelivery?.Status);
-        Assert.Equal("task", running.WorkDelivery?.WorkType);
-        Assert.Equal(work.WorkId, running.WorkDelivery?.WorkId);
+        var runningTask = running.CurrentStage().RunningTask;
+        Assert.NotNull(runningTask);
+        Assert.Equal(TaskRunStatus.Running, runningTask!.Status);
+        Assert.Equal(work.WorkId, runningTask.WorkId);
 
         await ReportAsync(runnerId, work, "completed");
 
         var completed = await LoadRunAsync(work.WorkflowRunId);
-        Assert.Equal(WorkflowWorkDeliveryStatus.Completed, completed.WorkDelivery?.Status);
-        Assert.NotNull(completed.WorkDelivery?.FinishedAt);
+        Assert.Null(completed.CurrentStage().RunningTask);
+        Assert.Equal(TaskRunStatus.Completed, completed.CurrentStage().Tasks.Single().Status);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

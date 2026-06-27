@@ -16,6 +16,7 @@ public sealed class StageRun
     public bool Initialized { get; set; }
     public List<TaskRun> Tasks { get; set; } = new();
     public List<StageCheck> Checks { get; set; } = new();
+    public string? ChecksWorkId { get; set; }
     public ApprovalStatus? ApprovalStatus { get; set; }
     public FailureDetails? Failure { get; set; }
 }
