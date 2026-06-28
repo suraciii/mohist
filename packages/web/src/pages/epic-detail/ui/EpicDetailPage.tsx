@@ -27,6 +27,7 @@ import {
   type AdvancementState,
 } from '../model/advancement'
 import { deriveStartBlockerReason } from '../model/startBlockerReason'
+import { deriveGraphBannerState } from '../model/graphBanner'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
@@ -41,7 +42,11 @@ import {
   DialogTitle,
 } from '@/shared/ui/components/dialog'
 import { MarkdownReader } from '@/shared/ui'
-import { DependencyGraphWidget, type Renderability } from '../../../widgets/epic-dependency-graph'
+import {
+  DependencyGraphErrorBoundary,
+  DependencyGraphWidget,
+  type Renderability,
+} from '../../../widgets/epic-dependency-graph'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -510,9 +515,18 @@ export function EpicDetailPage() {
     renderable: false,
     reason: null,
   })
+  const [graphRenderError, setGraphRenderError] = useState(false)
 
   const handleGraphRenderabilityChange = useCallback((state: { renderable: boolean; reason: Renderability | null }) => {
     setGraphRenderable(state)
+    if (state.renderable) {
+      setGraphRenderError(false)
+    }
+  }, [])
+
+  const handleGraphRenderError = useCallback(() => {
+    setGraphRenderError(true)
+    setGraphRenderable({ renderable: false, reason: null })
   }, [])
 
   const availableIssues = useMemo(() => {
@@ -585,7 +599,15 @@ export function EpicDetailPage() {
   const linkedIssueCount = epic.linkedIssues.length
   const graphAvailable = linkedIssueCount >= 2
   const graphSelected = graphAvailable && linkedIssuesView === 'graph'
-  const showList = !graphSelected || graphRenderable.reason === 'cyclic' || graphRenderable.reason === 'empty'
+  const graphHasReported = graphRenderError || graphRenderable.reason !== null
+  const graphUnrenderable = graphHasReported && !graphRenderable.renderable
+  const showList = !graphSelected || graphUnrenderable
+
+  useEffect(() => {
+    if (!graphSelected) {
+      setGraphRenderError(false)
+    }
+  }, [graphSelected])
 
   function handleConfirmClose() {
     closeEpic.mutate(epicId, {
@@ -913,7 +935,13 @@ export function EpicDetailPage() {
           <div
             className="mt-6"
             data-testid="linked-issues-graph-region"
-            data-renderability={graphRenderable.renderable ? 'renderable' : (graphRenderable.reason ?? 'loading')}
+            data-renderability={
+              graphRenderError
+                ? 'error'
+                : graphRenderable.renderable
+                  ? 'renderable'
+                  : (graphRenderable.reason ?? 'loading')
+            }
           >
             <p
               className="mb-2 text-xs text-muted-foreground md:hidden"
@@ -921,15 +949,32 @@ export function EpicDetailPage() {
             >
               Graph works best on wider screens — swipe to explore.
             </p>
-            <div
-              className="overflow-x-auto md:overflow-visible"
-              data-testid="linked-issues-graph-scroll-container"
-            >
-              <DependencyGraphWidget
-                linkedIssues={epic.linkedIssues}
-                onRenderabilityChange={handleGraphRenderabilityChange}
-              />
-            </div>
+            {(() => {
+              const banner = deriveGraphBannerState({ graphRenderError, graphRenderable })
+              if (!banner.show) return null
+              return (
+                <div
+                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 [overflow-wrap:anywhere]"
+                  data-testid="linked-issues-graph-unavailable-banner"
+                  data-reason={banner.reason ?? undefined}
+                >
+                  {banner.message}
+                </div>
+              )
+            })()}
+            {!graphUnrenderable && (
+              <div
+                className="overflow-x-auto md:overflow-visible"
+                data-testid="linked-issues-graph-scroll-container"
+              >
+                <DependencyGraphErrorBoundary onError={handleGraphRenderError}>
+                  <DependencyGraphWidget
+                    linkedIssues={epic.linkedIssues}
+                    onRenderabilityChange={handleGraphRenderabilityChange}
+                  />
+                </DependencyGraphErrorBoundary>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -937,7 +982,13 @@ export function EpicDetailPage() {
           <div
             className="mt-6 space-y-3"
             data-testid="linked-issues-list-region"
-            data-fallback-for={graphSelected ? graphRenderable.reason ?? undefined : undefined}
+            data-fallback-for={
+              graphSelected
+                ? graphRenderError
+                  ? 'error'
+                  : (graphRenderable.reason ?? undefined)
+                : undefined
+            }
           >
             {epic.linkedIssues.length === 0 ? (
               <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
