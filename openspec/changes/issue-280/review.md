@@ -1,37 +1,46 @@
 # Review Report
 
-## Result: FAIL
+## Result: PASS
 
 ## Repaired Items
 
-_(none)_
+- [ID: item-1]
+  Severity: info
+  Scope: formatting
+  Evidence: `packages/web/src/widgets/epic-dependency-graph/ui/DependencyGraphErrorBoundary.tsx` was added without a trailing newline at EOF. Added the missing newline only; no behavior changed.
+  Verification: `npm run typecheck -w packages/web`; `npm run test:run -w packages/web -- src/widgets/epic-dependency-graph/ui/DependencyGraphErrorBoundary.test.tsx`
+  Status: resolved
 
 ## Blocking Items
 
-- [ID: item-1]
-  Severity: warning
-  Scope: packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx graph empty-data fallback
-  Evidence: The spec requires an empty dependency graph to show a clear user-facing explanation and keep List usable. The real canvas only reports `empty` when `linkedIssues.length < 2` (`packages/web/src/widgets/epic-dependency-graph/ui/DependencyGraphCanvas.tsx:42`-`44`), but the Epic page hides the Graph toggle and never renders the graph region for exactly that state because `graphAvailable` is `linkedIssuesForGraph.length >= 2` (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:563`-`565`) and the graph region is only rendered when `graphSelected` is true (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:954`-`999`). As a result, an epic with zero linked issues only shows `No linked issues yet.` in the list (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:1013`-`1016`), and an epic with one linked issue shows the list with no graph-unavailable explanation. The `empty` banner tests use a mocked widget that reports `empty` despite two linked issues (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.test.tsx:3590`-`3609`), while the real page tests assert the toggle is hidden for zero and one linked issue (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.test.tsx:3184`-`3210`). [disallowed:product-behavior-change]
-  SuggestedAction: Decide the intended empty-data UX and implement it consistently: either expose the Graph region/tab for empty graph states so the `Not enough linked issues to draw a graph. Use the list below.` banner is reachable, or adjust the spec/product copy so the list-only empty state is the explicit fallback. Add a real-path component test for zero and one linked issue that verifies the chosen explanation and list usability without mocking the graph widget into an impossible state.
-  Verification: `npm run typecheck -w packages/web` passed; `npm run test:run -w packages/web` passed; `npm run test:e2e -w packages/web -- tests/e2e/epic-detail-mobile-overflow.spec.ts` passed. These runs do not resolve the finding because the empty-graph banner path remains unreachable in the real page state.
-  Status: open
+_(none)_
 
 ## Follow-up Items
 
-- [ID: item-2]
-  Severity: follow-up
-  Scope: openspec/changes/issue-280/tasks.json
-  Evidence: All task entries still have `passes: false` even though implementation commits, self-review, and verification indicate the candidate has been built. This is workflow traceability metadata, not a product deliverable defect.
-  SuggestedAction: Update task completion metadata in the workflow stage that owns task tracking if Mohist expects `tasks.json` to reflect the built candidate.
-  Status: follow-up
+_(none)_
 
 ## Pre-existing or Out-of-scope Items
 
-- [ID: item-3]
-  Severity: info
-  Scope: packages/web Vitest configuration
-  Evidence: `npm run test:run -w packages/web` prints `DEPRECATED  test.poolOptions was removed in Vitest 4`. This warning is unrelated to the issue-280 candidate and does not fail the test run.
-  SuggestedAction: Migrate the Vitest config away from removed `poolOptions` in a separate maintenance change.
+- [ID: item-2]
+  Severity: warning
+  Scope: packages/web test configuration
+  Evidence: Vitest prints `DEPRECATED  test.poolOptions was removed in Vitest 4` during both focused and full web test runs. This change does not edit Vitest configuration and the warning does not affect the reviewed behavior.
+  SuggestedAction: Update the Vitest config in a separate maintenance change.
   Status: pre-existing
 
-<promise>FAIL</promise>
+## Acceptance Evidence
+
+- Linked issue mobile rows: `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx` renders each row as `flex flex-col` with separate reading, metadata, blocker-reason, and actions rows (`data-testid="linked-issue-reading-row"`, `linked-issue-metadata-row`, `linked-issue-blocker-reason`, `linked-issue-actions-row`). Long titles use `break-words` and `[overflow-wrap:anywhere]`. Browser verification in `packages/web/tests/e2e/epic-detail-mobile-overflow.spec.ts` passed at 320px, 390px, and 430px with long linked issue titles and blocker copy.
+- Start gating: `LinkedIssueRow` still calls `canInlineStartRow(issue, hasInProgressSibling)` before rendering `Start`; tests cover startable rows, blocked/done/cancelled rows, and the single in-progress sibling rule in `packages/web/src/pages/epic-detail/ui/EpicDetailPage.test.tsx`.
+- Remove action: `Remove` is outside the primary reading row and opens a `Dialog`; only the destructive confirm button calls `removeEpicIssue.mutate`. Tests cover single-click no-op, cancel, confirm, disabled pending state, and row placement.
+- Graph mobile degradation: Graph/List tabs are always rendered, List remains the initial view, the graph region shows the mobile hint, and the graph canvas/skeleton have a `min-w-[640px]` inside an `overflow-x-auto md:overflow-visible` wrapper. The Playwright overflow spec passed Graph selection at 320px, 390px, and 430px.
+- Graph fallback: empty, cyclic, and render-error states show user-facing banners directing the user to the list below, and `showList` keeps the linked issue list usable for unrenderable states. Unit/component tests cover cyclic, empty, Error Boundary fallback, list fallback, and re-probe after data changes.
+
+## Verification
+
+- `npm run typecheck -w packages/web` passed.
+- `npm run test:run -w packages/web -- src/pages/epic-detail/model/startBlockerReason.test.ts src/pages/epic-detail/model/graphBanner.test.ts src/widgets/epic-dependency-graph/ui/DependencyGraphErrorBoundary.test.tsx src/pages/epic-detail/ui/EpicDetailPage.test.tsx` passed: 4 files, 194 tests.
+- `npm run test:e2e -w packages/web -- tests/e2e/epic-detail-mobile-overflow.spec.ts` passed: 17 tests.
+- `npm run test:run -w packages/web` passed: 186 files, 2783 passed, 1 skipped.
+
+<promise>PASS</promise>

@@ -5,6 +5,7 @@ export interface DependencyGraphErrorBoundaryProps {
   onError?: () => void
 }
 
+
 interface DependencyGraphErrorBoundaryState {
   hasError: boolean
 }
