@@ -1,4 +1,3 @@
-export { StickySessionTitle } from './StickySessionTitle'
 export { PromptBlock } from './PromptBlock'
 export { AssistantParts, AssistantTextPartView, ReasoningPartView, ErrorPartView, DividerPartView } from './AssistantParts'
 export { TurnList, TurnItem, TurnDiffs } from './TurnList'

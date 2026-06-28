@@ -1,5 +1,4 @@
 import type { DisplayTurn } from '../model/session-transcript-display'
-import { StickySessionTitle } from './StickySessionTitle'
 import { TurnList } from './TurnList'
 
 interface TranscriptEmptyStateProps {
@@ -34,34 +33,22 @@ interface SessionTranscriptLayoutProps {
 }
 
 export function SessionTranscriptLayout({
-  title,
-  turnCount,
   turns,
-  statusKind,
   isRunning,
   isThinking,
   isStreaming,
 }: SessionTranscriptLayoutProps) {
   return (
-    <div className="flex flex-col h-full">
-      <StickySessionTitle
-        title={title}
-        statusKind={statusKind}
-        turnCount={turnCount}
-        isRunning={isRunning}
-      />
-
-      <div className="flex-1 overflow-y-auto px-4 py-6" data-scrollable="">
-        {turns.length === 0 ? (
-          <TranscriptEmptyState isRunning={isRunning} />
-        ) : (
-          <TurnList turns={turns} />
-        )}
-        {isThinking && turns.length > 0 && (
-          <ThinkingPlaceholder />
-        )}
-        {isStreaming && <StreamingIndicator />}
-      </div>
+    <div className="flex-1 overflow-y-auto px-4 py-6" data-scrollable="">
+      {turns.length === 0 ? (
+        <TranscriptEmptyState isRunning={isRunning} />
+      ) : (
+        <TurnList turns={turns} />
+      )}
+      {isThinking && turns.length > 0 && (
+        <ThinkingPlaceholder />
+      )}
+      {isStreaming && <StreamingIndicator />}
     </div>
   )
 }

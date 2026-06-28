@@ -297,35 +297,35 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, r
       : null
 
   return (
-    <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
-      <div className="flex items-center gap-2 text-sm mb-2">
+    <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0 min-w-0">
+      <div className="flex items-center gap-2 text-sm mb-2 min-w-0">
         <Link
           to={toProjectPath(`/issues/${issueNumber}`)}
-          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors"
+          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors whitespace-nowrap shrink-0"
         >
-          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
           </svg>
           <span>Issue #{issueNumber}</span>
         </Link>
         {issueTitle && (
           <>
-            <span className="text-gray-300">/</span>
-            <span className="text-gray-500 truncate max-w-[300px]">{issueTitle}</span>
+            <span className="text-gray-300 shrink-0">/</span>
+            <span className="text-gray-500 truncate min-w-0">{issueTitle}</span>
           </>
         )}
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-gray-900">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-lg font-semibold text-gray-900 truncate">
             {meta.sessionName ?? 'Session'}
           </h1>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-gray-500 ml-auto shrink-0 flex-wrap justify-end">
+        <div className="flex flex-col gap-2 text-xs text-gray-500 sm:flex-row sm:items-center sm:gap-2 sm:ml-auto sm:shrink-0 sm:flex-wrap sm:justify-end">
           <StatusBadge kind={statusKind} failureReason={meta?.failureReason} />
-          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
+          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium self-start sm:self-auto">
             {getStageLabel(meta?.stage ?? null)}
           </span>
 
@@ -758,9 +758,14 @@ export function SessionPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
-      <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
-        {recoveryBar}
-      </div>
+      <SessionHeader
+        issueNumber={issueNumber}
+        issueTitle={issue?.title}
+        meta={detail.metadata}
+        statusKind={displayStatusKind}
+        turnCount={displayTurnCount}
+        recoveryBar={recoveryBar}
+      />
       <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto"
