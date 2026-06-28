@@ -54,6 +54,43 @@ interface ActiveGroupDescriptor {
   epics: EpicWithProgress[]
 }
 
+function EpicProgressBody({ progress }: { progress: EpicWithProgress['progress'] }) {
+  const next = progress.nextIssue
+  if (next) {
+    return (
+      <span
+        className="text-muted-foreground break-words"
+        data-testid="epic-card-next"
+      >
+        Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
+        <span className="text-muted-foreground ml-1 break-words">{next.title}</span>
+      </span>
+    )
+  }
+  if (progress.nextIssueReason) {
+    return (
+      <span
+        className="text-muted-foreground break-words"
+        data-testid="epic-card-next"
+      >
+        {progress.nextIssueReason}
+      </span>
+    )
+  }
+  if (progress.readyToMarkDone) {
+    return (
+      <span className="text-green-600 font-medium" data-testid="epic-card-ready">
+        Ready to mark done
+      </span>
+    )
+  }
+  return (
+    <span className="text-muted-foreground" data-testid="epic-card-empty">
+      No linked issues
+    </span>
+  )
+}
+
 function EpicCardBody({
   epic,
   group,
@@ -127,30 +164,15 @@ function EpicCardBody({
   }
 
   if (group === 'waitingBlocked') {
-    const reason = progress.nextIssueReason
-    return (
-      <span
-        className="text-muted-foreground break-words"
-        data-testid="epic-card-next"
-      >
-        {reason ?? 'Waiting'}
-      </span>
-    )
+    return <EpicProgressBody progress={progress} />
   }
 
   if (group === 'idleEmpty') {
-    if (progress.readyToMarkDone) {
-      return (
-        <span className="text-green-600 font-medium" data-testid="epic-card-ready">
-          Ready to mark done
-        </span>
-      )
-    }
-    return (
-      <span className="text-muted-foreground" data-testid="epic-card-empty">
-        No linked issues
-      </span>
-    )
+    return <EpicProgressBody progress={progress} />
+  }
+
+  if (group === 'paused') {
+    return <EpicProgressBody progress={progress} />
   }
 
   return null

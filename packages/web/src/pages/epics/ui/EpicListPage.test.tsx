@@ -579,7 +579,8 @@ describe('EpicListPage basic actions', () => {
             totalIssueCount: 2,
             blockedIssues: [],
             activeIssues: [],
-            nextIssue: null,
+            nextIssue: { id: 'issue-paused-next', number: 11, title: 'Resume-ready paused work' },
+            nextIssueReason: null,
             readyToMarkDone: false,
           },
         },
@@ -610,6 +611,67 @@ describe('EpicListPage basic actions', () => {
     expect(badges.length).toBeGreaterThan(0)
     const pausedBadge = badges.find(b => b.tagName !== 'H2') as HTMLElement
     expect(pausedBadge).toBeTruthy()
+    expect(pausedCard!.textContent).toContain('Next: #11')
+    expect(pausedCard!.textContent).toContain('Resume-ready paused work')
+  })
+
+  it('keeps the legacy paused progress fallback for waiting, ready-to-mark-done, and empty paused cards', () => {
+    mocks.useEpics.mockReturnValue({
+      data: [
+        makeEpic({
+          id: 'epic-paused-waiting',
+          title: 'Paused Waiting Epic',
+          status: EpicStatus.Paused,
+          progress: {
+            deliveredCount: 0,
+            totalIssueCount: 2,
+            blockedIssues: [],
+            activeIssues: [],
+            nextIssue: null,
+            nextIssueReason: 'Paused until external dependency lands',
+            readyToMarkDone: false,
+          },
+        }),
+        makeEpic({
+          id: 'epic-paused-ready',
+          title: 'Paused Ready Epic',
+          status: EpicStatus.Paused,
+          progress: {
+            deliveredCount: 2,
+            totalIssueCount: 2,
+            blockedIssues: [],
+            activeIssues: [],
+            nextIssue: null,
+            nextIssueReason: null,
+            readyToMarkDone: true,
+          },
+        }),
+        makeEpic({
+          id: 'epic-paused-empty',
+          title: 'Paused Empty Epic',
+          status: EpicStatus.Paused,
+          progress: {
+            deliveredCount: 0,
+            totalIssueCount: 0,
+            blockedIssues: [],
+            activeIssues: [],
+            nextIssue: null,
+            nextIssueReason: null,
+            readyToMarkDone: false,
+          },
+        }),
+      ],
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const waitingCard = screen.getByText('Paused Waiting Epic').closest('[data-slot="card"]')
+    const readyCard = screen.getByText('Paused Ready Epic').closest('[data-slot="card"]')
+    const emptyCard = screen.getByText('Paused Empty Epic').closest('[data-slot="card"]')
+    expect(waitingCard!.textContent).toContain('Paused until external dependency lands')
+    expect(readyCard!.textContent).toContain('Ready to mark done')
+    expect(emptyCard!.textContent).toContain('No linked issues')
   })
 
   it('opens create dialog and submits title description and priority', async () => {
