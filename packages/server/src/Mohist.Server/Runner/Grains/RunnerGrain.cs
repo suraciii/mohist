@@ -336,7 +336,8 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
         if (trackedWork is not null)
         {
-            var item = await RecoverWorkItemFromActiveWorkAsync(workflow, workflowRunId, workId, run);
+            var item = await RecoverWorkItemFromActiveWorkAsync(workflow, workflowRunId, workId, run)
+                ?? RecoverWorkItemFromRun(workId, run);
             if (item is not null)
             {
                 var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
@@ -356,12 +357,15 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 await PersistAsync();
                 if (await IsRunnerWorkOutstandingAsync(WorkDispatchOwnerKinds.Workflow, workflowRunId, workId))
                 {
+                    var (staleTerminalStatus, staleTerminalReason) = IsSyntheticFailure(result)
+                        ? ResolveTerminalStatus(result)
+                        : (LedgerRunnerWorkStatus.Failed, "stale-work");
                     await MarkRunnerWorkTerminalAsync(
                         WorkDispatchOwnerKinds.Workflow,
                         workflowRunId,
                         workId,
-                        LedgerRunnerWorkStatus.Failed,
-                        "stale-work");
+                        staleTerminalStatus,
+                        staleTerminalReason);
                 }
                 return new RunnerWorkReportResult(workflowRunId, null, true, "stale-work", WorkDispatchOwnerKinds.Workflow, workflowRunId);
             }
@@ -427,6 +431,37 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         };
     }
 
+    private static WorkItem? RecoverWorkItemFromRun(string workId, WorkflowRun run)
+    {
+        var stage = run.CurrentStage();
+        var task = stage.Tasks.FirstOrDefault(t =>
+            t.Status == TaskRunStatus.Running
+            && string.Equals(t.WorkId ?? t.Id, workId, StringComparison.Ordinal));
+        if (task is not null)
+        {
+            return WorkItem.Task(
+                stage.Id,
+                task.WorkId ?? task.Id,
+                task.Title,
+                task.Uses,
+                task.WithInput,
+                task.Artifacts,
+                task.SetVars,
+                task.Recovery);
+        }
+
+        if (string.Equals(stage.ChecksWorkId, workId, StringComparison.Ordinal))
+        {
+            var pendingChecks = stage.Checks
+                .Where(c => c.Status is StageCheckStatus.Pending or StageCheckStatus.Running)
+                .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
+                .ToList();
+            return WorkItem.Checks(stage.Id, workId, pendingChecks);
+        }
+
+        return null;
+    }
+
     private async Task<RunnerWorkflowWork?> RecoverActiveWorkflowWorkAsync(
         IWorkflowGrain workflow,
         string workflowRunId,
@@ -434,6 +469,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         WorkflowRun run)
     {
         var item = await RecoverWorkItemFromActiveWorkAsync(workflow, workflowRunId, workId, run);
+        item ??= RecoverWorkItemFromRun(workId, run);
         if (item is null) return null;
 
         var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, RunnerId);
@@ -883,13 +919,6 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (string.Equals(work.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal))
         {
-            var (terminalStatus, terminalReason) = ResolveTerminalStatus(result);
-            await MarkRunnerWorkTerminalAsync(
-                work.OwnerKind,
-                work.OwnerId,
-                work.WorkId,
-                terminalStatus,
-                terminalReason);
             await ReportWorkflowResultAsync(work.OwnerId, work.WorkId, result);
             return;
         }
@@ -954,6 +983,11 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             ? (LedgerRunnerWorkStatus.Completed, null)
             : (LedgerRunnerWorkStatus.Failed, string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
     }
+
+    private static bool IsSyntheticFailure(WorkResult result) =>
+        string.Equals(result.Status, "failed", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(result.Message, "timeout", StringComparison.Ordinal)
+            || string.Equals(result.Message, "runner-lost", StringComparison.Ordinal));
 }
 
 internal sealed record RunnerWorkflowWork(
