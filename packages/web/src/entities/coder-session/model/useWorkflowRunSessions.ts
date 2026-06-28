@@ -4,10 +4,12 @@ import { onAgentEvent } from '../../agent/@x/events'
 import { getWorkflowRunSessions } from '../api/client'
 import type { WorkflowRunSession } from './types'
 
+const EMPTY_SESSIONS: WorkflowRunSession[] = []
+
 export function useWorkflowRunSessions(workflowRunId: string | null | undefined) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['workflow-runs', workflowRunId, 'sessions'] as const, [workflowRunId])
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = EMPTY_SESSIONS, isLoading } = useQuery({
     queryKey,
     queryFn: () => getWorkflowRunSessions(workflowRunId!),
     enabled: !!workflowRunId,
@@ -19,7 +21,7 @@ export function useWorkflowRunSessions(workflowRunId: string | null | undefined)
 
   useEffect(() => {
     if (isLoading) return
-    setLiveSessions([...sessions])
+    setLiveSessions(sessions)
   }, [sessions, isLoading])
 
   useEffect(() => {

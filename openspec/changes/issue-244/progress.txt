@@ -103,3 +103,30 @@ This file is the working memory for the implementation of issue-244 (Session 列
   - `packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.test.tsx` — added `describe('WorkflowSessionRow responsive layout', ...)` with 4 cases: min-w-0 on row + header, truncate + min-w-0 on name and model badge, flex-wrap on metrics line + truncate on failure reason, and a regression test that no `w-[Npx]` class is declared on the row or its children.
 - `npm run typecheck -w packages/web` passes.
 - `npm run test:run -w packages/web` passes — 2696 tests across 181 files (1 skipped pre-existing; +4 new row layout tests vs. T-002 baseline).
+
+## Decisions
+
+- T-004 puts prev/next navigation in the existing local `SessionHeader` (under the back-to-issue breadcrumb row, right-aligned via `ml-auto`), and the sibling sidebar as a new `<aside>` rendered alongside the main transcript column on `xl:`+ viewports. No recreation of the deleted `SessionHeader` widget.
+- Sibling data comes from a new `useSiblingSessions(workflowRunId, { currentKey })` hook at `packages/web/src/widgets/issue-workflow/model/useSiblingSessions.ts`, which wraps `useWorkflowRunSessions` and returns sorted siblings + prev/next/currentIndex. Sorted by `createdAt` ascending, with `sessionName` as tiebreaker; current located by `sessionName` first, falling back to `id` — mirrors the spec note about matching the route identifier.
+- Boundary behavior: prev disabled at first sibling, next disabled at last. Disabled state uses `aria-disabled="true"` + `cursor-not-allowed` styling (no navigation), matching existing disabled-link idioms in the app.
+- Sidebar is hidden via `hidden xl:flex` so it never affects narrow/medium layouts; prev/next buttons remain always visible (they live in the always-rendered `SessionHeader`).
+
+## Gotchas
+
+- **`useWorkflowRunSessions` had an infinite-render bug.** Its old shape was `const { data: sessions = [] } = useQuery({...})` followed by `useEffect(() => { if (isLoading) return; setLiveSessions([...sessions]) }, [sessions, isLoading])`. When the query was disabled or had no data yet (e.g. `useIssue` returned null, so `workflowRunId` was null), `data` was `undefined` and the `= []` default produced a **fresh array reference each render**. The effect fired every render, called `setLiveSessions([...sessions])` (another new reference), and triggered a re-render → infinite loop, CPU pinned at 100%. In production this was masked because a real `workflowRunId` resolves to a stable `sessions` reference; in tests that didn't mock the hook it hung forever. Fixed by promoting the default to a module-level `EMPTY_SESSIONS` constant and dropping the redundant spread. This bug was the actual root cause of T-004's repeated workflow timeouts: the two unmocked SessionPage test files (`SessionPage.endpoints.test.tsx`, `SessionPage.followup-composer.test.tsx`) dead-looped, so the full `npx vitest run` never exited and the coder agent burned its entire 30-minute budget polling it.
+- Tests that render `SessionPage` must either mock `../src/entities/coder-session/model/useWorkflowRunSessions` (as `SessionPage.test.tsx` does) or accept the real hook's behavior. `SessionPage.endpoints.test.tsx` and `SessionPage.followup-composer.test.tsx` rely on the real hook with `workflowRunId: null`; they pass post-fix in ~150–250ms each.
+- Prev/next path construction must `encodeURIComponent(sibling.sessionName)` because session names like `T-003.1` contain a `.` (safe) but other route identifiers may not; matching the existing transcript-link convention.
+
+## Status
+
+- T-004 implemented and verified locally.
+- New files:
+  - `packages/web/src/widgets/issue-workflow/model/useSiblingSessions.ts`
+  - `packages/web/src/widgets/issue-workflow/model/useSiblingSessions.test.tsx`
+- Modified files:
+  - `packages/web/src/pages/session/ui/SessionPage.tsx` — `SessionHeader` accepts a `siblingNav` slot; `SessionPage` calls `useSiblingSessions` and renders `SiblingNavigation` + `SiblingSessionsSidebar`.
+  - `packages/web/src/widgets/issue-workflow/index.ts` — exports `useSiblingSessions` and types.
+  - `packages/web/tests/SessionPage.test.tsx` — added 7 cases covering prev/next navigation, boundary disablement, and the sidebar (entry rendering, current highlight, xl: visibility contract).
+  - `packages/web/src/entities/coder-session/model/useWorkflowRunSessions.ts` — infinite-render fix (stable `EMPTY_SESSIONS` default, no spread in the sync effect). Unrelated to T-004 scope but exposed by it; fixed in the same commit to unblock the workflow.
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes — 2714 tests across 182 files (1 skipped pre-existing; +7 new SessionPage sibling tests, +11 new `useSiblingSessions` hook tests, +1 test in each previously-hanging SessionPage file now actually executes).

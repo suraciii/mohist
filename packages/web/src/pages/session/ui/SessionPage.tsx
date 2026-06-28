@@ -1,9 +1,11 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useIssue } from '../../../entities/issue'
 import { useCoderSessions } from '../../../entities/coder-session'
 import { getAgentSessionMetadata, getAgentSessionTranscript } from '../../../entities/coder-session'
+import type { WorkflowRunSession } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -13,6 +15,7 @@ import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
 import { SessionRecoveryActions } from '../../../widgets/coder-session'
 import { SessionFollowupComposer } from '../../../widgets/coder-session'
 import { ContextHealthBar } from '../../../widgets/session-health'
+import { useSiblingSessions } from '../../../widgets/issue-workflow'
 import { Button } from '@/shared/ui/components/button'
 
 type StatusKind = SessionStatusKind
@@ -255,6 +258,132 @@ function JumpToBottomButton({ onClick }: { onClick: () => void }) {
   )
 }
 
+interface SiblingNavigationProps {
+  issueNumber: number
+  previous: WorkflowRunSession | null
+  next: WorkflowRunSession | null
+}
+
+function SiblingNavigation({ issueNumber, previous, next }: SiblingNavigationProps) {
+  const toProjectPath = useProjectPath()
+  const previousPath = previous
+    ? toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(previous.sessionName)}`)
+    : null
+  const nextPath = next
+    ? toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(next.sessionName)}`)
+    : null
+
+  return (
+    <div className="flex items-center gap-1" data-testid="session-sibling-navigation">
+      {previous ? (
+        <Link
+          to={previousPath!}
+          className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          data-testid="session-sibling-prev"
+          title={`Previous session: ${previous.sessionName}`}
+          aria-label={`Previous session: ${previous.sessionName}`}
+        >
+          <ChevronLeftIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="font-mono">prev: {previous.sessionName}</span>
+        </Link>
+      ) : (
+        <span
+          className="inline-flex items-center gap-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-300 cursor-not-allowed"
+          data-testid="session-sibling-prev-disabled"
+          aria-disabled="true"
+          title="No previous session"
+        >
+          <ChevronLeftIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="font-mono">prev</span>
+        </span>
+      )}
+      {next ? (
+        <Link
+          to={nextPath!}
+          className="inline-flex items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          data-testid="session-sibling-next"
+          title={`Next session: ${next.sessionName}`}
+          aria-label={`Next session: ${next.sessionName}`}
+        >
+          <span className="font-mono">next: {next.sessionName}</span>
+          <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
+      ) : (
+        <span
+          className="inline-flex items-center gap-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-300 cursor-not-allowed"
+          data-testid="session-sibling-next-disabled"
+          aria-disabled="true"
+          title="No next session"
+        >
+          <span className="font-mono">next</span>
+          <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      )}
+    </div>
+  )
+}
+
+interface SiblingSessionsSidebarProps {
+  issueNumber: number
+  siblings: WorkflowRunSession[]
+  currentKey: string | null
+}
+
+function SiblingSessionsSidebar({ issueNumber, siblings, currentKey }: SiblingSessionsSidebarProps) {
+  const toProjectPath = useProjectPath()
+  if (siblings.length === 0) return null
+
+  return (
+    <aside
+      className="hidden xl:flex w-64 shrink-0 flex-col border-l border-gray-200 bg-white"
+      data-testid="session-sibling-sidebar"
+      aria-label="Sibling sessions"
+    >
+      <div className="px-3 py-2 border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        Sibling sessions
+      </div>
+      <nav className="flex-1 overflow-y-auto p-1">
+        {siblings.map((sibling) => {
+          const isCurrent = sibling.sessionName === currentKey
+          const path = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sibling.sessionName)}`)
+          const baseClass = 'flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors min-w-0'
+          const stateClass = isCurrent
+            ? 'bg-blue-50 text-blue-800 font-medium'
+            : 'text-gray-700 hover:bg-gray-100'
+          return (
+            <Link
+              key={sibling.id}
+              to={path}
+              className={`${baseClass} ${stateClass}`}
+              data-testid="session-sibling-sidebar-entry"
+              data-current={isCurrent ? 'true' : 'false'}
+              title={`Open ${sibling.sessionName} transcript`}
+              aria-current={isCurrent ? 'page' : undefined}
+            >
+              <span
+                className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                  sibling.status === 'completed'
+                    ? 'bg-green-500'
+                    : sibling.status === 'failed' || sibling.status === 'cancelled'
+                      ? 'bg-red-500'
+                      : sibling.status === 'running' || sibling.status === 'active' || sibling.status === 'probing'
+                        ? 'bg-blue-500'
+                        : 'bg-gray-400'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1 truncate font-mono">{sibling.sessionName}</span>
+              {isCurrent && (
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-blue-700">current</span>
+              )}
+            </Link>
+          )
+        })}
+      </nav>
+    </aside>
+  )
+}
+
 interface SessionHeaderProps {
   issueNumber: number
   issueTitle?: string
@@ -262,9 +391,10 @@ interface SessionHeaderProps {
   statusKind: StatusKind
   turnCount: number
   recoveryBar?: React.ReactNode
+  siblingNav?: React.ReactNode
 }
 
-function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, recoveryBar }: SessionHeaderProps) {
+function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, recoveryBar, siblingNav }: SessionHeaderProps) {
   const toProjectPath = useProjectPath()
   const isTerminal = statusKind === 'completed' || statusKind === 'failed'
   const createdAt = meta?.createdAt ?? new Date().toISOString()
@@ -298,7 +428,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, r
 
   return (
     <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0 min-w-0">
-      <div className="flex items-center gap-2 text-sm mb-2 min-w-0">
+      <div className="flex flex-wrap items-center gap-2 text-sm mb-2 min-w-0">
         <Link
           to={toProjectPath(`/issues/${issueNumber}`)}
           className="flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors whitespace-nowrap shrink-0"
@@ -313,6 +443,11 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount, r
             <span className="text-gray-300 shrink-0">/</span>
             <span className="text-gray-500 truncate min-w-0">{issueTitle}</span>
           </>
+        )}
+        {siblingNav && (
+          <div className="ml-auto shrink-0 flex items-center gap-1" data-testid="session-sibling-navigation-slot">
+            {siblingNav}
+          </div>
         )}
       </div>
 
@@ -449,6 +584,10 @@ export function SessionPage() {
     ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
     : s.id === decodedSessionId)
 
+  const siblingNav = useSiblingSessions(issue?.workflowRunId ?? null, {
+    currentKey: decodedSessionName ?? decodedSessionId ?? null,
+  })
+
   const routeSessionLookup = decodedSessionName ?? routeSessionKey
   const lookupKey = decodedSessionName ?? decodedSessionId
 
@@ -575,6 +714,22 @@ export function SessionPage() {
       </div>
     </div>
   ) : null
+
+  const siblingNavigation = (
+    <SiblingNavigation
+      issueNumber={issueNumber}
+      previous={siblingNav.previous}
+      next={siblingNav.next}
+    />
+  )
+
+  const siblingSidebar = (
+    <SiblingSessionsSidebar
+      issueNumber={issueNumber}
+      siblings={siblingNav.sessions}
+      currentKey={decodedSessionName ?? decodedSessionId ?? null}
+    />
+  )
 
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
@@ -705,43 +860,71 @@ export function SessionPage() {
 
   if (detail.incomplete && turns.length === 0) {
     return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <SessionHeader
-          issueNumber={issueNumber}
-          issueTitle={issue?.title}
-          meta={detail.metadata}
-          statusKind={displayStatusKind}
-          turnCount={displayTurnCount}
-          recoveryBar={recoveryBar}
-        />
-        <SessionLegacyMissingState />
+      <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
+        <div className="flex flex-col flex-1 min-h-0">
+          <SessionHeader
+            issueNumber={issueNumber}
+            issueTitle={issue?.title}
+            meta={detail.metadata}
+            statusKind={displayStatusKind}
+            turnCount={displayTurnCount}
+            recoveryBar={recoveryBar}
+            siblingNav={siblingNavigation}
+          />
+          <SessionLegacyMissingState />
+        </div>
+        {siblingSidebar}
       </div>
     )
   }
 
   if (turns.length === 0 && isRunning) {
     return (
-      <div className="flex flex-col flex-1 min-h-0">
-        <SessionHeader
-          issueNumber={issueNumber}
-          issueTitle={issue?.title}
-          meta={detail.metadata}
-          statusKind={displayStatusKind}
-          turnCount={displayTurnCount}
-          recoveryBar={recoveryBar}
-        />
-        <SessionWaitingState />
-        <SessionFollowupComposer
-          issueNumber={issueNumber}
-          sessionName={routeSessionKey}
-          disabled={!isRunning}
-        />
+      <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
+        <div className="flex flex-col flex-1 min-h-0">
+          <SessionHeader
+            issueNumber={issueNumber}
+            issueTitle={issue?.title}
+            meta={detail.metadata}
+            statusKind={displayStatusKind}
+            turnCount={displayTurnCount}
+            recoveryBar={recoveryBar}
+            siblingNav={siblingNavigation}
+          />
+          <SessionWaitingState />
+          <SessionFollowupComposer
+            issueNumber={issueNumber}
+            sessionName={routeSessionKey}
+            disabled={!isRunning}
+          />
+        </div>
+        {siblingSidebar}
       </div>
     )
   }
 
   if (turns.length === 0) {
     return (
+      <div className="flex flex-col flex-1 min-h-0 xl:flex-row">
+        <div className="flex flex-col flex-1 min-h-0">
+          <SessionHeader
+            issueNumber={issueNumber}
+            issueTitle={issue?.title}
+            meta={detail.metadata}
+            statusKind={displayStatusKind}
+            turnCount={displayTurnCount}
+            recoveryBar={recoveryBar}
+            siblingNav={siblingNavigation}
+          />
+          <SessionEmptyState issueNumber={issueNumber} />
+        </div>
+        {siblingSidebar}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 relative xl:flex-row">
       <div className="flex flex-col flex-1 min-h-0">
         <SessionHeader
           issueNumber={issueNumber}
@@ -750,47 +933,35 @@ export function SessionPage() {
           statusKind={displayStatusKind}
           turnCount={displayTurnCount}
           recoveryBar={recoveryBar}
+          siblingNav={siblingNavigation}
         />
-        <SessionEmptyState issueNumber={issueNumber} />
-      </div>
-    )
-  }
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto min-w-0"
+        >
+          <SessionTranscriptLayout
+            title={detail.metadata.sessionName ?? routeSessionKey ?? 'Session'}
+            turnCount={displayTurnCount}
+            turns={displayTurns}
+            statusKind={displayStatusKind}
+            isRunning={isRunning}
+            isThinking={isThinking}
+            isStreaming={isStreaming}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
 
-  return (
-    <div className="flex flex-col flex-1 min-h-0 relative">
-      <SessionHeader
-        issueNumber={issueNumber}
-        issueTitle={issue?.title}
-        meta={detail.metadata}
-        statusKind={displayStatusKind}
-        turnCount={displayTurnCount}
-        recoveryBar={recoveryBar}
-      />
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto min-w-0"
-      >
-        <SessionTranscriptLayout
-          title={detail.metadata.sessionName ?? routeSessionKey ?? 'Session'}
-          turnCount={displayTurnCount}
-          turns={displayTurns}
-          statusKind={displayStatusKind}
-          isRunning={isRunning}
-          isThinking={isThinking}
-          isStreaming={isStreaming}
-          scrollContainerRef={scrollContainerRef}
+        <SessionFollowupComposer
+          issueNumber={issueNumber}
+          sessionName={routeSessionKey}
+          disabled={!isRunning}
         />
+
+        {newContentAvailable && (
+          <JumpToBottomButton onClick={handleScrollToBottom} />
+        )}
       </div>
-
-      <SessionFollowupComposer
-        issueNumber={issueNumber}
-        sessionName={routeSessionKey}
-        disabled={!isRunning}
-      />
-
-      {newContentAvailable && (
-        <JumpToBottomButton onClick={handleScrollToBottom} />
-      )}
+      {siblingSidebar}
     </div>
   )
 }

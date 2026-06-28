@@ -39,3 +39,8 @@ export type {
   WorkflowPipelineStage,
   WorkflowSessionSortKey,
 } from './model/useWorkflowSessionFiltering'
+export { useSiblingSessions } from './model/useSiblingSessions'
+export type {
+  SiblingSessionNavigation,
+  UseSiblingSessionsOptions,
+} from './model/useSiblingSessions'

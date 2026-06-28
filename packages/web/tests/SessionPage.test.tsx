@@ -20,6 +20,12 @@ const sessionPageMocks = vi.hoisted(() => ({
   detailError: null as Error | null,
   detailPending: false,
   params: { number: '123', sessionName: 'session-123' },
+  workflowRunSessions: [] as Array<{
+    id: string
+    sessionName: string
+    status: string
+    createdAt: string
+  }>,
 }))
 
 vi.mock('react-router-dom', async () => {
@@ -32,6 +38,13 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
+}))
+
+vi.mock('../src/entities/coder-session/model/useWorkflowRunSessions', () => ({
+  useWorkflowRunSessions: () => ({
+    isLoading: false,
+    sessions: sessionPageMocks.workflowRunSessions,
+  }),
 }))
 
 vi.mock('../src/entities/issue/api/queries', () => ({
@@ -75,6 +88,7 @@ beforeEach(() => {
   sessionPageMocks.detailError = null
   sessionPageMocks.detailPending = false
   sessionPageMocks.params = { number: '123', sessionName: 'session-123' }
+  sessionPageMocks.workflowRunSessions = []
   Element.prototype.scrollTo = vi.fn()
 })
 
@@ -2308,6 +2322,289 @@ describe('SessionPage header and states', () => {
       const issueTitle = screen.getByText(longTitle)
       expect(issueTitle.className).toContain('truncate')
       expect(issueTitle.className).toContain('min-w-0')
+    })
+  })
+
+  describe('sibling session navigation and sidebar', () => {
+    function setWorkflowRunSessions(entries: Array<{ id: string; sessionName: string; status: string; createdAt: string }>) {
+      sessionPageMocks.workflowRunSessions = entries
+    }
+
+    it('renders prev/next controls for a mid-sequence session and links to the chronologically adjacent siblings', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
+        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
+      ])
+
+      const turns = [makeTurn({ id: 'turn-1' })]
+      const detail = makeMockDetail({
+        id: 'session-build',
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          stage: 'build',
+          sessionName: 'build',
+          sessionId: 'session-build',
+        }),
+      })
+      setupSessionPage({
+        detail,
+        turns,
+        sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      const prev = screen.getByTestId('session-sibling-prev')
+      const next = screen.getByTestId('session-sibling-next')
+
+      expect(prev.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/plan')
+      expect(next.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/check')
+      expect(prev.getAttribute('title')).toBe('Previous session: plan')
+      expect(next.getAttribute('title')).toBe('Next session: check')
+    })
+
+    it('disables the previous control when the current session is the first sibling in createdAt order', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'plan' } as any
+      setWorkflowRunSessions([
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'completed', createdAt: '2026-06-15T10:00:00.000Z' },
+        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
+      ])
+
+      const detail = makeMockDetail({
+        id: 'session-plan',
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          stage: 'plan',
+          sessionName: 'plan',
+          sessionId: 'session-plan',
+        }),
+      })
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-plan', sessionName: 'plan' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      expect(screen.queryByTestId('session-sibling-prev')).not.toBeInTheDocument()
+      const disabledPrev = screen.getByTestId('session-sibling-prev-disabled')
+      expect(disabledPrev.getAttribute('aria-disabled')).toBe('true')
+      expect(disabledPrev.textContent).toContain('prev')
+
+      const next = screen.getByTestId('session-sibling-next')
+      expect(next.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/build')
+    })
+
+    it('disables the next control when the current session is the last sibling in createdAt order', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'check' } as any
+      setWorkflowRunSessions([
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'completed', createdAt: '2026-06-15T10:00:00.000Z' },
+        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
+      ])
+
+      const detail = makeMockDetail({
+        id: 'session-check',
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          stage: 'check',
+          sessionName: 'check',
+          sessionId: 'session-check',
+        }),
+      })
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-check', sessionName: 'check' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      const prev = screen.getByTestId('session-sibling-prev')
+      expect(prev.getAttribute('href')).toBe('/Test%20Project/issues/55/workflow/sessions/build')
+
+      expect(screen.queryByTestId('session-sibling-next')).not.toBeInTheDocument()
+      const disabledNext = screen.getByTestId('session-sibling-next-disabled')
+      expect(disabledNext.getAttribute('aria-disabled')).toBe('true')
+      expect(disabledNext.textContent).toContain('next')
+    })
+
+    it('renders the sidebar with one entry per workflow-run sibling, ordered by createdAt ascending', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([
+        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
+      ])
+
+      const detail = makeMockDetail({
+        id: 'session-build',
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          stage: 'build',
+          sessionName: 'build',
+          sessionId: 'session-build',
+        }),
+      })
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      const sidebar = screen.getByTestId('session-sibling-sidebar')
+      const entries = within(sidebar).getAllByTestId('session-sibling-sidebar-entry')
+
+      expect(entries).toHaveLength(3)
+      const names = entries.map((node) => node.querySelector('span.font-mono')?.textContent)
+      expect(names).toEqual(['plan', 'build', 'check'])
+
+      const hrefs = entries.map((node) => node.getAttribute('href'))
+      expect(hrefs).toEqual([
+        '/Test%20Project/issues/55/workflow/sessions/plan',
+        '/Test%20Project/issues/55/workflow/sessions/build',
+        '/Test%20Project/issues/55/workflow/sessions/check',
+      ])
+    })
+
+    it('highlights the currently viewed session in the sidebar and marks it with aria-current=page', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
+        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
+      ])
+
+      const detail = makeMockDetail({
+        id: 'session-build',
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          stage: 'build',
+          sessionName: 'build',
+          sessionId: 'session-build',
+        }),
+      })
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      const sidebar = screen.getByTestId('session-sibling-sidebar')
+      const entries = within(sidebar).getAllByTestId('session-sibling-sidebar-entry')
+
+      const current = entries.find((node) => node.getAttribute('data-current') === 'true')
+      expect(current).toBeDefined()
+      expect(current?.getAttribute('aria-current')).toBe('page')
+      expect(current?.textContent).toContain('current')
+      expect(current?.className).toContain('bg-blue-50')
+
+      // Non-current entries are not marked current.
+      const others = entries.filter((node) => node.getAttribute('data-current') !== 'true')
+      expect(others).toHaveLength(2)
+      others.forEach((node) => {
+        expect(node.getAttribute('aria-current')).toBeNull()
+      })
+    })
+
+    it('hides the sidebar entirely when the workflow run has no sessions but keeps prev/next always visible', async () => {
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([])
+
+      const detail = makeMockDetail({
+        id: 'session-build',
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          stage: 'build',
+          sessionName: 'build',
+          sessionId: 'session-build',
+        }),
+      })
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [{ ...makeMockSession(), id: 'session-build', sessionName: 'build' }],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      expect(screen.queryByTestId('session-sibling-sidebar')).not.toBeInTheDocument()
+      // The prev/next controls live in the header and are always rendered.
+      expect(screen.getByTestId('session-sibling-prev-disabled')).toBeInTheDocument()
+      expect(screen.getByTestId('session-sibling-next-disabled')).toBeInTheDocument()
+    })
+
+    it('uses the same session set as WorkflowSessionsPanel for the same workflow run', async () => {
+      // The SessionPage sidebar and the WorkflowSessionsPanel both source their
+      // session set from useWorkflowRunSessions(issue.workflowRunId). This test
+      // verifies that even when useCoderSessions returns a different (legacy)
+      // session list, the sidebar still reflects the workflow-run session set.
+      sessionPageMocks.params = { number: '55', sessionName: 'build' } as any
+      setWorkflowRunSessions([
+        { id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-15T08:00:00.000Z' },
+        { id: 's-build', sessionName: 'build', status: 'running', createdAt: '2026-06-15T10:00:00.000Z' },
+        { id: 's-check', sessionName: 'check', status: 'completed', createdAt: '2026-06-15T12:00:00.000Z' },
+      ])
+
+      const detail = makeMockDetail({
+        id: 'session-build',
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          stage: 'build',
+          sessionName: 'build',
+          sessionId: 'session-build',
+        }),
+      })
+      // The legacy useCoderSessions list is intentionally empty and inconsistent
+      // with the workflow run's session set. The sidebar must NOT follow it.
+      setupSessionPage({
+        detail,
+        turns: [makeTurn({ id: 'turn-1' })],
+        sessions: [],
+        issue: { number: 55, title: 'Issue 55', workflowRunId: 'wr-1' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #55')
+
+      const sidebar = screen.getByTestId('session-sibling-sidebar')
+      const entries = within(sidebar).getAllByTestId('session-sibling-sidebar-entry')
+      const names = entries.map((node) => node.querySelector('span.font-mono')?.textContent)
+      expect(names).toEqual(['plan', 'build', 'check'])
     })
   })
 })
