@@ -107,10 +107,16 @@ function LinkedIssueRow({
   hasInProgress: boolean
 }) {
   const toProjectPath = useProjectPath()
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
   const showStart = canInlineStartRow(issue, hasInProgress)
   const blockerReason = showStart
     ? null
     : deriveStartBlockerReason({ issue, hasInProgress })
+
+  function handleConfirmRemove() {
+    setRemoveConfirmOpen(false)
+    onRemove(issue.id)
+  }
 
   return (
     <Card className="flex flex-col gap-2 p-4" data-testid="linked-issue-row">
@@ -156,14 +162,44 @@ function LinkedIssueRow({
         )}
         <Button
           type="button"
-          variant="outline"
-          onClick={() => onRemove(issue.id)}
+          variant="ghost"
+          onClick={() => setRemoveConfirmOpen(true)}
           disabled={disabled}
           data-testid="linked-issue-remove"
         >
           Remove
         </Button>
       </div>
+      <Dialog open={removeConfirmOpen} onOpenChange={(v) => !v && setRemoveConfirmOpen(false)}>
+        <DialogContent data-testid="linked-issue-remove-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>Remove #{issue.number} from this Epic?</DialogTitle>
+            <DialogDescription>
+              Unlinking does not change the issue&apos;s workflow state. The issue will remain in the project and can be re-linked to this or another Epic later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRemoveConfirmOpen(false)}
+              disabled={disabled}
+              data-testid="linked-issue-remove-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmRemove}
+              disabled={disabled}
+              data-testid="linked-issue-remove-confirm"
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

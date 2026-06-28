@@ -16,6 +16,8 @@ Issue 280 — Mobile-first adaptation of Epic linked-issue rows & Graph.
   `linked-issue-row`, `linked-issue-reading-row`, `linked-issue-metadata-row`,
   `linked-issue-actions-row`, `linked-issue-blocker-reason`,
   `linked-issue-title`, `linked-issue-remove` (Remove button).
+  T-002 adds: `linked-issue-remove-confirm-dialog` (DialogContent),
+  `linked-issue-remove-cancel`, `linked-issue-remove-confirm`.
 - `canInlineStartRow(issue, hasInProgress)` is the sole gate for the Start
   button; the deriveStartBlockerReason function reuses the same boolean as
   the sole render gate for the blocker reason.
@@ -49,6 +51,32 @@ Issue 280 — Mobile-first adaptation of Epic linked-issue rows & Graph.
 - The Remove button kept its existing onClick→onRemove behavior on T-001.
   The two-step confirm flow is owned by T-002 (per task scope).
 
+## Decisions / Discoveries (T-002)
+
+- D4 Remove confirm flow: per-row local `removeConfirmOpen` state in
+  `LinkedIssueRow`. Remove button variant flipped from `outline` to `ghost`
+  (secondary de-emphasized affordance). Click on Remove now opens a
+  `<Dialog>` (same component as Close/Pause confirms). The dialog:
+    - Title: `Remove #{issue.number} from this Epic?`
+    - Description explains unlink does not change issue workflow state
+      and the issue can be re-linked to another Epic later.
+    - Cancel (`variant="outline"`) closes the dialog without calling
+      `onRemove`.
+    - Confirm (`variant="destructive"`) closes the dialog and then calls
+      `onRemove(issue.id)` — the only path to `removeEpicIssue.mutate`.
+  All three buttons (Remove trigger, dialog Cancel, dialog Confirm) are
+  wired to the same `disabled` prop sourced from `removeEpicIssue.isPending`
+  in the page. When pending, the Remove trigger is disabled so the dialog
+  cannot be opened mid-mutation; this is also how the wiring flows through
+  to the dialog buttons if a stale dialog were left open.
+- `handleConfirmRemove` order: close the dialog first, then fire `onRemove`.
+  Closing first prevents the user from triggering a second click during
+  the pending window (the dialog unmounts before the mutation kicks off).
+- Existing `onRemove` callback signature `(issueId: string) => void` was
+  preserved (the page still wraps it with `{ epicId, issueId }`). T-002
+  does not change the page-level wiring — only what `LinkedIssueRow` does
+  before calling it.
+
 ## Gotchas
 
 - An existing test asserted that the LinkedIssueRow action container has
@@ -62,6 +90,15 @@ Issue 280 — Mobile-first adaptation of Epic linked-issue rows & Graph.
   'Still a draft' as the row's blocker reason, so the assertion was
   scoped to the `next-issue-region` testid (where the advancement copy
   actually lives). The semantic intent of the test is preserved.
+- When `removeEpicIssue.isPending` is true, the Remove button itself is
+  disabled, so the confirm dialog cannot be opened through normal UI to
+  verify the dialog's Cancel/Confirm buttons are also disabled. The T-002
+  test instead asserts (a) Cancel/Confirm are NOT disabled while the
+  mutation is idle (sanity check that the `disabled` prop wires through),
+  and (b) the Remove button is disabled and a click does not open the
+  dialog while pending (proves the same prop gates the dialog access).
+  Both buttons share the same `disabled={disabled}` source so this is
+  sufficient to prove the wiring.
 
 ## Verification
 
@@ -72,3 +109,28 @@ Issue 280 — Mobile-first adaptation of Epic linked-issue rows & Graph.
   tests in the new `EpicDetailPage LinkedIssueRow vertical task line
   layout (T-001)` describe block. Note: an additional 7 tests are in
   that describe block; the diff to 2739 covers 7 + 5 = 12 net new.)
+- T-002 verification:
+  - `npm run typecheck -w packages/web` — passes.
+  - `npm run test:run -w packages/web` — 2751 passed, 1 skipped, 0
+    failed. Net 12 new tests in the new `EpicDetailPage LinkedIssueRow
+    Remove confirmation flow (T-002)` describe block:
+      1. Remove button is in actions row, not reading row.
+      2. Remove button uses ghost variant (hover:bg-muted, no border).
+      3. Single click on Remove does NOT call removeEpicIssue.mutate.
+      4. Clicking Remove opens a confirmation Dialog showing issue number
+         and explanation text.
+      5. The confirm dialog is NOT in the DOM before Remove is clicked.
+      6. Clicking Cancel keeps link intact, closes dialog, no mutate.
+      7. Clicking Confirm (destructive) calls mutate with right args.
+      8. Confirm button has destructive styling.
+      9. Cancel button has outline styling.
+      10. Cancel and Confirm are NOT disabled while idle (wiring sanity).
+      11. Remove is disabled and gates the dialog while pending.
+      12. Per-row local state — opening one row's dialog does not open
+          another row's dialog.
+    Two pre-existing tests were updated to the two-step flow:
+      - `removes a linked issue from the detail page` (EpicDetailPage)
+        — now clicks Remove → asserts no mutate → clicks Confirm →
+        asserts mutate.
+      - `keeps the Linked Issues list and add-issue selector fully
+        functional when the graph is the default tab` — same update.
