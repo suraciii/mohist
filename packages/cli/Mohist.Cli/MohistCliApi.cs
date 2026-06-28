@@ -819,6 +819,9 @@ internal sealed class MohistCliApi
         SessionMetadata,
         SessionTranscriptSummary,
         SessionRecovery,
+        AgentSessionLaunch,
+        AgentSessionFollowup,
+        AgentSessionCancel,
     }
 
     internal static TableShape ParseTableShape(string? shape)

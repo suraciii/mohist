@@ -759,3 +759,186 @@ section first).
   test double. Both sides treat it as a thin wrapper around the
   runner's reported string; the runner itself emits an untyped
   `{ state: "..." }` JSON object via SignalR.
+
+## T-006 — CLI: `mo agent session` subgroup (launch / followup / cancel)
+
+### Findings
+
+- `MohistCliCommands.Agent.cs:11` gained a `BuildSession` factory that
+  attaches a new `session` subcommand under `agent`. The new
+  subcommand tree mirrors the existing `mo issue session` subgroup:
+  three peer commands (`launch`, `followup`, `cancel`) reusing the
+  shared `MohistCliApi` helpers (`ProjectRefOption`, `OutputOption`,
+  `PrintPostWithOutputAsync`, `ValidateOutputMode`,
+  `ResolveProjectIdAsync`).
+- New `ProjectAgentSessionsPath(projectId, path)` URL helper alongside
+  the existing `ProjectAgentsPath` for the
+  `/api/projects/{projectId}/agent-sessions/...` URL family
+  (followup, cancel). Launch reuses `ProjectAgentsPath` because the
+  launch URL is rooted at
+  `/api/projects/{projectId}/agents/{agentId}/sessions`.
+- `BodyInputResolver.cs` now exposes a second `ResolveAsync` overload
+  that takes a `SourceFlags` record carrying the inline/file/stdin
+  flag labels and the body-kind noun (e.g. `prompt` vs `text`). The
+  legacy 4-arg overload (used by `mo issue create`) is preserved as
+  a thin wrapper that supplies the existing
+  `--body` / `--body-file` / `--body-stdin` labels so the issue
+  body error messages stay byte-identical. The generic overload also
+  rejects whitespace-only resolved bodies so the CLI short-circuits
+  the server's `prompt_required` / `followup_text_missing` 400 path
+  without a wasted HTTP roundtrip — the server still wins as the
+  source of truth when a non-whitespace body slips past the client
+  gate.
+- New commands accept `--project` and `--project-id` (the existing
+  cross-resolving pair from `MohistCliCommands.ProjectRefOption()`)
+  and `-o table|json` (via `MohistCliCommands.OutputOption()`).
+  Default output for all three is `table` so first-time use is
+  human-readable; `-o json` prints the raw server payload (delegated
+  to `PrintPostWithOutputAsync`, which already handles success/error
+  envelope decoding).
+- `launch <agent>` resolves the agent client-side via the existing
+  `ResolveAgentAsync` helper (id-by-id for `agent_*` refs, name-by-
+  list otherwise), then posts `{ prompt }` (plus optional `context`
+  with `issueNumber` / `epicNumber` / `repository` / `workspacePath`
+  when the caller passes `--issue` / `--epic` / `--repository` /
+  `--workspace-path`) to
+  `/api/projects/:projectId/agents/:agentId/sessions`. Response is
+  rendered as a four-line table (`session id`, `agent id`,
+  `agent name`, `status`).
+- `followup <session-id>` posts
+  `{ text }` to `/api/projects/:projectId/agent-sessions/:sessionId/followup`.
+  Response rendered as `delivery: <status>` (the server returns
+  `{ status: "sent" }`). Server errors (400 empty text, 404 unknown
+  session, 409 terminal, 503 runner offline) are surfaced through
+  `PrintPostWithOutputAsync`'s error-envelope handling — the CLI
+  prints `error (code)` to stderr and exits non-zero (404 → 4,
+  others → 1).
+- `cancel <session-id>` posts `{}` to
+  `/api/projects/:projectId/agent-sessions/:sessionId/cancel`.
+  Response rendered as `state: <state>` so the caller sees the
+  runner's honest verdict (`cancelled`, `not-cancellable`, or a
+  terminal-state name like `completed` / `failed` / `stopped`). The
+  CLI never invents success: `not-cancellable` is printed verbatim
+  and the exit code is 0 (the API returned 200), but the user-visible
+  string is honest. 404 (unknown session) and 502
+  (`runner_no_response`) still exit non-zero.
+- New `TableShape` enum values
+  (`AgentSessionLaunch`, `AgentSessionFollowup`, `AgentSessionCancel`)
+  added to `MohistCliApi.cs:539` and dispatched in
+  `TableRenderer.cs:117`. Renderers live in
+  `TableRenderer.Entities.cs` alongside the existing `AgentShow` /
+  `AgentList` renderers — they share the existing `StringOf` /
+  `WriteLine` infrastructure (no new helpers needed; the response
+  payloads are flat strings).
+- Tests added in `CliAgentSessionCommandSpecs.cs` (32 tests, all
+  passing):
+  - `AgentHelp_ListsSessionSubcommand` /
+    `SessionHelp_ListsLaunchFollowupCancel` /
+    `SessionLaunchHelp_ListsPromptInputFlags` /
+    `SessionFollowupHelp_ListsTextInputFlags` — help-text surface
+    checks; `-` separated by command because System.CommandLine's
+    `command --help` doesn't recursively list subcommand options.
+  - `SessionLaunch_Table_ResolvesAgentAndPrintsSessionIdentity` —
+    happy path: agent list → POST launch → 201; stdout contains
+    `session id`, `agent id`, `agent name`, `status`; the launch
+    body carries the prompt verbatim.
+  - `SessionLaunch_Json_PrintsRawServerPayload` /
+    `SessionFollowup_Json_PrintsRawPayload` /
+    `SessionCancel_Json_PrintsRawPayload` — `-o json` emits the raw
+    envelope (server response shape preserved).
+  - `SessionLaunch_PromptFile_ReadsFileAndSendsContents` /
+    `SessionLaunch_PromptStdin_ReadsFromStdin` /
+    `SessionFollowup_TextFile_ReadsFileAndSendsContents` /
+    `SessionFollowup_TextStdin_ReadsFromStdin` — body-source
+    variants. Each resolves through the same `BodyInputResolver`
+    helper with the right `SourceFlags`.
+  - `SessionLaunch_MissingAllPromptSources_FailsClearlyWithExitOne` /
+    `SessionLaunch_EmptyPrompt_FailsClearly` /
+    `SessionFollowup_MissingAllTextSources_FailsClearly` /
+    `SessionFollowup_EmptyText_FailsClearly` — validation paths;
+    no HTTP request is recorded (the CLI short-circuits).
+  - `SessionLaunch_MultiplePromptSources_FailsClearly` — the
+    mutually-exclusive flag guard (e.g. `--prompt` + `--prompt-file`).
+  - `SessionLaunch_UnknownAgentByName_SurfacesErrorWithoutSilentSuccess` /
+    `SessionLaunch_UnknownAgentById_SurfacesServer404Error` — both
+    agent-resolution paths. The friendly-name path errors client-side
+    (the list comes back empty) and never reaches the launch endpoint;
+    the `agent_*` path hits
+    `GET /api/projects/:projectId/agents/agent_missing` and the server
+    404 is surfaced. Both exit non-zero with a clear message.
+  - `SessionLaunch_EmptyPromptRejectedByServer_SurfacesServerMessage` —
+    client short-circuits a whitespace file before the server sees it;
+    verifies the `Result.Failure` path returns exit 1 without a
+    recorded HTTP request.
+  - `SessionLaunch_WithContextRefs_SendsContextInBody` — optional
+    `--issue` / `--epic` / `--repository` / `--workspace-path` flags
+    are packed under a `context` object in the launch body so the
+    server can stamp them as session metadata.
+  - `SessionLaunch_RespectsProjectIdOption` /
+    `SessionCancel_RespectsProjectOption` — both `--project` and
+    `--project-id` resolve through
+    `MohistCliCommands.ProjectRefOption()` and the URL reflects the
+    resolved project id.
+  - `SessionFollowup_UnknownSession_SurfacesServerErrorWithoutSilentSuccess` /
+    `SessionFollowup_TerminalSession_SurfacesConflict` — 404 (exit 4)
+    and 409 (exit 1) surface the server message verbatim with the
+    code suffix; no output is printed.
+  - `SessionCancel_NotCancellable_SurfacesStateHonestlyWithoutReportingSuccess` /
+    `SessionCancel_TerminalState_SurfacesTerminal` — the runner's
+    honest state is rendered without faking success. The
+    not-cancellable test asserts stdout contains the literal
+    `state: not-cancellable` and **not** `cancelled`.
+  - `SessionCommand_ServerUnavailableSurfacesStandardError` /
+    `SessionLaunch_InvalidOutputMode_ExitsOne` — wiring-level
+    coverage: HTTP transport errors surface the standard
+    "Server is not running" message; bad `-o yaml` is rejected with
+    the existing `ValidateOutputMode` error.
+
+### Gotchas
+
+- **The launch agent-by-id `agent_*` resolution path is unchanged.**
+  `ResolveAgentAsync` was already used by `agent show` /
+  `agent update` / `agent delete`. Its behaviour (id-by-id GET,
+  name-by-list GET) is preserved end-to-end; the new `session
+  launch` command just reuses it. The acceptance criterion
+  "Unknown agent surfaces server error" is satisfied by both paths:
+  the friendly-name path errors client-side with a clear message,
+  the id path surfaces the server's 404 via the existing
+  `PrintPostWithOutputAsync` error envelope.
+- **`-o` default is `table` for all three new commands**, matching
+  the issue-session subgroup's default (compact/reset use `table`).
+  The web/CLI consistency rule from prior agents (list/show defaults
+  to `json`) is overridden here because the user is staring at the
+  outcome of a single command — they want to see the session id,
+  not a JSON envelope.
+- **Help for `mo agent session --help` does NOT list the
+  `--prompt` / `--text` flags of the subcommands.** System.CommandLine
+  shows only the subcommand names at the parent `--help`; the
+  per-subcommand flags only appear in `mo agent session launch
+  --help` / `mo agent session followup --help`. This matches the
+  existing `mo issue session` group's help behaviour and is a
+  library-level decision, not a CLI design choice.
+- **`ProjectAgentSessionsPath` is a private static helper, not a
+  public method on `MohistCliApi`.** The helper-then-path pattern
+  matches `ProjectAgentsPath` (`MohistCliCommands.Agent.cs:34`):
+  one helper per URL family, escape the project id, prepend the
+  project prefix, append the suffix. Kept private because no other
+  command file needs it today.
+- **`BodyInputResolver` SourceFlags is a sealed record on the
+  resolver class itself** so callers cannot accidentally construct
+  it with mismatched flag labels (the body-kind noun is the
+  user-visible label, the flag labels are the option names). The
+  legacy 4-arg overload passes through the existing issue-body
+  labels so the issue body's error message stays byte-identical.
+- **The launch response is rendered with a fixed four-line table**
+  (session id / agent id / agent name / status). If the server
+  adds fields to the launch response (e.g. `createdAt`, `runnerId`)
+  they will not appear in table mode — `-o json` is the right
+  escape hatch. This is a deliberate tradeoff matching the issue
+  compact/reset commands' table shape.
+- **`-o json` for cancel prints the full server envelope, not just
+  the `state` field.** Callers that need to parse `state` should
+  pipe through `jq '.data.state'`. The envelope-vs-data split
+  matches the existing `PrintPostWithOutputAsync` contract — `-o
+  json` is "what the server sent", `table` is "what the user
+  wants to see".
