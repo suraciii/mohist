@@ -25,11 +25,19 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildShow(api));
         agent.Subcommands.Add(BuildUpdate(api));
         agent.Subcommands.Add(BuildDelete(api));
+        agent.Subcommands.Add(BuildSession(api));
 
         return agent;
     }
 
     private static Argument<string> NameOrIdArg() => new("name-or-id") { Description = "Agent name or id" };
+
+    private static string ProjectAgentSessionsPath(string? projectId, string path = "")
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new InvalidOperationException(MohistCliCommands.NoActiveProjectMessage);
+        return $"/api/projects/{MohistCliCommands.Escape(projectId)}/agent-sessions{(path.StartsWith('/') ? path : "/" + path)}";
+    }
 
     private static string ProjectAgentsPath(string? projectId, string path = "")
     {
@@ -344,6 +352,222 @@ internal static class AgentCommands
             }
         });
         return cmd;
+    }
+
+    private static Command BuildSession(MohistCliApi api)
+    {
+        var session = new Command(
+            "session",
+            "Manage a generic AgentSession launched from an Agent profile (issue-129). Subcommands: launch <agent>, followup <sessionId>, cancel <sessionId>.");
+
+        session.Subcommands.Add(BuildSessionLaunch(api));
+        session.Subcommands.Add(BuildSessionFollowup(api));
+        session.Subcommands.Add(BuildSessionCancel(api));
+
+        return session;
+    }
+
+    private static Command BuildSessionLaunch(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "launch",
+            "Launch a generic AgentSession from an Agent profile. Sends POST /api/projects/:projectId/agents/:agentId/sessions.");
+        var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
+        var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file and --prompt-stdin)" };
+        var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path (recommended for long prompts; mutually exclusive with --prompt and --prompt-stdin)" };
+        var promptStdinOpt = new Option<bool>("--prompt-stdin") { Description = "Read prompt from stdin (mutually exclusive with --prompt and --prompt-file)" };
+        var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
+        var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
+        var repositoryRefOpt = new Option<string?>("--repository") { Description = "Optional context reference: record the repository on the session metadata" };
+        var workspacePathOpt = new Option<string?>("--workspace-path") { Description = "Optional context reference: record the workspace path on the session metadata" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(agentRefArg);
+        cmd.Options.Add(promptOpt);
+        cmd.Options.Add(promptFileOpt);
+        cmd.Options.Add(promptStdinOpt);
+        cmd.Options.Add(issueRefOpt);
+        cmd.Options.Add(epicRefOpt);
+        cmd.Options.Add(repositoryRefOpt);
+        cmd.Options.Add(workspacePathOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var agentRef = ctx.GetValue(agentRefArg);
+            var prompt = ctx.GetValue(promptOpt);
+            var promptFile = ctx.GetValue(promptFileOpt);
+            var promptStdin = ctx.GetValue(promptStdinOpt);
+            var issueRef = ctx.GetValue(issueRefOpt);
+            var epicRef = ctx.GetValue(epicRefOpt);
+            var repositoryRef = ctx.GetValue(repositoryRefOpt);
+            var workspacePath = ctx.GetValue(workspacePathOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return LaunchAsync();
+
+            async Task<int> LaunchAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
+                {
+                    api.Error.WriteLine(invalidOutput.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var resolvedPrompt = await BodyInputResolver.ResolveAsync(
+                    prompt, promptFile, promptStdin,
+                    new BodyInputResolver.SourceFlags("--prompt", "--prompt-file", "--prompt-stdin", "prompt"),
+                    api.FileSystem, api.StandardInput, api.Error);
+                if (resolvedPrompt is BodyInputResolver.Result.Failure)
+                    return 1;
+                var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
+
+                var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);
+                object body = contextRefs is null
+                    ? new { prompt = promptText }
+                    : new { prompt = promptText, context = contextRefs };
+
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintPostWithOutputAsync(
+                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions"),
+                    body,
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionLaunch),
+                    rawJson: true);
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionFollowup(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "followup",
+            "Send followup text to a running generic AgentSession. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/followup.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Agent session id returned by launch" };
+        var textOpt = new Option<string?>("--text") { Description = "Followup text (mutually exclusive with --text-file and --text-stdin)" };
+        var textFileOpt = new Option<string?>("--text-file") { Description = "Read followup text from a UTF-8 file path (recommended for long messages; mutually exclusive with --text and --text-stdin)" };
+        var textStdinOpt = new Option<bool>("--text-stdin") { Description = "Read followup text from stdin (mutually exclusive with --text and --text-file)" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(textOpt);
+        cmd.Options.Add(textFileOpt);
+        cmd.Options.Add(textStdinOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var text = ctx.GetValue(textOpt);
+            var textFile = ctx.GetValue(textFileOpt);
+            var textStdin = ctx.GetValue(textStdinOpt);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return FollowupAsync();
+
+            async Task<int> FollowupAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
+                {
+                    api.Error.WriteLine(invalidOutput.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var resolvedText = await BodyInputResolver.ResolveAsync(
+                    text, textFile, textStdin,
+                    new BodyInputResolver.SourceFlags("--text", "--text-file", "--text-stdin", "text"),
+                    api.FileSystem, api.StandardInput, api.Error);
+                if (resolvedText is BodyInputResolver.Result.Failure)
+                    return 1;
+                var textValue = ((BodyInputResolver.Result.Success)resolvedText).Body;
+
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintPostWithOutputAsync(
+                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),
+                    new { text = textValue },
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionFollowup),
+                    rawJson: true);
+            }
+        });
+        return cmd;
+    }
+
+    private static Command BuildSessionCancel(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "cancel",
+            "Request cancellation of a running generic AgentSession. Sends POST /api/projects/:projectId/agent-sessions/:sessionId/cancel and prints the resulting session state honestly (cancelled / not-cancellable / terminal-state).");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Agent session id returned by launch" };
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return CancelAsync();
+
+            async Task<int> CancelAsync()
+            {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
+                {
+                    api.Error.WriteLine(invalidOutput.Message);
+                    return 1;
+                }
+
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintPostWithOutputAsync(
+                    ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/cancel"),
+                    new { },
+                    mode,
+                    nameof(MohistCliApi.TableShape.AgentSessionCancel),
+                    rawJson: true);
+            }
+        });
+        return cmd;
+    }
+
+    private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspacePath)
+    {
+        if (issue is null && string.IsNullOrWhiteSpace(epic) && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+            return null;
+
+        return new
+        {
+            issueNumber = issue,
+            epicNumber = string.IsNullOrWhiteSpace(epic) ? null : epic,
+            repository = string.IsNullOrWhiteSpace(repository) ? null : repository,
+            workspacePath = string.IsNullOrWhiteSpace(workspacePath) ? null : workspacePath,
+        };
     }
 
     private static async Task<string?> ResolveInstructionsAsync(string? instructions, bool instructionsStdin, MohistCliApi api)

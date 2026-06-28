@@ -72,12 +72,18 @@ export interface AcpPromptRunResult {
 export type AcpPromptRunner = (prompt: string) => Promise<AcpPromptRunResult>
 
 export async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+  if (context.ownerKind === "agent-job") {
+    return context.agentSessionId
+      ? runAcpGenericAgentSession(context, prompt)
+      : runEphemeralWorkflowAgentSession(context, prompt)
+  }
+
   const sessionName = sessionNameFromContext(context)
   const manager = context.acpSessionManager
   const projectId = context.projectId
 
   if (sessionName && manager && context.serverConnection && projectId) {
-    const key = manager.key(context.workflowRunId, sessionName)
+    const key = manager.workflowKey(context.workflowRunId, sessionName)
     const agentConfig = resolveAgentConfig(context.with)
     const requestedModel = resolveRequestedModel(context, agentConfig).model
     const existing = await context.serverConnection.getWorkflowAgentSession(projectId, context.workflowRunId, sessionName, context.signal)
@@ -118,6 +124,49 @@ export async function runAcpWorkflowAgentSession(context: ActionContext, prompt:
   }
 
   return runEphemeralWorkflowAgentSession(context, prompt)
+}
+
+export async function runAcpGenericAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+  const sessionId = context.agentSessionId
+  const manager = context.acpSessionManager
+  const projectId = context.projectId
+  const serverConnection = context.serverConnection
+
+  if (!sessionId || !manager || !serverConnection || !projectId) {
+    return runEphemeralWorkflowAgentSession(context, prompt)
+  }
+
+  const key = manager.genericKey(sessionId)
+  const agentConfig = resolveAgentConfig(context.with)
+  const requestedModel = resolveRequestedModel(context, agentConfig).model
+  const existing = await serverConnection.getAgentSession(projectId, sessionId, context.signal)
+  const openBody = {
+    workId: context.workId,
+    workType: context.workType,
+    stage: context.stage,
+    title: context.title,
+    issueNumber: context.issueNumber,
+  }
+  const session = existing?.acpSessionId
+    ? existing
+    : await serverConnection.openAgentSession(projectId, sessionId, openBody, context.signal)
+
+  if (session.acpSessionId) {
+    const cached = manager.get(key)
+    const sessionModelMatches = requestedModelMatchesSession(requestedModel, session.model)
+    if (cached?.sessionId === session.acpSessionId && cachedModelAllowsReuse(requestedModel, cached.model) && sessionModelMatches) {
+      return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+    }
+    const result = sessionModelMatches
+      ? await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+      : await runNewWorkflowAgentSession(context, prompt)
+    if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir, model: requestedModel })
+    return result
+  }
+
+  const result = await runNewWorkflowAgentSession(context, prompt)
+  if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir, model: requestedModel })
+  return result
 }
 
 export async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -336,12 +337,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ? null
             : JSON.Serialize(payload);
 
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["prompt"] = JSON.SerializeToElement(input.Prompt),
-        };
+        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        ComposePromptWithEntry(with, input);
         if (!string.IsNullOrWhiteSpace(input.Model))
             with["model"] = JSON.SerializeToElement(input.Model);
+        ApplyAgentRuntimeConfig(with, input.AgentConfig, input.Model);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
@@ -354,7 +354,63 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             Stage: "agent",
             Title: "Agent Job",
             OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-            AgentJobId: Key);
+            AgentJobId: Key,
+            ProjectId: string.IsNullOrWhiteSpace(input.ProjectId) ? null : input.ProjectId,
+            AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId);
+    }
+
+    /// <summary>
+    /// Populates the <c>with.prompt</c> entry on the dispatch envelope. When
+    /// an Agent profile is supplied, the Agent's <c>Instructions</c> and
+    /// <c>AgentConfig</c> snapshot are composed with the caller's prompt
+    /// into a single execution input so the installed external agent
+    /// receives the composed bytes rather than the bare prompt. When no
+    /// Agent profile is supplied (raw-prompt-only AgentJob), the caller's
+    /// prompt is passed through unchanged.
+    /// </summary>
+    internal static void ComposePromptWithEntry(
+        Dictionary<string, JsonElement?> with,
+        AgentJobInput input)
+    {
+        var hasAgent = !string.IsNullOrWhiteSpace(input.AgentId)
+            || !string.IsNullOrWhiteSpace(input.AgentInstructions)
+            || input.AgentConfig is not null;
+
+        if (!hasAgent)
+        {
+            with["prompt"] = JSON.SerializeToElement(input.Prompt);
+            return;
+        }
+
+        var composed = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
+            composed["instructions"] = input.AgentInstructions;
+        if (input.AgentConfig is { ValueKind: not JsonValueKind.Undefined } configElement)
+            composed["config"] = configElement.Clone();
+        composed["prompt"] = input.Prompt;
+
+        with["prompt"] = JSON.SerializeToElement(
+            new Dictionary<string, object?> { ["agent-launch"] = composed });
+    }
+
+    private static void ApplyAgentRuntimeConfig(
+        Dictionary<string, JsonElement?> with,
+        JsonElement? agentConfig,
+        string? modelOverride)
+    {
+        if (agentConfig is not { ValueKind: JsonValueKind.Object } config)
+            return;
+
+        if (string.IsNullOrWhiteSpace(modelOverride))
+        {
+            with["agent"] = config.Clone();
+            return;
+        }
+
+        var agent = JSON.Deserialize<Dictionary<string, JsonElement>>(config.GetRawText())
+            ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        agent["model"] = JSON.SerializeToElement(modelOverride);
+        with["agent"] = JSON.SerializeToElement(agent);
     }
 
     private async Task ScheduleNextDispatchAsync()
@@ -390,13 +446,42 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task OnJobTimeoutAsync()
     {
-        if (_status != AgentJobStatus.Running || !JobTimeoutExceeded())
+        if (_status != AgentJobStatus.Running)
             return;
 
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to failed",
             Key, _options.JobTimeout);
         await FailWithReasonAsync(AgentJobFailureReasons.ReportTimeout);
+    }
+
+    private async Task CloseGenericSessionOnFailureAsync(string reason)
+    {
+        var sessionId = _input?.AgentSessionId;
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        try
+        {
+            var grain = GrainFactory.GetGrain<IAgentSessionGrain>(sessionId);
+            var payload = JSON.Serialize(new Dictionary<string, object?>
+            {
+                ["status"] = "failed",
+                ["exitCode"] = (int?)null,
+                ["failureCategory"] = reason,
+                ["reason"] = $"agent-job-{reason} ({Key})",
+                ["recordedAt"] = DateTime.UtcNow.ToString("o"),
+            });
+            await grain.AppendRuntimeEventsAsync(
+                new AppendAgentSessionRuntimeEventsCommand(
+                    new[] { new AgentSessionRuntimeEventInput("session.closed", payload) }));
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "AgentJob {Id} failed to close generic session {SessionId} after failure",
+                Key, sessionId);
+        }
     }
 
     private bool DispatchRetryBoundExceeded()
@@ -414,10 +499,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && _timeProvider.GetUtcNow() >= _runningSince.Value + _options.JobTimeout;
     }
 
-    private Task FailWithReasonAsync(string reason)
+    private async Task FailWithReasonAsync(string reason)
     {
         if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
-            return Task.CompletedTask;
+            return;
 
         _status = AgentJobStatus.Failed;
         _failureReason = reason;
@@ -426,7 +511,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _status, reason, null, null, reason, null);
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
-        return Task.CompletedTask;
+        await CloseGenericSessionOnFailureAsync(reason);
     }
 
     private void DisposeDispatchTimer()

@@ -11,55 +11,96 @@ internal static class BodyInputResolver
         public sealed record Failure(string Message) : Result;
     }
 
-    public static async Task<Result> ResolveAsync(
+    /// <summary>
+    /// Generic labels for a body-source flag set. Each surface (issue body,
+    /// agent launch prompt, agent session followup text, ...) names its three
+    /// flags so error messages can name the right option without duplicating
+    /// the resolution loop.
+    /// </summary>
+    public sealed record SourceFlags(
+        string InlineFlag,
+        string FileFlag,
+        string StdinFlag,
+        string BodyKind);
+
+    public static Task<Result> ResolveAsync(
         string? inlineBody,
         string? bodyFile,
         bool bodyStdin,
         IFileSystem fileSystem,
         TextReader standardInput,
+        TextWriter error) =>
+        ResolveAsync(inlineBody, bodyFile, bodyStdin,
+            new SourceFlags("--body", "--body-file", "--body-stdin", "issue body"),
+            fileSystem, standardInput, error);
+
+    public static async Task<Result> ResolveAsync(
+        string? inlineBody,
+        string? bodyFile,
+        bool bodyStdin,
+        SourceFlags flags,
+        IFileSystem fileSystem,
+        TextReader standardInput,
         TextWriter error)
     {
-        var hasInline = !string.IsNullOrWhiteSpace(inlineBody);
+        var hasInline = inlineBody is not null;
         var hasFile = !string.IsNullOrWhiteSpace(bodyFile);
         var hasStdin = bodyStdin;
 
         var providedCount = (hasInline ? 1 : 0) + (hasFile ? 1 : 0) + (hasStdin ? 1 : 0);
         if (providedCount == 0)
         {
-            await error.WriteLineAsync("issue body is required (use --body, --body-file, or --body-stdin)").ConfigureAwait(false);
-            return new Result.Failure("issue body is required");
+            await error.WriteLineAsync(
+                $"{flags.BodyKind} is required (use {flags.InlineFlag}, {flags.FileFlag}, or {flags.StdinFlag})")
+                .ConfigureAwait(false);
+            return new Result.Failure($"{flags.BodyKind} is required");
         }
 
         if (providedCount > 1)
         {
             var provided = new List<string>();
-            if (hasInline) provided.Add("--body");
-            if (hasFile) provided.Add("--body-file");
-            if (hasStdin) provided.Add("--body-stdin");
+            if (hasInline) provided.Add(flags.InlineFlag);
+            if (hasFile) provided.Add(flags.FileFlag);
+            if (hasStdin) provided.Add(flags.StdinFlag);
             await error.WriteLineAsync(
                 $"the following options are mutually exclusive: {string.Join(", ", provided)}; pass only one")
                 .ConfigureAwait(false);
             return new Result.Failure($"mutually exclusive body sources: {string.Join(", ", provided)}");
         }
 
+        string resolved;
         if (hasInline)
-            return new Result.Success(inlineBody!);
-
-        if (hasStdin)
+        {
+            resolved = inlineBody!;
+        }
+        else if (hasStdin)
         {
             var text = await standardInput.ReadToEndAsync().ConfigureAwait(false);
-            return new Result.Success(text ?? string.Empty);
+            resolved = text ?? string.Empty;
+        }
+        else
+        {
+            try
+            {
+                var text = await fileSystem.ReadAllTextAsync(bodyFile!).ConfigureAwait(false);
+                resolved = text ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                await error.WriteLineAsync($"could not read body file: {bodyFile} ({ex.Message})")
+                    .ConfigureAwait(false);
+                return new Result.Failure($"could not read body file: {bodyFile}");
+            }
         }
 
-        try
+        if (string.IsNullOrWhiteSpace(resolved))
         {
-            var text = await fileSystem.ReadAllTextAsync(bodyFile!).ConfigureAwait(false);
-            return new Result.Success(text ?? string.Empty);
+            await error.WriteLineAsync(
+                $"{flags.BodyKind} is required (resolved body is empty)")
+                .ConfigureAwait(false);
+            return new Result.Failure($"{flags.BodyKind} is required");
         }
-        catch (Exception ex)
-        {
-            await error.WriteLineAsync($"could not read body file: {bodyFile} ({ex.Message})").ConfigureAwait(false);
-            return new Result.Failure($"could not read body file: {bodyFile}");
-        }
+
+        return new Result.Success(resolved);
     }
 }

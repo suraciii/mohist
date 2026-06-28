@@ -8,6 +8,7 @@ import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
 import type { ServerConnection } from "./connection.js"
+import type { SessionTarget } from "../runtime/acp-connection.js"
 
 export interface FollowupTarget {
   readonly connection: ClientSideConnection
@@ -15,11 +16,47 @@ export interface FollowupTarget {
   readonly projectId: string
 }
 
-export type FollowupTargetResolver = (workflowRunId: string, sessionName: string) => FollowupTarget | null
+// Issue-129 T-004: the resolver takes a discriminated SessionTarget so a
+// single resolver can dispatch both workflow-shaped followups
+// (`{ kind: "workflow", projectId, workflowRunId, sessionName }`) and
+// generic (non-workflow) followups
+// (`{ kind: "generic", projectId, sessionId }`). Older runners that only
+// handle workflow followups are reached through the issue-scoped route
+// whose SignalR payload still carries the top-level `workflowRunId` /
+// `sessionName` fields; the T-004 build of the runner prefers `target`
+// when present and falls back to the top-level fields otherwise so the
+// wire is forward + backward compatible.
+export type FollowupTargetResolver = (target: SessionTarget) => FollowupTarget | null
 
+/**
+ * Discriminated session target carried in the unified
+ * `ReceiveFollowup` SignalR payload (issue-129 T-004). The runner
+ * branches on `kind` to pick the right `AcpSessionManager` key prefix
+ * (`workflow:` / `generic:`, T-002) and the right server-side runtime
+ * endpoint. Older runners that only know workflow followups can keep
+ * reading the top-level `workflowRunId` / `sessionName` fields the
+ * server still populates for the issue-scoped route.
+ */
+export interface ReceiveFollowupSessionTarget {
+  kind: "workflow" | "generic"
+  projectId: string
+  workflowRunId?: string
+  sessionName?: string
+  sessionId?: string
+}
+
+/**
+ * Unified payload delivered by the server-side `ReceiveFollowup` SignalR
+ * method. Workflow followups continue to populate the top-level
+ * `workflowRunId` / `sessionName` fields so older runners keep working;
+ * generic followups carry `target.kind === "generic"` and a `sessionId`
+ * instead. The `text` field is always present and non-empty (the server
+ * rejects empty / whitespace text with 400 before pushing).
+ */
 export interface ReceiveFollowupPayload {
-  workflowRunId: string
-  sessionName: string
+  workflowRunId?: string
+  sessionName?: string
+  target?: ReceiveFollowupSessionTarget
   text: string
 }
 
@@ -31,6 +68,32 @@ export interface ReceiveFollowupPayload {
 export interface ReceiveWorkflowRunStatusPayload {
   workflowRunId: string
   status: string
+}
+
+/**
+ * Payload delivered by the server-side `CancelAgentSession` SignalR
+ * invocation (issue-129 T-005 / design D6). Distinct from
+ * `ReceiveFollowup` because cancel needs a reply path (the runner
+ * returns `{ state: "cancelled" | "not-cancellable" | <terminal-state> }`)
+ * while followup is strictly fire-and-forget. The `target` shape is the
+ * same `SessionTarget` discriminator introduced in T-004; today only
+ * generic (non-workflow) sessions are reachable through this method
+ * because the cancel endpoint is product-level and issue-anchored
+ * sessions have no cancel surface.
+ */
+export interface CancelAgentSessionPayload {
+  target: ReceiveFollowupSessionTarget
+}
+
+/**
+ * Reply shape returned by the runner for the `CancelAgentSession`
+ * invocation. The server mirrors this value into the HTTP response so
+ * the API can never fake success (design D6). Recognised values:
+ * `cancelled`, `not-cancellable`, and the terminal-state names
+ * (`completed` / `failed` / `stopped`).
+ */
+export interface CancelAgentSessionReply {
+  state: string
 }
 
 export interface RunnerSignalRClientOptions {
@@ -314,6 +377,10 @@ export class RunnerSignalRClient {
       void this.handleFollowup(payload)
     })
 
+    this.connection.on("CancelAgentSession", async (payload: CancelAgentSessionPayload | null | undefined) => {
+      return await this.handleCancel(payload)
+    })
+
     this.connection.on("ReceiveWorkflowRunStatus", async (payload: ReceiveWorkflowRunStatusPayload | null | undefined) => {
       await this.handleWorkflowRunStatus(payload)
     })
@@ -380,22 +447,33 @@ export class RunnerSignalRClient {
 
   private async handleFollowup(payload: ReceiveFollowupPayload | null | undefined): Promise<void> {
     if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return
-    if (!payload.workflowRunId || !payload.sessionName) return
     if (!this.followupTargetResolver || !this.serverConnection) return
+
+    // Issue-129 T-004: branch on the discriminated `target.kind` so a
+    // single handler can deliver followups to either a workflow-shaped
+    // session or a generic (non-workflow) AgentSession. The
+    // server-side payload always carries the unified `target` shape
+    // (T-004 / D3); when the target is absent we fall back to the
+    // legacy top-level workflowRunId / sessionName fields so older
+    // server builds (no `target` field) keep working against the
+    // workflow followup route.
+    const sessionTarget = resolveSessionTarget(payload)
+    if (!sessionTarget) return
 
     let target: FollowupTarget | null
     try {
-      target = this.followupTargetResolver(payload.workflowRunId, payload.sessionName)
+      target = this.followupTargetResolver(sessionTarget)
     } catch (error) {
       console.error("followup target resolver threw:", error)
       return
     }
     if (!target) return
 
-    void this.serverConnection.workflowAgentSessionRuntimeEvents(
+    if (sessionTarget.kind === "workflow") {
+      void this.serverConnection.workflowAgentSessionRuntimeEvents(
         target.projectId,
-        payload.workflowRunId,
-        payload.sessionName,
+        sessionTarget.workflowRunId,
+        sessionTarget.sessionName,
         {
           workId: null,
           workType: null,
@@ -418,6 +496,33 @@ export class RunnerSignalRClient {
       ).catch((error) => {
         console.error("failed to emit followup session.input event:", error)
       })
+    } else {
+      void this.serverConnection.agentSessionRuntimeEvents(
+        target.projectId,
+        sessionTarget.sessionId,
+        {
+          workId: null,
+          workType: null,
+          stage: null,
+          runtimeEvents: [
+            {
+              type: "session.input",
+              payload: {
+                role: "user",
+                text: payload.text,
+                kind: "followup",
+                sentAt: new Date().toISOString(),
+                acpSessionId: target.sessionId,
+                source: "followup",
+              },
+            },
+          ],
+        },
+        new AbortController().signal,
+      ).catch((error) => {
+        console.error("failed to emit followup session.input event:", error)
+      })
+    }
 
     void target.connection
       .prompt({
@@ -427,6 +532,93 @@ export class RunnerSignalRClient {
       .catch((error) => {
         console.error("followup connection.prompt rejected:", error instanceof Error ? error.message : String(error))
       })
+  }
+
+  // Server-invoked cancel (issue-129 T-005 / design D6). The server
+  // pushes a `CancelAgentSession` SignalR invocation carrying a
+  // `SessionTarget` and expects a `{ state: ... }` reply that the HTTP
+  // endpoint mirrors verbatim. The handler branches on the same
+  // `target.kind` discriminator introduced in T-004 (workflow vs generic)
+  // but today only the generic path is reachable from the product API
+  // because the issue-scoped session lifecycle has no cancel surface.
+  //
+  // The runner reports the state it actually observed:
+  //   - `cancelled` — a live ACP session entry exists for the target AND
+  //     the connection advertises a `cancel` method. The handler fires
+  //     the `session/cancel` notification (best-effort) and replies
+  //     `cancelled`. Whether the agent actually honours the cancellation
+  //     is the agent's decision; the runner is honest about the attempt.
+  //   - `not-cancellable` — the runner has no live ACP session entry for
+  //     the target, OR the connection has no `cancel` method. There is
+  //     nothing to cancel.
+  //
+  // The server already short-circuits terminal sessions before invoking
+  // the runner (T-005 / design D6), so a `terminal-state` reply from the
+  // runner is rare but reserved (e.g. for a race window where the agent
+  // reports the session as terminal in the same instant we sent the
+  // cancel). The handler does not invent terminal states — the server is
+  // the source of truth.
+  private async handleCancel(payload: CancelAgentSessionPayload | null | undefined): Promise<CancelAgentSessionReply> {
+    if (!payload || !payload.target) {
+      return { state: "not-cancellable" }
+    }
+
+    // The cancel endpoint only addresses generic sessions today, so any
+    // other `target.kind` (or missing kind) is treated as not-cancellable.
+    const target = payload.target
+    if (target.kind !== "generic" || !target.sessionId) {
+      return { state: "not-cancellable" }
+    }
+
+    if (!this.followupTargetResolver) {
+      return { state: "not-cancellable" }
+    }
+
+    const sessionTarget: SessionTarget = {
+      kind: "generic",
+      projectId: target.projectId ?? "",
+      sessionId: target.sessionId,
+    }
+
+    let resolved: FollowupTarget | null
+    try {
+      resolved = this.followupTargetResolver(sessionTarget)
+    } catch (error) {
+      console.error("cancel target resolver threw:", error)
+      return { state: "not-cancellable" }
+    }
+
+    if (!resolved) {
+      // No live ACP session entry for this target. There is nothing to
+      // cancel — the API must report that honestly.
+      return { state: "not-cancellable" }
+    }
+
+    // `ClientSideConnection.cancel` is a notification, not a request —
+    // the call resolves once the message is on the wire, not when the
+    // agent honours it. The agent decides what to do; the runner is
+    // honest about the attempt. The `?.` guard handles a hypothetical
+    // older connection that did not advertise cancel (the current SDK
+    // always defines it on `ClientSideConnection`).
+    const cancel = resolved.connection.cancel?.bind(resolved.connection) as
+      | ((params: { sessionId: string }) => Promise<void>)
+      | undefined
+    if (typeof cancel !== "function") {
+      return { state: "not-cancellable" }
+    }
+
+    try {
+      await cancel({ sessionId: resolved.sessionId })
+    } catch (error) {
+      // The transport-level cancel send failed (e.g. the connection died
+      // between the resolver hit and the send). Surface this as
+      // `not-cancellable` rather than fabricating a `cancelled` reply;
+      // the caller can retry against a freshly-opened session.
+      console.error("cancel connection.cancel rejected:", error instanceof Error ? error.message : String(error))
+      return { state: "not-cancellable" }
+    }
+
+    return { state: "cancelled" }
   }
 }
 
@@ -622,4 +814,37 @@ export function isUnderRunnerRoot(root: string, candidate: string): boolean {
 
 function removal(removed: boolean, status: string, path: string | null, reason: string | null, message: string) {
   return { removed, status, path, reason, message }
+}
+
+// Issue-129 T-004: derives a discriminated `SessionTarget` from the
+// unified `ReceiveFollowup` SignalR payload. Prefers the `target` field
+// when present; falls back to the legacy top-level `workflowRunId` /
+// `sessionName` fields so older server builds (which only populate the
+// top-level fields on the issue-scoped route) keep working against the
+// workflow followup path. Returns `null` when neither carries a usable
+// target — the caller drops the message silently, matching the existing
+// "unknown session" contract.
+export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTarget | null {
+  const target = payload.target
+  if (target) {
+    if (target.kind === "workflow") {
+      if (!target.workflowRunId || !target.sessionName) return null
+      const projectId = target.projectId ?? ""
+      if (!projectId) return null
+      return { kind: "workflow", projectId, workflowRunId: target.workflowRunId, sessionName: target.sessionName }
+    }
+    if (target.kind === "generic") {
+      if (!target.sessionId) return null
+      const projectId = target.projectId ?? ""
+      if (!projectId) return null
+      return { kind: "generic", projectId, sessionId: target.sessionId }
+    }
+    return null
+  }
+
+  // Legacy fallback for older server builds (no `target` field).
+  if (payload.workflowRunId && payload.sessionName) {
+    return { kind: "workflow", projectId: "", workflowRunId: payload.workflowRunId, sessionName: payload.sessionName }
+  }
+  return null
 }

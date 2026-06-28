@@ -138,12 +138,179 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionJsonHelper.StatusName(session) == "active");
     }
 
+    /// <summary>
+    /// Resolves the runner + activity state of a generic (non-workflow)
+    /// <see cref="AgentSession"/> for followup delivery (issue-129 T-004).
+    /// Distinct from <see cref="ResolveFollowupTargetAsync"/> which is
+    /// issue-anchored and returns null when the workflow-run label is
+    /// blank: generic sessions are addressed by their minted sessionId
+    /// alone, and the launch endpoint stamps
+    /// <c>source-kind = agent-launch</c> labels (no workflow-run lookup
+    /// key). The runner id is sourced from the grain's runtime (the
+    /// runner's <c>open</c> call is what stamps it onto the session after
+    /// the launch mints it with an empty RunnerId, per T-003). Active
+    /// state mirrors <see cref="AgentSessionJsonHelper.StatusName"/>.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the session has not yet been opened by a
+    /// runner (no RunnerId bound) — the same null result the issue-scoped
+    /// resolver returns for sessions without a workflowRunId, so the
+    /// endpoint maps null to 404 and the caller does not need to know
+    /// which lookup axis was missing.
+    /// </remarks>
+    public async Task<GenericFollowupTarget?> ResolveGenericFollowupTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return null;
+
+        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
+            return null;
+
+        // The session exists and belongs to the requested project. The
+        // RunnerId may be empty if the launch minted the session but the
+        // runner never opened it — that state is "inactive" from the
+        // followup perspective, not "not found". Surface IsActive=false
+        // and let the endpoint return 409 (matching the issue-scoped
+        // followup behaviour for inactive sessions).
+        var runnerId = record.Row.RunnerId;
+        var statusActive = !string.IsNullOrWhiteSpace(runnerId)
+            && await ReadTerminalStateAsync(db, sessionId, ct) is null
+            && AgentSessionJsonHelper.StatusName(record.Session) == "active";
+
+        return new GenericFollowupTarget(
+            runnerId ?? string.Empty,
+            sessionId,
+            statusActive);
+    }
+
+    /// <summary>
+    /// Resolves the cancel target for a generic (non-workflow)
+    /// <see cref="AgentSession"/> (issue-129 T-005). Distinct from
+    /// <see cref="ResolveGenericFollowupTargetAsync"/>: cancel is
+    /// best-effort over ACP, so the endpoint needs the runner id AND the
+    /// terminal-state verdict up front — if the session is already terminal
+    /// the server short-circuits without calling the runner at all. The
+    /// returned <see cref="GenericCancelTarget.TerminalState"/> is the
+    /// verbatim <c>status</c> field of the most recent
+    /// <c>session.closed</c> transcript event
+    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), so the HTTP
+    /// response can mirror the runner's reported state without inventing a
+    /// value.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the session is unknown OR belongs to a
+    /// different project (cross-project leakage guard), matching the
+    /// null-return contract <see cref="ResolveGenericFollowupTargetAsync"/>
+    /// uses for the same cases.
+    /// </remarks>
+    public async Task<GenericCancelTarget?> ResolveGenericCancelTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return null;
+
+        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
+            return null;
+
+        var runnerId = record.Row.RunnerId;
+        var terminalState = await ReadTerminalStateAsync(db, sessionId, ct);
+
+        return new GenericCancelTarget(
+            runnerId ?? string.Empty,
+            sessionId,
+            terminalState);
+    }
+
+    /// <summary>
+    /// Reads the most recent <c>session.closed</c> / <c>session_closed</c>
+    /// transcript event and returns its <c>status</c> field
+    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), or <c>null</c>
+    /// when no terminal event has been recorded yet. Used by
+    /// <see cref="ResolveGenericCancelTargetAsync"/> to short-circuit the
+    /// cancel endpoint on already-terminal sessions (issue-129 T-005).
+    /// </summary>
+    private static async Task<string?> ReadTerminalStateAsync(MohistDbContext db, string sessionId, CancellationToken ct)
+    {
+        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (turnIds.Count == 0) return null;
+
+        var closed = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(p => turnIds.Contains(p.TurnId)
+                && (p.Type == "session_closed" || p.Type == "session.closed"))
+            .OrderByDescending(p => p.Sequence)
+            .ThenByDescending(p => p.Id)
+            .Select(p => p.PayloadJson)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(closed)) return null;
+
+        JsonElement payload;
+        try { payload = JSON.DeserializeElement(closed); }
+        catch { return null; }
+        if (payload.ValueKind != JsonValueKind.Object) return null;
+
+        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
+        if (string.IsNullOrWhiteSpace(status)) return null;
+        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase))
+        {
+            return status.ToLowerInvariant();
+        }
+        return null;
+    }
+
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
+        return await BuildSessionMetadataDtoAsync(db, session, sessionName, ct);
+    }
+
+    public async Task<AgentSessionTranscriptResponse?> GetSessionTranscriptAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
+        if (session is null) return null;
+
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
+        return SessionTranscriptBuilder.Build(transcript);
+    }
+
+    public async Task<AgentSessionMetadataDto?> GetGenericSessionMetadataAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var session = await FindGenericSessionAsync(projectId, sessionId, ct);
+        if (session is null) return null;
+
+        return await BuildSessionMetadataDtoAsync(db, session, sessionId, ct);
+    }
+
+    public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var session = await FindGenericSessionAsync(projectId, sessionId, ct);
+        if (session is null) return null;
+
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
+        return SessionTranscriptBuilder.Build(transcript);
+    }
+
+    private async Task<AgentSessionMetadataDto> BuildSessionMetadataDtoAsync(
+        MohistDbContext db,
+        AgentSessionRecord session,
+        string fallbackSessionName,
+        CancellationToken ct)
+    {
         var domainSession = session.Session;
         var transcript = await LoadTranscriptAsync(db, domainSession.Id, ct);
         var sessionByTurnId = transcript.Turns.ToDictionary(t => t.Id, t => t.SessionId);
@@ -159,7 +326,7 @@ public class AgentSessionQuerier : IScopedService
 
         return new AgentSessionMetadataDto(
             domainSession.Id,
-            Label(session, AgentSessionQueryMetadataKeys.SessionName) ?? sessionName,
+            Label(session, AgentSessionQueryMetadataKeys.SessionName) ?? fallbackSessionName,
             domainSession.Status.AgentRuntimeSessionId ?? domainSession.Id,
             AgentSessionJsonHelper.StatusName(domainSession),
             domainSession.Settings.Model,
@@ -170,16 +337,6 @@ public class AgentSessionQuerier : IScopedService
             ToEventSummaryDto(eventSummary),
             ToUsageDto(usage),
             new AgentSessionMetadataCounts(partCount, toolCount));
-    }
-
-    public async Task<AgentSessionTranscriptResponse?> GetSessionTranscriptAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await FindCurrentSessionAsync(db, projectId, issueNumber, sessionName, ct);
-        if (session is null) return null;
-
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, ct);
-        return SessionTranscriptBuilder.Build(transcript);
     }
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
@@ -204,6 +361,18 @@ public class AgentSessionQuerier : IScopedService
                 (AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId),
                 (AgentSessionQueryMetadataKeys.SessionName, sessionName)),
             ct: ct);
+    }
+
+    private async Task<AgentSessionRecord?> FindGenericSessionAsync(string projectId, string sessionId, CancellationToken ct)
+    {
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return null;
+
+        return string.Equals(Label(record, AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            && string.Equals(Label(record, AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
+            ? record
+            : null;
     }
 
     public async Task<ActivityDto> GetActivityAsync(string projectId, int? limit = null, IReadOnlyList<ActivityWaitingCardDto>? waiting = null, IReadOnlyList<string>? runnerIds = null, CancellationToken ct = default)
@@ -772,3 +941,32 @@ public sealed record FollowupTarget(
     string WorkflowRunId,
     string SessionName,
     bool IsActive);
+
+/// <summary>
+/// Followup target for a generic (non-workflow) <see cref="AgentSession"/>
+/// (issue-129 T-004). Identifies a session by its minted
+/// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
+/// <c>sessionName</c> pair to carry. The runner uses
+/// <see cref="SessionId"/> to look up the active ACP session entry under
+/// the <c>generic:</c> prefix in <c>AcpSessionManager</c>.
+/// </summary>
+public sealed record GenericFollowupTarget(
+    string RunnerId,
+    string SessionId,
+    bool IsActive);
+
+/// <summary>
+/// Cancel target for a generic (non-workflow) <see cref="AgentSession"/>
+/// (issue-129 T-005). Carries the runner id (so the server can resolve
+/// the runner's SignalR connection) and the most-recent terminal state
+/// observed in the session's transcript (so the endpoint can short-circuit
+/// without ever invoking the runner when the session is already
+/// <c>completed</c> / <c>failed</c> / <c>stopped</c>). <see cref="TerminalState"/>
+/// is <c>null</c> when the session is not yet terminal, in which case the
+/// endpoint must call the runner and let it report the cancellation
+/// outcome (design D6).
+/// </summary>
+public sealed record GenericCancelTarget(
+    string RunnerId,
+    string SessionId,
+    string? TerminalState);
