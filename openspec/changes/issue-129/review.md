@@ -10,52 +10,62 @@ None.
 
 - [ID: item-1]
   Severity: blocking
-  Scope: packages/runner/src/actions/acp/session-strategies.ts; packages/server/src/Mohist.Server/Api/RunnerRoutes.cs; packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs
-  Evidence: Generic sessions are minted by the launch endpoint before dispatch, so the runner's first `getAgentSession(projectId, sessionId)` call returns an existing session from `RunnerRoutes.cs:267-272`. `runAcpGenericAgentSession` then skips `openAgentSession` because it only calls open when `existing` is null (`session-strategies.ts:142-149`). The server only stamps the authoritative runner id during the generic open path (`RunnerRoutes.cs:275-300`, `AgentSessionGrain.cs:79-82`), and both followup and cancel resolve the runner from the persisted session row (`AgentSessionQuerier.cs:178-186`, `AgentSessionQuerier.cs:220-226`). In the real launched path the session can therefore execute and emit runtime events while retaining an empty `RunnerId`, causing followup to return 409 inactive and cancel to return `not-cancellable` instead of addressing the live runner. The tests mask this by manually calling `/open` in `LaunchAndOpenGenericSessionAsync` instead of exercising the runner's actual `getAgentSession`-then-skip-open flow. [disallowed:product-behavior-change]
-  SuggestedAction: Ensure the runner always binds the generic session to the runner id before running or resuming the ACP session. One minimal direction is to make the generic strategy call `openAgentSession` for the minted session even when `getAgentSession` returns an existing record that has no ACP session id/runner binding, then add an integration/runner test that launches through the product endpoint, lets the runner strategy process the dispatch without a manual open call, and verifies followup/cancel resolve the runner.
-  Verification: Static trace across `runAcpGenericAgentSession`, generic runner routes, and generic followup/cancel resolvers; existing tests show the gap because helper `LaunchAndOpenGenericSessionAsync` manually posts `/open` before followup/cancel assertions.
+  Scope: packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs
+  Evidence: The generic read path correctly requires `source-kind = agent-launch` in `FindGenericSessionAsync` before returning a session (lines 366-375), but `ResolveGenericFollowupTargetAsync` and `ResolveGenericCancelTargetAsync` only verify the project label before returning a target (lines 161-186 and 209-226). A workflow session in the same project can therefore be addressed through `POST /agent-sessions/{workflowSessionId}/followup` or `/cancel`, even though those endpoints are specified as generic AgentSession surfaces. Followup would send a `target.kind = generic` SignalR message for a workflow session and may report `sent` while the runner drops it; cancel may report generic cancel state for a workflow-owned session. [disallowed:product-behavior-change]
+  SuggestedAction: Reuse the same generic-session guard as `FindGenericSessionAsync` in both generic followup and cancel resolvers, and add integration tests that a workflow session id returns 404 on the generic followup/cancel endpoints.
+  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --no-restore --filter "FullyQualifiedName~GenericAgentSessionFollowupApiSpecs|FullyQualifiedName~GenericAgentSessionCancelApiSpecs"` after adding the regression cases.
   Status: open
 
 - [ID: item-2]
   Severity: blocking
-  Scope: packages/server/tests/Mohist.Server.Tests/Specs/Agent/Api/AgentSessionLaunchRoutesSpecs.cs; packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs
-  Evidence: The candidate's own acceptance coverage for "On AgentJob timeout the grain transitions the session to a terminal failed state" does not pass. Running `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --no-restore --filter "FullyQualifiedName~AgentSessionLaunchRoutesSpecs|FullyQualifiedName~GenericAgentSessionFollowupApiSpecs|FullyQualifiedName~GenericAgentSessionCancelApiSpecs|FullyQualifiedName~AgentJobGrainSpecs"` failed `AgentSessionLaunchRoutesSpecs.Launch_AgentJobTimeout_TransitionsGenericSessionToTerminalFailedState`: `Agent job did not reach Failed within 30s (last status Running)`. That leaves the issue acceptance criterion and task T-003 timeout requirement unmet. [disallowed:product-behavior-change]
-  SuggestedAction: Fix the AgentJob timeout path for launched generic sessions so running jobs hit `ReportTimeout`, close the associated generic session with a terminal failed event, and make the failing test deterministic enough to pass in the filtered server suite.
-  Verification: Re-run the filtered server test command above and then the broader server suite.
+  Scope: packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs; packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs
+  Evidence: Terminal detection for generic followup/cancel reads `session.closed` from persisted transcript rows (`ReadTerminalStateAsync`, lines 237-267), but `AgentSessionGrain.AppendRuntimeEventsAsync` only updates in-memory state and arms a persistence timer before returning (lines 359-365); the actual transcript save happens later in `PersistCallback`/`FlushAsync` (lines 564-627). For `session.closed`, the domain transition only records activity (`ApplyRuntimeEventToDomain`, lines 762-772), so `StatusName` remains `active` for the five-minute activity window (`AgentSessionJsonHelper.cs` lines 11-16) until the DB transcript is flushed. The tests explicitly drain/deactivate before asserting terminal behavior (`GenericAgentSessionFollowupApiSpecs.cs` lines 258-274, `GenericAgentSessionCancelApiSpecs.cs` lines 125-144), so they miss the immediate post-close window where followup can be accepted and cancel can call the runner or return `not-cancellable` instead of the terminal state. [disallowed:product-behavior-change]
+  SuggestedAction: Make terminal state part of the session state or otherwise resolve it from the grain/current state synchronously, not only from eventually persisted transcript rows. Add tests that append `session.closed` and immediately call followup/cancel without deactivation or delay.
+  Verification: Add immediate-after-close tests expecting followup 409, cancel `{ state: "completed" }`, and no runner invocation; then run the server test filter above.
   Status: open
 
 - [ID: item-3]
-  Severity: blocking
-  Scope: packages/server/src/Mohist.Server/Api; packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs
-  Evidence: The launch response returns only `{ sessionId, agentId, agentName, status }` (`AgentSessionLaunchRoutes.cs:92-100`), and the only generic-session id GET route added is runner-internal under `/api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}` (`RunnerRoutes.cs:261-343`). Existing transcript and metadata product routes remain issue-scoped and require `{number}/sessions/{name}` (`IssueRoutes.Sessions.cs:24-46`), while `GetSessionTranscriptAsync` still resolves through issue/workflow labels (`AgentSessionQuerier.cs:343-374`). A generic session without workflow run/session name therefore has no product API transcript entry despite the issue requiring callers to receive a transcript entry and the specs requiring the session to be observable through existing read paths by session id. [disallowed:public-contract-change]
-  SuggestedAction: Add or expose a product read path for generic AgentSession metadata/transcript by project and session id, or return an existing valid transcript URL from launch, and cover it with an API test that launches a generic session and reads its transcript without an issue number or workflowRunId.
-  Verification: Add API tests for product-level generic session metadata/transcript access and verify launch output includes a usable transcript entry or documented route.
+  Severity: warning
+  Scope: packages/server/src/Mohist.Server/Api/AgentSessionLaunchRoutes.cs; packages/server/src/Mohist.Server/Agent/Grains/AgentJobGrain.cs
+  Evidence: Launch accepts optional context refs (`issueNumber`, `epicNumber`, `repository`, `workspacePath`) and records them as metadata in `BuildContext`/`GenericAgentSessionMetadata` (launch route lines 134-150; metadata lines 70-88), but the `AgentJobInput` execution snapshot only carries the trimmed prompt, workspace path, agent id/instructions/config, and session id (launch route lines 80-89). `ComposePromptWithEntry` then sends only `{ instructions, config, prompt }` to the external agent (AgentJobGrain lines 365-373). The issue and specs require optional context references to be metadata / prompt context, so repository/issue/epic context is not actually delivered to the external agent. [disallowed:product-behavior-change]
+  SuggestedAction: Define the prompt-context shape and include supplied context refs in the composed launch input sent to the runner, while keeping them metadata-only with respect to scope/mount/supervisor lifecycle. Add a launch/composition test asserting context refs are present in the dispatched prompt.
+  Verification: Run `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --no-restore --filter "FullyQualifiedName~AgentSessionLaunchRoutesSpecs|FullyQualifiedName~AgentJobGrainSpecs"`.
   Status: open
 
 - [ID: item-4]
-  Severity: test-gap
-  Scope: packages/runner/tests/acp/session-strategies-generic.spec.ts; packages/server/tests/Mohist.Server.Tests/Specs/Sessions/GenericAgentSessionFollowupApiSpecs.cs; packages/server/tests/Mohist.Server.Tests/Specs/Sessions/GenericAgentSessionCancelApiSpecs.cs
-  Evidence: The regression suite does not exercise the real end-to-end lifecycle for a minted generic session. Runner tests use a fake `getAgentSession` that always returns null (`session-strategies-generic.spec.ts:91-99`), so the generic strategy always enters the open path and never covers the production case where the launch endpoint already created the session. Server followup/cancel tests manually post `/api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open` in `LaunchAndOpenGenericSessionAsync` before testing product followup/cancel, bypassing the runner behavior under review. This coverage gap allowed item-1 to ship. [disallowed:test-design-change]
-  SuggestedAction: Add a runner unit test where `getAgentSession` returns the pre-minted generic session without `acpSessionId`, and assert the strategy still binds/opens before running. Add a server or integration test that performs launch plus actual runner dispatch processing, then validates followup and cancel without a manual `/open` setup call.
-  Verification: New tests should fail before the item-1 fix and pass after it.
+  Severity: warning
+  Scope: packages/cli/Mohist.Cli/BodyInputResolver.cs; packages/cli/Mohist.Cli/MohistCliCommands.Issue.cs
+  Evidence: `BodyInputResolver.ResolveAsync` now rejects any resolved whitespace-only body (lines 96-102). That is correct for the new `--prompt` and `--text` surfaces, but the same helper is used by existing issue body commands, including `issue update` (MohistCliCommands.Issue.cs lines 453-469). Previously `issue update --body-file empty.md` could send `"body": ""` to clear an issue body because body presence is tracked separately; now the CLI exits before sending the PATCH. This is a regression in a changed shared helper. [disallowed:product-behavior-change]
+  SuggestedAction: Add an option/flag to `BodyInputResolver` so prompt/text callers can require non-empty content without changing issue body/comment/feedback behavior. Add regression coverage for clearing an issue body via empty file/stdin.
+  Verification: Run `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore --filter FullyQualifiedName~CliIssueUpdatePatchBodySpecs`.
   Status: open
 
 ## Follow-up Items
 
 - [ID: item-5]
   Severity: follow-up
-  Scope: packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs
-  Evidence: `ReadTerminalStateAsync` and `IsTerminalSessionAsync` duplicate the same transcript query and JSON parsing logic for `session.closed`/`session_closed` status detection. This is not the source of the current failure, but it increases the chance of future divergence in terminal-state handling.
-  SuggestedAction: After the blocking lifecycle issues are fixed, consolidate the terminal-state read into one helper that returns the terminal status and have followup/cancel share it.
+  Scope: packages/runner/src/server/runner-signalr.ts; packages/runner/src/runtime/host.ts
+  Evidence: The legacy `ReceiveFollowup` fallback creates a workflow `SessionTarget` with `projectId: ""` when the payload has only top-level `workflowRunId/sessionName` (runner-signalr.ts lines 845-848). `RunnerHost.resolveFollowupTarget` rejects that target when the runner has a configured `projectId` (host.ts lines 108-116). Current server code sends the new `target` shape for issue-scoped followup, so this is not the primary same-version path, but the fallback comment says older server payloads keep working and the tests cover it only with a fake resolver.
+  SuggestedAction: Either remove/clarify the unsupported fallback or have the host resolve the configured project id for legacy workflow payloads. Add a host-level test for a legacy workflow payload against a configured runner project.
   Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
 - [ID: item-6]
   Severity: info
-  Scope: repository verification
-  Evidence: `npm run typecheck -w packages/runner`, `npm test -w packages/runner`, and `npm run typecheck -w packages/web` passed. `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore --filter "FullyQualifiedName~CliAgentSessionCommandSpecs"` passed 36 tests. A broad `npm test -- --filter Mohist.Cli.Tests --no-restore` attempt timed out after 120 seconds while the .NET server suite was still running, so it is not counted as a candidate pass/fail beyond confirming the command exceeded the review timeout.
-  SuggestedAction: Re-run the broad server/monorepo test command with a longer timeout after fixing the blockers.
+  Scope: dependency audit
+  Evidence: The server test build output includes `npm audit` reporting 9 vulnerabilities (3 moderate, 3 high, 3 critical). This appears unrelated to the issue-129 product change and did not cause test failure.
+  SuggestedAction: Track separately through dependency maintenance.
   Status: out-of-scope
+
+## Verification
+
+- `npm run typecheck -w packages/runner` passed.
+- `npm test -w packages/runner -- --run tests/runner-signalr.spec.ts tests/runner-host.spec.ts tests/acp/session-strategies-generic.spec.ts tests/acp/session-target.spec.ts` passed: 85 tests.
+- `npm test -w packages/runner` passed: 722 passed, 23 skipped.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore --filter FullyQualifiedName~CliAgentSessionCommandSpecs` passed: 36 tests.
+- `dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore` passed: 428 tests.
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj --no-restore --filter "FullyQualifiedName~AgentSessionLaunchRoutesSpecs|FullyQualifiedName~GenericAgentSessionFollowupApiSpecs|FullyQualifiedName~GenericAgentSessionCancelApiSpecs|FullyQualifiedName~AgentJobGrainSpecs"` passed: 59 tests.
+- `npm test` passed in this workspace run; output showed the runner suite completing with 722 passed and 23 skipped. It also surfaced the out-of-scope npm audit warnings noted above.
 
 <promise>FAIL</promise>
