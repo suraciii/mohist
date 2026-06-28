@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -10,9 +11,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    partial class MohistDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260627072538_AddRunnerWorksTable")]
+    partial class AddRunnerWorksTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
@@ -382,25 +385,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasComputedColumnSql("json_extract(State, '$.archivedAt') IS NOT NULL");
 
-                    b.Property<bool?>("IsDraft")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("INTEGER")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.isDraft'), json_extract(State, '$.IsDraft'))");
-
                     b.Property<int?>("Number")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("INTEGER")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.number'), json_extract(State, '$.Number'))", true);
-
-                    b.Property<string>("PrerequisiteNumbersJson")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.prerequisiteNumbers'), json_extract(State, '$.PrerequisiteNumbers'))");
-
-                    b.Property<string>("Priority")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.priority'), json_extract(State, '$.Priority'))");
 
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
@@ -419,11 +407,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("COALESCE(json_extract(State, '$.status'), json_extract(State, '$.Status'))");
-
-                    b.Property<string>("Title")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("COALESCE(json_extract(State, '$.title'), json_extract(State, '$.Title'))");
 
                     b.Property<string>("WorkflowRunId")
                         .ValueGeneratedOnAddOrUpdate()

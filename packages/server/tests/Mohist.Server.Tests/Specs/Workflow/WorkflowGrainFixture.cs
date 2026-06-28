@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Events.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Tests.Support;
@@ -19,6 +20,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
+    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
     private readonly InMemoryEventBus _sharedEventBus = new(
         NullLogger<InMemoryEventBus>.Instance);
@@ -38,7 +40,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
         var builder = new InProcessTestClusterBuilder();
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
-            GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore));
+            GrainTestConfig.ConfigureSilo(siloBuilder, connectionString, _sharedEventBus, _sharedEventStore, TimeProvider));
         Cluster = builder.Build();
         await Cluster.DeployAsync();
 

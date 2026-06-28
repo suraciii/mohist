@@ -96,6 +96,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        services.Configure<WorkflowOptions>(configuration.GetSection(WorkflowOptions.SectionName));
         services.Configure<CleanupPolicyOptions>(configuration.GetSection(CleanupPolicyOptions.SectionName));
         services.Configure<Mohist.Server.Otel.OtelOptions>(configuration.GetSection(Mohist.Server.Otel.OtelOptions.SectionName));
         services.PostConfigure<Mohist.Server.Otel.OtelOptions>(options =>
@@ -121,6 +122,7 @@ public static class MohistServiceRegistration
             CopyJsonOptions(JSON.Options, o.SerializerOptions);
         });
         services.AddScoped<RunnerDefinitionStore>();
+        services.AddScoped<RunnerWorkStore>();
         services.AddSignalR()
             .AddJsonProtocol(options =>
             {
