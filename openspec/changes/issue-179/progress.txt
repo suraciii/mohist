@@ -1,0 +1,78 @@
+# Issue 179 — Build stage working memory
+
+## Codebase Patterns
+- Tests under `packages/server/tests/Mohist.Server.Tests/Specs/Epic/Grain/` use the
+  Fake-based pattern from `EpicProgressionSpecs.cs`: a `TestDbContextFactory`
+  against an in-memory SQLite (Migrate the schema), a `RecordingGrainFactory`
+  or `NullGrainFactory` for grain dispatch, and `Seed*` helpers to populate
+  `Epics` / `Issues` / `EpicIssues` rows directly. No real DB, no real
+  Orleans, no HttpClient. `dotnet test` covers them under `Speed=Unit`.
+- The HTTP-driven `EpicLifecycleSpecs.cs` in
+  `Specs/Epic/Domain/` covers the full round-trip via `MohistIntegrationFixture`
+  and is tagged `Speed=Integration`. Keep that file for end-to-end assertions;
+  use the `Grain/` specs for unit-level coverage.
+- `EpicProgress.IsTerminal(string)` is the canonical terminal test for the
+  epic status (returns true for `"done"` / `"closed"`). Reuse it where
+  possible — but EF Core LINQ-to-SQL cannot lower managed helpers, so when
+  inlining into a query, expand the predicate to the literal set
+  `(Status != "done" && Status != "closed")`.
+- `EpicQuerier.ListAsync` is a single raw SQL join and does NOT touch
+  `IssueQuerier`; a `ThrowingIssueQuerier` stub is fine for those tests.
+  `EpicQuerier.GetAsync` calls into `IssueQuerier.ListAsync` and needs a
+  working querier — easier to assert detail/list reads in the HTTP-driven
+  `EpicLifecycleSpecs.cs` instead.
+
+## Decisions
+- D1 (EpicGrain.ApplyPendingEvents): removed the `EpicClosed` branch and
+  `RemoveAllLinkedIssues` helper. The method is now a single-line
+  `epic.ClearPendingEvents()` drain (with a comment noting the
+  non-destructive close). Removed the unused `(db, projectId, epicId)`
+  parameters to satisfy TreatWarningsAsErrors.
+- D2 (MohistDbContext + migration): relaxed
+  `IX_EpicIssues_ProjectId_IssueId` from `IsUnique()` to a non-unique
+  index. Migration `20260628022822_DropEpicIssueMembershipUniqueIndex`
+  drops the old index and re-creates it without `unique: true`. Snapshot
+  regenerated.
+- D3 (EpicGrain.LinkIssueAsync): replaced the single-row
+  `FirstOrDefaultAsync` duplicate check with a set-based query that joins
+  `EpicIssues` to `Epics` and filters terminal owners. Inlined
+  `Status != "done" && Status != "closed"` so EF Core can translate.
+  Existing-link-to-this-epic is handled by a separate `AnyAsync` idempotent
+  guard so the second insert is skipped before the domain method runs.
+- D4 (unused for T-001): the `IssueQuerier.primaryEpic` projection change
+  is T-002's scope; we did not touch it here.
+
+## Gotchas
+- `EpicProgress.IsTerminal(string)` cannot be used inside a LINQ-to-SQL
+  query (EF Core refuses to translate it). Inline the literal check.
+- After dropping the unique index, the
+  `IX_EpicIssues_ProjectId_IssueId` migration step is `DropIndex` →
+  `CreateIndex` (not unique). EF Core generates this correctly when the
+  model drops `IsUnique()`.
+- `TestDbContextFactory`-style `RecordingGrainFactory` implements all
+  members of `IGrainFactory` (Orleans interface, ~15 throws). For
+  membership tests where no inter-grain dispatch is needed, a minimal
+  `NullGrainFactory` works.
+- `IssueQuerier` constructor takes six dependencies. For unit specs that
+  need to construct `EpicQuerier` for the `ListAsync` raw-SQL path
+  (which doesn't touch IssueQuerier), use a `ThrowingIssueQuerier` that
+  overrides `ListAsync` to throw — this asserts the EpicQuerier
+  implementation doesn't drift back into calling IssueQuerier.
+- The previous `Close_SetsStatusToClosedAndRemovesEpicIssueLinks` and
+  the `Assert.Empty(detail.LinkedIssues)` block in
+  `Close_DoesNotChangeIssueStatusOrPrerequisitesOrWorkflow` both had
+  to flip from "empty after close" to "preserved after close" — those
+  are the behavioural break called out in the proposal.
+
+## Verification
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj
+  -p:SkipWebBuild=true` — green.
+- `dotnet test packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj
+  --filter FullyQualifiedName~Epic` — 235 passed (including 13 new
+  `EpicMembershipSpecs` and 2 rewritten `EpicLifecycleSpecs`).
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` — 2883 passed,
+  14 skipped, 0 failed.
+- `npm test` (which includes the runner / web workspaces) — 664 TS tests
+  passed, 23 skipped, plus the C# suite above.
+- `npm run typecheck -w packages/web` and `npm run typecheck -w
+  packages/runner` — green.

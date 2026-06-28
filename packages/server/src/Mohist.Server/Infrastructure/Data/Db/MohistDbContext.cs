@@ -219,7 +219,13 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.EpicId).HasMaxLength(64);
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
-            entity.HasIndex(e => new { e.ProjectId, e.IssueId }).IsUnique();
+            // Issue-179: relax uniqueness — an issue may hold a terminal-epic
+            // membership (done/closed) AND a non-terminal membership
+            // (idle/running/paused) concurrently so it can be re-homed from a
+            // finished epic into a new active one. The "at most one
+            // non-terminal epic per issue" invariant is enforced in application
+            // code (EpicGrain.LinkIssueAsync) instead of by this index.
+            entity.HasIndex(e => new { e.ProjectId, e.IssueId });
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
         });
 
