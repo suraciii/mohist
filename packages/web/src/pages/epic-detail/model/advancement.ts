@@ -35,7 +35,7 @@ function isStartableCandidate(issue: LinkedIssue): boolean {
   return (
     issue.status === IssueStatus.Backlog
     && issue.canStart
-    && issue.startBlocker === null
+    && issue.startBlocker == null
   )
 }
 
@@ -58,7 +58,7 @@ function byServerCandidateOrder(a: LinkedIssue, b: LinkedIssue): number {
 
 function describeCandidateBlocker(issue: LinkedIssue): string {
   const blocker = issue.startBlocker
-  if (blocker === null) return 'no startable issue'
+  if (blocker == null) return 'no startable issue'
   if (blocker.kind === 'draft') return `still a draft`
   if (blocker.kind === 'waiting-for') return `waiting for #${blocker.issue.number} to finish`
   return 'no startable issue'
@@ -91,7 +91,7 @@ export function deriveAdvancementState(context: AdvancementContext): Advancement
   if (
     candidate.status === IssueStatus.Backlog
     && !candidate.canStart
-    && candidate.startBlocker === null
+    && candidate.startBlocker == null
     && externalPrereqs.length > 0
   ) {
     return {
