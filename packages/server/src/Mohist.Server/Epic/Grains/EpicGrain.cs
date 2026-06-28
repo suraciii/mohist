@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Epic.Domain;
-using Mohist.Server.Epic.Domain.Events;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
@@ -63,17 +62,20 @@ public class EpicGrain : Grain, IEpicGrain
 
         var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
         if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var targetIsTerminal = IsTerminalEpicStatus(row.Status);
 
-        var existing = await db.EpicIssues.AsNoTracking()
-            .FirstOrDefaultAsync(link => link.ProjectId == projectId && link.IssueId == issueId);
-        if (existing is not null && existing.EpicId != epicId)
+        // Cross-aggregate uniqueness invariant: an issue may belong to at
+        // most one non-terminal epic (idle/running/paused). Terminal target
+        // epics do not consume the active slot.
+        if (!targetIsTerminal && await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
         {
-            var existingEpic = await db.Epics.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == existing.EpicId);
-            throw new InvalidOperationException($"Issue already belongs to Epic '{existing.EpicId}'{(existingEpic is not null ? $" ({existingEpic.Title})" : "")}");
+            throw new InvalidOperationException(
+                $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
         }
 
-        if (existing is not null) return;
+        var alreadyLinkedToThisEpic = await db.EpicIssues.AsNoTracking()
+            .AnyAsync(link => link.ProjectId == projectId && link.EpicId == epicId && link.IssueId == issueId);
+        if (alreadyLinkedToThisEpic) return;
 
         var links = await db.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
@@ -89,10 +91,32 @@ public class EpicGrain : Grain, IEpicGrain
             IssueId = issueId,
             IssueNumber = issueNumber,
         });
+        if (!targetIsTerminal)
+        {
+            db.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = projectId,
+                IssueId = issueId,
+                EpicId = epicId,
+                IssueNumber = issueNumber,
+            });
+        }
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
-        await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
+        ApplyPendingEvents(domain);
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException) when (!targetIsTerminal)
+        {
+            var owner = await GetActiveMembershipOwnerAsync(projectId, issueId, epicId);
+            if (owner is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Issue already belongs to Epic '{owner.EpicId}' ({owner.Title})");
+            }
+            throw;
+        }
     }
 
     public async Task UnlinkIssueAsync(string issueId, string projectId)
@@ -114,10 +138,10 @@ public class EpicGrain : Grain, IEpicGrain
         var link = await db.EpicIssues.FirstOrDefaultAsync(
             l => l.ProjectId == projectId && l.EpicId == epicId && l.IssueId == issueId);
         if (link is not null) db.EpicIssues.Remove(link);
+        await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
     }
 
     public async Task<EpicDto> PauseAsync(string? reason)
@@ -143,9 +167,10 @@ public class EpicGrain : Grain, IEpicGrain
         var now = DateTimeOffset.UtcNow;
         domain.Pause(reason, now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
         return ToDto(row);
     }
 
@@ -173,9 +198,8 @@ public class EpicGrain : Grain, IEpicGrain
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Start(now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -208,9 +232,8 @@ public class EpicGrain : Grain, IEpicGrain
         var wasAlreadyRunning = row.Status == EpicStatusName.Running;
         domain.Resume(now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
 
         if (row.Status == EpicStatusName.Running && !wasAlreadyRunning)
         {
@@ -251,9 +274,10 @@ public class EpicGrain : Grain, IEpicGrain
         }
 
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
         return ToDto(row);
     }
 
@@ -274,9 +298,8 @@ public class EpicGrain : Grain, IEpicGrain
         var now = DateTimeOffset.UtcNow;
         domain.Update(title, description, priority, now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
         return ToDto(row);
     }
 
@@ -338,9 +361,9 @@ public class EpicGrain : Grain, IEpicGrain
             var now = DateTimeOffset.UtcNow;
             domain.MarkDone(open, now.UtcDateTime);
             MapToRow(domain, row, now);
-            ApplyPendingEvents(db, domain, projectId, epicId);
+            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
+            ApplyPendingEvents(domain);
             await db.SaveChangesAsync();
-            domain.ClearPendingEvents();
             return ToDto(row);
         }
 
@@ -422,10 +445,45 @@ public class EpicGrain : Grain, IEpicGrain
         var now = DateTimeOffset.UtcNow;
         domain.MarkDone(open, now.UtcDateTime);
         MapToRow(domain, row, now);
-        ApplyPendingEvents(db, domain, projectId, epicId);
+        await ReleaseActiveMembershipsAsync(db, projectId, epicId);
+        ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
-        domain.ClearPendingEvents();
         return ToDto(row);
+    }
+
+    private async Task<ActiveMembershipOwner?> GetActiveMembershipOwnerAsync(string projectId, string issueId, string currentEpicId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await GetActiveMembershipOwnerAsync(db, projectId, issueId, currentEpicId);
+    }
+
+    private static async Task<ActiveMembershipOwner?> GetActiveMembershipOwnerAsync(
+        MohistDbContext db, string projectId, string issueId, string currentEpicId)
+    {
+        return await (
+            from active in db.EpicActiveIssues.AsNoTracking()
+            join epic in db.Epics.AsNoTracking()
+                on active.EpicId equals epic.Id
+            where active.ProjectId == projectId
+                && active.IssueId == issueId
+                && active.EpicId != currentEpicId
+            select new ActiveMembershipOwner(active.EpicId, epic.Title)
+        ).FirstOrDefaultAsync();
+    }
+
+    private static async Task ReleaseActiveMembershipsAsync(MohistDbContext db, string projectId, string epicId)
+    {
+        var active = await db.EpicActiveIssues
+            .Where(row => row.ProjectId == projectId && row.EpicId == epicId)
+            .ToListAsync();
+        db.EpicActiveIssues.RemoveRange(active);
+    }
+
+    private static async Task ReleaseActiveMembershipAsync(MohistDbContext db, string projectId, string epicId, string issueId)
+    {
+        var active = await db.EpicActiveIssues.FirstOrDefaultAsync(row =>
+            row.ProjectId == projectId && row.EpicId == epicId && row.IssueId == issueId);
+        if (active is not null) db.EpicActiveIssues.Remove(active);
     }
 
     private async Task<HashSet<int>> ComputeOpenLinkedNumbersAsync(
@@ -529,24 +587,20 @@ public class EpicGrain : Grain, IEpicGrain
 
     private static EpicStatusEnum ParseStatus(string status) => EpicStatusName.Parse(status);
 
-    private static void ApplyPendingEvents(MohistDbContext db, EpicAggregate epic, string projectId, string epicId)
-    {
-        var drained = epic.PendingEvents.ToArray();
-        epic.ClearPendingEvents();
-        foreach (var evt in drained)
-        {
-            if (evt is EpicClosed)
-                RemoveAllLinkedIssues(db, projectId, epicId);
-        }
-    }
+    private static bool IsTerminalEpicStatus(string status) =>
+        status is EpicStatusName.Done or EpicStatusName.Closed;
 
-    private static void RemoveAllLinkedIssues(MohistDbContext db, string projectId, string epicId)
+    private sealed record ActiveMembershipOwner(string EpicId, string Title);
+
+    private static void ApplyPendingEvents(EpicAggregate epic)
     {
-        var links = db.EpicIssues
-            .Where(link => link.ProjectId == projectId && link.EpicId == epicId)
-            .ToList();
-        if (links.Count > 0)
-            db.EpicIssues.RemoveRange(links);
+        // No-op drain: close, done, link/unlink, and other domain
+        // events are recorded on the aggregate for audit / projection,
+        // and the corresponding EpicIssueRow mutations are applied
+        // inline by the caller (LinkIssueAsync / UnlinkIssueAsync).
+        // Closing an epic is now non-destructive: it does NOT remove
+        // any EpicIssueRow. See issue-179 / design D1.
+        epic.ClearPendingEvents();
     }
 
     private static EpicDto ToDto(EpicRow epic) =>

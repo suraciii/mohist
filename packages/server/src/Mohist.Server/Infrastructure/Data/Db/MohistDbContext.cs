@@ -38,6 +38,7 @@ public class MohistDbContext : DbContext
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
+    public DbSet<EpicActiveIssueRow> EpicActiveIssues { get; set; } = null!;
     public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
@@ -219,8 +220,23 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.EpicId).HasMaxLength(64);
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
-            entity.HasIndex(e => new { e.ProjectId, e.IssueId }).IsUnique();
+            // Issue-179: relax uniqueness - an issue may hold a terminal-epic
+            // membership (done/closed) AND a non-terminal membership
+            // (idle/running/paused) concurrently so it can be re-homed from a
+            // finished epic into a new active one. The active-membership slot
+            // table below enforces the "at most one non-terminal epic per issue"
+            // invariant at the database boundary.
+            entity.HasIndex(e => new { e.ProjectId, e.IssueId });
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
+        });
+
+        modelBuilder.Entity<EpicActiveIssueRow>(entity =>
+        {
+            entity.HasKey(e => new { e.ProjectId, e.IssueId });
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.EpicId).HasMaxLength(64).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.EpicId });
         });
 
         modelBuilder.Entity<IssueRow>(entity =>
