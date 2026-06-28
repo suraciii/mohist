@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
 import { WorkflowSessionsPanel } from './WorkflowSessionsPanel'
 import { useWorkflowRunSessions, type WorkflowRunSession } from '../../../entities/coder-session'
@@ -106,5 +106,127 @@ describe('WorkflowSessionsPanel', () => {
     const { container } = render(<WorkflowSessionsPanel issueNumber={55} workflowRunId={null} />)
 
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('renders a compact filter/sort control row above the session list', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
+        session({ id: 's-build', sessionName: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    expect(screen.getByTestId('workflow-sessions-controls')).toBeInTheDocument()
+    const statusFilter = screen.getByTestId('workflow-sessions-status-filter') as HTMLSelectElement
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
+    const sortSelect = screen.getByTestId('workflow-sessions-sort') as HTMLSelectElement
+
+    expect(statusFilter.value).toBe('')
+    expect(stageFilter.value).toBe('')
+    expect(sortSelect.value).toBe('createdAt')
+
+    const stageOptions = Array.from(stageFilter.querySelectorAll('option')).map((o) => o.textContent)
+    expect(stageOptions).toEqual(['All stages', 'Plan', 'Build', 'Check', 'Integrate'])
+  })
+
+  it('filtering by status hides non-matching sessions and surfaces a notice', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
+        session({ id: 's-build', sessionName: 'build', status: 'failed', createdAt: '2026-06-12T10:03:00.000Z' }),
+        session({ id: 's-check', sessionName: 'check', status: 'running', createdAt: '2026-06-12T10:02:00.000Z' }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const statusFilter = screen.getByTestId('workflow-sessions-status-filter') as HTMLSelectElement
+    fireEvent.change(statusFilter, { target: { value: 'failed' } })
+
+    expect(screen.queryByText('plan')).not.toBeInTheDocument()
+    expect(screen.queryByText('check')).not.toBeInTheDocument()
+    expect(screen.getByText('build')).toBeInTheDocument()
+    expect(screen.getByTestId('workflow-sessions-filter-notice')).toHaveTextContent('Showing 1 of 3 sessions')
+  })
+
+  it('filtering by stage hides non-matching sessions', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({ id: 's-plan', sessionName: 'plan', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z' }),
+        session({ id: 's-build', sessionName: 'build', status: 'completed', createdAt: '2026-06-12T10:03:00.000Z' }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
+    fireEvent.change(stageFilter, { target: { value: 'build' } })
+
+    expect(screen.queryByText('plan')).not.toBeInTheDocument()
+    expect(screen.getByText('build')).toBeInTheDocument()
+  })
+
+  it('sorting by tokens reorders visible sessions', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan',
+          sessionName: 'plan',
+          status: 'completed',
+          createdAt: '2026-06-12T10:00:00.000Z',
+          usage: { totalTokens: 1_000 },
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'build',
+          status: 'completed',
+          createdAt: '2026-06-12T10:01:00.000Z',
+          usage: { totalTokens: 5_000 },
+        }),
+        session({
+          id: 's-check',
+          sessionName: 'check',
+          status: 'completed',
+          createdAt: '2026-06-12T10:02:00.000Z',
+          usage: { totalTokens: 2_500 },
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const sortSelect = screen.getByTestId('workflow-sessions-sort') as HTMLSelectElement
+    fireEvent.change(sortSelect, { target: { value: 'tokens' } })
+
+    const links = screen.getAllByRole('link')
+    const rendered = links.map((link) => link.getAttribute('href'))
+    expect(rendered).toEqual([
+      '/Test%20Project/issues/55/workflow/sessions/build',
+      '/Test%20Project/issues/55/workflow/sessions/check',
+      '/Test%20Project/issues/55/workflow/sessions/plan',
+    ])
+  })
+
+  it('shows an empty-result message when filters hide every session', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({ id: 's-plan', sessionName: 'plan', status: 'completed' }),
+        session({ id: 's-build', sessionName: 'build', status: 'completed' }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const stageFilter = screen.getByTestId('workflow-sessions-stage-filter') as HTMLSelectElement
+    fireEvent.change(stageFilter, { target: { value: 'check' } })
+
+    expect(screen.getByText(/No sessions match the current filters/)).toBeInTheDocument()
   })
 })

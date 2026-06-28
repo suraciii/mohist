@@ -44,3 +44,37 @@ This file is the working memory for the implementation of issue-244 (Session 列
 - After T-001, the only session-list rendering path is `WorkflowSessionsPanel` (`widgets/issue-workflow/ui/`) → `WorkflowSessionRow` (same file). T-002 (filtering + sorting) and T-003 (responsive row layout) must edit those two files; no other list implementation exists.
 - T-004 (sibling navigation + sidebar on `SessionPage`) should read siblings via `useWorkflowRunSessions(issue.workflowRunId)` to match the panel's data source. The local `SessionHeader` inside `SessionPage.tsx` is the right place to add the prev/next controls next to (or as part of) the existing header — do **not** recreate the deleted widget.
 - `useCoderSessions` and `useWorkflowRunSessions` are both live-updating via SSE; mixing them on `SessionPage` for current-session lookup (existing) + sibling navigation (new) is acceptable per design D4.
+
+## Codebase Patterns (continued)
+
+- **`WorkflowRunSession` carries no `stage` field.** The server projection `ToWorkflowDto` (`packages/server/src/Mohist.Server/Workflow/Services/Sessions/AgentSessionQuerier.cs:560`) maps only `sessionName` — the canonical session label — not a separate `stage`. Session names in practice are the pipeline stage names (`plan`, `build`, `check`, `integrate`), so deriving a session's stage from `sessionName` against the known pipeline set is consistent with how the rest of the app treats them. Sessions whose `sessionName` falls outside the pipeline list are simply un-stageable (no stage filter matches them).
+- **Native `<select>` is the established pattern for small filtering controls.** `WorkflowProfileControl.tsx:99-115` uses a native `<select>` with `data-testid` and `fireEvent.change` (see `WorkflowProfileControl.test.tsx:136`). The heavier base-ui `Select` component (`shared/ui/components/select.tsx`) is reserved for dialog/picker surfaces and is overkill for a compact toolbar control. New compact selects should follow the `WorkflowProfileControl` shape.
+- **Hook testability pattern.** `useEventTimeline.test.ts` shows the convention: mock the entity-layer hook with `vi.mock('../../../entities/...', ...)`, then call `renderHook(() => useFoo(...))` from `@testing-library/react`. Use `act(() => result.current.setX(...))` for state mutations and assert on `result.current.x`. A `nowMs` parameter on hooks that compare against `Date.now()` (e.g. duration sort) makes tests deterministic without mocking the global clock.
+
+## Decisions
+
+- T-002 adds `useWorkflowSessionFiltering` at `packages/web/src/widgets/issue-workflow/model/useWorkflowSessionFiltering.ts`. Owns `statusFilter: string | null`, `stageFilter: WorkflowPipelineStage | null`, `sortKey: WorkflowSessionSortKey`. Memoized filtered+sorted output is exposed as `sessions`. The hook also surfaces `availableStatuses` (required ones: running/completed/failed), `availableStages` (intersection of the pipeline set with what the current session set actually contains), and `totalCount` so the panel can show "Showing N of M" without losing the unsfiltered total.
+- T-002 keeps the existing `WorkflowSessionsPanel` summary line (`${n} sessions · tokens · peak ctx · cost`) computed over the **unfiltered** session set so the panel header still reflects the full workflow run, and adds a separate "Showing N of M sessions" notice only when a filter actually hides rows.
+- Token fallback in `getSessionTotalTokens`: `usage.totalTokens` if numeric, else `inputTokens + outputTokens`, else `0`. Matches the proposal's note.
+- Duration in `computeSessionDurationMs`: terminal statuses (`completed`/`failed`/`cancelled`) measure `completedAt - startedAt` (or `- createdAt` when `startedAt` is null); non-terminal measure `now - startedAt` (or `- createdAt` when `startedAt` is null). Mirrors `SessionPage.tsx:272-276` but always returns a positive duration for live sessions so duration sort is meaningful. The hook accepts a `nowMs` option for deterministic tests; the panel passes nothing and falls back to `Date.now()`.
+- Stage filter UI keeps all four pipeline stages listed at all times (per spec) but `disabled`s the ones that aren't currently present in the session set, so users can see they exist even before any session of that stage exists.
+
+## Gotchas
+
+- The existing `WorkflowSessionsPanel.test.tsx` `session()` helper defaults `status` to `'completed'` and `sessionName` to `'check'`. After T-002 the panel exposes filter controls only when the session list is non-empty, so the "no sessions yet" branch (and the `!workflowRunId` early return) does not render the controls — no need to update those tests.
+- `fireEvent.change` on a `<select>` works with `target.value` in jsdom. The tests must encode the option value (`'running'`, `'failed'`, `'build'`, `'tokens'`) — not the visible label — in `target.value`.
+- Tests that compare rendered transcript link `href`s must include the project path prefix (`/Test%20Project/...`) because `render()` from `tests/test-utils.tsx` wraps the app in `ProjectProvider` which prepends the project slug via `useProjectPath`. The plain `/issues/...` shape never appears in rendered output under jsdom.
+- `WorkflowRunSession` does not have a `stage` property. Any code that needs to know a session's stage must derive it from `sessionName` via `getSessionPipelineStage` (exported from the hook module) — do not assume `session.stage` exists.
+
+## Status
+
+- T-002 implemented and verified locally.
+- New files:
+  - `packages/web/src/widgets/issue-workflow/model/useWorkflowSessionFiltering.ts`
+  - `packages/web/src/widgets/issue-workflow/model/useWorkflowSessionFiltering.test.ts`
+- Modified files:
+  - `packages/web/src/widgets/issue-workflow/index.ts` — exported hook, stage/sort constants, helpers, and types.
+  - `packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.tsx` — uses `useWorkflowSessionFiltering`, renders a `SessionFilterControls` toolbar (status/stage/sort `<select>`s), shows a "Showing N of M" notice when filters hide rows, and falls back to "No sessions match the current filters." when the filtered set is empty.
+  - `packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.test.tsx` — added 5 cases covering the control row, status/stage filtering, sort reorder, and the empty-result message.
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes — 2692 tests across 181 files (1 skipped pre-existing; 24 new hook tests + 5 new panel tests vs. T-001 baseline).
