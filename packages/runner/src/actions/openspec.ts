@@ -284,6 +284,10 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       )
     }
     if (persistedArchiveHasFiles) {
+      if (persistedSource === "legacy") {
+        const persistFailure = await persistArchiveName(context, archivePrefix, changeDir)
+        if (persistFailure) return persistFailure
+      }
       destination = persistedDestination
     } else if (!sourceHasFiles) {
       return archiveFailure(

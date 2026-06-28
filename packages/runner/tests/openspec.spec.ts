@@ -1423,6 +1423,55 @@ describe("mohist/archive-change", () => {
     )
   })
 
+  it("ArchiveChangeLegacyOnlyRetryWithArchivePresent_MigratesBeforeGitStaging", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    const oldPrefix = "2026-06-25-issue-127"
+    const archivedDir = join(workDir, "openspec", "changes", "archive", oldPrefix)
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(join(archivedDir, "proposal.md"), "proposal\n")
+
+    const sourceRel = "openspec/changes/issue-127"
+    const destinationRel = `openspec/changes/archive/${oldPrefix}`
+
+    const patchRunVars = vi.fn()
+    const events: string[] = []
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      events.push(key)
+      if (key === `add -A ${destinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${destinationRel}`) {
+        return gitOk(`${destinationRel}/proposal.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`) {
+        return gitOk("[main eee5555] Archive OpenSpec change: issue-127\n 1 file changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("eee5555\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
+    }, { patchRunVars: async (...args) => {
+      events.push("patchRunVars")
+      return patchRunVars(...args)
+    } }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.destination).toBe(archivedDir)
+    expect(output.errorCode).toBeNull()
+    expect(patchRunVars).toHaveBeenCalledTimes(1)
+    expect(patchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { openspecArchiveName: oldPrefix },
+      expect.any(AbortSignal),
+    )
+    expect(events[0]).toBe("patchRunVars")
+    expect(events).toContain(`add -A ${destinationRel}`)
+  })
+
   it("ArchiveChangeBothKeysPresent_PrefersOpenspecArchiveNameAndIgnoresLegacy", async () => {
     // When both `openspecArchiveName` and the legacy nested-map entry are
     // present, the action must prefer the new key for archive-name
