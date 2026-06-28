@@ -72,8 +72,10 @@ export interface AcpPromptRunResult {
 export type AcpPromptRunner = (prompt: string) => Promise<AcpPromptRunResult>
 
 export async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
-  if (context.ownerKind === "agent-job" && context.agentSessionId) {
-    return runAcpGenericAgentSession(context, prompt)
+  if (context.ownerKind === "agent-job") {
+    return context.agentSessionId
+      ? runAcpGenericAgentSession(context, prompt)
+      : runEphemeralWorkflowAgentSession(context, prompt)
   }
 
   const sessionName = sessionNameFromContext(context)

@@ -1,9 +1,13 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services.Sessions;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
 using Orleans;
@@ -320,6 +324,67 @@ public class AgentJobGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
     [Fact]
+    public async Task SubmitAsync_GenericSession_NoEligibleRunner_ClosesSessionAsFailed()
+    {
+        await ClearGlobalRunnerRegistryAsync();
+
+        var projectId = $"agent-job-missing-project-bound-{Guid.NewGuid():N}";
+        var sessionId = $"generic-session-{Guid.NewGuid():N}";
+        var sessionGrain = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await sessionGrain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: string.Empty,
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/generic-session",
+            Metadata: new AgentSessionMetadata(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                })));
+
+        var jobKey = $"agent-job-bound-generic-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(new AgentJobInput(
+            Prompt: "no runner ever",
+            WorkspacePath: "/tmp/agent-job-bound",
+            ProjectId: projectId,
+            AgentSessionId: sessionId));
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        await job.CheckTimeoutsAsync();
+
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
+        await sessionGrain.DeactivateForTestAsync();
+
+        var closedPayload = await WaitForAsync(
+            async () =>
+            {
+                await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+                var turnIds = await db.AgentSessionTranscriptTurns
+                    .Where(t => t.SessionId == sessionId)
+                    .Select(t => t.Id)
+                    .ToListAsync();
+                if (turnIds.Count == 0) return null;
+                return await db.AgentSessionTranscriptParts
+                    .Where(p => turnIds.Contains(p.TurnId) && p.Type == "session_closed")
+                    .Select(p => p.PayloadJson)
+                    .FirstOrDefaultAsync();
+            },
+            payload => !string.IsNullOrWhiteSpace(payload),
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(50),
+            "generic session terminal close transcript event")!;
+        using var payload = JsonDocument.Parse(closedPayload!);
+        Assert.Equal("failed", payload.RootElement.GetProperty("status").GetString());
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, payload.RootElement.GetProperty("failureCategory").GetString());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Fact]
     public async Task SubmitAsync_DoesNotUseWorkflowAssignment()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-bypass-runner-{Guid.NewGuid():N}");
@@ -459,6 +524,7 @@ public class AgentJobGrainSpecs
         Assert.Equal("summarize the diff", agentLaunch.GetProperty("prompt").GetString());
 
         Assert.Equal("openai/gpt-5.5", with.GetProperty("model").GetString());
+        Assert.Equal("openai/gpt-5.5", with.GetProperty("agent").GetProperty("model").GetString());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

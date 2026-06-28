@@ -43,7 +43,7 @@ internal static class BodyInputResolver
         TextReader standardInput,
         TextWriter error)
     {
-        var hasInline = !string.IsNullOrWhiteSpace(inlineBody);
+        var hasInline = inlineBody is not null;
         var hasFile = !string.IsNullOrWhiteSpace(bodyFile);
         var hasStdin = bodyStdin;
 

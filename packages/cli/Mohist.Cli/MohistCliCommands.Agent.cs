@@ -430,10 +430,6 @@ internal static class AgentCommands
                     return 1;
                 var promptText = ((BodyInputResolver.Result.Success)resolvedPrompt).Body;
 
-                var agent = await ResolveAgentAsync(api, resolvedProjectId, agentRef!);
-                if (agent is null)
-                    return 1;
-
                 var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);
                 object body = contextRefs is null
                     ? new { prompt = promptText }
@@ -441,10 +437,11 @@ internal static class AgentCommands
 
                 var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
                 return await api.PrintPostWithOutputAsync(
-                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}/sessions"),
+                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions"),
                     body,
                     mode,
-                    nameof(MohistCliApi.TableShape.AgentSessionLaunch));
+                    nameof(MohistCliApi.TableShape.AgentSessionLaunch),
+                    rawJson: true);
             }
         });
         return cmd;
@@ -506,7 +503,8 @@ internal static class AgentCommands
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/followup"),
                     new { text = textValue },
                     mode,
-                    nameof(MohistCliApi.TableShape.AgentSessionFollowup));
+                    nameof(MohistCliApi.TableShape.AgentSessionFollowup),
+                    rawJson: true);
             }
         });
         return cmd;
@@ -551,7 +549,8 @@ internal static class AgentCommands
                     ProjectAgentSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/cancel"),
                     new { },
                     mode,
-                    nameof(MohistCliApi.TableShape.AgentSessionCancel));
+                    nameof(MohistCliApi.TableShape.AgentSessionCancel),
+                    rawJson: true);
             }
         });
         return cmd;

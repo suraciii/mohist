@@ -6,6 +6,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
@@ -44,6 +45,8 @@ public static class GrainTestConfig
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
             .UseSqlite(connectionString));
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
+        siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddScoped<RunnerWorkStore>();
@@ -61,6 +64,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
         siloBuilder.Services.AddSingleton(eventBus);
         siloBuilder.Services.AddSingleton(eventStore);
+        siloBuilder.Services.AddSingleton<ITranscriptEventPublisher, NoopTranscriptEventPublisher>();
         siloBuilder.Services.AddSingleton<TimeProvider>(timeProvider ?? TimeProvider.System);
         siloBuilder.Services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         siloBuilder.Services.AddScoped<AgentSessionQuery>();
@@ -75,5 +79,10 @@ public static class GrainTestConfig
         {
             opts.WorkCompletionTimeout = TimeSpan.FromMinutes(10);
         });
+    }
+
+    private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher
+    {
+        public Task PublishAsync(TranscriptEnvelope envelope, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

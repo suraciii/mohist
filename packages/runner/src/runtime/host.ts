@@ -112,9 +112,8 @@ export class RunnerHost {
       : this.sessionManager.genericKey(target.sessionId)
     const entry = this.sessionManager.get(key)
     if (!entry) return null
-    const projectId = this.options.projectId ?? ""
-    if (!projectId) return null
-    return { connection: this.sharedAcpConnection.connection, sessionId: entry.sessionId, projectId }
+    if (this.options.projectId && this.options.projectId !== target.projectId) return null
+    return { connection: this.sharedAcpConnection.connection, sessionId: entry.sessionId, projectId: target.projectId }
   }
 
   async run(signal: AbortSignal) {

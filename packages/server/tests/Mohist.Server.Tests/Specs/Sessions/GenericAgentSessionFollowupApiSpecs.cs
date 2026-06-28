@@ -92,6 +92,51 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task GenericRunnerRoutes_CrossProjectSession_ReturnNotFoundAndDoNotMutate()
+    {
+        var launched = await LaunchAndOpenGenericSessionAsync("gen-cross-project");
+        var otherProject = await CreateProjectAsync("gen-cross-project-other");
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(launched.SessionId);
+        var before = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
+
+        using var get = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}");
+        using var open = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/open", new { workId = "bad-open" });
+        using var attach = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/attach", new { agentSessionId = "bad-acp" });
+        using var events = await _client.PostAsJsonAsync($"/api/runner/{_runnerId}/agent-sessions/{otherProject.Id}/{launched.SessionId}/runtime-events", new
+        {
+            runtimeEvents = new[] { new { type = "session.input", payload = new { text = "bad" } } }
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, open.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, attach.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, events.StatusCode);
+        var after = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
+        Assert.Equal(before.AgentSessionId, after.AgentSessionId);
+        Assert.Equal(before.WorkDir, after.WorkDir);
+        Assert.Equal(before.LastDataAt, after.LastDataAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public async Task GenericRunnerOpen_UnknownSession_ReturnsNotFoundAndDoesNotCreateSession()
+    {
+        var project = await CreateProjectAsync("gen-unknown-open");
+        var sessionId = $"missing-{Guid.NewGuid():N}";
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
+            new { workId = "bad-open" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        Assert.Null(await grain.GetAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task GenericFollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
         var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-empty");

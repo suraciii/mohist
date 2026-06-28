@@ -117,11 +117,10 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(2, handler.Requests.Count);
-        Assert.Equal("/api/projects/proj_test/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
-        var launchRequest = handler.Requests[1];
+        Assert.Single(handler.Requests);
+        var launchRequest = handler.Requests[0];
         Assert.Equal(HttpMethod.Post, launchRequest.Method);
-        Assert.Equal("/api/projects/proj_test/agents/agent_123/sessions", launchRequest.RequestUri?.PathAndQuery);
+        Assert.Equal("/api/projects/proj_test/agents/reviewer/sessions", launchRequest.RequestUri?.PathAndQuery);
         var launchBody = JsonNode.Parse(launchRequest.Body!)!.AsObject();
         Assert.Equal("Audit the auth flow", launchBody["prompt"]?.GetValue<string>());
 
@@ -198,7 +197,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        var launchRequest = handler.Requests[1];
+        var launchRequest = handler.Requests[0];
         var launchBody = JsonNode.Parse(launchRequest.Body!)!.AsObject();
         Assert.Equal("Long markdown body from file", launchBody["prompt"]?.GetValue<string>());
     }
@@ -232,7 +231,7 @@ public class CliAgentSessionCommandSpecs
             standardInput: stdin);
 
         Assert.Equal(0, exitCode);
-        var launchRequest = handler.Requests[1];
+        var launchRequest = handler.Requests[0];
         var launchBody = JsonNode.Parse(launchRequest.Body!)!.AsObject();
         Assert.Equal("summarize this PR", launchBody["prompt"]?.GetValue<string>());
     }
@@ -284,26 +283,52 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
+    public async Task SessionLaunch_BlankInlinePromptWithFile_StillFailsMutualExclusion()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+        fileSystem.AddFile("/tmp/p", "from file");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "launch", "reviewer", "--prompt", "", "--prompt-file", "/tmp/p"],
+            output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionLaunch_BlankInlinePromptWithStdin_StillFailsMutualExclusion()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "launch", "reviewer", "--prompt", " ", "--prompt-stdin"],
+            output, error, fileSystem, executor,
+            standardInput: new StringReader("from stdin"));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task SessionLaunch_UnknownAgentByName_SurfacesErrorWithoutSilentSuccess()
     {
-        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
-        {
-            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
-            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
-            {
-                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = Array.Empty<object>() }));
-            }
-            return Task.FromResult(RecordingHttpHandler.JsonError(
-                "Agent 'nope' not found", "agent_not_found", HttpStatusCode.NotFound));
-        });
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "server says agent nope is missing", "agent_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["agent", "session", "launch", "nope", "--prompt", "Hi"],
             output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("Agent 'nope' not found", error.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(handler.Requests, r => r.RequestUri?.PathAndQuery.EndsWith("/sessions", StringComparison.Ordinal) == true);
+        Assert.Contains("server says agent nope is missing", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+        Assert.Equal("/api/projects/proj_test/agents/nope/sessions", handler.Requests[0].RequestUri?.PathAndQuery);
     }
 
     [Fact]
@@ -320,7 +345,7 @@ public class CliAgentSessionCommandSpecs
         Assert.NotEqual(0, exitCode);
         var lookupRequest = handler.Requests.FirstOrDefault();
         Assert.NotNull(lookupRequest);
-        Assert.Equal("/api/projects/proj_test/agents/agent_missing", lookupRequest!.RequestUri?.PathAndQuery);
+        Assert.Equal("/api/projects/proj_test/agents/agent_missing/sessions", lookupRequest!.RequestUri?.PathAndQuery);
     }
 
     [Fact]
@@ -381,7 +406,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        var launchRequest = handler.Requests[1];
+        var launchRequest = handler.Requests[0];
         var launchBody = JsonNode.Parse(launchRequest.Body!)!.AsObject();
         Assert.Equal("Hi", launchBody["prompt"]?.GetValue<string>());
         var context = launchBody["context"]?.AsObject();
@@ -417,8 +442,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal("/api/projects/proj_other/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
-        Assert.Equal("/api/projects/proj_other/agents/agent_123/sessions", handler.Requests[1].RequestUri?.PathAndQuery);
+        Assert.Equal("/api/projects/proj_other/agents/reviewer/sessions", handler.Requests[0].RequestUri?.PathAndQuery);
     }
 
     [Fact]
@@ -502,6 +526,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
+        Assert.Contains("\"success\": true", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("\"status\": \"sent\"", output.ToString(), StringComparison.Ordinal);
     }
 
@@ -532,6 +557,38 @@ public class CliAgentSessionCommandSpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("text is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_BlankInlineTextWithFile_StillFailsMutualExclusion()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+        fileSystem.AddFile("/tmp/t", "from file");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "followup", "sess_123", "--text", "", "--text-file", "/tmp/t"],
+            output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionFollowup_BlankInlineTextWithStdin_StillFailsMutualExclusion()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "followup", "sess_123", "--text", " ", "--text-stdin"],
+            output, error, fileSystem, executor,
+            standardInput: new StringReader("from stdin"));
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -642,6 +699,7 @@ public class CliAgentSessionCommandSpecs
             output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
+        Assert.Contains("\"success\": true", output.ToString(), StringComparison.Ordinal);
         Assert.Contains("\"state\": \"cancelled\"", output.ToString(), StringComparison.Ordinal);
     }
 

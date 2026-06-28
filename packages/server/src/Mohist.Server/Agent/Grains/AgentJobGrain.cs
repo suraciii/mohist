@@ -341,6 +341,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         ComposePromptWithEntry(with, input);
         if (!string.IsNullOrWhiteSpace(input.Model))
             with["model"] = JSON.SerializeToElement(input.Model);
+        ApplyAgentRuntimeConfig(with, input.AgentConfig, input.Model);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
@@ -392,6 +393,26 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             new Dictionary<string, object?> { ["agent-launch"] = composed });
     }
 
+    private static void ApplyAgentRuntimeConfig(
+        Dictionary<string, JsonElement?> with,
+        JsonElement? agentConfig,
+        string? modelOverride)
+    {
+        if (agentConfig is not { ValueKind: JsonValueKind.Object } config)
+            return;
+
+        if (string.IsNullOrWhiteSpace(modelOverride))
+        {
+            with["agent"] = config.Clone();
+            return;
+        }
+
+        var agent = JSON.Deserialize<Dictionary<string, JsonElement>>(config.GetRawText())
+            ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        agent["model"] = JSON.SerializeToElement(modelOverride);
+        with["agent"] = JSON.SerializeToElement(agent);
+    }
+
     private async Task ScheduleNextDispatchAsync()
     {
         if (_status != AgentJobStatus.Pending || _input is null || _submittedAt is null)
@@ -432,20 +453,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             "AgentJob {Id} report timeout after {Timeout}; transitioning to failed",
             Key, _options.JobTimeout);
         await FailWithReasonAsync(AgentJobFailureReasons.ReportTimeout);
-
-        // If a generic AgentSession was minted at launch (T-003), close
-        // it on the server so the session reaches a terminal state. The
-        // runner never reported a result, so the session would otherwise
-        // sit indefinitely in a non-terminal state. The synthesized
-        // session.closed event flows through the existing runtime-event
-        // pipeline (ContextExhaustionClassifier classifies it as
-        // probe_timeout / context_exhaustion_suspected when no usage is
-        // recorded, which matches the runner's liveness-quiet
-        // classification).
-        await CloseGenericSessionOnTimeoutAsync();
     }
 
-    private async Task CloseGenericSessionOnTimeoutAsync()
+    private async Task CloseGenericSessionOnFailureAsync(string reason)
     {
         var sessionId = _input?.AgentSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
@@ -458,8 +468,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             {
                 ["status"] = "failed",
                 ["exitCode"] = (int?)null,
-                ["failureCategory"] = AgentJobFailureReasons.ReportTimeout,
-                ["reason"] = $"agent-job-timeout ({Key})",
+                ["failureCategory"] = reason,
+                ["reason"] = $"agent-job-{reason} ({Key})",
                 ["recordedAt"] = DateTime.UtcNow.ToString("o"),
             });
             await grain.AppendRuntimeEventsAsync(
@@ -469,7 +479,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "AgentJob {Id} failed to close generic session {SessionId} on timeout",
+                "AgentJob {Id} failed to close generic session {SessionId} after failure",
                 Key, sessionId);
         }
     }
@@ -489,10 +499,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && _timeProvider.GetUtcNow() >= _runningSince.Value + _options.JobTimeout;
     }
 
-    private Task FailWithReasonAsync(string reason)
+    private async Task FailWithReasonAsync(string reason)
     {
         if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
-            return Task.CompletedTask;
+            return;
 
         _status = AgentJobStatus.Failed;
         _failureReason = reason;
@@ -501,7 +511,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _status, reason, null, null, reason, null);
         DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
-        return Task.CompletedTask;
+        await CloseGenericSessionOnFailureAsync(reason);
     }
 
     private void DisposeDispatchTimer()

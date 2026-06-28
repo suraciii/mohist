@@ -49,8 +49,10 @@ export function sessionTargetFromContext(context: ActionContext): SessionTarget 
   const projectId = context.projectId
   if (!projectId) return null
 
-  if (context.ownerKind === "agent-job" && context.agentSessionId) {
-    return { kind: "generic", projectId, sessionId: context.agentSessionId }
+  if (context.ownerKind === "agent-job") {
+    return context.agentSessionId
+      ? { kind: "generic", projectId, sessionId: context.agentSessionId }
+      : null
   }
 
   const sessionName = sessionNameFromContext(context)

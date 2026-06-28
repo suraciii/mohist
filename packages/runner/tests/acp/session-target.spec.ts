@@ -43,7 +43,7 @@ describe("sessionTargetFromContext", () => {
     expect(target).toEqual({ kind: "generic", projectId: "project-1", sessionId: "session-abc" })
   })
 
-  it("AgentJobWithoutSessionId_FallsThroughToWorkflowShape", () => {
+  it("AgentJobWithoutSessionId_ReturnsNullForEphemeralRawAgentJob", () => {
     const context = baseContext({
       ownerKind: "agent-job",
       projectId: "project-1",
@@ -51,7 +51,7 @@ describe("sessionTargetFromContext", () => {
       workId: "fallback-work",
     })
 
-    expect(sessionTargetFromContext(context)).toEqual({ kind: "workflow", projectId: "project-1", workflowRunId: "", sessionName: "fallback-work" })
+    expect(sessionTargetFromContext(context)).toBeNull()
   })
 
   it("WorkflowOwnerKind_ReturnsWorkflowShape_WithSessionName", () => {
@@ -86,7 +86,7 @@ describe("sessionTargetFromContext", () => {
     expect(sessionTargetFromContext(context)).toBeNull()
   })
 
-  it("AgentJobWithSessionNameButNoAgentSessionId_FallsThroughToWorkflowShape", () => {
+  it("AgentJobWithSessionNameButNoAgentSessionId_ReturnsNullForEphemeralRawAgentJob", () => {
     const context = baseContext({
       ownerKind: "agent-job",
       projectId: "project-1",
@@ -94,6 +94,6 @@ describe("sessionTargetFromContext", () => {
       with: { session: "ephemeral" },
     })
 
-    expect(sessionTargetFromContext(context)).toEqual({ kind: "workflow", projectId: "project-1", workflowRunId: "", sessionName: "ephemeral" })
+    expect(sessionTargetFromContext(context)).toBeNull()
   })
 })

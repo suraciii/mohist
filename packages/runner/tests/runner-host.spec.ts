@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
+import type { SessionTarget } from "../src/runtime/acp-connection.js"
 
 const connect = vi.fn()
 const heartbeat = vi.fn()
@@ -15,6 +16,7 @@ const probeLiveness = vi.fn(async () => true)
 // overwrites this slot with its most-recently registered callback. Tests
 // can then invoke it to simulate the client reporting a completed reconnect.
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
+let capturedFollowupTargetResolver: ((target: SessionTarget) => { connection: unknown; sessionId: string; projectId: string } | null) | null = null
 
 const forceReconnect = vi.fn(async () => undefined)
 const createSharedAcpConnection = vi.fn()
@@ -37,8 +39,9 @@ vi.mock("../src/server/runner-signalr.js", () => ({
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
-    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void } = {}) {
+    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: typeof capturedFollowupTargetResolver } = {}) {
       capturedOnReconnected = options.onReconnected ?? null
+      capturedFollowupTargetResolver = options.followupTargetResolver ?? null
     }
   },
 }))
@@ -53,11 +56,14 @@ const acpShutdown = vi.fn()
 
 vi.mock("../src/runtime/acp-connection.js", () => ({
   AcpSessionManager: class {
-    key(_workflowRunId: string, _sessionName: string) { return `${_workflowRunId}:${_sessionName}` }
-    get(_key: string) { return undefined }
-    set() {}
-    has() { return false }
-    delete() {}
+    private sessions = new Map<string, { sessionId: string; workDir: string }>()
+    key(target: SessionTarget) { return target.kind === "workflow" ? this.workflowKey(target.workflowRunId, target.sessionName) : this.genericKey(target.sessionId) }
+    workflowKey(workflowRunId: string, sessionName: string) { return `workflow:${workflowRunId}:${sessionName}` }
+    genericKey(sessionId: string) { return `generic:${sessionId}` }
+    get(key: string) { return this.sessions.get(key) }
+    set(key: string, entry: { sessionId: string; workDir: string }) { this.sessions.set(key, entry) }
+    has(key: string) { return this.sessions.has(key) }
+    delete(key: string) { this.sessions.delete(key) }
   },
   createSharedAcpConnection: (...args: unknown[]) => createSharedAcpConnection(...args),
 }))
@@ -279,6 +285,46 @@ describe("RunnerHost", () => {
     ), { timeout: 5_000 })
     controller.abort()
     await expect(run).resolves.toBeUndefined()
+  })
+
+  it("GenericFollowupResolver_UsesPayloadProjectId_WhenRunnerProjectUnset", async () => {
+    vi.clearAllMocks()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      maxConcurrentWorkflows: 1,
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as { sharedAcpConnection: unknown; sessionManager: { set(key: string, entry: unknown): void; genericKey(sessionId: string): string } }
+    const connection = { prompt: vi.fn() }
+    host.sharedAcpConnection = { connection }
+    host.sessionManager.set(host.sessionManager.genericKey("gen-1"), { sessionId: "acp-1", workDir: "/tmp/work" })
+
+    const resolved = capturedFollowupTargetResolver?.({ kind: "generic", projectId: "project-from-payload", sessionId: "gen-1" })
+
+    expect(resolved).toEqual({ connection, sessionId: "acp-1", projectId: "project-from-payload" })
+  })
+
+  it("GenericFollowupResolver_RejectsMismatchedConfiguredRunnerProject", async () => {
+    vi.clearAllMocks()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "runner-project",
+      runnerRoot: "/tmp/mohist-runner-test",
+      maxConcurrentWorkflows: 1,
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    }) as unknown as { sharedAcpConnection: unknown; sessionManager: { set(key: string, entry: unknown): void; genericKey(sessionId: string): string } }
+    host.sharedAcpConnection = { connection: { prompt: vi.fn() } }
+    host.sessionManager.set(host.sessionManager.genericKey("gen-1"), { sessionId: "acp-1", workDir: "/tmp/work" })
+
+    const resolved = capturedFollowupTargetResolver?.({ kind: "generic", projectId: "other-project", sessionId: "gen-1" })
+
+    expect(resolved).toBeNull()
   })
 
   it("SelfCheckTimer_DoesNotReconnect_OnProbeSuccess", async () => {

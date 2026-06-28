@@ -27,7 +27,6 @@ function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
     projectId: "project-1",
     ownerKind: "agent-job",
     agentSessionId: "session-abc",
-    agentJobId: "agent-job-1",
     writeVars: async () => {},
     ...overrides,
   }
@@ -175,8 +174,7 @@ function createGenericFixture() {
 }
 
 function createFakeProcess(agent: GenericFakeAgent): AcpProcessHandle {
-  const [, agentStream] = linkedStreams()
-  const [clientStream] = linkedStreams()
+  const [clientStream, agentStream] = linkedStreams()
   const connection = new AgentSideConnection(() => agent.handler(), agentStream)
   agent.bind(connection)
   return {
@@ -221,7 +219,7 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     expect(cached?.sessionId).toBe("acp-session-1")
   })
 
-  it("GenericSession_RuntimeEventsIncludeSessionInputAndClosed", async () => {
+  it("GenericSession_RuntimeEventsIncludeSessionInputAndDoNotCloseAfterSuccessfulTurn", async () => {
     const fixture = createGenericFixture()
 
     await acpAgentAction(fixture.context({ with: { prompt: "do the work" } as never }))
@@ -230,7 +228,45 @@ describe("runAcpAgentSession — generic session dispatch", () => {
       .filter((entry) => entry.event === "agentSessionRuntimeEvents")
       .map((entry) => ({ type: entry.type, sessionId: entry.sessionId }))
     expect(runtimeEvents.some((event) => event.type === "session.input" && event.sessionId === "session-abc")).toBe(true)
-    expect(runtimeEvents.some((event) => event.type === "session.closed" && event.sessionId === "session-abc")).toBe(true)
+    expect(runtimeEvents.some((event) => event.type === "session.closed" && event.sessionId === "session-abc")).toBe(false)
+  })
+
+  it("GenericSession_CanFollowUpAfterFirstTurnUsingSameCachedAcpSession", async () => {
+    const fixture = createGenericFixture()
+
+    await acpAgentAction(fixture.context({ with: { prompt: "first" } as never }))
+    await acpAgentAction(fixture.context({ with: { prompt: "second" } as never }))
+
+    const prompts = fixture.agent.calls.filter((call) => call.event === "prompt")
+    expect(prompts).toHaveLength(2)
+    expect(prompts.every((call) => call.sessionId === "acp-session-1")).toBe(true)
+    const closedEvents = fixture.serverConnection.calls.filter((entry) => entry.event === "agentSessionRuntimeEvents" && entry.type === "session.closed")
+    expect(closedEvents).toHaveLength(0)
+  })
+
+  it("RawAgentJobWithProjectIdAndNoSessionId_StaysEphemeral", async () => {
+    const fixture = createGenericFixture()
+
+    const result = await acpAgentAction(fixture.context({ agentSessionId: undefined, with: { prompt: "raw" } as never }))
+
+    expect(result.status).toBe("success")
+    const events = fixture.serverConnection.calls.map((entry) => entry.event)
+    expect(events).not.toContain("getWorkflowAgentSession")
+    expect(events).not.toContain("openWorkflowAgentSession")
+    expect(events).not.toContain("attachWorkflowAgentSession")
+    expect(events).not.toContain("workflowAgentSessionRuntimeEvents")
+    expect(events).not.toContain("getAgentSession")
+    expect(events).not.toContain("openAgentSession")
+    expect(events).not.toContain("attachAgentSession")
+    expect(events).not.toContain("agentSessionRuntimeEvents")
+  })
+
+  it("GenericSession_AgentConfigModelSelectsAcpModel", async () => {
+    const fixture = createGenericFixture()
+
+    await acpAgentAction(fixture.context({ with: { prompt: "do the work", agent: { model: "openai/gpt-5.5" } } as never }))
+
+    expect(fixture.agent.calls).toContainEqual({ event: "unstable_setSessionModel", sessionId: "acp-session-1", modelId: "openai/gpt-5.5" })
   })
 
   it("WorkflowOwnerKind_StillUsesWorkflowConnectionMethods", async () => {

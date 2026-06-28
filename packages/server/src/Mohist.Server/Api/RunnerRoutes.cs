@@ -261,10 +261,13 @@ public static class RunnerRoutes
         group.MapGet("/agent-sessions/{projectId}/{sessionId}", async (
             string projectId, string sessionId,
             AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
             CancellationToken ct) =>
         {
             var session = await sessions.GetGrain(sessionId).GetAsync();
             if (session is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
 
             return Results.Ok(ToRunnerGenericAgentSession(session));
         });
@@ -272,10 +275,15 @@ public static class RunnerRoutes
         group.MapPost("/agent-sessions/{projectId}/{sessionId}/open", async (
             string runnerId, string projectId, string sessionId,
             GenericAgentSessionOpenRequest? req, AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
             CancellationToken ct) =>
         {
             req ??= new GenericAgentSessionOpenRequest();
             var grain = sessions.GetGrain(sessionId);
+            var existing = await grain.GetAsync();
+            if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
 
             // The session was minted up front by the launch endpoint
             // (T-003) carrying source-kind=agent-launch + agent id/name
@@ -295,11 +303,14 @@ public static class RunnerRoutes
         group.MapPost("/agent-sessions/{projectId}/{sessionId}/attach", async (
             string projectId, string sessionId,
             AgentSessionAttachRequest req, AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
 
             try
             {
@@ -316,11 +327,14 @@ public static class RunnerRoutes
         group.MapPost("/agent-sessions/{projectId}/{sessionId}/runtime-events", async (
             string projectId, string sessionId,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
+            AgentSessionQuery sessionQuery,
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
+            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+                return ApiResults.NotFound($"Agent session {sessionId} not found");
 
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
@@ -338,6 +352,19 @@ public static class RunnerRoutes
             session.WorkDir,
             session.Model,
             session.ResolvedModel);
+
+    private static async Task<bool> IsGenericAgentSessionInProjectAsync(
+        AgentSessionQuery sessionQuery,
+        string projectId,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var records = await sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return false;
+        return string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            && string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Builds the annotations-only metadata that the runner contributes on
