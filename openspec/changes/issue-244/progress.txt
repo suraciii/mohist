@@ -1,0 +1,46 @@
+# Issue 244 — progress notes
+
+This file is the working memory for the implementation of issue-244 (Session 列表与发现改进).
+
+## Codebase Patterns
+
+- **Widget barrel conventions.** `packages/web/src/widgets/coder-session/index.ts` re-exports widget-level components and hooks (e.g. `useActivityCards`, `ActiveSessionCard`). When deleting a widget component, drop the line in the barrel — the barrel is the only public surface to clean up.
+- **SessionHeader is a homonym.** Two distinct components share the `SessionHeader` name across the web tree:
+  - `packages/web/src/widgets/coder-session/ui/SessionHeader.tsx` — the dense single-row component using `CoderSessionSummary`. Consumed only by `SessionList`. **Deleted in T-001.**
+  - `packages/web/src/pages/session/ui/SessionPage.tsx:267` — a locally-scoped sub-component used for the SessionPage transcript header (props: `issueNumber`, `issueTitle`, `meta`, `statusKind`, `turnCount`, `recoveryBar`). Unrelated to the dead widget above.
+  Tests that mention "SessionHeader" in comments and `describe` titles inside `SessionPage.test.tsx` reference the local one and are correct as-is.
+- **"Dead component" tests live in `tests/`, not `src/`.** The acceptance criterion restricts the import grep to `packages/web/src`, but tests under `packages/web/tests/` also import dead components. Removing a dead `widgets/*/ui/*.tsx` file requires also removing (or migrating) any `tests/*.test.tsx` that imports it; otherwise `tsc -b` fails. `useCoderSessions` live-event coverage that previously lived alongside `SessionHeader` tests in `SessionLiveness.test.tsx` already exists in `tests/useCoderSessions.test.tsx` under `describe('useCoderSessions live event handling', ...)` — deleting `SessionLiveness.test.tsx` does not lose coverage.
+
+## Decisions
+
+- T-001 deletes `SessionDetail.tsx`, `SessionList.tsx`, `SessionHeader.tsx`, `SessionHeader.test.tsx`, and the entire `SessionLiveness.test.tsx` (the latter exclusively tested the dead component plus a few live-event assertions now duplicated in `useCoderSessions.test.tsx`).
+- T-001 deletes the `describe('SessionHeader navigation', ...)` block in `SessionPage.test.tsx` (lines 2316–2456 before the deletion). That block tested the deleted `SessionHeader` widget and its `getSessionLabel` helper; both are dead.
+- `WorkflowSessionsPanel` remains the sole canonical session-list component rendered by `IssueDetailPage.tsx:926`. No code changes inside it.
+- The `SessionList` export is removed from `widgets/coder-session/index.ts:3`.
+
+## Gotchas
+
+- `rg -w "SessionHeader"` still matches 8 lines after deletion — every one is the local `SessionHeader` definition or comment inside `SessionPage.tsx` / `SessionPage.test.tsx`, not an import of the deleted widget. Confirm with `rg "import.*from.*coder-session.*SessionHeader"` (returns zero) before reporting the import-clean criterion as satisfied.
+- `SessionHeader` in `SessionPage.test.tsx` is imported via `await import('../src/widgets/coder-session/ui/SessionHeader')` inside each `it` callback; a `rg "SessionHeader" tests/` only of `*.tsx` is required to catch those, since the file otherwise compiles.
+- `SessionDetail` / `SessionList` are pure component names; `getSessionLabel` / `getSessionStatusLabel` are exported helpers from `SessionHeader` that have no other consumers and die with it.
+
+## Status
+
+- T-001 implemented and verified locally.
+- Deleted files:
+  - `packages/web/src/widgets/coder-session/ui/SessionDetail.tsx`
+  - `packages/web/src/widgets/coder-session/ui/SessionList.tsx`
+  - `packages/web/src/widgets/coder-session/ui/SessionHeader.tsx`
+  - `packages/web/src/widgets/coder-session/ui/SessionHeader.test.tsx`
+  - `packages/web/tests/SessionLiveness.test.tsx`
+- Modified files:
+  - `packages/web/src/widgets/coder-session/index.ts` — removed `SessionList` export.
+  - `packages/web/tests/SessionPage.test.tsx` — removed `describe('SessionHeader navigation', ...)` block (previously lines 2316–2456) which tested the deleted widget.
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes — 2663 tests across 180 files (1 skipped pre-existing).
+
+## Learnings for T-002 / T-003 / T-004
+
+- After T-001, the only session-list rendering path is `WorkflowSessionsPanel` (`widgets/issue-workflow/ui/`) → `WorkflowSessionRow` (same file). T-002 (filtering + sorting) and T-003 (responsive row layout) must edit those two files; no other list implementation exists.
+- T-004 (sibling navigation + sidebar on `SessionPage`) should read siblings via `useWorkflowRunSessions(issue.workflowRunId)` to match the panel's data source. The local `SessionHeader` inside `SessionPage.tsx` is the right place to add the prev/next controls next to (or as part of) the existing header — do **not** recreate the deleted widget.
+- `useCoderSessions` and `useWorkflowRunSessions` are both live-updating via SSE; mixing them on `SessionPage` for current-session lookup (existing) + sibling navigation (new) is acceptable per design D4.
