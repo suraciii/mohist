@@ -171,3 +171,60 @@
   - `detaches the listener when the layout unmounts` — confirms hook cleanup is bound to layout lifecycle.
   - `respects the focus-deferral contract when the followup composer is focused` — appends a textarea to the scroll container, focuses it, fires all four shortcuts, asserts none scroll.
 - The 22 pre-existing tests in `SessionTranscriptLayout.integration.test.tsx`, the 7 `TurnList.render.test.tsx` tests, the 10 `AssistantParts.render.test.tsx`, the 6 `TranscriptMarkdown.render.test.tsx`, the 6 SessionPage main-branch header tests, the 5 `TurnToc.test.tsx` tests, the 10 `TranscriptToolbar.test.tsx` tests, the 143 SessionPage tests, and the rest of the suite (172+ tests across the broader SessionPage coverage) all stay green.
+
+## T-006 Decisions
+
+- D6 (serializer): `serializeTranscriptPlainText(turns: DisplayTurn[])` lives in `widgets/session-transcript/model/serialize-transcript.ts`. It is a pure function (no IO, no React, no `Date.now()`/randomness) that:
+  1. Returns `''` when `turns.length === 0` (no trailing newline — the button is disabled in that state, so the contract is just "no surprises").
+  2. For each turn builds a `string[]` section: `== Turn N · <kindLabel> · <toLocaleString(startedAt)> ==` + prompt section lines + assistant part lines.
+  3. Prompt section lines: `title` (skip if falsy), `subtitle` (skip if falsy), `Output: <outputPath>` (only when not redundant with subtitle, mirroring `PromptBlock.tsx:64-66` so the copy reflects what the user sees), `Context: <files joined>` (skip when no context files), and the raw prompt `text` (skip when falsy).
+  4. Assistant part lines: text in full; reasoning as `[reasoning omitted, X KB]` where `X = (text.length / 1024).toFixed(1)` (matches `ReasoningPartView` in `AssistantParts.tsx:53`); tool parts as `[tool <normalizedName>] <displayTitle|title|target|>` (fallback chain: displayTitle → title → target → bare name); context-group parts as `[context-group] <title>`; error parts as `[error] <message>`; divider parts as `[divider] <label>`.
+  5. Joins each turn section's lines with `\n`, joins turn sections with `\n\n`, `trimEnd()`s, then appends a final `\n` so the output ends with a newline.
+- D6 (memoization): `CopyFullTextButton` uses `useMemo(() => serializeTranscriptPlainText(turns), [turns])` keyed on the `turns` reference. Tests confirm rerendering with the same reference produces identical serialized output (no redundant re-serialization on every keystroke/parent re-render); rerendering with a different reference recomputes.
+- D6 (clipboard pattern): The button uses `navigator.clipboard?.writeText` (the robust existence check from `ArtifactContentViewer.tsx:89`). When `navigator.clipboard` is absent the handler sets `data-state="failed"` and calls `toast.error('Clipboard is unavailable in this browser.')` — never reports success. When `writeText` rejects the second `.then` callback fires the same `data-state="failed"` + `toast.error('Failed to copy transcript to clipboard.')` path. No bare `.then(...)` that silently swallows failure.
+- D6 (UI): Button rendered inside `TranscriptToolbar`'s `rightSlot` so it sits to the right of the mobile TOC trigger below `lg` (the lg+ rail remains on the right gutter). Label: `'Copy full text'` → `'Copied!'` for ~2s on success, stable `'Copy full text'` on failure. `data-state` cycles through `'idle' | 'copied' | 'failed'`; `data-copy-full-text=""` and `aria-label="Copy full transcript text"` for test selectors / a11y.
+- D6 (timing): The 2s auto-reset is wired via a `useEffect([status])` that schedules `setTimeout(() => setStatus('idle'), 2000)` and clears it on unmount/status-change. This mirrors the existing pattern at `PromptBlock.tsx:31` / `AssistantParts.tsx:24` but adds the cleanup-on-unmount (those callers don't unmount during a copy cycle, but the transcript page does when navigating away).
+- D6 (disabled state): `disabled={turns.length === 0}` — when there are no turns, the button is rendered but unusable. The handler short-circuits early (`if (isEmpty) return`) so a disabled button can't fire a copy.
+- Wiring: `SessionTranscriptLayout.tsx` imports `CopyFullTextButton` and passes `<CopyFullTextButton turns={turns} />` as `TranscriptToolbar`'s `rightSlot`. Re-exports added to `widgets/session-transcript/ui/index.ts` for symmetry with other components.
+
+## T-006 Gotchas
+
+- `Array.prototype.join('\n\n')` on an array of arrays turns each inner array into a comma-separated string via `Array.toString()` — first version of the serializer produced `Turn 2 · ... ==,Wire TOC,Add the toolbar TOC trigger.,On it.` instead of newlines. Fix: `.map((turn, i) => turnSection(i + 1, turn).join('\n')).join('\n\n')` — map inner turn sections into strings before joining.
+- `vi.useFakeTimers()` + `waitFor` race: fake timers make `waitFor`'s polling loop (which uses `setTimeout`) wait on the fake clock, but React's microtask queue and the `setTimeout(..., 2000)` reset effect can land in inconsistent order. Two paths the tests take now: (a) most cases use real timers + `waitFor` for state transitions; (b) the two "reset after ~2s" tests wrap `vi.useFakeTimers()` / `vi.useRealTimers()` in a `try/finally` per-test, and call `vi.waitFor(...)` (the bound `vi` namespace, not `@testing-library`) so the polling survives under fake timers. The other 10 tests stay on real timers.
+- `setClipboard(undefined)` between tests: `Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })` plus `setClipboard(originalClipboard)` in `afterEach` restores the session-wide clipboard mock from `SessionPage.test.tsx:60-63`. Without the restore, the second test sees `navigator.clipboard === undefined` and the "is disabled when turns.length === 0" assertion still passes (the button is disabled regardless), but later tests could see a stale writeText. Restoration keeps the suite isolated.
+- `navigator.clipboard` defineProperty on jsdom: the getter must be `configurable: true` so subsequent `Object.defineProperty` calls can replace the value. The first version of `setClipboard(undefined)` used `{ writable: true }` which throws on a non-writable getter.
+- The serializer uses `toLocaleString()` (date + time) for the turn header timestamp, matching `PromptBlock.tsx:14` (`formatDateTime`). The T-002 turn header at `TurnList.tsx:91` uses `toLocaleTimeString()` (time only) for the inline marker. They are deliberately different — the inline marker is a small subtle indicator, the copy header is a fuller reference.
+
+## T-006 Verification
+
+- `npm run typecheck -w packages/web` → clean.
+- `npm run test:run -w packages/web` → 2577 passed | 1 skipped (was 2552 before T-006; +25 new tests: 12 serializer + 12 CopyFullTextButton + 1 layout integration).
+- New tests in `packages/web/src/widgets/session-transcript/model/serialize-transcript.test.ts` under `describe('serializeTranscriptPlainText')` (12):
+  - `emits a header line, prompt content, and assistant parts in document order for a representative multi-turn fixture` — 2-turn fixture with text/reasoning/tool/error parts; asserts the full expected document string with turn headers, prompt text, `[reasoning omitted, 2.0 KB]`, `[tool apply_patch] src/SessionPage.tsx`, `[error] Tool execution failed`.
+  - `uses the same kind labels as PromptBlock and TOC for the header` — covers all 6 `PromptKind` values; locks in the kind-label vocabulary (Initial Task, Task, Retry, Follow-up, Recovery, Missing Prompt).
+  - `numbers turns 1-based in document order` — three turns; asserts the header indices appear in increasing order via `String#indexOf` comparison.
+  - `omits the title, subtitle, and outputPath lines when the prompt has none` — body-only prompt; asserts no `Output:` / `Context:` leakage.
+  - `renders tool parts as [tool <name>] <title> falling back to target then bare name` — exercises the fallback chain: displayTitle → target → bare name.
+  - `renders context-group parts as [context-group] <title>` — exercises the context-group branch.
+  - `renders error parts as [error] <message>` — exercises the error branch.
+  - `summarizes reasoning as [reasoning omitted, X KB] matching the AssistantParts helper format` — 4 KB reasoning; asserts exact KB string + asserts the raw reasoning text is NOT in the output.
+  - `renders the prompt text in full` — body with newlines preserved.
+  - `returns an empty string for an empty transcript` — empty fixture returns `''` (no trailing newline).
+  - `is a pure function: input is not mutated` — `JSON.stringify` snapshot of input is unchanged after two `serializeTranscriptPlainText(turns)` calls.
+  - `separates sections by a single blank line` — two-turn fixture; exactly one `\n\n` in the output.
+- New tests in `packages/web/src/widgets/session-transcript/ui/CopyFullTextButton.test.tsx` under `describe('CopyFullTextButton')` (12):
+  - `mounts with the default label and data-copy-full-text attribute` — asserts `aria-label`, `data-state="idle"`, not disabled.
+  - `is disabled when turns.length === 0`.
+  - `does not call clipboard.writeText when disabled (empty transcript)` — `disabled` getter returns `true`.
+  - `on success: writes the full serialized transcript and shows Copied! for ~2s` — waitFor's until `data-state="copied"`; asserts the written text contains all four assistant-part lines from the multi-turn fixture; asserts `toast.error` not called.
+  - `on writeText reject: surfaces toast.error, sets data-state="failed", does NOT show success` — `mockRejectedValue`; asserts toast message + `data-state="failed"` + label stable.
+  - `when navigator.clipboard is absent: does not call writeText, surfaces toast.error, sets data-state="failed"` — `setClipboard(undefined)`; asserts no writeText call.
+  - `uses the robust clipboard-existence check from ArtifactContentViewer (no bare .then)` — confirms writeText IS called when clipboard is present (guards against future "guarded too tightly" regression).
+  - `memoizes the serialized text on the turns reference` — same `turns` reference across two clicks; asserts identical serialized output.
+  - `regenerates the serialized text when the turns reference changes` — different `turns` reference; asserts the new content reaches the clipboard.
+  - `does not fire toast.success on successful copy` — only the visual label changes; no toast is shown on success.
+  - `resets data-state back to idle after the ~2s timer elapses (success path)` — `vi.useFakeTimers()` + `vi.advanceTimersByTime(2000)`.
+  - `resets data-state back to idle after the ~2s timer elapses (failure path)` — same as above for the rejection branch.
+- New test in `packages/web/src/widgets/session-transcript/ui/SessionTranscriptLayout.integration.test.tsx` under the lg+ two-column describe (1):
+  - `mounts the CopyFullTextButton inside the toolbar alongside the mobile TOC trigger` — asserts both `[data-copy-full-text]` and `[data-transcript-toolbar-toc-trigger]` are children of `[data-transcript-toolbar]`.
+- The 22+1 pre-existing tests in `SessionTranscriptLayout.integration.test.tsx`, the 7 `TurnList.render.test.tsx` tests, the 10 `AssistantParts.render.test.tsx`, the 6 `TranscriptMarkdown.render.test.tsx` tests, the 6 SessionPage main-branch header tests, the 5 `TurnToc.test.tsx` tests, the 10 `TranscriptToolbar.test.tsx` tests, the 143 SessionPage tests, and the rest of the suite (172+ tests across the broader SessionPage coverage) all stay green.

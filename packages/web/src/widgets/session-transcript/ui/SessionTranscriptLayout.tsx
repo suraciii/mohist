@@ -4,6 +4,7 @@ import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { TurnList } from './TurnList'
 import { TurnTocRail, buildTurnTocEntries } from './TurnToc'
 import { TranscriptToolbar } from './TranscriptToolbar'
+import { CopyFullTextButton } from './CopyFullTextButton'
 
 interface TranscriptEmptyStateProps {
   isRunning: boolean
@@ -73,7 +74,10 @@ export function SessionTranscriptLayout({
       ) : (
         <div className="lg:grid lg:grid-cols-[1fr_180px] lg:gap-6 lg:max-w-4xl lg:mx-auto">
           <div className="min-w-0">
-            <TranscriptToolbar entries={entries} />
+            <TranscriptToolbar
+              entries={entries}
+              rightSlot={<CopyFullTextButton turns={turns} />}
+            />
             <TurnList turns={turns} turnRefs={turnRefs} />
             {isThinking && turns.length > 0 && <ThinkingPlaceholder />}
             {isStreaming && <StreamingIndicator />}

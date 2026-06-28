@@ -231,6 +231,18 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
       expect(mask & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
+    it('mounts the CopyFullTextButton inside the toolbar alongside the mobile TOC trigger', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+
+      const toolbar = document.querySelector('[data-transcript-toolbar]')
+      expect(toolbar).not.toBeNull()
+      const copyButton = toolbar!.querySelector('[data-copy-full-text]')
+      const tocTrigger = toolbar!.querySelector('[data-transcript-toolbar-toc-trigger]')
+      expect(copyButton).not.toBeNull()
+      expect(tocTrigger).not.toBeNull()
+    })
+
     it('renders the grid with the lg-only two-column measure on lg+', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
       const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
