@@ -168,9 +168,6 @@ public abstract class WorkflowGrainSpecs
         // collection. Without resetting it, tests that submit agent jobs
         // see work assigned by stale runners registered in earlier specs.
         await ClearGlobalRunnerRegistryAsync();
-
-        var management = Grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
     }
 
     protected async Task ClearRunnerRegistryAsync(string registryKey)

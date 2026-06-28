@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Idempotent archive directory naming across retries
 
 The `mohist/archive-change` action SHALL make its directory move idempotent across retries and reruns. Before moving the change directory into the archive, the action SHALL persist the computed archive directory name to the single run-scoped workflow runtime variable **`openspecArchiveName`**, whose value is the archive directory basename (for example `2026-06-27-issue-276`) — not an absolute path and not a map keyed by change directory. On any retry or rerun, the action SHALL read `openspecArchiveName` and reuse the same archive directory name, locating the archive at `${dirname(changeDir)}/archive/${openspecArchiveName}`, so that the already-archived directory is located instead of computing a fresh name. The action SHALL NOT derive the archive directory name from the current wall-clock date alone across a retry boundary, because a cross-day retry would otherwise compute a different prefix and fail with `missing-source` once the source directory has already been moved. This requirement SHALL apply to every workflow profile that uses `mohist/archive-change` (both `mohist/github-pr` and `mohist/default`).
@@ -34,20 +36,7 @@ The `mohist/archive-change` action SHALL make its directory move idempotent acro
 - **WHEN** either the `mohist/github-pr` or `mohist/default` profile archives a change
 - **THEN** the `mohist/archive-change` action SHALL exhibit the same idempotent archive-naming behavior using `openspecArchiveName`
 
-### Requirement: Mid-execution workflow runtime variable writes
-
-The runner action infrastructure SHALL allow an action to programmatically write workflow runtime variables during execution, before its task completes. This mid-execution write is distinct from the declarative `setVars` mechanism, which only patches runtime variables after a task succeeds. A mid-execution variable write SHALL be persisted to the server immediately, reusing the run-variable patch path, so that a subsequent retry or rerun of the same task observes the value even when the current execution fails after the write. The `mohist/archive-change` action SHALL use this capability to persist its archive directory name before performing the directory move.
-
-#### Scenario: Action writes a runtime variable mid-execution
-
-- **WHEN** an action writes a workflow runtime variable during execution, before the task completes
-- **THEN** the value SHALL be persisted to the server immediately via the run-variable patch path
-- **AND** the write SHALL NOT be deferred until task completion
-
-#### Scenario: Mid-execution write survives task failure
-
-- **WHEN** an action writes a workflow runtime variable mid-execution and the task subsequently fails
-- **THEN** a retry or rerun of that task SHALL observe the value written before the failure
+## ADDED Requirements
 
 ### Requirement: Backfill archive name from existing archive on missing source
 

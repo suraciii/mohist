@@ -9,12 +9,31 @@ import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
 
 const SPEC_SYNC_COMMIT_MESSAGE = "Sync OpenSpec specs from change delta"
 const ARCHIVE_CHANGE_COMMIT_MESSAGE_PREFIX = "Archive OpenSpec change"
+const OPENSPEC_ARCHIVE_NAME_VAR_KEY = "openspecArchiveName"
 const ARCHIVE_DESTINATION_VAR_KEY = "_actions.archiveChange.destination"
 
-function archiveDestinationMap(variables: JsonObject): JsonObject {
+function readLegacyArchiveName(variables: JsonObject, sourceRel: string): string | null {
   const raw = variables[ARCHIVE_DESTINATION_VAR_KEY]
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as JsonObject
-  return {}
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
+  const entry = (raw as JsonObject)[sourceRel]
+  return typeof entry === "string" && entry.length > 0 ? entry : null
+}
+
+function resolveEffectiveArchiveName(
+  variables: JsonObject,
+  sourceRel: string,
+  sourceName: string,
+  today: string,
+): { name: string; persistedSource: "new" | "legacy" | null } {
+  const newName = variables[OPENSPEC_ARCHIVE_NAME_VAR_KEY]
+  if (typeof newName === "string" && newName.length > 0) {
+    return { name: newName, persistedSource: "new" }
+  }
+  const legacyName = readLegacyArchiveName(variables, sourceRel)
+  if (legacyName) {
+    return { name: legacyName, persistedSource: "legacy" }
+  }
+  return { name: `${today}-${sourceName}`, persistedSource: null }
 }
 
 export type OpenSpecGitRunner = (workDir: string, args: string[], signal: AbortSignal) => Promise<{
@@ -225,10 +244,14 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   const archiveDir = join(dirname(changeDir), "archive")
   const sourceName = basename(changeDir) || "change"
   const sourceRel = relativePath(context.workDir, changeDir)
+  const today = new Date().toISOString().slice(0, 10)
 
-  const existingDestinationMap = archiveDestinationMap(context.variables)
-  const persistedPrefix = typeof existingDestinationMap[sourceRel] === "string" ? (existingDestinationMap[sourceRel] as string) : null
-  const archivePrefix = persistedPrefix ?? `${new Date().toISOString().slice(0, 10)}-${sourceName}`
+  const { name: archivePrefix, persistedSource } = resolveEffectiveArchiveName(
+    context.variables,
+    sourceRel,
+    sourceName,
+    today,
+  )
   const invalidArchivePrefix = validateArchivePrefix(archivePrefix)
   if (invalidArchivePrefix) {
     return archiveFailure("config-error", `Invalid archive name for ${sourceName}: ${invalidArchivePrefix}`, {
@@ -242,13 +265,13 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   const sourceHasFiles = exists(changeDir) && (await hasFiles(changeDir))
 
   let destination: string
-  if (persistedPrefix) {
-    const persistedDestination = resolveArchiveDestination(archiveDir, persistedPrefix)
+  if (persistedSource) {
+    const persistedDestination = resolveArchiveDestination(archiveDir, archivePrefix)
     if (!persistedDestination) {
-      return archiveFailure("config-error", `Archive destination escapes archive root: ${persistedPrefix}`, {
+      return archiveFailure("config-error", `Archive destination escapes archive root: ${archivePrefix}`, {
         kind: "archive-change",
         source: changeDir,
-        archivePrefix: persistedPrefix,
+        archivePrefix,
         stage: "resolve-destination",
       })
     }
@@ -261,6 +284,10 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       )
     }
     if (persistedArchiveHasFiles) {
+      if (persistedSource === "legacy") {
+        const persistFailure = await persistArchiveName(context, archivePrefix, changeDir)
+        if (persistFailure) return persistFailure
+      }
       destination = persistedDestination
     } else if (!sourceHasFiles) {
       return archiveFailure(
@@ -277,6 +304,8 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
           { kind: "archive-change", source: changeDir, archive: persistedDestination },
         )
       }
+      const persistFailure = await persistArchiveName(context, archivePrefix, changeDir)
+      if (persistFailure) return persistFailure
       destination = persistedDestination
       try {
         await moveChangeDir(changeDir, destination)
@@ -292,6 +321,18 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   } else if (!sourceHasFiles) {
     const existingArchive = await findExistingArchive(archiveDir, archivePrefix)
     if (existingArchive) {
+      const backfilledName = basename(existingArchive)
+      const invalidBackfilled = validateArchivePrefix(backfilledName)
+      if (invalidBackfilled) {
+        return archiveFailure("config-error", `Invalid archive name for ${sourceName}: ${invalidBackfilled}`, {
+          kind: "archive-change",
+          source: changeDir,
+          archivePrefix: backfilledName,
+          stage: "validate-archive-name",
+        })
+      }
+      const backfillFailure = await persistArchiveName(context, backfilledName, changeDir)
+      if (backfillFailure) return backfillFailure
       destination = existingArchive
     } else {
       return archiveFailure(
@@ -312,22 +353,8 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
       })
     }
     const resolvedArchiveName = basename(resolvedDestination)
-    try {
-      await context.writeVars({
-        [ARCHIVE_DESTINATION_VAR_KEY]: { ...existingDestinationMap, [sourceRel]: resolvedArchiveName },
-      })
-    } catch (err) {
-      return archiveFailure(
-        "retry-safe",
-        `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
-        {
-          kind: "archive-change",
-          source: changeDir,
-          archivePrefix: resolvedArchiveName,
-          stage: "persist-name",
-        },
-      )
-    }
+    const persistFailure = await persistArchiveName(context, resolvedArchiveName, changeDir)
+    if (persistFailure) return persistFailure
     destination = resolvedDestination
     try {
       await moveChangeDir(changeDir, destination)
@@ -430,6 +457,28 @@ type ArchiveErrorCode = "retry-safe" | "partial-archive" | "missing-source" | "c
 
 function archiveFailure(errorCode: ArchiveErrorCode, message: string, output: Record<string, JsonValue>): ActionResult {
   return { status: "failure", message, output: JSON.stringify({ ...output, errorCode }) }
+}
+
+async function persistArchiveName(
+  context: ActionContext,
+  archiveName: string,
+  source: string,
+): Promise<ActionResult | null> {
+  try {
+    await context.writeVars({ [OPENSPEC_ARCHIVE_NAME_VAR_KEY]: archiveName })
+    return null
+  } catch (err) {
+    return archiveFailure(
+      "retry-safe",
+      `Failed to persist archive name: ${err instanceof Error ? err.message : String(err)}`,
+      {
+        kind: "archive-change",
+        source,
+        archivePrefix: archiveName,
+        stage: "persist-name",
+      },
+    )
+  }
 }
 
 function mergeTaskWith(

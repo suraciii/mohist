@@ -150,8 +150,10 @@ public static class WorkflowGrainTestHelpers
 
     public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)
     {
-        var management = grains.GetGrain<IManagementGrain>(0);
-        await management.ForceActivationCollection(TimeSpan.Zero);
+        var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        var ids = await registry.ListRunnerIdsAsync();
+        foreach (var id in ids)
+            await registry.UnregisterAsync(id);
     }
 
     public static async Task EnqueueWorkflowForTestAsync(IGrainFactory grains, string workflowId, string? projectId = null)
