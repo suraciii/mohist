@@ -217,15 +217,17 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
     public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(_result);
     public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_result.Status, null, null, _result.FailureReason));
+    public Task FailAsync(string reason) => Task.CompletedTask;
 }
 
 internal sealed class PendingAgentJobGrain : IAgentJobGrain
 {
     public int SubmitCount { get; private set; }
+    private string? _failureReason;
 
     public Task<bool> IsWorkRunnableAsync(string runnerId, string workId) => Task.FromResult(false);
     public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "not-running"));
-    public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(AgentJobStatus.Pending);
+    public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input)
@@ -234,8 +236,13 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
         return Task.CompletedTask;
     }
     public Task CheckTimeoutsAsync() => Task.CompletedTask;
-    public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(AgentJobStatus.Pending, null, null, null, null, null));
-    public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(AgentJobStatus.Pending, null, null, null));
+    public Task<AgentJobTerminalResult> GetTerminalResultAsync() => Task.FromResult(new AgentJobTerminalResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, _failureReason, null, null, _failureReason, null));
+    public Task<AgentJobRuntimeSnapshot> GetRuntimeSnapshotAsync() => Task.FromResult(new AgentJobRuntimeSnapshot(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed, null, null, _failureReason));
+    public Task FailAsync(string reason)
+    {
+        _failureReason = reason;
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class SingleAgentJobGrainFactory : IGrainFactory

@@ -95,34 +95,30 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
-    [Fact(Skip = "Tech debt: work-timeout supervision is deleted in T-004 (design D5); runner-process-side liveness (opencode-log-diagnostics) replaces it — no grain-side coverage at this layer")]
+    [Fact]
     public async Task RunningTask_WithoutReport_TimesOutWithoutQueryingRunner()
     {
-        // See design D5: work-timeout supervision is gone from the control
-        // plane. The runner process owns liveness (livenessQuietThresholdMs
-        // + probeTimeoutMs + maxDuration), and the runner-loss closeout
-        // synthesizes a failed report. There is no grain-side timeout to
-        // assert against; coverage lives in runner-process liveness tests.
+        // Regression for T-003: RunnerGrain enforces a control-plane
+        // WorkCompletionTimeout safety net via a persisted reminder. The
+        // scan uses the in-memory active set hydrated from the RunnerWorks
+        // ledger and never queries the runner process; a stuck work is
+        // synthesized as failed(reason=timeout) through the normal report
+        // channel.
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
-        var (work, _) = await PollWorkAnyAsync();
+        var (work, runnerId) = await PollWorkAnyAsync();
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(11));
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.CheckWorkTimeoutsAsync();
+
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        Assert.Null(await workflow.GetCurrentWorkIdAsync());
 
         var run = await LoadRunAsync(work.WorkflowRunId);
         var task = run.Stages.Single().Tasks.Single();
-        task.StartedAt = DateTimeOffset.UtcNow.AddMinutes(-30);
-        await _fixture.Cluster.GetSiloServiceProvider(null)
-            .GetRequiredService<Mohist.Server.Infrastructure.Data.Workflow.IWorkflowRunStore>()
-            .SaveAsync(run);
-        await DeactivateWorkflowAsync(work.WorkflowRunId);
-        workflow = Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-
-        Assert.Equal("Running", await workflow.GetRunStatusAsync());
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
-
-        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
-        run = await LoadRunAsync(work.WorkflowRunId);
-        task = run.Stages.Single().Tasks.Single();
         Assert.Equal(TaskRunStatus.Failed, task.Status);
-        Assert.Equal("work-timeout", run.Failure?.Message);
+        Assert.NotNull(task.FinishedAt);
+        Assert.Equal("timeout", run.Failure?.Message);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]

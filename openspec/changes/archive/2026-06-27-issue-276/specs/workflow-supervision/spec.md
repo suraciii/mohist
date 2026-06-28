@@ -1,18 +1,4 @@
-### Requirement: WorkflowGrain 零定时器零 runner 概念
-
-WorkflowGrain SHALL 不持有任何定时器，SHALL NOT 感知 runner 死活。它 SHALL 只消费 work 结果。runner 状态 SHALL 永远不跨进 WorkflowGrain。
-
-#### Scenario: 不持有 work 超时定时器
-
-- **WHEN** 一个 work 被拉取后处于 STARTED
-- **THEN** WorkflowGrain SHALL NOT 为该 work 装配任何完成定时器
-- **AND** `WorkflowGrainOptions.WorkCompletionTimeout`、`FailTimedOutWorkAsync`、`WorkCompletionDueTime`、`ArmWorkCompletionTimer`、`_workCompletionTimer` SHALL 被删除
-
-#### Scenario: 不接收 runner-lost 通知
-
-- **WHEN** 一个 runner 被判定丢失
-- **THEN** WorkflowGrain SHALL NOT 收到 runner-lost 通知
-- **AND** `IWorkflowGrain.NotifyRunnerLostAsync`、`WorkflowGrain.FailLostRunningTasksAsync`、域 `WorkflowRun.FailTaskForRunnerLost` SHALL 被删除
+## MODIFIED Requirements
 
 ### Requirement: work 执行超时归 runner 进程
 
@@ -69,21 +55,7 @@ work 完成超时与 runner 丢失 SHALL 共用同一 report 通道合成失败�
 - **THEN** 后续的 runner-loss 扫描 SHALL NOT 再次合成该 work
 - **AND** 反之，因 runner-loss（`reason=runner-lost`）进入终态的 work SHALL NOT 被超时扫描再次合成
 
-### Requirement: runner-loss 检测须持久化
-
-runner-loss 检测 SHALL 基于 Orleans reminder 与持久化心跳状态，而 NOT 基于 grain 定时器与内存 `_lastHeartbeat`。否则 silo 重启 + runner 永久消失时无人触发 closeout。此项为独立健壮性 bug，可单开 follow-up issue 跟踪。
-
-#### Scenario: 检测跨 silo 重启存活
-
-- **WHEN** silo 重启且某 runner 永久消失
-- **THEN** runner-loss 检测 SHALL 仍被触发（基于 reminder + 持久化心跳）
-- **AND** SHALL NOT 因内存 `_lastHeartbeat` 丢失而失效
-
-#### Scenario: follow-up 可跟踪
-
-- **WHEN** 本次变更不实现 reminder 化检测
-- **THEN** 该项 SHALL 通过单开的 follow-up issue 跟踪
-- **AND** 验收 SHALL 接受"已开 follow-up issue 跟踪"作为满足条件
+## ADDED Requirements
 
 ### Requirement: RunnerWorks 持久台账
 

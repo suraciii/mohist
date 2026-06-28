@@ -46,6 +46,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
+        siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
@@ -69,6 +70,10 @@ public static class GrainTestConfig
             opts.DispatchBackoffCap = TimeSpan.FromMilliseconds(200);
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
+        });
+        siloBuilder.Services.Configure<WorkflowOptions>(opts =>
+        {
+            opts.WorkCompletionTimeout = TimeSpan.FromMinutes(10);
         });
     }
 }

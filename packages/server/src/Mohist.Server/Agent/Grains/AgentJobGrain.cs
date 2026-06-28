@@ -173,6 +173,26 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         return Task.FromResult(new AgentJobReportResult(true));
     }
 
+    public Task FailAsync(string reason)
+    {
+        if (_status == AgentJobStatus.Completed || _status == AgentJobStatus.Failed)
+            return Task.CompletedTask;
+
+        _status = AgentJobStatus.Failed;
+        _failureReason = reason;
+        _runningSince = null;
+        _terminalResult ??= new AgentJobTerminalResult(
+            _status, reason, null, null, reason, null);
+        DisposeDispatchTimer();
+        DisposeJobTimeoutTimer();
+
+        _log.LogInformation(
+            "AgentJob {Id} forced to failed: {Reason}",
+            Key, reason);
+
+        return Task.CompletedTask;
+    }
+
     public Task SubmitAsync(AgentJobInput input)
     {
         if (_status != AgentJobStatus.Pending)
