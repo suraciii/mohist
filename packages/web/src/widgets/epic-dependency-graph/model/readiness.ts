@@ -20,7 +20,7 @@ export function readinessLabel(readiness: Readiness): string {
 }
 
 function isWaitingForBlocker(blocker: IssueStartBlocker | null): blocker is { kind: 'waiting-for'; issue: { number: number; title: string; stage?: string; status?: string } } {
-  return blocker !== null && blocker.kind === 'waiting-for'
+  return blocker != null && blocker.kind === 'waiting-for'
 }
 
 export function deriveReadiness(issue: Pick<LinkedIssue, 'status' | 'canStart' | 'startBlocker'>): DerivedReadiness {
