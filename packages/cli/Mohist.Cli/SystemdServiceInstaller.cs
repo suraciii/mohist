@@ -12,17 +12,20 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     private readonly TextWriter _err;
     private readonly IFileSystem _fileSystem;
     private readonly ICommandExecutor _commandExecutor;
+    private readonly IEnvironmentVariableProvider _environment;
 
     public SystemdServiceInstaller(
         TextWriter output,
         TextWriter error,
         IFileSystem? fileSystem = null,
-        ICommandExecutor? commandExecutor = null)
+        ICommandExecutor? commandExecutor = null,
+        IEnvironmentVariableProvider? environment = null)
     {
         _out = output;
         _err = error;
         _fileSystem = fileSystem ?? RealFileSystem.Instance;
         _commandExecutor = commandExecutor ?? new SystemCommandExecutor();
+        _environment = environment ?? SystemEnvironmentVariableProvider.Instance;
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -32,11 +35,14 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             Name: ServerUnit,
             Description: "Mohist Server",
             WorkingDirectory: repoRoot,
-            ExecStart: DotnetRun(repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", [
+            ExecStart: DotnetRun(ResolveExecutable("dotnet"), repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", [
                 "--urls",
                 options.ListenUrl ?? "http://127.0.0.1:3456",
             ]),
-            Environment: new Dictionary<string, string>());
+            Environment: new Dictionary<string, string>
+            {
+                ["PATH"] = BuildServicePath(),
+            });
 
         return await InstallAsync(unit, options);
     }
@@ -56,7 +62,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             Name: RunnerUnit,
             Description: "Mohist Runner",
             WorkingDirectory: repoRoot,
-            ExecStart: "node packages/runner/dist/cli.js",
+            ExecStart: $"{ResolveExecutable("node")} packages/runner/dist/cli.js",
             Environment: environment);
 
         return await InstallAsync(unit, options);
@@ -271,12 +277,12 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             "systemd",
             "user")).Replace('\\', '/');
 
-    private static string DotnetRun(string repoRoot, string projectPath, IReadOnlyList<string> args)
+    private static string DotnetRun(string dotnetPath, string repoRoot, string projectPath, IReadOnlyList<string> args)
     {
         var combinedPath = (repoRoot + "/" + projectPath).Replace('\\', '/');
         var parts = new List<string>
         {
-            "dotnet",
+            dotnetPath,
             "run",
             "--project",
             ShellQuote(combinedPath),
@@ -303,6 +309,27 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             "/bin",
         };
         return string.Join(':', entries.Select(NormalizePath));
+    }
+
+    private string ResolveExecutable(string name)
+    {
+        if (Path.IsPathRooted(name))
+            return name.Replace('\\', '/');
+
+        var path = _environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(path))
+            return name;
+
+        foreach (var raw in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var dir = raw.Trim();
+            if (dir.Length == 0) continue;
+            var candidate = (dir.EndsWith('/') ? dir + name : dir + "/" + name).Replace('\\', '/');
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return name;
     }
 
     private static string ShellQuote(string value)
