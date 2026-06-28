@@ -910,6 +910,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
+        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "recovered");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -952,6 +953,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(2);
+        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "failed");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);
@@ -990,6 +992,7 @@ public class SystemUpdateServiceSpecs
 
         var result = await service.StartAsync(new SystemUpdateRequest(), CancellationToken.None);
         await commands.WaitForCountAsync(3);
+        await WaitUntilAsync(async () => (await store.GetLatestAsync())?.Status == "recovered");
 
         var latest = await store.GetLatestAsync();
         Assert.True(result.Started);

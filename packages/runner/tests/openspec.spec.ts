@@ -1050,7 +1050,7 @@ describe("mohist/archive-change", () => {
     expect(patchRunVars).toHaveBeenCalledTimes(1)
     expect(patchRunVars).toHaveBeenCalledWith(
       "workflow-1",
-      { "_actions.archiveChange.destination": { [sourceRel]: `${datePrefix}-issue-127` } },
+      { openspecArchiveName: `${datePrefix}-issue-127` },
       expect.any(AbortSignal),
     )
   })
@@ -1098,7 +1098,7 @@ describe("mohist/archive-change", () => {
     expect(firstOutput.destination).toBe(versionedDestination)
     expect(firstPatchRunVars).toHaveBeenCalledWith(
       "workflow-1",
-      { "_actions.archiveChange.destination": { [sourceRel]: versionedArchiveName } },
+      { openspecArchiveName: versionedArchiveName },
       expect.any(AbortSignal),
     )
 
@@ -1153,7 +1153,7 @@ describe("mohist/archive-change", () => {
     })
 
     const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
-      "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
+      openspecArchiveName: oldPrefix,
     }, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
@@ -1162,7 +1162,14 @@ describe("mohist/archive-change", () => {
     expect(patchRunVars).not.toHaveBeenCalled()
   })
 
-  it.each(["../escaped", "../../escaped", "nested/name"])("ArchiveChangeRejectsUnsafePersistedName_%s", async (unsafePrefix) => {
+  it.each([
+    ["openspecArchiveName", "../escaped"],
+    ["openspecArchiveName", "../../escaped"],
+    ["openspecArchiveName", "nested/name"],
+    ["_actions.archiveChange.destination", "../escaped"],
+    ["_actions.archiveChange.destination", "../../escaped"],
+    ["_actions.archiveChange.destination", "nested/name"],
+  ] as const)("ArchiveChangeRejectsUnsafePersistedName_%s_%s", async (keySource, unsafePrefix) => {
     const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
     const changeDir = join(workDir, "openspec", "changes", "issue-127")
     await mkdir(join(changeDir, "specs"), { recursive: true })
@@ -1175,9 +1182,11 @@ describe("mohist/archive-change", () => {
       return gitFail(`unexpected git call: ${args.join(" ")}`, 1)
     })
 
-    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
-      "_actions.archiveChange.destination": { "openspec/changes/issue-127": unsafePrefix },
-    }, { patchRunVars }))
+    const variables = keySource === "openspecArchiveName"
+      ? { openspecArchiveName: unsafePrefix }
+      : { "_actions.archiveChange.destination": { "openspec/changes/issue-127": unsafePrefix } }
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, variables, { patchRunVars }))
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
@@ -1221,7 +1230,12 @@ describe("mohist/archive-change", () => {
 
     expect(result.status).toBe("success")
     expect(output.destination).toBe(join(workDir, destinationRel))
-    expect(patchRunVars).not.toHaveBeenCalled()
+    expect(patchRunVars).toHaveBeenCalledTimes(1)
+    expect(patchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { openspecArchiveName: oldPrefix },
+      expect.any(AbortSignal),
+    )
   })
 
   it("ArchiveChangeWhenPersistFails_FailsWithRetrySafeBeforeMove", async () => {
@@ -1242,6 +1256,263 @@ describe("mohist/archive-change", () => {
     expect(output.errorCode).toBe("retry-safe")
     expect(output.stage).toBe("persist-name")
     expect(output.source).toBe(changeDir)
+  })
+
+  it("ArchiveChangeBackfillsArchiveNameWhenSourceMissingAndArchiveExists", async () => {
+    // Source change directory was already moved by a prior run whose
+    // `writeVars` never reached the server (or this is the first retry on
+    // the new runner). No `openspecArchiveName` is persisted, but the
+    // archive directory exists on disk under today's prefix. The action
+    // must backfill `openspecArchiveName = basename(archiveDir)` before
+    // continuing and must NOT fail with `missing-source`.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    const datePrefix = new Date().toISOString().slice(0, 10)
+    const archivedName = `${datePrefix}-issue-127`
+    const archivedDir = join(workDir, "openspec", "changes", "archive", archivedName)
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(join(archivedDir, "proposal.md"), "proposal\n")
+
+    const sourceRel = "openspec/changes/issue-127"
+    const destinationRel = `openspec/changes/archive/${archivedName}`
+
+    const patchRunVars = vi.fn()
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      if (key === `add -A ${destinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${destinationRel}`) {
+        return gitOk(`${destinationRel}/proposal.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`) {
+        return gitOk("[main aaa1111] Archive OpenSpec change: issue-127\n 1 file changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("aaa1111\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.destination).toBe(archivedDir)
+    expect(patchRunVars).toHaveBeenCalledTimes(1)
+    expect(patchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { openspecArchiveName: archivedName },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it("ArchiveChangeSubsequentSameRunCrossDateRetry_ReusesBackfilledArchiveName", async () => {
+    // Simulates: a prior run's backfill persisted `openspecArchiveName`;
+    // a later retry crosses a UTC date boundary. The action must read
+    // the backfilled name (which points to the old-date archive) and
+    // NOT recompute today's date prefix.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    const oldPrefix = "2026-06-25-issue-127"
+    const archivedDir = join(workDir, "openspec", "changes", "archive", oldPrefix)
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(join(archivedDir, "proposal.md"), "proposal\n")
+
+    const sourceRel = "openspec/changes/issue-127"
+    const destinationRel = `openspec/changes/archive/${oldPrefix}`
+
+    const patchRunVars = vi.fn()
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      if (key === `add -A ${destinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${destinationRel}`) {
+        return gitOk(`${destinationRel}/proposal.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`) {
+        return gitOk("[main bbb2222] Archive OpenSpec change: issue-127\n 1 file changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("bbb2222\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      openspecArchiveName: oldPrefix,
+    }, { patchRunVars }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.destination).toBe(archivedDir)
+    expect(output.errorCode).toBeNull()
+    expect(patchRunVars).not.toHaveBeenCalled()
+  })
+
+  it("ArchiveChangeBackfillPersistFailure_ReturnsRetrySafePersistNameWithoutMove", async () => {
+    // Source is missing, an existing archive is found by `findExistingArchive`,
+    // but the `writeVars` call to backfill `openspecArchiveName` rejects.
+    // The action must return `persist-name` retry-safe and must NOT touch
+    // the existing archive (the basename is the same, but the failed persist
+    // means a retry will re-attempt the persist).
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    const datePrefix = new Date().toISOString().slice(0, 10)
+    const archivedDir = join(workDir, "openspec", "changes", "archive", `${datePrefix}-issue-127`)
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(join(archivedDir, "proposal.md"), "proposal\n")
+
+    const patchRunVars = vi.fn().mockRejectedValue(new Error("server unavailable"))
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      return gitFail(`unexpected git call: ${args.join(" ")}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {}, { patchRunVars }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(output.errorCode).toBe("retry-safe")
+    expect(output.stage).toBe("persist-name")
+    expect(output.source).toBe(changeDir)
+    expect(patchRunVars).toHaveBeenCalledTimes(1)
+    expect(patchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { openspecArchiveName: `${datePrefix}-issue-127` },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it("ArchiveChangeLegacyOnlyFirstRun_MigratesToOpenspecArchiveNameOnBeforeMove", async () => {
+    // A pre-existing in-flight run only has the legacy
+    // `_actions.archiveChange.destination` key set. The new code must read
+    // the legacy basename and migrate it to `openspecArchiveName` at the
+    // before-move write site, so a subsequent retry uses the new key.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    await mkdir(join(changeDir, "specs"), { recursive: true })
+    await writeFile(join(changeDir, "proposal.md"), "proposal\n")
+    await writeFile(join(changeDir, "specs", "spec.md"), "spec\n")
+
+    const oldPrefix = "2026-06-25-issue-127"
+    const sourceRel = "openspec/changes/issue-127"
+    const destinationRel = `openspec/changes/archive/${oldPrefix}`
+
+    const patchRunVars = vi.fn()
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      if (key === `add -A ${destinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${destinationRel}`) {
+        return gitOk(`${destinationRel}/proposal.md\n${destinationRel}/specs/spec.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`) {
+        return gitOk("[main ccc3333] Archive OpenSpec change: issue-127\n 3 files changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("ccc3333\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
+    }, { patchRunVars }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.destination).toBe(join(workDir, destinationRel))
+    expect(patchRunVars).toHaveBeenCalledTimes(1)
+    expect(patchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { openspecArchiveName: oldPrefix },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it("ArchiveChangeLegacyOnlyRetryWithArchivePresent_MigratesBeforeGitStaging", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    const oldPrefix = "2026-06-25-issue-127"
+    const archivedDir = join(workDir, "openspec", "changes", "archive", oldPrefix)
+    await mkdir(archivedDir, { recursive: true })
+    await writeFile(join(archivedDir, "proposal.md"), "proposal\n")
+
+    const sourceRel = "openspec/changes/issue-127"
+    const destinationRel = `openspec/changes/archive/${oldPrefix}`
+
+    const patchRunVars = vi.fn()
+    const events: string[] = []
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      events.push(key)
+      if (key === `add -A ${destinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${destinationRel}`) {
+        return gitOk(`${destinationRel}/proposal.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`) {
+        return gitOk("[main eee5555] Archive OpenSpec change: issue-127\n 1 file changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("eee5555\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      "_actions.archiveChange.destination": { [sourceRel]: oldPrefix },
+    }, { patchRunVars: async (...args) => {
+      events.push("patchRunVars")
+      return patchRunVars(...args)
+    } }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.destination).toBe(archivedDir)
+    expect(output.errorCode).toBeNull()
+    expect(patchRunVars).toHaveBeenCalledTimes(1)
+    expect(patchRunVars).toHaveBeenCalledWith(
+      "workflow-1",
+      { openspecArchiveName: oldPrefix },
+      expect.any(AbortSignal),
+    )
+    expect(events[0]).toBe("patchRunVars")
+    expect(events).toContain(`add -A ${destinationRel}`)
+  })
+
+  it("ArchiveChangeBothKeysPresent_PrefersOpenspecArchiveNameAndIgnoresLegacy", async () => {
+    // When both `openspecArchiveName` and the legacy nested-map entry are
+    // present, the action must prefer the new key for archive-name
+    // resolution (D2 priority order) and ignore the legacy value. The
+    // action must NOT write any variable in this scenario because the
+    // archive at the persisted (new-key) destination already exists.
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-archive-change-"))
+    const changeDir = join(workDir, "openspec", "changes", "issue-127")
+    const newPrefix = "2026-06-26-issue-127"
+    const legacyPrefix = "2026-06-25-issue-127"
+    const newArchivedDir = join(workDir, "openspec", "changes", "archive", newPrefix)
+    await mkdir(newArchivedDir, { recursive: true })
+    await writeFile(join(newArchivedDir, "proposal.md"), "new-key archive\n")
+
+    const sourceRel = "openspec/changes/issue-127"
+    const destinationRel = `openspec/changes/archive/${newPrefix}`
+
+    const patchRunVars = vi.fn()
+    setOpenSpecGitRunnerForTest(async (_dir, args) => {
+      const key = args.join(" ")
+      if (key === `add -A ${destinationRel}`) return gitOk("")
+      if (key === `rm -rf --cached --ignore-unmatch ${sourceRel}`) return gitOk("")
+      if (key === `diff --cached --name-only -- ${sourceRel} ${destinationRel}`) {
+        return gitOk(`${destinationRel}/proposal.md\n`)
+      }
+      if (key === `commit -m Archive OpenSpec change: issue-127 -- ${sourceRel} ${destinationRel}`) {
+        return gitOk("[main ddd4444] Archive OpenSpec change: issue-127\n 1 file changed")
+      }
+      if (key === "rev-parse HEAD") return gitOk("ddd4444\n")
+      return gitFail(`unexpected git call: ${key}`, 1)
+    })
+
+    const result = await archiveChangeAction(archiveContext(workDir, changeDir, {
+      openspecArchiveName: newPrefix,
+      "_actions.archiveChange.destination": { [sourceRel]: legacyPrefix },
+    }, { patchRunVars }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(output.destination).toBe(newArchivedDir)
+    expect(patchRunVars).not.toHaveBeenCalled()
   })
 })
 
