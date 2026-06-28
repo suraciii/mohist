@@ -4,6 +4,45 @@ namespace Mohist.Cli;
 
 internal sealed partial class TableRenderer
 {
+    internal void RenderRunnerStatus(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No runners connected");
+            return;
+        }
+
+        var headers = new[] { "id", "heartbeat", "state" };
+        var widths = new[] { IdSoftCap, 18, 8 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            var id = StringOf(obj, "id");
+            var heartbeat = FormatHeartbeat(obj);
+            var state = DeriveRunnerState(obj);
+            cells.Add(new[]
+            {
+                Truncate(id, IdSoftCap),
+                Truncate(heartbeat, 18),
+                Truncate(state, 8),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private static string DeriveRunnerState(JsonNode? row)
+    {
+        if (row is not JsonObject obj) return "unknown";
+        if (obj["capacity"] is not JsonObject capacity) return "unknown";
+        var usedSlots = NumberOf(capacity, "usedSlots");
+        if (string.IsNullOrEmpty(usedSlots)) return "unknown";
+        return usedSlots == "0" ? "idle" : "busy";
+    }
+
     private void RenderRepoList(JsonNode? data)
     {
         var rows = AsArray(data);

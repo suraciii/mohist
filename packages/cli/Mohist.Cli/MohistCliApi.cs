@@ -339,6 +339,55 @@ internal sealed class MohistCliApi
         return 0;
     }
 
+    public async Task<int> PrintRunnerStatusAsync(string projectId, string mode)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
+            return 1;
+        }
+
+        JsonNode? data;
+        try
+        {
+            data = await GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}/runners");
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+        catch (ApiResponseException ex)
+        {
+            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+
+        if (data is null)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+
+        var runners = data["runners"] as JsonArray ?? new JsonArray();
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            _out.WriteLine(runners.ToJsonString(JsonOptions));
+            return 0;
+        }
+
+        if (runners.Count == 0)
+        {
+            _out.WriteLine("No runners connected");
+            return 0;
+        }
+
+        var renderer = new TableRenderer(_out, projectId);
+        renderer.RenderRunnerStatus(runners);
+        return 0;
+    }
+
     private void RenderRunnerShow(JsonObject runner)
     {
         _out.WriteLine($"Runner: {StringOfNullable(runner, "id")}");
