@@ -915,10 +915,21 @@ export function EpicDetailPage() {
             data-testid="linked-issues-graph-region"
             data-renderability={graphRenderable.renderable ? 'renderable' : (graphRenderable.reason ?? 'loading')}
           >
-            <DependencyGraphWidget
-              linkedIssues={epic.linkedIssues}
-              onRenderabilityChange={handleGraphRenderabilityChange}
-            />
+            <p
+              className="mb-2 text-xs text-muted-foreground md:hidden"
+              data-testid="linked-issues-graph-narrow-hint"
+            >
+              Graph works best on wider screens — swipe to explore.
+            </p>
+            <div
+              className="overflow-x-auto md:overflow-visible"
+              data-testid="linked-issues-graph-scroll-container"
+            >
+              <DependencyGraphWidget
+                linkedIssues={epic.linkedIssues}
+                onRenderabilityChange={handleGraphRenderabilityChange}
+              />
+            </div>
           </div>
         ) : null}
 

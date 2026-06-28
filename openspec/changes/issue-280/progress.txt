@@ -128,9 +128,67 @@ Issue 280 — Mobile-first adaptation of Epic linked-issue rows & Graph.
       11. Remove is disabled and gates the dialog while pending.
       12. Per-row local state — opening one row's dialog does not open
           another row's dialog.
-    Two pre-existing tests were updated to the two-step flow:
+     Two pre-existing tests were updated to the two-step flow:
       - `removes a linked issue from the detail page` (EpicDetailPage)
         — now clicks Remove → asserts no mutate → clicks Confirm →
         asserts mutate.
       - `keeps the Linked Issues list and add-issue selector fully
         functional when the graph is the default tab` — same update.
+
+## Decisions / Discoveries (T-003)
+
+- D5 graph mobile degradation: pure-CSS approach, no JS media query
+  hook. Inside the existing `linked-issues-graph-region` (EpicDetailPage.tsx),
+  two siblings sit between the region root and `DependencyGraphWidget`:
+    1. `<p data-testid="linked-issues-graph-narrow-hint"
+       className="mb-2 text-xs text-muted-foreground md:hidden">`
+       with copy: `Graph works best on wider screens — swipe to explore.`
+       The `md:hidden` class makes it mobile-only; desktop hides it via
+       Tailwind's 768px breakpoint.
+    2. `<div data-testid="linked-issues-graph-scroll-container"
+       className="overflow-x-auto md:overflow-visible">` wrapping
+       `DependencyGraphWidget`. The `md:overflow-visible` keeps the
+       desktop view free of spurious horizontal scrollbars once the
+       viewport is wider than the canvas min-width.
+- The inner canvas itself received `min-w-[640px]` (plus a matching
+  `min-w-[640px]` on `DependencyGraphSkeleton` for consistency while
+  the React Flow canvas lazy-loads). When the page container is
+  narrower than 640px, the scroll container keeps the canvas inside
+  its own horizontal scroll track instead of pushing the page wider.
+- New testids (kebab-case to match project convention):
+  `linked-issues-graph-narrow-hint`,
+  `linked-issues-graph-scroll-container`. Existing testids
+  (`linked-issues-graph-region`, `linked-issues-view-toggle`,
+  `linked-issues-view-list`, `linked-issues-view-graph`,
+  `epic-dep-graph-canvas`) are unchanged.
+- Tab toggle behavior is unchanged: `linkedIssuesView` initial value
+  stays `'list'`, both tab buttons render inside
+  `linked-issues-view-toggle` only when `graphAvailable` (linkedIssueCount
+  >= 2), and the existing `aria-selected` toggle still drives selection.
+- No changes to `showList` / `data-fallback-for` / `Renderability` type
+  in this task — those extensions belong to T-004 (banner + error
+  boundary).
+
+## Verification
+
+- T-003 verification:
+  - `npm run typecheck -w packages/web` — passes.
+  - `npm run test:run -w packages/web` — 2759 passed, 1 skipped, 0
+    failed. Net 8 new tests in the new `EpicDetailPage Graph mobile
+    degradation (T-003)` describe block:
+      1. Defaults to List view when 2+ linked issues are present
+         (LinkedIssuesView initial value 'list' unchanged).
+      2. Keeps both List and Graph tabs visible and clickable when
+         graphAvailable is true (data-testids unchanged).
+      3. Wraps the graph canvas in an overflow-x-auto container with
+         md:overflow-visible (no scrollbar on desktop).
+      4. Gives the inner graph canvas a min-width class so it
+         horizontally scrolls on narrow viewports.
+      5. Renders a narrow-screen hint with md:hidden above the graph
+         canvas.
+      6. Places the narrow-screen hint above the scroll container in
+         DOM order.
+      7. Keeps the narrow-screen hint hidden when the list view is
+         the default (only renders inside the graph region).
+      8. Switches between List and Graph tabs without error and keeps
+         the overflow-x-auto wrapper on every Graph render.
