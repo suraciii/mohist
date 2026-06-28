@@ -33,23 +33,25 @@ The `EpicClosed` event is still emitted (audit/future use) but currently has no 
 
 - *Alternative considered:* push the "do not unlink" rule into the domain. Rejected — the domain never owned the unlink side-effect (it was grain infrastructure reacting to an event); the destructive write to `EpicIssueRow` is a persistence concern and belongs at the grain. This keeps the #178 boundary intact.
 
-### D2 — Relax the unique index `(ProjectId, IssueId)` to non-unique (schema change)
-The spec's "terminal membership retained + new non-terminal link succeeds" requirement needs **multiple `EpicIssueRow` per issue** (≥1 terminal + exactly 1 non-terminal). The existing `IsUnique()` index (`MohistDbContext.cs:221`) makes that impossible at the DB level — the second `db.EpicIssues.Add(...)` would throw on `SaveChangesAsync`.
+### D2 — Relax the historical-link index and add an active-membership slot (schema change)
+The spec's "terminal membership retained + new non-terminal link succeeds" requirement needs **multiple `EpicIssueRow` per issue** (>=1 terminal + exactly 1 non-terminal). The existing `IsUnique()` index (`MohistDbContext.cs:221`) makes that impossible at the historical-link level — the second `db.EpicIssues.Add(...)` would throw on `SaveChangesAsync`.
 
-Decision: drop the uniqueness on `IX_EpicIssues_ProjectId_IssueId` (keep it as a regular non-unique index for the link lookups), via a new EF Core migration. The "at most one non-terminal epic per issue" invariant is then enforced in application code only (D3).
+Decision: drop the uniqueness on `IX_EpicIssues_ProjectId_IssueId` (keep it as a regular non-unique index for link lookups) and add `EpicActiveIssues`, keyed by `(ProjectId, IssueId)`, via a new EF Core migration. `EpicIssues` remains the historical membership table; `EpicActiveIssues` is the current non-terminal ownership slot. The migration backfills `EpicActiveIssues` from existing `EpicIssues` rows whose owning epic status is `idle`/`running`/`paused`, and intentionally skips `done`/`closed` owners so terminal history does not block re-homing.
+
+The "at most one non-terminal epic per issue" invariant is therefore still hard-enforced at the database boundary, while terminal memberships can coexist in `EpicIssues` with a new active slot.
 
 This contradicts the proposal's "No DB schema changes" claim; that claim held only for *existing* rows (already-empty terminal link sets stay valid) but did not account for the re-homing write path. This design surfaces and resolves that gap.
 
-- *Alternative A — partial unique index on a denormalized terminal flag:* add an `OwnerTerminal` bool to `EpicIssueRow` and a SQLite partial unique index `... WHERE OwnerTerminal = 0`. Rejected for this change: it adds a denormalized column that must be flipped for every link row when the owning epic closes (a write amplification we are explicitly trying to avoid), and the invariant is already naturally single-writer per project in practice. Can be revisited if invariant violations appear.
+- *Alternative A — partial unique index on a denormalized terminal flag:* add an `OwnerTerminal` bool to `EpicIssueRow` and a SQLite partial unique index `... WHERE OwnerTerminal = 0`. Rejected for this change: it adds a denormalized column that must be flipped for every link row when the owning epic closes (a write amplification we are explicitly trying to avoid). The separate active-slot table provides the same hard uniqueness guarantee without mutating retained terminal history rows on close.
 - *Alternative B — "move the slot" on re-homing (delete terminal link, insert non-terminal):* rejected — it contradicts the spec scenario "Re-homing … SHALL NOT reference the terminal epic" while implying the terminal membership remains, and degrades closed-epic history the moment an issue is re-homed.
 
-### D3 — Status-aware duplicate check in `LinkIssueAsync` (set-based)
-Replace the current "first existing link wins" lookup (`EpicGrain.cs:67-74`, a single `FirstOrDefaultAsync`) with a single set-based query that joins all of the issue's `EpicIssues` rows to their owning `Epics.Status`, then:
-- If any existing link belongs to a **non-terminal** epic whose `EpicId != epicId` → reject with the existing `InvalidOperationException("Issue already belongs to Epic …")` (mapped to `DUPLICATE_EPIC_MEMBERSHIP` in `EpicRoutes.cs:79`, unchanged).
-- If an existing link belongs to **this** epic (any status) → idempotent return (unchanged).
-- Otherwise (existing links are all to terminal epics, or none) → proceed to insert.
+### D3 — Status-aware duplicate check in `LinkIssueAsync` (active-slot based)
+Replace the current "first existing link wins" lookup (`EpicGrain.cs:67-74`, a single `FirstOrDefaultAsync`) with an active-slot lookup against `EpicActiveIssues`, then:
+- If the active slot exists and belongs to a different epic -> reject with the existing `InvalidOperationException("Issue already belongs to Epic ...")` (mapped to `DUPLICATE_EPIC_MEMBERSHIP` in `EpicRoutes.cs:79`, unchanged).
+- If the active slot belongs to this epic, or an `EpicIssueRow` already links this epic and issue, return idempotently without creating duplicate rows.
+- Otherwise, insert the historical `EpicIssueRow`; when this epic is non-terminal, also insert the `EpicActiveIssueRow` slot.
 
-The set-based query is required because, post-D2, an issue may hold several terminal-epic rows; `FirstOrDefaultAsync` would only inspect one. Terminal-epic owners are filtered out of the conflict set.
+The active-slot query is required because, post-D2, an issue may hold several terminal-epic rows; `FirstOrDefaultAsync` over `EpicIssues` would only inspect one. Terminal-epic owners are absent from `EpicActiveIssues`, so they do not participate in conflict detection.
 
 The check stays at the grain (not the domain `Epic.LinkIssue`): cross-aggregate visibility of other epics' status is a persistence-boundary concern, matching the existing placement. `Epic.LinkIssue` remains responsible only for intra-aggregate idempotency and the per-epic duplicate-number guard.
 
@@ -63,24 +65,24 @@ In `IssueQuerier.cs:1258-1281`, filter the join so `issue.PrimaryEpic` is assign
 
 ## Risks / Trade-offs
 
-- **[Weakened concurrency guarantee on the non-terminal uniqueness invariant]** -> Previously the unique index was the hard enforcer; the grain check was a friendly pre-check. After D2, two concurrent `LinkIssueAsync` calls for the same issue into two different non-terminal epics could both pass the grain-level check and both insert. *Mitigation:* acceptable for a local-first single-user system; Orleans single-threads per epic grain so same-epic races are already impossible, and cross-epic same-issue races are rare and recoverable via explicit unlink. Document as a known limitation; D2-Alternative A (partial unique index) is the hardening path if it bites.
+- **[Active-slot migration correctness]** -> The new `EpicActiveIssues` table is the hard enforcer for non-terminal uniqueness, so its backfill must faithfully represent existing non-terminal memberships during upgrade. *Mitigation:* migration SQL joins `EpicIssues` to `Epics` and inserts only `idle`/`running`/`paused` owners; regression coverage migrates a pre-issue-179 database and verifies active owners are backfilled while `done`/`closed` owners remain historical-only.
 - **[Behavioural break for callers relying on empty post-close link sets]** -> List/detail/progress reads for closed epics will now show members. *Mitigation:* this is the intended product behaviour; update affected tests (see Migration Plan). No external API contract changes.
 - **[Proposal/schema drift]** -> The proposal asserted "no DB schema changes"; D2 introduces one. *Mitigation:* explicit migration + snapshot update; called out here so reviewers can challenge.
 - **[Stale `EpicClosed` event with no subscriber]** -> After D1 the event is emitted but unused. *Mitigation:* harmless; retained for audit/future projections rather than deleted to avoid churn in the domain event union.
 
 ## Migration Plan
 
-1. **Code**: apply D1 (drop side-effect + helper), D3 (set-based status-aware check), D4 (projection filter).
-2. **Schema**: add an EF Core migration that drops the unique constraint on `IX_EpicIssues_ProjectId_IssueId`, keeping the index as non-unique. Update `MohistDbContextModelSnapshot`.
+1. **Code**: apply D1 (drop side-effect + helper), D3 (active-slot-aware duplicate check), D4 (projection filter).
+2. **Schema**: add an EF Core migration that drops the unique constraint on `IX_EpicIssues_ProjectId_IssueId`, keeping the index as non-unique; create `EpicActiveIssues` keyed by `(ProjectId, IssueId)`; backfill it from existing non-terminal epic memberships. Update `MohistDbContextModelSnapshot`.
 3. **Tests**: 
    - Rewrite `Close_SetsStatusToClosedAndRemovesEpicIssueLinks` (`EpicLifecycleSpecs.cs:187`) → `Close_SetsStatusToClosedAndRetainsEpicIssueLinks` (assert member list + progress preserved).
    - Fix the `Assert.Empty(detail.LinkedIssues)` assertion in `Close_DoesNotChangeIssueStatus…` (`EpicLifecycleSpecs.cs:234`) → assert the linked issue is still present.
-   - Add Fake-based specs covering: (a) close keeps links, (b) re-home from terminal epic into a non-terminal epic succeeds, (c) second non-terminal link still raises `DUPLICATE_EPIC_MEMBERSHIP`, (d) explicit single unlink still works, (e) progress/detail readable post-close, (f) `primaryEpic` follows the non-terminal epic / null when only terminal.
+   - Add Fake-based specs covering: (a) close keeps links, (b) re-home from terminal epic into a non-terminal epic succeeds, (c) second non-terminal link still raises `DUPLICATE_EPIC_MEMBERSHIP`, (d) explicit single unlink still works, (e) progress/detail readable post-close, (f) `primaryEpic` follows the non-terminal epic / null when only terminal, (g) migration backfills active slots only for non-terminal owners.
 4. **Verify**: `npm test` (server, TreatWarningsAsErrors acts as lint); typecheck/tests for web & runner are not affected (no contract change).
-5. **Data**: no backfill. Existing closed epics have empty link sets (pre-change behaviour already deleted them); they remain valid empty sets. Only newly-closed epics retain links.
+5. **Data**: backfill only the active-slot table from existing non-terminal memberships. Do not backfill historical closed epic link sets; existing closed epics have empty link sets because pre-change behaviour already deleted them, and they remain valid empty sets. Only newly-closed epics retain links.
 6. **Rollback**: revert the migration (re-create the unique index — safe because retained-link rows from the new behaviour would need to be reconciled first if duplicates exist) and revert code. In practice rollback is only clean if no issue has been re-homed under the new code; otherwise orphan duplicate-link cleanup may be required.
 
 ## Open Questions
 
-- Is the weakened DB-level uniqueness (D2 risk) acceptable for the project's concurrency model, or should we invest up-front in the denormalized `OwnerTerminal` flag + partial unique index (D2-Alternative A)? Lean: ship without it; revisit only if a real duplicate-non-terminal-membership incident occurs.
+- Should the active-slot table eventually grow foreign keys to `Epics`/`Issues`, or is the existing explicit cleanup in the grain sufficient for the current local-first model? Lean: keep the current explicit cleanup and avoid migration churn unless integrity drift appears.
 - Should listing epics (`EpicQuerier.ListAsync`) visually distinguish retained members of closed epics (e.g. a "closed" badge on the member rows), or is surfacing the preserved set as-is sufficient? Out of scope here but worth a follow-up in the Web layer.

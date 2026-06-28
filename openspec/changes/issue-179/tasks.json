@@ -6,7 +6,7 @@
       "id": "T-001",
       "title": "Non-destructive close and status-aware membership uniqueness",
       "spec": "specs/epic-issue-membership/spec.md#Membership retained across epic close",
-      "description": "Remove the close→unlink side-effect from EpicGrain.ApplyPendingEvents (delete the EpicClosed branch and RemoveAllLinkedIssues helper) so closing an epic retains all EpicIssueRow links. Relax the unique DB index IX_EpicIssues_ProjectId_IssueId to non-unique via an EF Core migration so a terminal-epic membership and a new non-terminal membership can coexist. Replace the single-row duplicate check in LinkIssueAsync with a set-based, status-aware query that rejects DUPLICATE_EPIC_MEMBERSHIP only when an existing membership belongs to a different non-terminal epic; terminal-epic memberships do not block re-homing. UnlinkIssueAsync stays unchanged. Cover all changes with Fake-based specs.",
+      "description": "Remove the close→unlink side-effect from EpicGrain.ApplyPendingEvents (delete the EpicClosed branch and RemoveAllLinkedIssues helper) so closing an epic retains all EpicIssueRow links. Relax the unique DB index IX_EpicIssues_ProjectId_IssueId to non-unique via an EF Core migration so a terminal-epic membership and a new non-terminal membership can coexist, and add EpicActiveIssues as the database-enforced non-terminal ownership slot keyed by ProjectId+IssueId. Backfill EpicActiveIssues from existing idle/running/paused EpicIssue rows during migration while leaving done/closed memberships historical-only. Replace the single-row duplicate check in LinkIssueAsync with an active-slot lookup that rejects DUPLICATE_EPIC_MEMBERSHIP only when an existing slot belongs to a different non-terminal epic; terminal-epic memberships do not block re-homing. UnlinkIssueAsync stays unchanged. Cover all changes with Fake-based specs and a migration backfill regression test.",
       "acceptanceCriteria": [
         "Closing an epic transitions it to `closed` and all N linked-issue memberships remain present (assert member list + progress preserved post-close).",
         "An issue held only by terminal (done/closed) epic(s) can be linked to a non-terminal (idle/running/paused) epic without DUPLICATE_EPIC_MEMBERSHIP; the terminal membership row remains intact.",
@@ -14,12 +14,12 @@
         "The duplicate check is idempotent: linking an issue to an epic it already belongs to (any status) does not error and does not create a duplicate row.",
         "Explicit unlink of a single membership still removes exactly one link and leaves other memberships (including terminal-epic ones) intact.",
         "Epic progress, member list, and detail reads for a newly-closed epic show the preserved member set (non-empty) instead of an empty set.",
-        "EF Core migration drops the unique constraint on IX_EpicIssues_ProjectId_IssueId (index kept as non-unique) and MohistDbContextModelSnapshot is updated; `npm test` passes with TreatWarningsAsErrors."
+        "EF Core migration drops the unique constraint on IX_EpicIssues_ProjectId_IssueId (index kept as non-unique), creates/backfills EpicActiveIssues for non-terminal owners only, and MohistDbContextModelSnapshot is updated; `npm test` passes with TreatWarningsAsErrors."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Modified EpicGrain.cs (removed close side-effect + status-aware LinkIssueAsync), new EF Core migration + updated ModelSnapshot, updated/new specs in EpicLifecycleSpecs.cs and epic membership specs; `npm test` green.",
+      "output": "Modified EpicGrain.cs (removed close side-effect + active-slot-aware LinkIssueAsync), new EF Core migration + updated ModelSnapshot, updated/new specs in EpicLifecycleSpecs.cs and epic membership specs, migration backfill regression coverage; `npm test` green.",
       "dependsOn": [],
       "passes": true,
       "notes": "Rewrite Close_SetsStatusToClosedAndRemovesEpicIssueLinks (EpicLifecycleSpecs.cs) → Close_SetsStatusToClosedAndRetainsEpicIssueLinks. Fix the Assert.Empty(detail.LinkedIssues) assertion in Close_DoesNotChangeIssueStatus… → assert the linked issue is still present. Reuse EpicProgress.IsTerminal(string) for the terminal-status test in the duplicate check to avoid a second definition of 'terminal'. The EpicClosed domain event stays emitted (audit) but now has no subscriber."
