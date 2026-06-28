@@ -768,7 +768,7 @@ export function SessionPage() {
       />
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto min-w-0"
       >
         <SessionTranscriptLayout
           title={detail.metadata.sessionName ?? routeSessionKey ?? 'Session'}

@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayTurn, DisplayChangedFile } from '../model/session-transcript-display'
+import type { TurnRefsMap } from './SessionTranscriptLayout'
 import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'
 
@@ -10,17 +11,29 @@ function formatTime(iso: string): string {
 
 interface TurnListProps {
   turns: DisplayTurn[]
+  turnRefs?: TurnRefsMap
 }
 
-export function TurnList({ turns }: TurnListProps) {
+export function TurnList({ turns, turnRefs }: TurnListProps) {
   return (
     <div
       role="log"
-      className="space-y-6 max-w-2xl mx-auto"
+      className="space-y-6 max-w-2xl mx-auto min-w-0"
       style={{ contentVisibility: 'auto' }}
     >
       {turns.map((turn, index) => (
-        <TurnItem key={turn.id} turn={turn} index={index + 1} />
+        <TurnItem
+          key={turn.id}
+          turn={turn}
+          index={index + 1}
+          registerRef={turnRefs ? (el) => {
+            if (el) {
+              turnRefs.set(index + 1, el)
+            } else {
+              turnRefs.delete(index + 1)
+            }
+          } : undefined}
+        />
       ))}
     </div>
   )
@@ -29,16 +42,26 @@ export function TurnList({ turns }: TurnListProps) {
 interface TurnItemProps {
   turn: DisplayTurn
   index: number
+  registerRef?: (el: HTMLDivElement | null) => void
 }
 
-export function TurnItem({ turn, index }: TurnItemProps) {
+export function TurnItem({ turn, index, registerRef }: TurnItemProps) {
   return (
-    <div className="space-y-3">
+    <div
+      ref={registerRef}
+      data-turn-id={turn.id}
+      data-turn-ref=""
+      className="space-y-3 min-w-0"
+    >
       <TurnHeader index={index} startedAt={turn.startedAt} />
-      <PromptBlock prompt={turn.prompt} />
+      <div className="min-w-0">
+        <PromptBlock prompt={turn.prompt} />
+      </div>
 
       {turn.assistantParts.length > 0 && (
-        <AssistantParts parts={turn.assistantParts} />
+        <div className="min-w-0">
+          <AssistantParts parts={turn.assistantParts} />
+        </div>
       )}
 
       {turn.changedFiles.length > 0 && (
@@ -81,7 +104,7 @@ export function TurnDiffs({ files }: TurnDiffsProps) {
   const count = files.length
 
   return (
-    <div className="max-w-[90%] rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
+    <div className="max-w-[90%] sm:max-w-[80%] min-w-0 rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
       <Button
         variant="ghost"
         size="sm"

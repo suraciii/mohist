@@ -1,5 +1,8 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
 import { TurnList } from './TurnList'
+import { TurnTocRail, buildTurnTocEntries } from './TurnToc'
+import { TranscriptToolbar } from './TranscriptToolbar'
 
 interface TranscriptEmptyStateProps {
   isRunning: boolean
@@ -22,6 +25,8 @@ export function TranscriptEmptyState({ isRunning }: TranscriptEmptyStateProps) {
   )
 }
 
+export type TurnRefsMap = Map<number, HTMLDivElement>
+
 interface SessionTranscriptLayoutProps {
   title: string
   turnCount: number
@@ -38,17 +43,35 @@ export function SessionTranscriptLayout({
   isThinking,
   isStreaming,
 }: SessionTranscriptLayoutProps) {
+  const turnRefs = useRef<TurnRefsMap>(new Map()).current
+  const [refsVersion, setRefsVersion] = useState(0)
+
+  useEffect(() => {
+    setRefsVersion((version) => version + 1)
+  }, [turns.length])
+
+  const entries = useMemo(
+    () => buildTurnTocEntries(turns, turnRefs),
+    [turns, turnRefs, refsVersion],
+  )
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6" data-scrollable="">
+    <div className="px-4 py-6 min-w-0" data-scrollable="">
       {turns.length === 0 ? (
-        <TranscriptEmptyState isRunning={isRunning} />
+        <div className="max-w-2xl mx-auto">
+          <TranscriptEmptyState isRunning={isRunning} />
+        </div>
       ) : (
-        <TurnList turns={turns} />
+        <div className="lg:grid lg:grid-cols-[1fr_180px] lg:gap-6 lg:max-w-4xl lg:mx-auto">
+          <div className="min-w-0">
+            <TranscriptToolbar entries={entries} />
+            <TurnList turns={turns} turnRefs={turnRefs} />
+            {isThinking && turns.length > 0 && <ThinkingPlaceholder />}
+            {isStreaming && <StreamingIndicator />}
+          </div>
+          <TurnTocRail entries={entries} />
+        </div>
       )}
-      {isThinking && turns.length > 0 && (
-        <ThinkingPlaceholder />
-      )}
-      {isStreaming && <StreamingIndicator />}
     </div>
   )
 }

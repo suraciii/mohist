@@ -26,7 +26,7 @@ export function AssistantTextPartView({ text, completedAt, isStreaming }: Assist
   }
 
   return (
-    <div className="max-w-[90%]">
+    <div className="max-w-[90%] sm:max-w-[80%] min-w-0">
       <TranscriptMarkdown content={text} />
       <div className="mt-1 flex items-center gap-2">
         {(isIncomplete || isStreaming) && (
@@ -53,7 +53,7 @@ export function ReasoningPartView({ text, startedAt }: ReasoningPartViewProps) {
   const sizeKB = (text.length / 1024).toFixed(1)
 
   return (
-    <details className="max-w-[90%]">
+    <details className="max-w-[90%] sm:max-w-[80%] min-w-0">
       <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
         Thinking... {sizeKB}KB · {formatTime(startedAt)}
       </summary>
