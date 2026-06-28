@@ -346,7 +346,7 @@ public class EpicAutoDoneHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        Assert.Equal(3, grains.Calls.Count);
+        Assert.Single(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("done", stored.Status);
@@ -458,8 +458,10 @@ public class EpicAutoDoneHandlerSpecs
         await closed.HandleAsync(BuildClosedEvent("project_1", "issue_2"), CancellationToken.None);
         await workCompleted.HandleAsync(BuildWorkCompletedEvent("project_1", "issue_1"), CancellationToken.None);
 
-        // Both flows reach the grain; reconcile-on-terminal is idempotent.
-        Assert.Equal(2, grains.Calls.Count);
+        // The first flow reaches the grain and releases the active
+        // membership; the reordered duplicate terminal signal then has
+        // no active owner to dispatch to.
+        Assert.Single(grains.Calls);
     }
 
     private static CloudEvent<IssueWorkCompleted> BuildWorkCompletedEvent(string projectId, string issueId) =>
