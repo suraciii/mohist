@@ -239,6 +239,18 @@ function isCandidateSelectable(issue: Issue): boolean {
   return getCandidateUnavailableReason(issue) === null
 }
 
+function graphInputKey(linkedIssues: LinkedIssue[]): string {
+  return linkedIssues
+    .map(issue => {
+      const prerequisites = (issue.prerequisiteNumbers ?? []).join(',')
+      const externals = (issue.externalPrerequisites ?? [])
+        .map(external => `${external.number}:${external.status}:${external.title}`)
+        .join(',')
+      return `${issue.id}:${issue.number}:${prerequisites}:${externals}`
+    })
+    .join('|')
+}
+
 interface CurrentActivityEntryProps {
   issue: EpicProgressIssue
   toProjectPath: (path: string) => string
@@ -548,6 +560,25 @@ export function EpicDetailPage() {
   )
   const advancementInfo = useMemo(() => advancementCopy(advancement), [advancement])
 
+  const linkedIssuesForGraph = epic?.linkedIssues ?? []
+  const graphAvailable = linkedIssuesForGraph.length >= 2
+  const graphSelected = graphAvailable && linkedIssuesView === 'graph'
+  const linkedIssuesGraphInputKey = graphInputKey(linkedIssuesForGraph)
+  const graphHasReported = graphRenderError || graphRenderable.reason !== null
+  const graphUnrenderable = graphHasReported && !graphRenderable.renderable
+  const showList = !graphSelected || graphUnrenderable
+
+  useEffect(() => {
+    setGraphRenderError(false)
+    setGraphRenderable({ renderable: false, reason: null })
+  }, [linkedIssuesGraphInputKey])
+
+  useEffect(() => {
+    if (!graphSelected) {
+      setGraphRenderError(false)
+    }
+  }, [graphSelected])
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-12 text-muted-foreground">Loading...</div>
   }
@@ -597,17 +628,6 @@ export function EpicDetailPage() {
   const isClosed = epic.status === EpicStatus.Closed
   const isDone = epic.status === EpicStatus.Done
   const linkedIssueCount = epic.linkedIssues.length
-  const graphAvailable = linkedIssueCount >= 2
-  const graphSelected = graphAvailable && linkedIssuesView === 'graph'
-  const graphHasReported = graphRenderError || graphRenderable.reason !== null
-  const graphUnrenderable = graphHasReported && !graphRenderable.renderable
-  const showList = !graphSelected || graphUnrenderable
-
-  useEffect(() => {
-    if (!graphSelected) {
-      setGraphRenderError(false)
-    }
-  }, [graphSelected])
 
   function handleConfirmClose() {
     closeEpic.mutate(epicId, {
@@ -643,7 +663,7 @@ export function EpicDetailPage() {
     })
   }
 
-  const hasInProgress = epic.linkedIssues.some(i => i.status === IssueStatus.InProgress)
+  const inProgressIssueId = epic.linkedIssues.find(i => i.status === IssueStatus.InProgress)?.id ?? null
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
@@ -995,17 +1015,20 @@ export function EpicDetailPage() {
                 No linked issues yet.
               </div>
             ) : (
-              epic.linkedIssues.map(issue => (
-                <LinkedIssueRow
-                  key={issue.id}
-                  issue={issue}
-                  onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
-                  onStart={handleStartIssue}
-                  disabled={removeEpicIssue.isPending}
-                  startPending={pendingStartIssueNumber === issue.number}
-                  hasInProgress={hasInProgress}
-                />
-              ))
+              epic.linkedIssues.map(issue => {
+                const hasInProgressSibling = inProgressIssueId !== null && inProgressIssueId !== issue.id
+                return (
+                  <LinkedIssueRow
+                    key={issue.id}
+                    issue={issue}
+                    onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
+                    onStart={handleStartIssue}
+                    disabled={removeEpicIssue.isPending}
+                    startPending={pendingStartIssueNumber === issue.number}
+                    hasInProgress={hasInProgressSibling}
+                  />
+                )
+              })
             )}
           </div>
         ) : null}

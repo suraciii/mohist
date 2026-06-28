@@ -1,8 +1,8 @@
-import { IssueHealth } from '../../../entities/issue/@x/types'
+import { IssueHealth, IssueStatus } from '../../../entities/issue/@x/types'
 import type { LinkedIssue } from '../../../entities/epic/model/types'
 
 export interface StartBlockerReasonContext {
-  issue: Pick<LinkedIssue, 'startBlocker' | 'health'>
+  issue: Pick<LinkedIssue, 'startBlocker' | 'health' | 'status'>
   hasInProgress: boolean
 }
 
@@ -16,7 +16,7 @@ export type StartBlockerReason =
 export function deriveStartBlockerReason(context: StartBlockerReasonContext): StartBlockerReason {
   const { issue, hasInProgress } = context
 
-  if (hasInProgress) {
+  if (hasInProgress && issue.status !== IssueStatus.InProgress) {
     return 'Another issue is in progress'
   }
 

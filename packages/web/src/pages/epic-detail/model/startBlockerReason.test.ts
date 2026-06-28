@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { IssueHealth } from '../../../entities/issue/@x/types'
+import { IssueHealth, IssueStatus } from '../../../entities/issue/@x/types'
 import type { LinkedIssue } from '../../../entities/epic/model/types'
 import { deriveStartBlockerReason } from './startBlockerReason'
 
 function makeIssue(
-  overrides: Pick<LinkedIssue, 'startBlocker' | 'health'> = {
+  overrides: Partial<Pick<LinkedIssue, 'startBlocker' | 'health' | 'status'>> = {
     startBlocker: null,
     health: IssueHealth.Active,
+    status: IssueStatus.Backlog,
   },
 ) {
-  return overrides
+  return {
+    startBlocker: null,
+    health: IssueHealth.Active,
+    status: IssueStatus.Backlog,
+    ...overrides,
+  }
 }
 
 describe('deriveStartBlockerReason', () => {
@@ -37,6 +43,15 @@ describe('deriveStartBlockerReason', () => {
         hasInProgress: true,
       }),
     ).toBe('Another issue is in progress')
+  })
+
+  it('does not call the current in-progress issue another in-progress issue', () => {
+    expect(
+      deriveStartBlockerReason({
+        issue: makeIssue({ startBlocker: null, health: IssueHealth.Active, status: IssueStatus.InProgress }),
+        hasInProgress: true,
+      }),
+    ).toBe('Not startable')
   })
 
   it('returns "Waiting for #N" when the issue has a waiting-for blocker and no sibling is running', () => {

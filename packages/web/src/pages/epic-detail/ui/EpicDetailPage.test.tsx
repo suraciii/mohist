@@ -140,7 +140,7 @@ const issues = [
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const ui = () => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
@@ -151,8 +151,10 @@ function renderPage() {
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const result = render(ui())
+  return { ...result, rerenderPage: () => result.rerender(ui()) }
 }
 
 describe('EpicDetailPage', () => {
@@ -2707,7 +2709,7 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout (T-001)', () =
     expect(reason.textContent).toBe('Blocked')
   })
 
-  it('shows the "Another issue is in progress" reason when a sibling is running', () => {
+  it('shows the "Another issue is in progress" reason only on rows blocked by a running sibling', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpic({
         linkedIssues: [
@@ -2720,9 +2722,9 @@ describe('EpicDetailPage LinkedIssueRow vertical task line layout (T-001)', () =
 
     renderPage()
 
-    const reasons = screen.getAllByTestId('linked-issue-blocker-reason')
-    expect(reasons.length).toBeGreaterThanOrEqual(1)
-    expect(reasons.some(r => r.textContent === 'Another issue is in progress')).toBe(true)
+    const rows = screen.getAllByTestId('linked-issue-row')
+    expect(rows[0].textContent).not.toContain('Another issue is in progress')
+    expect(rows[1].textContent).toContain('Another issue is in progress')
   })
 
   it('shows the "Not startable" fallback reason when the issue is not startable for an unrecognized reason', () => {
@@ -3777,6 +3779,33 @@ describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', ()
       expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
     })
     expect(screen.queryByTestId('linked-issues-graph-unavailable-banner')).toBeNull()
+  })
+
+  it('re-probes graph renderability when linked issue data changes while Graph remains selected', async () => {
+    let currentEpic = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
+    mocks.useEpic.mockImplementation(() => ({ data: currentEpic, isLoading: false }))
+
+    const { rerenderPage } = renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner.getAttribute('data-reason')).toBe('cyclic')
+    expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
+
+    currentEpic = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
+    rerenderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('linked-issues-graph-unavailable-banner')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-list-region')).toBeNull()
   })
 
   it('every unrenderable banner message directs the user to the list below (spec contract)', async () => {

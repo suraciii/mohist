@@ -10,6 +10,7 @@ const project = {
 
 const LONG_TITLE = 'EpicDetailPageMobileHeaderTitleWithAnUnbrokenEnglishTokenThatMustWrapInsideTheReadableColumnAtThreeHundredTwentyPixels'
 const LONG_DESCRIPTION = 'EpicDetailPageMobileHeaderDescriptionWithAnUnbrokenEnglishTokenThatMustWrapInsideTheDescriptionColumnAtThreeHundredTwentyPixels'
+const LONG_LINKED_ISSUE_TITLE = 'LinkedIssueRowMobileOverflowTitleWithAnUnbrokenTokenThatMustWrapInsideTheTaskLineAtThreeHundredTwentyPixels'
 const FULL_DESCRIPTION = [
   LONG_DESCRIPTION,
   ...Array.from({ length: 24 }, (_, index) => `Background paragraph ${index + 1} that should stay below the summary area.`),
@@ -44,8 +45,8 @@ function makeIssue(number: number, overrides: Record<string, unknown> = {}) {
   }
 }
 
-function makeEpic(status: EpicStatus) {
-  const linkedIssues = [
+function makeEpic(status: EpicStatus, overrides: Record<string, unknown> = {}) {
+  const linkedIssues = overrides.linkedIssues ?? [
     makeIssue(1, { title: 'Root linked issue', status: 'done', stage: 'done', health: 'done', canStart: false }),
     makeIssue(2, { title: 'Dependent linked issue', prerequisiteNumbers: [1] }),
   ]
@@ -69,6 +70,7 @@ function makeEpic(status: EpicStatus) {
       readyToMarkDone: status === 'done' || status === 'closed',
     },
     linkedIssues,
+    ...overrides,
   }
 }
 
@@ -76,7 +78,8 @@ async function mockEpicApi(page: Page) {
   await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
-    const path = url.pathname.replace(/^\/api/, '')
+    const apiIndex = url.pathname.indexOf('/api/')
+    const path = apiIndex >= 0 ? url.pathname.slice(apiIndex + '/api'.length) : url.pathname.replace(/^\/api/, '')
     const method = route.request().method()
 
     if (method === 'GET' && path === '/projects') {
@@ -90,6 +93,28 @@ async function mockEpicApi(page: Page) {
     }
     if (method === 'GET' && path.startsWith(`/projects/${project.id}/epics/`)) {
       const id = decodeURIComponent(path.split('/').at(-1) ?? '')
+      if (id === 'epic-linked-rows') {
+        return route.fulfill({
+          json: apiResponse(makeEpic('idle', {
+            id,
+            number: 11,
+            linkedIssues: [
+              makeIssue(1, {
+                title: LONG_LINKED_ISSUE_TITLE,
+                status: 'in_progress',
+                stage: 'build',
+                canStart: false,
+              }),
+              makeIssue(2, {
+                title: `${LONG_LINKED_ISSUE_TITLE}Dependent`,
+                canStart: false,
+                startBlocker: { kind: 'waiting-for', issue: { number: 1, title: LONG_LINKED_ISSUE_TITLE } },
+                prerequisiteNumbers: [1],
+              }),
+            ],
+          })),
+        })
+      }
       const status = id.replace('epic-', '') as EpicStatus
       return route.fulfill({ json: apiResponse(makeEpic(status)) })
     }
@@ -104,6 +129,20 @@ async function expectNoHorizontalOverflow(page: Page) {
     clientWidth: document.documentElement.clientWidth,
   }))
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
+}
+
+async function expectLinkedIssueRowsFitViewport(page: Page) {
+  const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth)
+  const rows = page.getByTestId('linked-issue-row')
+  const count = await rows.count()
+  expect(count).toBeGreaterThan(0)
+
+  for (let index = 0; index < count; index += 1) {
+    const box = await rows.nth(index).boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth)
+  }
 }
 
 async function expectSummaryVisibleBeforeOverview(page: Page, viewportHeight: number) {
@@ -146,6 +185,20 @@ test.describe('Epic detail mobile overflow', () => {
         await expectNoHorizontalOverflow(page)
       })
     }
+  }
+
+  for (const width of [320, 390, 430]) {
+    test(`linked issue rows do not overflow at ${width}px with long titles and blocker copy`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await mockEpicApi(page)
+
+      await page.goto(`/${project.name}/epics/epic-linked-rows`)
+      await expect(page.getByTestId('linked-issue-title').first()).toContainText(LONG_LINKED_ISSUE_TITLE)
+      await expect(page.getByText('Another issue is in progress')).toBeVisible()
+
+      await expectLinkedIssueRowsFitViewport(page)
+      await expectNoHorizontalOverflow(page)
+    })
   }
 })
 
