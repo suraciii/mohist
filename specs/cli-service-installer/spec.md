@@ -24,7 +24,7 @@ The CLI SHALL expose an `IServiceInstaller` interface that covers the full manag
 
 #### Scenario: All server and runner commands dispatch through the same interface
 
-- [x] **WHEN** the user runs `mo install server`, `mo install runner`, `mo server start|stop|restart|status|logs|uninstall`, or `mo runner start|stop|restart|status|logs|uninstall`
+- [x] **WHEN** the user runs `mo install server`, `mo install runner`, `mo server start|stop|restart|status|logs|uninstall`, or `mo runner start|stop|restart|service-status|logs|uninstall`
 - **THEN** each command SHALL dispatch through the resolved `IServiceInstaller` for the matching service kind
 - **AND** the command builders SHALL NOT contain platform-specific code paths or hard-coded platform checks
 

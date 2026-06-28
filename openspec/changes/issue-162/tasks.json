@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "packages/cli/Mohist.Cli/MohistCliCommands.System.cs (new), registration in MohistCliCommands.Build, PrintSystemInfoAsync + RenderSystemInfo in MohistCliApi, and xUnit specs in packages/cli/tests/Mohist.Cli.Tests/",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Follow RenderRunnerShow (MohistCliApi.cs:341) as the established pattern for single-object multi-section key/value rendering. Do NOT reuse InfoCollector for the degraded subset (Decision 3 rejects coupling)."
     },
     {
@@ -41,7 +41,7 @@
       "type": "WRITE",
       "output": "packages/cli/Mohist.Cli/MohistCliCommands.Opencode.cs (new), registration in MohistCliCommands.Build, PrintOpencodeModelsAsync in MohistCliApi, and xUnit specs in packages/cli/tests/Mohist.Cli.Tests/",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Endpoint is project-scoped despite the issue body describing it as global (verified: OpencodeRoutes.cs:16). Do NOT render modelVariants in table mode (out of scope; Decision 4)."
     },
     {
@@ -64,7 +64,7 @@
       "type": "WRITE",
       "output": "Modified MohistCliCommands.Server.cs (RunnerCommands.Build: rename + add BuildStatus), PrintRunnerStatusAsync in MohistCliApi, RenderRunnerStatus in TableRenderer.Runners.cs, and xUnit specs in packages/cli/tests/Mohist.Cli.Tests/",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Breaking rename is acceptable per AGENTS.md (active development, no version-compat obligation). Derive idle/busy from capacity.usedSlots, NOT the status field (Decision 5). The rename and new diagnostic are coupled in a single task because both modify RunnerCommands.Build atomically."
     }
   ]
