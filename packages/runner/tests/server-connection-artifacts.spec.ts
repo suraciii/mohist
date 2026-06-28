@@ -268,6 +268,98 @@ describe("ServerConnection.poll", () => {
     expect(item!.workId).toBe("agent-work-1")
     expect(item!.workflowRunId).toBe("")
   })
+
+  it("preservesProjectIdAndAgentSessionIdFromDispatchResponse_ForAgentJob", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          workflowRunId: "",
+          workId: "agent-work-2",
+          workType: "agent-job",
+          uses: "mohist/acp-agent",
+          with: "{\"prompt\":{\"agent-launch\":{\"instructions\":\"be brief\",\"prompt\":\"hi\"}}}",
+          variables: "{\"workspace\":{\"path\":\"/tmp/agent-2\"}}",
+          stage: "agent",
+          title: "Agent Job",
+          ownerKind: "agent-job",
+          agentJobId: "agent-job-xyz",
+          projectId: "project-launch",
+          agentSessionId: "session-abc",
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    const item = await connection.poll(new AbortController().signal)
+
+    expect(item).not.toBeNull()
+    expect(item!.ownerKind).toBe("agent-job")
+    expect(item!.projectId).toBe("project-launch")
+    expect(item!.agentSessionId).toBe("session-abc")
+    expect(item!.agentJobId).toBe("agent-job-xyz")
+  })
+
+  it("preservesProjectIdFromIssue_ForWorkflowDispatch", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          workflowRunId: "wf-1",
+          workId: "work-1",
+          workType: "task",
+          uses: "mohist/acp-agent",
+          with: "{\"prompt\":\"hi\"}",
+          variables: "{}",
+          stage: "build",
+          title: "Workflow task",
+          ownerKind: "workflow",
+          projectId: "project-wf",
+          issueId: "issue-1",
+          issueNumber: 7,
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    const item = await connection.poll(new AbortController().signal)
+
+    expect(item).not.toBeNull()
+    expect(item!.ownerKind).toBe("workflow")
+    expect(item!.projectId).toBe("project-wf")
+    expect(item!.issueNumber).toBe(7)
+    expect(item!.workflowRunId).toBe("wf-1")
+    expect(item!.agentSessionId).toBeUndefined()
+  })
+
+  it("leavesAgentSessionIdUndefined_WhenDispatchOmitsField", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          workflowRunId: "",
+          workId: "agent-work-3",
+          workType: "agent-job",
+          uses: "mohist/acp-agent",
+          with: "{\"prompt\":\"raw\"}",
+          variables: "{\"workspace\":{\"path\":\"/tmp/agent-3\"}}",
+          stage: "agent",
+          title: "Agent Job",
+          ownerKind: "agent-job",
+          agentJobId: "agent-job-no-session",
+          projectId: "project-raw",
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    const item = await connection.poll(new AbortController().signal)
+
+    expect(item).not.toBeNull()
+    expect(item!.ownerKind).toBe("agent-job")
+    expect(item!.projectId).toBe("project-raw")
+    expect(item!.agentSessionId).toBeUndefined()
+  })
 })
 
 describe("ServerConnection.buildGitHash", () => {

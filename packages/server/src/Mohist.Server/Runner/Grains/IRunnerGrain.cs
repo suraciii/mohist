@@ -80,7 +80,25 @@ public record WorkDispatch(
     [property: Id(11)] string OwnerKind = WorkDispatchOwnerKinds.Workflow,
     [property: Id(12)] string? AgentJobId = null,
     [property: Id(13)] string? SetVars = null,
-    [property: Id(14)] string? Recovery = null)
+    [property: Id(14)] string? Recovery = null,
+    /// <summary>
+    /// Project id for the dispatch envelope. For workflow dispatches the
+    /// project is carried on <see cref="Issue"/>; for agent-job
+    /// dispatches the grain sources it from the launch context. Null
+    /// for workflow dispatches (the runner continues to read it from
+    /// <c>Issue.ProjectId</c>). New field; older-field consumers
+    /// ignore it.
+    /// </summary>
+    [property: Id(15)] string? ProjectId = null,
+    /// <summary>
+    /// AgentSession id for the dispatch envelope. Populated only for
+    /// agent-job dispatches whose launch minted a generic
+    /// (non-workflow) AgentSession; the runner uses it verbatim as the
+    /// session identity for runtime events. Null for workflow
+    /// dispatches and for raw-prompt-only AgentJob validation
+    /// dispatches. New field; older-field consumers ignore it.
+    /// </summary>
+    [property: Id(16)] string? AgentSessionId = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

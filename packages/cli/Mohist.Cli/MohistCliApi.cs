@@ -728,12 +728,12 @@ internal sealed class MohistCliApi
         }
     }
 
-    public async Task<int> PrintPostWithOutputAsync(string path, object body, string mode, string? tableShape = null)
+    public async Task<int> PrintPostWithOutputAsync(string path, object body, string mode, string? tableShape = null, bool rawJson = false)
     {
         try
         {
             using var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
-            return await PrintEnvelopeAsync(response, mode, tableShape);
+            return await PrintEnvelopeAsync(response, mode, tableShape, rawJson: rawJson);
         }
         catch (HttpRequestException)
         {
@@ -774,10 +774,12 @@ internal sealed class MohistCliApi
         }
     }
 
-    private async Task<int> PrintEnvelopeAsync(HttpResponseMessage response, string mode, string? tableShape, JsonNode? successDataFallback = null)
+    private async Task<int> PrintEnvelopeAsync(HttpResponseMessage response, string mode, string? tableShape, JsonNode? successDataFallback = null, bool rawJson = false)
     {
         if (string.Equals(mode, "json", StringComparison.Ordinal))
         {
+            if (rawJson)
+                return await PrintRawResponseAsync(response);
             if (successDataFallback is not null)
                 return await PrintResponseAsync(response, successDataFallback);
             return await PrintResponseAsync(response);
@@ -819,6 +821,9 @@ internal sealed class MohistCliApi
         SessionMetadata,
         SessionTranscriptSummary,
         SessionRecovery,
+        AgentSessionLaunch,
+        AgentSessionFollowup,
+        AgentSessionCancel,
     }
 
     internal static TableShape ParseTableShape(string? shape)
@@ -1016,6 +1021,29 @@ internal sealed class MohistCliApi
         {
             var data = node["data"] ?? successDataFallback;
             _out.WriteLine(data is null ? "OK" : data.ToJsonString(JsonOptions));
+            return 0;
+        }
+
+        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+        var code = node["code"]?.GetValue<string>();
+        _err.WriteLine(code is null ? error : $"{error} ({code})");
+        return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+    }
+
+    private async Task<int> PrintRawResponseAsync(HttpResponseMessage response)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+        if (node is null)
+        {
+            _out.WriteLine(response.StatusCode);
+            return response.IsSuccessStatusCode ? 0 : 1;
+        }
+
+        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
+        if (success)
+        {
+            _out.WriteLine(node.ToJsonString(JsonOptions));
             return 0;
         }
 

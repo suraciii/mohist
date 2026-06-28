@@ -68,6 +68,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         else
         {
             _ = _session.MergeMetadata(command.Metadata);
+            // When a session was minted up front (e.g. by the generic
+            // agent-session launch endpoint, T-003) the launch endpoint
+            // opened the session with an empty RunnerId; the runner's
+            // subsequent open call carries the authoritative RunnerId,
+            // and we stamp it onto the runtime exactly once. An
+            // already-bound RunnerId is left untouched so workflow
+            // sessions remain sticky across reopens (the existing
+            // semantics the runner-side retry flow relies on).
+            if (string.IsNullOrWhiteSpace(_session.Runtime.RunnerId)
+                && !string.IsNullOrWhiteSpace(command.RunnerId))
+            {
+                _session.Runtime = _session.Runtime with { RunnerId = command.RunnerId };
+            }
         }
 
         await _stateStore.SaveAsync(SessionId, _session);

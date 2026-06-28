@@ -5,6 +5,10 @@ import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotifi
 import { killProcess, sanitizedEnvironment } from "../system/process.js"
 import { acpArgs, acpCommand } from "./acp-command.js"
 
+export type SessionTarget =
+  | { kind: "workflow"; projectId: string; workflowRunId: string; sessionName: string }
+  | { kind: "generic"; projectId: string; sessionId: string }
+
 export interface SharedAcpConnection {
   readonly connection: ClientSideConnection
   readonly processPid: number | null
@@ -22,8 +26,19 @@ export interface SessionEntry {
 export class AcpSessionManager {
   private sessions = new Map<string, SessionEntry>()
 
-  key(workflowRunId: string, sessionName: string): string {
-    return `${workflowRunId}:${sessionName}`
+  key(target: SessionTarget): string {
+    if (target.kind === "workflow") {
+      return `workflow:${target.workflowRunId}:${target.sessionName}`
+    }
+    return `generic:${target.sessionId}`
+  }
+
+  workflowKey(workflowRunId: string, sessionName: string): string {
+    return `workflow:${workflowRunId}:${sessionName}`
+  }
+
+  genericKey(sessionId: string): string {
+    return `generic:${sessionId}`
   }
 
   get(key: string): SessionEntry | undefined {

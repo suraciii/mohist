@@ -270,6 +270,7 @@ public class ArchitectureRules
     private static readonly (string from, string to)[] AllowedDomainDependencies =
     [
         ("Agent", "Runner"),
+        ("Agent", "Sessions"),
         ("Issue", "Workflow"),
         ("Issue", "Epic"),
         ("Issue", "Project"),

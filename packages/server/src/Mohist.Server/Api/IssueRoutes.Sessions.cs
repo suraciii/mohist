@@ -121,9 +121,28 @@ public static partial class IssueRoutes
             if (string.IsNullOrWhiteSpace(connectionId))
                 return ApiResults.Fail("Runner is offline", 503, "runner_offline", new { runnerId = target.RunnerId });
 
+            // Workflow followup payload: keep `workflowRunId` / `sessionName`
+            // populated on the top level so older runners (that branch on
+            // those fields) continue to work, AND emit the unified
+            // `target: SessionTarget` shape (issue-129 T-004 / D3) so the
+            // newer runner can route by target.kind. The runner resolver
+            // prefers `target` when present and falls back to the
+            // top-level workflow fields for backwards compatibility.
             await runnerHub.Clients.Client(connectionId).SendAsync(
                 "ReceiveFollowup",
-                new { workflowRunId = target.WorkflowRunId, sessionName = target.SessionName, text });
+                new
+                {
+                    workflowRunId = target.WorkflowRunId,
+                    sessionName = target.SessionName,
+                    target = new
+                    {
+                        kind = "workflow",
+                        projectId = project.Id,
+                        workflowRunId = target.WorkflowRunId,
+                        sessionName = target.SessionName,
+                    },
+                    text,
+                });
 
             return ApiResults.Ok(new { status = "sent" });
         });

@@ -117,4 +117,44 @@ internal sealed partial class TableRenderer
         if (!string.IsNullOrEmpty(instructions))
             _out.WriteLine($"instructions:        {Truncate(instructions, BodySoftCap)}");
     }
+
+    private void RenderAgentSessionLaunch(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"session id: {StringOf(data, "sessionId")}");
+        _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
+        _out.WriteLine($"agent name: {StringOf(data, "agentName")}");
+        _out.WriteLine($"status:     {StringOf(data, "status")}");
+    }
+
+    private void RenderAgentSessionFollowup(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var status = StringOf(data, "status");
+        var statusText = string.IsNullOrEmpty(status) ? "(no status returned)" : status;
+        _out.WriteLine($"delivery: {statusText}");
+    }
+
+    private void RenderAgentSessionCancel(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var state = StringOf(data, "state");
+        var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
+        _out.WriteLine($"state: {stateText}");
+    }
 }

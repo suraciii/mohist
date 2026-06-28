@@ -574,6 +574,8 @@ function baseContext(work: RenderedWorkItem, variables: JsonObject, signal: Abor
     recovery: work.recovery,
     projectId: work.projectId,
     issueNumber: work.issueNumber,
+    ownerKind: work.ownerKind,
+    agentSessionId: work.agentSessionId,
     acpSessionManager: sessionManager,
     acpConnection,
     serverConnection: connection,
