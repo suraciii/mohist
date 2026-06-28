@@ -5,7 +5,7 @@ action that moves a completed OpenSpec change directory into
 `${dirname(changeDir)}/archive/<archiveName>` and commits the move. To make the
 move idempotent across retries, it persists the computed archive name to a
 run-scoped workflow runtime variable via `context.writeVars` (contract:
-`packages/runner/src/core/types.ts:168` — best-effort, immediate, **not** rolled
+`packages/runner/src/core/types.ts:174` — best-effort, immediate, **not** rolled
 back on later failure, so retries can observe the value).
 
 Today that variable is the nested map `_actions.archiveChange.destination`, keyed
