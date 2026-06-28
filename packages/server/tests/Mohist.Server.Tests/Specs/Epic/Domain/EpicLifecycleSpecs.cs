@@ -239,8 +239,12 @@ public class EpicLifecycleSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
-    public async Task Close_SetsStatusToClosedAndRemovesEpicIssueLinks()
+    public async Task Close_SetsStatusToClosedAndRetainsEpicIssueLinks()
     {
+        // Issue-179: closing an epic is non-destructive — the linked-issue
+        // membership set is preserved so progress and history remain readable
+        // post-close (see spec epic-issue-membership#Membership retained
+        // across epic close and epic-lifecycle#Close is non-destructive).
         var project = await CreateProjectAsync();
         var first = await CreateIssueAsync(project.Id, "First");
         var second = await CreateIssueAsync(project.Id, "Second");
@@ -254,8 +258,10 @@ public class EpicLifecycleSpecs
 
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("closed", detail.Status);
-        Assert.Empty(detail.LinkedIssues);
-        Assert.Equal(0, detail.Progress.TotalIssueCount);
+        Assert.Equal(2, detail.LinkedIssues.Length);
+        Assert.Contains(detail.LinkedIssues, i => i.Id == first.Id);
+        Assert.Contains(detail.LinkedIssues, i => i.Id == second.Id);
+        Assert.Equal(2, detail.Progress.TotalIssueCount);
         Assert.Equal(0, detail.Progress.DeliveredCount);
         Assert.False(detail.Progress.ReadyToMarkDone);
     }
@@ -286,7 +292,10 @@ public class EpicLifecycleSpecs
 
         var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("closed", detail.Status);
-        Assert.Empty(detail.LinkedIssues);
+        // Issue-179: close is non-destructive — the link to the dependent
+        // issue remains after close, so the linked-issue set is non-empty.
+        Assert.Single(detail.LinkedIssues);
+        Assert.Equal(dependent.Id, detail.LinkedIssues[0].Id);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]

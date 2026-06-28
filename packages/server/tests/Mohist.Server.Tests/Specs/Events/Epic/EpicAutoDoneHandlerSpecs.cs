@@ -46,6 +46,28 @@ public class EpicAutoDoneHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task HandleAsync_RehomedIssue_DispatchesToNonTerminalEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_closed", number: 1, status: "closed");
+        await SeedEpicAsync(database, epicId: "epic_running", number: 2, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Done);
+        await SeedLinkAsync(database, epicId: "epic_closed", issueId: "issue_1", issueNumber: 1);
+        await SeedLinkAsync(database, epicId: "epic_running", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
+
+        await handler.HandleAsync(BuildWorkCompletedEvent(projectId: "project_1", issueId: "issue_1"), CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_running", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task HandleAsync_IssueNotLinkedToAnyEpic_NoOpsAndDoesNotInvokeGrain()
     {
         await using var database = CreateDatabase();
@@ -130,7 +152,9 @@ public class EpicAutoDoneHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        Assert.Equal(3, grains.Calls.Count);
+        // The first reconcile marks the epic terminal and releases active
+        // ownership; repeated terminal events then find no active owner.
+        Assert.Single(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("done", stored.Status);
@@ -261,6 +285,28 @@ public class EpicAutoDoneHandlerSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task ClosedHandler_RehomedIssue_DispatchesToNonTerminalEpic()
+    {
+        await using var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_done", number: 1, status: "done");
+        await SeedEpicAsync(database, epicId: "epic_running", number: 2, status: "running");
+        await SeedIssueAsync(database, projectId: "project_1", issueId: "issue_1", issueNumber: 1, status: Mohist.Server.Issue.Domain.IssueStatus.Cancelled);
+        await SeedLinkAsync(database, epicId: "epic_done", issueId: "issue_1", issueNumber: 1);
+        await SeedLinkAsync(database, epicId: "epic_running", issueId: "issue_1", issueNumber: 1);
+
+        var querier = new EpicQuerier(database.Factory, null!);
+        var grains = new TestEpicGrainFactory(database.Factory);
+        var handler = new EpicClosedReconcileHandler(querier, grains, NullLogger<EpicClosedReconcileHandler>.Instance);
+
+        await handler.HandleAsync(BuildClosedEvent(projectId: "project_1", issueId: "issue_1"), CancellationToken.None);
+
+        var call = Assert.Single(grains.Calls);
+        Assert.Equal("project_1:epic_running", call.GrainKey);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task ClosedHandler_IssueNotLinkedToAnyEpic_NoOpsWithoutGrainCall()
     {
         await using var database = CreateDatabase();
@@ -300,7 +346,7 @@ public class EpicAutoDoneHandlerSpecs
         await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        Assert.Equal(3, grains.Calls.Count);
+        Assert.Single(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("done", stored.Status);
@@ -326,9 +372,9 @@ public class EpicAutoDoneHandlerSpecs
         var evt = BuildClosedEvent(projectId: "project_1", issueId: "issue_1");
         await handler.HandleAsync(evt, CancellationToken.None);
 
-        // Reconcile still flows to the grain — idempotency is enforced
-        // at the grain, not in the handler.
-        Assert.Single(grains.Calls);
+        // Retained terminal memberships are historical only; without a
+        // non-terminal owner there is no active epic to reconcile.
+        Assert.Empty(grains.Calls);
         await using var verify = database.CreateDbContext();
         var stored = await verify.Epics.AsNoTracking().FirstAsync();
         Assert.Equal("done", stored.Status);
@@ -412,8 +458,10 @@ public class EpicAutoDoneHandlerSpecs
         await closed.HandleAsync(BuildClosedEvent("project_1", "issue_2"), CancellationToken.None);
         await workCompleted.HandleAsync(BuildWorkCompletedEvent("project_1", "issue_1"), CancellationToken.None);
 
-        // Both flows reach the grain; reconcile-on-terminal is idempotent.
-        Assert.Equal(2, grains.Calls.Count);
+        // The first flow reaches the grain and releases the active
+        // membership; the reordered duplicate terminal signal then has
+        // no active owner to dispatch to.
+        Assert.Single(grains.Calls);
     }
 
     private static CloudEvent<IssueWorkCompleted> BuildWorkCompletedEvent(string projectId, string issueId) =>
@@ -509,6 +557,18 @@ public class EpicAutoDoneHandlerSpecs
             IssueNumber = issueNumber,
             CreatedAt = DateTimeOffset.UtcNow,
         });
+        var epic = await db.Epics.AsNoTracking().FirstAsync(e => e.ProjectId == "project_1" && e.Id == epicId);
+        if (epic.Status is not ("done" or "closed"))
+        {
+            db.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = "project_1",
+                IssueId = issueId,
+                EpicId = epicId,
+                IssueNumber = issueNumber,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+        }
         await db.SaveChangesAsync();
     }
 

@@ -138,7 +138,9 @@ An epic SHALL have the lifecycle states `idle`, `running`, `paused`, `done`, and
 - `running` --Pause--> `paused`
 - `paused` --Resume--> `running` (and re-evaluate readiness / advancement)
 - `running` --no open linked issue (every linked issue terminal: `done`/`completed` or `cancelled`)--> `done`
-- any non-terminal state --Close--> `closed`
+- any non-terminal state --Close--> `closed` (non-destructive: the epic's linked-issue memberships SHALL be retained so that membership history and progress remain readable)
+
+The Close transition SHALL be non-destructive: it SHALL only mark the epic terminal and halt further advancement, and SHALL NOT unlink, remove, or clear any of the epic's linked-issue memberships. Removal of a single membership is available only via the explicit unlink operation (see `epic-issue-membership`).
 
 The `running` → `done` transition condition is "no open linked issue", shared verbatim by auto-done, manual "Mark Done", resume re-evaluation, and the read-model `readyToMarkDone` indicator. A `cancelled` linked issue is terminal and SHALL NOT block this transition; it SHALL NOT count toward `deliveredCount`.
 
@@ -164,11 +166,17 @@ Existing epic data in the legacy `active` status SHALL be migrated to `idle` on 
 - **THEN** the epic SHALL transition to `done`
 - **AND** SHALL NOT be required to have every linked issue delivered
 
-#### Scenario: Close from any non-terminal state
-
+#### Scenario: Close from any non-terminal state preserves links
 - **WHEN** a Close is invoked on an epic in `idle`, `running`, or `paused`
 - **THEN** the epic SHALL transition to `closed`
 - **AND** SHALL NOT advance any further linked issues
+- **AND** SHALL NOT remove or clear any of its linked-issue memberships
+- **AND** the membership set present before close SHALL remain intact and readable afterward
+
+#### Scenario: Close is non-destructive
+- **WHEN** an epic with linked issues is closed
+- **THEN** no linked-issue membership SHALL be unlinked as a side-effect of the close
+- **AND** removal of a membership SHALL require an explicit unlink
 
 #### Scenario: Terminal state ignores lifecycle transitions
 
