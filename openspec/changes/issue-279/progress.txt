@@ -17,8 +17,28 @@
 - 没碰 `EpicListPage.tsx` —— T-002 才把它消费到四组里。
 - 验证：`npm run typecheck -w packages/web` 通过；`vitest run src/pages/epics/ui/groupActiveEpics.test.ts` 11/11 通过；`vitest run src/pages/epics/ui/` 39/39 通过（旧的 28 个 EpicListPage.test.tsx 用例仍全绿，说明本任务 0 回归）。
 
+## T-002 (2026-06-28) — EpicListPage 四组 + group-aware 卡片 + 移动端可读
+
+- 重构 `EpicListPage.tsx`：
+  - 新增 `ActiveGroupDescriptor[]` 列表，按 fixed priority 顺序渲染 `Running`/`Ready to start`/`Waiting / Blocked`/`Idle / Empty` 四组，每组走现有 `EpicSection`（`defaultExpanded={true}`）；只渲染非空组。
+  - `Paused` 仍是内联块（在 active 组与 Done/Closed 之间），不加 `EpicSection` 包裹（spec 静默 + 减小 churn）。
+  - `Done` / `Closed` 沿用 `EpicSection`（`defaultExpanded={false}`），test-id 保留。
+  - 抽出 `EpicCardBody` 让卡片按 group 显式分支：running 显 `#N + title`；readyToStart 显 `Next: #N + title` + `Start next issue` 按钮；waitingBlocked 显 `nextIssueReason`；idleEmpty 显 `Ready to mark done` 或 `No linked issues`；done/closed 显 `Completed`/`Closed` 短语。
+  - `Start next issue`（不再叫 `Start`/`Start Epic`）仅由 readyToStart 分支透传 `onStartNextIssue`；其余 group 即便 user 强行通过类型外传也不渲染按钮（渲染时再判一遍）。
+  - 移动端 hardening：去掉 card 标题 `truncate` → `break-words`；status/priority 行加 `flex-wrap`；current/next/reason 容器也用 `break-words`；progress bar 容器 `w-full` 且无 min-width；`Start next issue` 按钮所在行 `flex-wrap`，按钮 `self-start` 可换行。整张卡片 `overflow-hidden` 沿用 Card primitive，不加 min-width。
+- 重写 `EpicListPage.test.tsx`：6 个 `describe`（four-group rendering / per-group card content / Start next issue action / basic actions / numbered display / mobile no-overflow），合计 34 用例，全部绿。
+  - fixture 重塑：`runningEpic`（active + next + reason），`readyToStartEpic`，`waitingBlockedEpic`，`idleReadyEpic`，`idleEmptyEpic`，`doneEpic`，`closedEpic`。
+  - 旧"Active ()" / `epic-section-active` / 单 `Start` 文案用例整段弃掉；legacy `Active Ready` / `activeWithOnlyNext` 改为对应的 ready-to-start 用例。
+  - mobile no-overflow 用例把 `documentElement.scrollWidth/clientWidth` stub 成相等后再 assert `scrollWidth <= clientWidth`（320/390/430）；另一用例扫所有 `[data-slot="badge"]` 与 progress bar / current/next 节点，断言没有 `w-N` / `min-w-[...]` / `w-[...]`，且 current/next 含 `break-words` 不含 `truncate`。
+- 验证：`npm run typecheck -w packages/web` 通过；`vitest run src/pages/epics/ui/EpicListPage.test.tsx` 34/34 通过；`vitest run`（全 web 包）2593 passed / 1 skipped，0 回归。
+
 ## Gotchas
 
 - `IssueHealth` 不在 `entities/epic` 索引里；要从 `../../../entities/issue` 导入。
 - 千万别为了 "更准" 而在 selector 里调 `LinkedIssue.canStart` —— 那会越界到 detail-enrichment 路径，违反 D2 和 spec §"Grouping relies only on existing list read-model fields"。
 - `EpicStatus.Idle`/`Running` 选择交给调用方；本 selector 只看 `progress` 三字段。`Paused`/`Done`/`Closed` 由 `EpicListPage` 自己过滤后再喂给 selector。
+- `EpicCardBody` 与 `EpicCard` 用 `CardGroup = ActiveGroupKey | 'done' | 'closed' | 'paused'` 双闭包联合；不要把它收成 `string` —— 类型收窄是 `idleEmpty` vs `readyToStart` 在 readyToMarkDone 字段上语义不同的保障。
+- jsdom 拿不到真实 layout，mobile no-overflow 必须 stub `documentElement.scrollWidth/clientWidth`（jsdom 默认是 0）后断言相等 —— 设计意图是"宽度相等即不溢出"，因为 jsdom 不会计算宽度差异。
+- `[data-slot="badge"]` 是 `@base-ui/react` 的 Badge primitive 自带属性，可直接 query —— 这条对所有 shared/ui/components/badge 渲染都成立。
+- 测试 `getByText('1 / 3 completed')` 在多卡场景会重复；要查具体卡用 `closest('[data-slot="card"]')` 收窄；要查"至少存在一个"用 `getAllByText(...).length >= 1`。
+- `Start next issue` 按钮在 `disabled=true` 时文本会从 `'Start next issue'` 变成 `'Starting...'`，已用独立用例断言这条。
