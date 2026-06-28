@@ -32,8 +32,10 @@ public class InstallSpecs
         Assert.Equal(0, exitCode);
         var unitContent = files.ReadAllText("/units/mohist.service");
         Assert.Contains("Description=Mohist Server", unitContent);
-        Assert.Contains("ExecStart=dotnet run --project", unitContent);
+        Assert.Contains("ExecStart=", unitContent);
+        Assert.Contains("dotnet run --project", unitContent);
         Assert.Contains("Mohist.Server.csproj", unitContent);
+        Assert.Contains("Environment=\"PATH=", unitContent);
         Assert.Contains("http://127.0.0.1:4567", unitContent);
         Assert.Contains("SuccessExitStatus=0 143", unitContent);
     }
@@ -64,7 +66,8 @@ public class InstallSpecs
         Assert.Equal(0, exitCode);
         var unitContent = files.ReadAllText("/units/mohist-runner.service");
         Assert.Contains("Description=Mohist Runner", unitContent);
-        Assert.Contains("ExecStart=node packages/runner/dist/cli.js", unitContent);
+        Assert.Contains("ExecStart=", unitContent);
+        Assert.Contains("node packages/runner/dist/cli.js", unitContent);
         Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", unitContent);
         Assert.Contains("Environment=\"PATH=", unitContent);
         Assert.Contains("/.opencode/bin", unitContent);
