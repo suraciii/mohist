@@ -2126,6 +2126,190 @@ describe('SessionPage header and states', () => {
       })
     })
   })
+
+  describe('main transcript branch renders shared session header', () => {
+    it('renders SessionHeader above the transcript with title, status badge, stage, issue link, and turn count', async () => {
+      const turns: SessionTurn[] = [
+        makeTurn({
+          id: 'turn-1',
+          user: {
+            role: 'mohist',
+            text: 'First turn prompt',
+            kind: 'task',
+            sentAt: '2024-01-01T10:00:00.000Z',
+          },
+        }),
+        makeTurn({
+          id: 'turn-2',
+          startedAt: '2024-01-01T10:01:00.000Z',
+          user: {
+            role: 'mohist',
+            text: 'Second turn prompt',
+            kind: 'task',
+            sentAt: '2024-01-01T10:01:00.000Z',
+          },
+        }),
+      ]
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          stage: 'build',
+          model: 'claude-3-5-sonnet',
+          turnCount: 2,
+        }),
+      })
+      setupSessionPage({ detail, turns, issue: { number: 123, title: 'Test Issue' } })
+
+      renderWithQueryClient(<SessionPage />)
+
+      // Wait until the header is rendered (metadata resolved).
+      await screen.findByText('Issue #123')
+
+      // Same SessionHeader shared with the empty/waiting/incomplete branches.
+      expect(screen.getByText('Test Issue')).toBeInTheDocument()
+      expect(screen.getByText('Build')).toBeInTheDocument()
+      expect(screen.getByText('Completed')).toBeInTheDocument()
+      // h1 always renders a non-empty session title.
+      const h1 = document.querySelector('h1')
+      expect(h1).not.toBeNull()
+      expect(h1?.textContent?.trim().length ?? 0).toBeGreaterThan(0)
+
+      // Wait for the transcript query to populate the turn count in the header.
+      await screen.findByText('2 turns')
+
+      // Issue back-link resolves to the issue page (not a session sub-route).
+      const issueLink = screen.getByRole('link', { name: /Issue #123/ })
+      expect(issueLink.getAttribute('href')).toBe('/Test%20Project/issues/123')
+
+      // The main branch must NOT show the legacy sticky compact summary.
+      expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
+    })
+
+    it('renders recoveryBar inside the SessionHeader region on the main branch', async () => {
+      const turns = [makeTurn({ id: 'turn-1' })]
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+        }),
+      })
+      setupSessionPage({ detail, turns })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #123')
+
+      // recoveryBar is rendered inside the header sub-region (testid exists on every branch).
+      expect(screen.getByTestId('session-recovery-bar')).toBeInTheDocument()
+    })
+
+    it('renders the same header on the main branch as on the empty branch', async () => {
+      const baseMetadata = makeMockMetadata({
+        status: 'completed',
+        statusKind: 'completed',
+        stage: 'build',
+        model: 'claude-3-5-sonnet',
+      })
+
+      // Main branch: turns > 0
+      const mainDetail = makeMockDetail({ metadata: baseMetadata })
+      setupSessionPage({
+        detail: mainDetail,
+        turns: [makeTurn({ id: 'turn-1' })],
+      })
+
+      const { unmount } = renderWithQueryClient(<SessionPage />)
+      // Wait for the transcript query to populate the header (turn count from transcript).
+      await screen.findByText('1 turn')
+      expect(screen.getByText('Build')).toBeInTheDocument()
+      expect(screen.getByText('Completed')).toBeInTheDocument()
+      expect(screen.queryByText(/Jump to bottom/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/No activity recorded/i)).not.toBeInTheDocument()
+      unmount()
+
+      // Empty branch: turns === 0
+      const emptyDetail = makeMockDetail({
+        metadata: baseMetadata,
+        turns: [],
+      })
+      setupSessionPage({
+        detail: emptyDetail,
+        turns: [],
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #123')
+      expect(screen.getByText('Build')).toBeInTheDocument()
+      expect(screen.getByText('Completed')).toBeInTheDocument()
+      // Empty branch shows the "No activity" sub-region.
+      expect(screen.getByText(/No activity recorded/i)).toBeInTheDocument()
+    })
+
+    it('main branch session header back-link uses whitespace-nowrap and never wraps', async () => {
+      const turns = [makeTurn({ id: 'turn-1' })]
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+        }),
+      })
+      setupSessionPage({ detail, turns, issue: { number: 123, title: 'Test Issue' } })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #123')
+
+      const issueLink = screen.getByRole('link', { name: /Issue #123/ })
+      expect(issueLink.className).toContain('whitespace-nowrap')
+      expect(issueLink.className).toContain('shrink-0')
+    })
+
+    it('main branch session header metadata cluster stacks vertically below sm', async () => {
+      const turns = [makeTurn({ id: 'turn-1' })]
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          stage: 'build',
+          model: 'claude-3-5-sonnet',
+        }),
+      })
+      setupSessionPage({ detail, turns, issue: { number: 123, title: 'Test Issue' } })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #123')
+
+      // The metadata cluster lives inside the SessionHeader and is the second flex child.
+      // It must declare the mobile vertical stack AND the sm+ horizontal row layout
+      // so it never wraps/overlaps on narrow viewports.
+      const metadataCluster = screen.getByText('Build').parentElement as HTMLElement
+      expect(metadataCluster.className).toContain('flex-col')
+      expect(metadataCluster.className).toContain('sm:flex-row')
+    })
+
+    it('main branch session header issue title truncates with min-w-0', async () => {
+      const longTitle = 'A'.repeat(120)
+      const turns = [makeTurn({ id: 'turn-1' })]
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+        }),
+      })
+      setupSessionPage({ detail, turns, issue: { number: 123, title: longTitle } })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await screen.findByText('Issue #123')
+
+      const issueTitle = screen.getByText(longTitle)
+      expect(issueTitle.className).toContain('truncate')
+      expect(issueTitle.className).toContain('min-w-0')
+    })
+  })
 })
 
 

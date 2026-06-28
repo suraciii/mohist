@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Readable Mohist coder transcript
 
 The dedicated session page SHALL read top-to-bottom as a Mohist prompt followed by a Coder response and resulting output. It SHALL resemble an opencode-style conversation transcript more than a workflow dashboard or event log. The page SHALL always render a session header/breadcrumb above the transcript across every render branch, including the main transcript view when one or more turns exist, the empty state, and the loading/waiting state. The header SHALL display the session title, status badge, workflow stage, a link back to the owning issue, and the turn count. The recovery bar, when present, SHALL render as a sub-region of this header rather than as a standalone narrow bar. During an active (running) session, the page MAY additionally present a followup composer at the bottom so the user can inject messages mid-run without canceling the agent.
@@ -40,6 +42,8 @@ The dedicated session page SHALL read top-to-bottom as a Mohist prompt followed 
 - **AND** the recovery bar, when present, SHALL render within the header region rather than as a standalone narrow bar
 - **AND** the rendered header SHALL match the header shown in the empty and waiting states
 
+## ADDED Requirements
+
 ### Requirement: Turn-level timestamps in transcript
 
 The transcript layout SHALL display a timestamp for each turn. The timestamp SHALL reflect the turn's time and SHALL be visible in or alongside the turn so the user can see when each turn occurred while reading top to bottom.
@@ -62,7 +66,7 @@ The transcript SHALL render fenced code blocks with syntax highlighting, layered
 
 ### Requirement: Responsive session transcript on narrow viewports
 
-The session transcript page SHALL remain usable on narrow viewports down to 320px width. The session header SHALL NOT wrap into a broken or overlapping layout on narrow viewports, prompt and assistant cards SHALL NOT deform, and the page SHALL NOT produce horizontal overflow across the 320-430px viewport range.
+The session transcript page SHALL remain usable on narrow viewports down to 320px width. The session header SHALL NOT wrap into a broken or overlapping layout on narrow viewports, prompt and assistant cards SHALL NOT deform, and the page SHALL NOT produce horizontal overflow across the 320–430px viewport range.
 
 #### Scenario: No horizontal overflow on a narrow viewport
 
