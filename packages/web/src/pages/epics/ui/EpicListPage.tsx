@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEpics, useStartIssue } from '../../../entities/epic'
-import { EpicStatus, type EpicProgress, type EpicWithProgress } from '../../../entities/epic'
+import { useEpics, useStartIssue, EpicStatus, type EpicWithProgress } from '../../../entities/epic'
 import { EpicCreateDialog } from '../../../features/create-epic'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
 import { Card } from '@/shared/ui/components/card'
 import { useProjectPath } from '../../../entities/project'
+import { groupActiveEpics, type ActiveEpicGroups } from './groupActiveEpics'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -45,70 +45,180 @@ function StatusBadge({ status }: { status: EpicStatus }) {
   )
 }
 
-function statusText(
-  status: EpicStatus,
-  progress: EpicProgress,
-  onStart?: (issueNumber: number) => void,
-  startPending?: boolean,
-): React.ReactNode {
+type ActiveGroupKey = 'running' | 'readyToStart' | 'waitingBlocked' | 'idleEmpty'
+
+interface ActiveGroupDescriptor {
+  key: ActiveGroupKey
+  title: string
+  testIdPrefix: string
+  epics: EpicWithProgress[]
+}
+
+function EpicProgressBody({ progress }: { progress: EpicWithProgress['progress'] }) {
+  const next = progress.nextIssue
+  if (next) {
+    return (
+      <span
+        className="text-muted-foreground break-words"
+        data-testid="epic-card-next"
+      >
+        Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
+        <span className="text-muted-foreground ml-1 break-words">{next.title}</span>
+      </span>
+    )
+  }
+  if (progress.nextIssueReason) {
+    return (
+      <span
+        className="text-muted-foreground break-words"
+        data-testid="epic-card-next"
+      >
+        {progress.nextIssueReason}
+      </span>
+    )
+  }
+  if (progress.readyToMarkDone) {
+    return (
+      <span className="text-green-600 font-medium" data-testid="epic-card-ready">
+        Ready to mark done
+      </span>
+    )
+  }
+  return (
+    <span className="text-muted-foreground" data-testid="epic-card-empty">
+      No linked issues
+    </span>
+  )
+}
+
+function StartNextIssueButton({
+  issueNumber,
+  onStartNextIssue,
+  startPending,
+}: {
+  issueNumber: number
+  onStartNextIssue: (issueNumber: number) => void
+  startPending?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation()
+          onStartNextIssue(issueNumber)
+        }}
+        disabled={startPending}
+        data-testid="epic-card-start"
+        className="self-start"
+      >
+        {startPending ? 'Starting...' : 'Start next issue'}
+      </Button>
+    </div>
+  )
+}
+
+function EpicCardBody({
+  epic,
+  group,
+  onStartNextIssue,
+  startPending,
+}: {
+  epic: EpicWithProgress
+  group: CardGroup
+  onStartNextIssue?: (issueNumber: number) => void
+  startPending?: boolean
+}) {
+  const { progress, status } = epic
+
   if (status === EpicStatus.Done) {
     return <span className="text-blue-700 font-medium">Completed</span>
   }
   if (status === EpicStatus.Closed) {
     return <span className="text-muted-foreground font-medium">Closed</span>
   }
-  const inProgress = progress.activeIssues[0]
-  const next = progress.nextIssue
-  const nextReason = progress.nextIssueReason
 
-  return (
-    <div className="flex flex-col gap-0.5">
-      {inProgress && (
-        <span className="text-muted-foreground" data-testid="epic-card-in-progress">
-          In progress: <span className="text-foreground/80 font-medium">#{inProgress.number}</span>
-          <span className="text-muted-foreground ml-1">{inProgress.title}</span>
-        </span>
-      )}
-      {next ? (
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-muted-foreground min-w-0" data-testid="epic-card-next">
-            Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
-            <span className="text-muted-foreground ml-1">{next.title}</span>
+  if (group === 'running') {
+    const inProgress = progress.activeIssues[0]
+    return (
+      <div className="flex flex-col gap-0.5" data-testid="epic-card-running">
+        {inProgress && (
+          <span
+            className="text-muted-foreground break-words"
+            data-testid="epic-card-in-progress"
+          >
+            In progress:{' '}
+            <span className="text-foreground/80 font-medium">#{inProgress.number}</span>
+            <span className="text-muted-foreground ml-1 break-words">{inProgress.title}</span>
           </span>
-          {onStart && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation()
-                onStart(next.number)
-              }}
-              disabled={startPending}
-              data-testid="epic-card-start"
-            >
-              {startPending ? 'Starting...' : 'Start'}
-            </Button>
-          )}
+        )}
+      </div>
+    )
+  }
+
+  if (group === 'readyToStart') {
+    const next = progress.nextIssue
+    if (!next) return null
+    return (
+      <div className="flex flex-col gap-1" data-testid="epic-card-ready">
+        <span
+          className="text-muted-foreground break-words"
+          data-testid="epic-card-next"
+        >
+          Next: <span className="text-foreground/80 font-medium">#{next.number}</span>
+          <span className="text-muted-foreground ml-1 break-words">{next.title}</span>
+        </span>
+        {onStartNextIssue && (
+          <StartNextIssueButton
+            issueNumber={next.number}
+            onStartNextIssue={onStartNextIssue}
+            startPending={startPending}
+          />
+        )}
+      </div>
+    )
+  }
+
+  if (group === 'waitingBlocked') {
+    return <EpicProgressBody progress={progress} />
+  }
+
+  if (group === 'idleEmpty') {
+    return <EpicProgressBody progress={progress} />
+  }
+
+  if (group === 'paused') {
+    const next = progress.nextIssue
+    if (next && onStartNextIssue) {
+      return (
+        <div className="flex flex-col gap-1" data-testid="epic-card-paused-next">
+          <EpicProgressBody progress={progress} />
+          <StartNextIssueButton
+            issueNumber={next.number}
+            onStartNextIssue={onStartNextIssue}
+            startPending={startPending}
+          />
         </div>
-      ) : nextReason ? (
-        <span className="text-muted-foreground" data-testid="epic-card-next">{nextReason}</span>
-      ) : progress.readyToMarkDone ? (
-        <span className="text-green-600 font-medium" data-testid="epic-card-ready">Ready to mark done</span>
-      ) : (
-        <span className="text-muted-foreground">No linked issues</span>
-      )}
-    </div>
-  )
+      )
+    }
+    return <EpicProgressBody progress={progress} />
+  }
+
+  return null
 }
 
 function EpicCard({
   epic,
-  onStart,
+  group,
+  onStartNextIssue,
   startPending,
 }: {
   epic: EpicWithProgress
-  onStart: (issueNumber: number) => void
-  startPending: boolean
+  group: CardGroup
+  onStartNextIssue?: (issueNumber: number) => void
+  startPending?: boolean
 }) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -126,7 +236,7 @@ function EpicCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
             <span
               className="text-sm font-medium text-muted-foreground"
               data-testid="epic-number"
@@ -136,18 +246,21 @@ function EpicCard({
             <StatusBadge status={epic.status} />
             <PriorityBadge priority={epic.priority} />
           </div>
-          <h3 className="text-base font-semibold text-foreground truncate">{epic.title}</h3>
+          <h3 className="text-base font-semibold text-foreground break-words">{epic.title}</h3>
         </div>
       </div>
 
       <div className="mt-3">
-        <div className="flex items-center justify-between text-sm mb-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm mb-1">
           <span className="text-muted-foreground">Progress</span>
           <span className="font-medium text-foreground">
             {progress.deliveredCount} / {progress.totalIssueCount} completed
           </span>
         </div>
-        <div className="w-full bg-muted rounded-full h-1.5">
+        <div
+          className="w-full bg-muted rounded-full h-1.5"
+          data-testid="epic-progress-bar"
+        >
           <div
             className="bg-blue-600 h-1.5 rounded-full transition-all"
             style={{
@@ -160,29 +273,45 @@ function EpicCard({
       </div>
 
       <div className="mt-3 flex items-center justify-between">
-        <div className="text-sm min-w-0 flex-1">
-          {statusText(epic.status, progress, onStart, startPending)}
+        <div className="text-sm min-w-0 flex-1 break-words">
+          <EpicCardBody
+            epic={epic}
+            group={group}
+            onStartNextIssue={group === 'readyToStart' || group === 'paused' ? onStartNextIssue : undefined}
+            startPending={group === 'readyToStart' || group === 'paused' ? startPending : undefined}
+          />
         </div>
       </div>
     </Card>
   )
 }
 
+type CardGroup = ActiveGroupKey | 'done' | 'closed' | 'paused'
+
 interface EpicSectionProps {
   title: string
   epics: EpicWithProgress[]
   defaultExpanded: boolean
   testIdPrefix: string
-  onStart: (issueNumber: number) => void
-  pendingStartIssueNumber: number | null
+  group?: CardGroup
+  onStartNextIssue?: (issueNumber: number) => void
+  pendingStartIssueNumber?: number | null
 }
 
-function EpicSection({ title, epics, defaultExpanded, testIdPrefix, onStart, pendingStartIssueNumber }: EpicSectionProps) {
+function EpicSection({
+  title,
+  epics,
+  defaultExpanded,
+  testIdPrefix,
+  group,
+  onStartNextIssue,
+  pendingStartIssueNumber,
+}: EpicSectionProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
     <section data-testid={testIdPrefix}>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
           {title} ({epics.length})
         </h2>
@@ -204,8 +333,13 @@ function EpicSection({ title, epics, defaultExpanded, testIdPrefix, onStart, pen
             <EpicCard
               key={epic.id}
               epic={epic}
-              onStart={onStart}
-              startPending={pendingStartIssueNumber === epic.progress.nextIssue?.number}
+              group={group ?? (epic.status === EpicStatus.Done ? 'done' : epic.status === EpicStatus.Closed ? 'closed' : 'paused')}
+              onStartNextIssue={onStartNextIssue}
+              startPending={
+                group === 'readyToStart' &&
+                pendingStartIssueNumber != null &&
+                epic.progress.nextIssue?.number === pendingStartIssueNumber
+              }
             />
           ))}
         </div>
@@ -225,7 +359,16 @@ export function EpicListPage() {
   const doneEpics = epics?.filter(e => e.status === EpicStatus.Done) ?? []
   const closedEpics = epics?.filter(e => e.status === EpicStatus.Closed) ?? []
 
-  function handleStartIssue(issueNumber: number) {
+  const groups: ActiveEpicGroups = groupActiveEpics(activeEpics)
+
+  const activeSections: ActiveGroupDescriptor[] = [
+    { key: 'running', title: 'Running', testIdPrefix: 'epic-section-running', epics: groups.running },
+    { key: 'readyToStart', title: 'Ready to start', testIdPrefix: 'epic-section-ready', epics: groups.readyToStart },
+    { key: 'waitingBlocked', title: 'Waiting / Blocked', testIdPrefix: 'epic-section-waiting', epics: groups.waitingBlocked },
+    { key: 'idleEmpty', title: 'Idle / Empty', testIdPrefix: 'epic-section-idle', epics: groups.idleEmpty },
+  ]
+
+  function handleStartNextIssue(issueNumber: number) {
     setPendingStartIssueNumber(issueNumber)
     startIssue.mutate(issueNumber, {
       onSettled: () => setPendingStartIssueNumber(null),
@@ -261,27 +404,35 @@ export function EpicListPage() {
         </div>
       ) : (
         <div className="space-y-8">
-          {activeEpics.length > 0 && (
-            <EpicSection
-              title="Active"
-              epics={activeEpics}
-              defaultExpanded={true}
-              testIdPrefix="epic-section-active"
-              onStart={handleStartIssue}
-              pendingStartIssueNumber={pendingStartIssueNumber}
-            />
-          )}
+          {activeSections
+            .filter(section => section.epics.length > 0)
+            .map(section => (
+              <EpicSection
+                key={section.key}
+                title={section.title}
+                epics={section.epics}
+                defaultExpanded={true}
+                testIdPrefix={section.testIdPrefix}
+                group={section.key}
+                onStartNextIssue={handleStartNextIssue}
+                pendingStartIssueNumber={pendingStartIssueNumber}
+              />
+            ))}
 
           {pausedEpics.length > 0 && (
-            <section>
+            <section data-testid="epic-section-paused">
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Paused</h2>
               <div className="grid gap-4">
                 {pausedEpics.map(epic => (
                   <EpicCard
                     key={epic.id}
                     epic={epic}
-                    onStart={handleStartIssue}
-                    startPending={pendingStartIssueNumber === epic.progress.nextIssue?.number}
+                    group="paused"
+                    onStartNextIssue={handleStartNextIssue}
+                    startPending={
+                      pendingStartIssueNumber != null &&
+                      epic.progress.nextIssue?.number === pendingStartIssueNumber
+                    }
                   />
                 ))}
               </div>
@@ -294,7 +445,8 @@ export function EpicListPage() {
               epics={doneEpics}
               defaultExpanded={false}
               testIdPrefix="epic-section-done"
-              onStart={handleStartIssue}
+              group="done"
+              onStartNextIssue={handleStartNextIssue}
               pendingStartIssueNumber={pendingStartIssueNumber}
             />
           )}
@@ -305,7 +457,8 @@ export function EpicListPage() {
               epics={closedEpics}
               defaultExpanded={false}
               testIdPrefix="epic-section-closed"
-              onStart={handleStartIssue}
+              group="closed"
+              onStartNextIssue={handleStartNextIssue}
               pendingStartIssueNumber={pendingStartIssueNumber}
             />
           )}
