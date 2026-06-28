@@ -51,6 +51,10 @@ const mocks = vi.hoisted(() => ({
   useResumeEpic: vi.fn(),
 }))
 
+const widgetBehavior = vi.hoisted(() => ({
+  mode: 'default' as 'default' | 'empty' | 'error',
+}))
+
 vi.mock('../../../entities/project', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../entities/project')>()
   return {
@@ -77,6 +81,32 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
     useUpdateEpic: mocks.useUpdateEpic,
     usePauseEpic: mocks.usePauseEpic,
     useResumeEpic: mocks.useResumeEpic,
+  }
+})
+
+vi.mock('../../../widgets/epic-dependency-graph', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../widgets/epic-dependency-graph')>()
+  const { useEffect: useEffectMock, createElement: createElementMock } = await import('react')
+  return {
+    ...actual,
+    DependencyGraphWidget: (props: {
+      linkedIssues: Parameters<typeof actual.DependencyGraphWidget>[0]['linkedIssues']
+      onRenderabilityChange?: (state: { renderable: boolean; reason: 'renderable' | 'cyclic' | 'empty' | null }) => void
+    }) => {
+      const mode = widgetBehavior.mode
+      useEffectMock(() => {
+        if (mode === 'empty') {
+          props.onRenderabilityChange?.({ renderable: false, reason: 'empty' })
+        }
+      }, [mode])
+      if (mode === 'default') {
+        return createElementMock(actual.DependencyGraphWidget, props)
+      }
+      if (mode === 'error') {
+        throw new Error('Simulated render error from DependencyGraphWidget')
+      }
+      return null
+    },
   }
 })
 const epic = {
@@ -110,7 +140,7 @@ const issues = [
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const ui = () => (
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={['/epic/epic-12345678']}>
@@ -121,8 +151,10 @@ function renderPage() {
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const result = render(ui())
+  return { ...result, rerenderPage: () => result.rerender(ui()) }
 }
 
 describe('EpicDetailPage', () => {
@@ -204,6 +236,10 @@ describe('EpicDetailPage', () => {
     renderPage()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0])
+
+    expect(removeMutate).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
 
     expect(removeMutate).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' })
   })
@@ -2431,6 +2467,601 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   })
 })
 
+describe('EpicDetailPage LinkedIssueRow vertical task line layout (T-001)', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function getRow(): HTMLElement {
+    return screen.getByTestId('linked-issue-row')
+  }
+
+  it('uses a vertical flex-col container instead of the old horizontal two-column layout', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const row = getRow()
+    expect(row.classList.contains('flex')).toBe(true)
+    expect(row.classList.contains('flex-col')).toBe(true)
+    expect(row.classList.contains('justify-between')).toBe(false)
+    expect(row.classList.contains('items-center')).toBe(false)
+  })
+
+  it('keeps reading-row (#number + title) at the top, then metadata row, then blocker reason, then actions row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-7',
+            number: 7,
+            title: 'Blocked item',
+            status: IssueStatus.Backlog,
+            canStart: false,
+            startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } },
+            health: IssueHealth.Active,
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const row = getRow()
+    const readingRow = screen.getByTestId('linked-issue-reading-row')
+    const metadataRow = screen.getByTestId('linked-issue-metadata-row')
+    const blockerReason = screen.getByTestId('linked-issue-blocker-reason')
+    const actionsRow = screen.getByTestId('linked-issue-actions-row')
+
+    expect(row.children[0]).toBe(readingRow)
+    expect(row.children[1]).toBe(metadataRow)
+    expect(row.children[2]).toBe(blockerReason)
+    expect(row.children[3]).toBe(actionsRow)
+  })
+
+  it('uses break-words + [overflow-wrap:anywhere] on the title instead of truncate', () => {
+    const LONG_TITLE =
+      'LinkedIssueRowLongEnglishTitleWithAnUnbrokenTokenThatMustWrapInsideTheRowAtThreeHundredTwentyPixels'
+
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: LONG_TITLE }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const title = screen.getByTestId('linked-issue-title')
+    expect(title.textContent).toBe(LONG_TITLE)
+    expect(title.classList.contains('break-words')).toBe(true)
+    expect(title.classList.contains('[overflow-wrap:anywhere]')).toBe(true)
+    expect(title.classList.contains('truncate')).toBe(false)
+  })
+
+  it('uses flex-wrap on the metadata row so health/status/priority badges wrap at narrow widths', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const metadataRow = screen.getByTestId('linked-issue-metadata-row')
+    expect(metadataRow.classList.contains('flex')).toBe(true)
+    expect(metadataRow.classList.contains('flex-wrap')).toBe(true)
+  })
+
+  it('places the number link and the title on the same primary reading row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const readingRow = screen.getByTestId('linked-issue-reading-row')
+    const navLink = screen.getByTestId('linked-issue-nav-link')
+    const title = screen.getByTestId('linked-issue-title')
+    expect(readingRow.contains(navLink)).toBe(true)
+    expect(readingRow.contains(title)).toBe(true)
+  })
+
+  it('does NOT show the blocker reason when the issue is inline-startable', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-blocker-reason')).toBeNull()
+  })
+
+  it('shows the "Still a draft" blocker reason when the issue has a draft blocker', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Draft candidate',
+            canStart: false,
+            startBlocker: { kind: 'draft' },
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Still a draft')
+  })
+
+  it('shows the "Waiting for #N" blocker reason when the issue has a waiting-for blocker', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Waiting on upstream',
+            canStart: false,
+            startBlocker: { kind: 'waiting-for', issue: { number: 42, title: 'Upstream' } },
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Waiting for #42')
+  })
+
+  it('shows the "Blocked" reason when health is blocked but no blocker is set', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Blocked by upstream issue',
+            canStart: false,
+            health: IssueHealth.Blocked,
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Blocked')
+  })
+
+  it('shows the "Another issue is in progress" reason only on rows blocked by a running sibling', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Running', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Active }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Next candidate' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const rows = screen.getAllByTestId('linked-issue-row')
+    expect(rows[0].textContent).not.toContain('Another issue is in progress')
+    expect(rows[1].textContent).toContain('Another issue is in progress')
+  })
+
+  it('shows the "Not startable" fallback reason when the issue is not startable for an unrecognized reason', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Done-ish issue',
+            status: IssueStatus.Done,
+            stage: WorkflowStage.Done,
+            health: IssueHealth.Done,
+            canStart: false,
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Not startable')
+  })
+
+  it('keeps Start button gated by canInlineStartRow: present only when inline-startable', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Startable candidate' }),
+          linkedIssue({
+            id: 'issue-4',
+            number: 4,
+            title: 'Non-startable',
+            canStart: false,
+            startBlocker: { kind: 'draft' },
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getAllByTestId('linked-issue-start')).toHaveLength(1)
+    const rows = screen.getAllByTestId('linked-issue-row')
+    expect(rows).toHaveLength(2)
+    expect(screen.getAllByTestId('linked-issue-blocker-reason')).toHaveLength(1)
+  })
+})
+
+describe('EpicDetailPage LinkedIssueRow Remove confirmation flow (T-002)', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+  const pauseMutate = vi.fn()
+  const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
+    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('places the Remove button in the actions row, not the primary reading row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const readingRow = screen.getByTestId('linked-issue-reading-row')
+    const actionsRow = screen.getByTestId('linked-issue-actions-row')
+    const removeButton = screen.getByTestId('linked-issue-remove')
+
+    expect(readingRow.contains(removeButton)).toBe(false)
+    expect(actionsRow.contains(removeButton)).toBe(true)
+  })
+
+  it('renders the Remove button with the ghost variant for a secondary de-emphasized affordance', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const removeButton = screen.getByTestId('linked-issue-remove')
+    expect(removeButton.className).toContain('hover:bg-muted')
+    expect(removeButton.className).not.toContain('border-border')
+  })
+
+  it('a single click on Remove does NOT call removeEpicIssue.mutate', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+
+    expect(removeMutate).not.toHaveBeenCalled()
+  })
+
+  it('clicking Remove opens a confirmation Dialog that shows the issue number and an explanation', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+          linkedIssue({ id: 'issue-7', number: 7, title: 'Other issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const removeButtons = screen.getAllByTestId('linked-issue-remove')
+    fireEvent.click(removeButtons[0])
+
+    const dialog = screen.getByTestId('linked-issue-remove-confirm-dialog')
+    expect(dialog).toBeTruthy()
+    expect(dialog.textContent).toMatch(/remove #3 from this epic\?/i)
+    expect(dialog.textContent).toMatch(/workflow state/i)
+  })
+
+  it('does not render the remove confirm dialog in the DOM before Remove is clicked', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
+    expect(screen.queryByTestId('linked-issue-remove-confirm')).toBeNull()
+    expect(screen.queryByTestId('linked-issue-remove-cancel')).toBeNull()
+  })
+
+  it('clicking Cancel keeps the link intact and closes the dialog without calling mutate', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+    fireEvent.click(screen.getByTestId('linked-issue-remove-cancel'))
+
+    expect(removeMutate).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
+  })
+
+  it('clicking Confirm (destructive) calls removeEpicIssue.mutate with the correct epicId and issueId', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+    fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
+
+    expect(removeMutate).toHaveBeenCalledTimes(1)
+    expect(removeMutate).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-3' })
+  })
+
+  it('the Confirm button uses the destructive variant', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+
+    const confirm = screen.getByTestId('linked-issue-remove-confirm')
+    expect(confirm.className).toContain('text-destructive')
+  })
+
+  it('the Cancel button uses the outline variant', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+
+    const cancel = screen.getByTestId('linked-issue-remove-cancel')
+    expect(cancel.className).toContain('border-border')
+  })
+
+  it('Cancel and Confirm are not disabled while removeEpicIssue is not pending', () => {
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove'))
+
+    const confirm = screen.getByTestId('linked-issue-remove-confirm')
+    const cancel = screen.getByTestId('linked-issue-remove-cancel')
+    expect(confirm).not.toBeDisabled()
+    expect(cancel).not.toBeDisabled()
+  })
+
+  it('gates the Remove affordance on removeEpicIssue.isPending so the dialog cannot be opened mid-mutation', () => {
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: true, isError: false })
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const removeButton = screen.getByTestId('linked-issue-remove')
+    expect(removeButton).toBeDisabled()
+
+    fireEvent.click(removeButton)
+    expect(screen.queryByTestId('linked-issue-remove-confirm-dialog')).toBeNull()
+    expect(removeMutate).not.toHaveBeenCalled()
+  })
+
+  it('each row owns its own remove-confirm open state — clicking one row does not open another row dialog', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'First issue' }),
+          linkedIssue({ id: 'issue-7', number: 7, title: 'Second issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const removeButtons = screen.getAllByTestId('linked-issue-remove')
+    fireEvent.click(removeButtons[0])
+
+    expect(screen.getByTestId('linked-issue-remove-confirm-dialog')).toBeTruthy()
+    expect(screen.getAllByTestId('linked-issue-remove-confirm')).toHaveLength(1)
+    expect(screen.getAllByTestId('linked-issue-remove-cancel')).toHaveLength(1)
+  })
+})
+
 describe('EpicDetailPage linked issues view toggle', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
@@ -2550,7 +3181,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
   })
 
-  it('hides the toggle entirely when the epic has zero linked issues and shows the list', () => {
+  it('keeps the Graph tab reachable with an empty-data explanation when the epic has zero linked issues', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpicWithLinkedIssues([]),
       isLoading: false,
@@ -2559,11 +3190,23 @@ describe('EpicDetailPage linked issues view toggle', () => {
     renderPage()
 
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
-    expect(screen.queryByTestId('linked-issues-view-toggle')).toBeNull()
-    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    expect(screen.getByTestId('linked-issues-view-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const graphRegion = screen.getByTestId('linked-issues-graph-region')
+    expect(graphRegion).toHaveAttribute('data-renderability', 'empty')
+    const banner = screen.getByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toHaveAttribute('data-reason', 'empty')
+    expect(banner.textContent).toMatch(/not enough/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+    expect(screen.getByTestId('linked-issues-list-region')).toHaveAttribute('data-fallback-for', 'empty')
+    expect(screen.getByText('No linked issues yet.')).toBeInTheDocument()
   })
 
-  it('hides the toggle when the epic has exactly one linked issue and shows the list', () => {
+  it('keeps the Graph tab reachable with an empty-data explanation when the epic has exactly one linked issue', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpicWithLinkedIssues([
         makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Lone issue' }),
@@ -2574,8 +3217,21 @@ describe('EpicDetailPage linked issues view toggle', () => {
     renderPage()
 
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
-    expect(screen.queryByTestId('linked-issues-view-toggle')).toBeNull()
-    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    expect(screen.getByTestId('linked-issues-view-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const graphRegion = screen.getByTestId('linked-issues-graph-region')
+    expect(graphRegion).toHaveAttribute('data-renderability', 'empty')
+    const banner = screen.getByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toHaveAttribute('data-reason', 'empty')
+    expect(banner.textContent).toMatch(/not enough/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+    expect(screen.getByTestId('linked-issues-list-region')).toHaveAttribute('data-fallback-for', 'empty')
+    expect(screen.getByText('Lone issue')).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issue-row')).toBeInTheDocument()
   })
 
   it('falls back to the list view when the graph reports a cycle', async () => {
@@ -2599,6 +3255,12 @@ describe('EpicDetailPage linked issues view toggle', () => {
       expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
     })
 
+    const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toBeInTheDocument()
+    expect(banner.getAttribute('data-reason')).toBe('cyclic')
+    expect(banner.textContent).toMatch(/cycle/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+
     expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
   })
 
@@ -2618,7 +3280,591 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2)
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Remove' })[0])
+    expect(removeMutate).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId('linked-issue-remove-confirm'))
     expect(removeMutate).toHaveBeenCalledWith({ epicId: 'epic-12345678', issueId: 'issue-1' })
+  })
+})
+
+describe('EpicDetailPage Graph mobile degradation (T-003)', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+  const pauseMutate = vi.fn()
+  const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
+
+  function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
+    return {
+      id: 'epic-12345678',
+      number: 7,
+      title: 'Graph epic',
+      description: 'Epic description',
+      priority: 'p1',
+      status: EpicStatus.Idle,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: linkedIssues.length,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
+    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('defaults to the List view when 2+ linked issues are present (List is always the initial state)', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+  })
+
+  it('keeps both List and Graph tabs visible and clickable when graphAvailable is true (data-testids unchanged)', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const listTab = screen.getByTestId('linked-issues-view-list')
+    const graphTab = screen.getByTestId('linked-issues-view-graph')
+
+    expect(listTab).toBeInTheDocument()
+    expect(graphTab).toBeInTheDocument()
+    expect(listTab).toBeInstanceOf(HTMLButtonElement)
+    expect(graphTab).toBeInstanceOf(HTMLButtonElement)
+    expect((listTab as HTMLButtonElement).disabled).toBe(false)
+    expect((graphTab as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(graphTab)
+    fireEvent.click(listTab)
+    expect(addMutate).not.toHaveBeenCalled()
+    expect(removeMutate).not.toHaveBeenCalled()
+    expect(updateMutate).not.toHaveBeenCalled()
+  })
+
+  it('wraps the graph canvas in an overflow-x-auto container with md:overflow-visible (no scrollbar on desktop)', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+
+    const canvas = screen.getByTestId('epic-dep-graph-canvas')
+    const scrollContainer = canvas.parentElement
+    expect(scrollContainer).toBeTruthy()
+    expect(scrollContainer!.getAttribute('data-testid')).toBe('linked-issues-graph-scroll-container')
+    expect(scrollContainer!.classList.contains('overflow-x-auto')).toBe(true)
+    expect(scrollContainer!.classList.contains('md:overflow-visible')).toBe(true)
+  })
+
+  it('gives the inner graph canvas a min-width class so it horizontally scrolls on narrow viewports', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+
+    const canvas = screen.getByTestId('epic-dep-graph-canvas')
+    const classes = Array.from(canvas.classList)
+    const hasMinWidth = classes.some(cls => /^min-w-\[/.test(cls))
+    expect(hasMinWidth).toBe(true)
+  })
+
+  it('renders a narrow-screen hint with md:hidden above the graph canvas', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-graph-region')).toBeInTheDocument()
+    })
+
+    const hint = screen.getByTestId('linked-issues-graph-narrow-hint')
+    expect(hint).toBeInTheDocument()
+    expect(hint.classList.contains('md:hidden')).toBe(true)
+    expect(hint.textContent).toMatch(/Graph works best on wider screens/i)
+    expect(hint.textContent).toMatch(/swipe/i)
+  })
+
+  it('places the narrow-screen hint above the scroll container in DOM order', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-graph-scroll-container')).toBeInTheDocument()
+    })
+
+    const region = screen.getByTestId('linked-issues-graph-region')
+    const hint = screen.getByTestId('linked-issues-graph-narrow-hint')
+    const scrollContainer = screen.getByTestId('linked-issues-graph-scroll-container')
+
+    const hintIndex = Array.from(region.children).indexOf(hint)
+    const scrollIndex = Array.from(region.children).indexOf(scrollContainer)
+    expect(hintIndex).toBeGreaterThanOrEqual(0)
+    expect(scrollIndex).toBeGreaterThanOrEqual(0)
+    expect(hintIndex).toBeLessThan(scrollIndex)
+  })
+
+  it('keeps the narrow-screen hint hidden when the list view is the default (only renders inside the graph region)', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-graph-narrow-hint')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-graph-scroll-container')).toBeNull()
+  })
+
+  it('switches between List and Graph tabs without error and keeps the overflow-x-auto wrapper on every Graph render', async () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'Root' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'Dep', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-graph-scroll-container')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('linked-issues-graph-narrow-hint')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-list'))
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    await waitFor(() => {
+      expect(screen.getByTestId('linked-issues-graph-scroll-container')).toBeInTheDocument()
+    })
+    const canvasAfterReturn = screen.getByTestId('epic-dep-graph-canvas')
+    const containerAfterReturn = canvasAfterReturn.parentElement
+    expect(containerAfterReturn!.classList.contains('overflow-x-auto')).toBe(true)
+    expect(containerAfterReturn!.classList.contains('md:overflow-visible')).toBe(true)
+  })
+})
+
+describe('EpicDetailPage Graph unrenderable banner + Error Boundary (T-004)', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+  const pauseMutate = vi.fn()
+  const resumeMutate = vi.fn()
+  const startEpicMutate = vi.fn()
+
+  function makeEpicWithLinkedIssues(linkedIssues: unknown[]) {
+    return {
+      id: 'epic-12345678',
+      number: 7,
+      title: 'Graph epic',
+      description: 'Epic description',
+      priority: 'p1',
+      status: EpicStatus.Idle,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: linkedIssues.length,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    widgetBehavior.mode = 'default'
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+    mocks.usePauseEpic.mockReturnValue({ mutate: pauseMutate, isPending: false })
+    mocks.useResumeEpic.mockReturnValue({ mutate: resumeMutate, isPending: false })
+    mocks.useStartEpic.mockReturnValue({ mutate: startEpicMutate, isPending: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+    widgetBehavior.mode = 'default'
+  })
+
+  it('renders the cyclic banner explaining the dependency cycle when the graph reports cyclic', async () => {
+    widgetBehavior.mode = 'default'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toBeInTheDocument()
+    expect(banner.getAttribute('data-reason')).toBe('cyclic')
+    expect(banner.textContent).toMatch(/cycle/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+  })
+
+  it('renders the empty banner explaining there is not enough data when the graph reports empty', async () => {
+    widgetBehavior.mode = 'empty'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toBeInTheDocument()
+    expect(banner.getAttribute('data-reason')).toBe('empty')
+    expect(banner.textContent).toMatch(/not enough/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+  })
+
+  it('renders the fallback "Graph is unavailable" banner when the Error Boundary catches a render exception', async () => {
+    widgetBehavior.mode = 'error'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toBeInTheDocument()
+    expect(banner.getAttribute('data-reason')).toBe('error')
+    expect(banner.textContent).toMatch(/graph is unavailable/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+
+    expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-graph-scroll-container')).toBeNull()
+  })
+
+  it('keeps the List view rendered as fallback for the empty unrenderable scenario', async () => {
+    widgetBehavior.mode = 'empty'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await screen.findByTestId('linked-issues-graph-unavailable-banner')
+
+    const listRegion = screen.getByTestId('linked-issues-list-region')
+    expect(listRegion).toBeInTheDocument()
+    expect(listRegion.getAttribute('data-fallback-for')).toBe('empty')
+
+    const listRows = screen.getAllByTestId('linked-issue-row')
+    expect(listRows).toHaveLength(2)
+  })
+
+  it('keeps the List view rendered as fallback when the Error Boundary catches a render exception', async () => {
+    widgetBehavior.mode = 'error'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await screen.findByTestId('linked-issues-graph-unavailable-banner')
+
+    const listRegion = screen.getByTestId('linked-issues-list-region')
+    expect(listRegion).toBeInTheDocument()
+    expect(listRegion.getAttribute('data-fallback-for')).toBe('error')
+
+    const listRows = screen.getAllByTestId('linked-issue-row')
+    expect(listRows).toHaveLength(2)
+  })
+
+  it('keeps the List view rendered as fallback for the cyclic unrenderable scenario (existing behavior)', async () => {
+    widgetBehavior.mode = 'default'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
+        linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await screen.findByTestId('linked-issues-graph-unavailable-banner')
+
+    const listRegion = screen.getByTestId('linked-issues-list-region')
+    expect(listRegion).toBeInTheDocument()
+    expect(listRegion.getAttribute('data-fallback-for')).toBe('cyclic')
+
+    const listRows = screen.getAllByTestId('linked-issue-row')
+    expect(listRows).toHaveLength(2)
+  })
+
+  it('does not show the graph canvas or scroll container when the banner is displayed (any unrenderable state)', async () => {
+    widgetBehavior.mode = 'empty'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await screen.findByTestId('linked-issues-graph-unavailable-banner')
+
+    expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-graph-scroll-container')).toBeNull()
+  })
+
+  it('shows the narrow-screen hint above the unavailability banner in DOM order', async () => {
+    widgetBehavior.mode = 'empty'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    await screen.findByTestId('linked-issues-graph-unavailable-banner')
+
+    const region = screen.getByTestId('linked-issues-graph-region')
+    const hint = screen.getByTestId('linked-issues-graph-narrow-hint')
+    const banner = screen.getByTestId('linked-issues-graph-unavailable-banner')
+
+    const children = Array.from(region.children)
+    const hintIndex = children.indexOf(hint)
+    const bannerIndex = children.indexOf(banner)
+    expect(hintIndex).toBeGreaterThanOrEqual(0)
+    expect(bannerIndex).toBeGreaterThanOrEqual(0)
+    expect(hintIndex).toBeLessThan(bannerIndex)
+  })
+
+  it('clears the error fallback when the user switches back to the List tab and re-selects Graph with a healthy widget', async () => {
+    widgetBehavior.mode = 'error'
+    mocks.useEpic.mockReturnValue({
+      data: makeEpicWithLinkedIssues([
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(screen.getByTestId('linked-issues-graph-unavailable-banner').getAttribute('data-reason')).toBe('error')
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-list'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    })
+
+    widgetBehavior.mode = 'default'
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    await waitFor(() => {
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('linked-issues-graph-unavailable-banner')).toBeNull()
+  })
+
+  it('re-probes graph renderability when linked issue data changes while Graph remains selected', async () => {
+    let currentEpic = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1', prerequisiteNumbers: [2] }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
+    mocks.useEpic.mockImplementation(() => ({ data: currentEpic, isLoading: false }))
+
+    const { rerenderPage } = renderPage()
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+    const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner.getAttribute('data-reason')).toBe('cyclic')
+    expect(screen.queryByTestId('epic-dep-graph-canvas')).toBeNull()
+
+    currentEpic = makeEpicWithLinkedIssues([
+      linkedIssue({ id: 'issue-1', number: 1, title: 'L-1' }),
+      linkedIssue({ id: 'issue-2', number: 2, title: 'L-2', prerequisiteNumbers: [1] }),
+    ])
+    rerenderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('epic-dep-graph-canvas')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('linked-issues-graph-unavailable-banner')).toBeNull()
+    expect(screen.queryByTestId('linked-issues-list-region')).toBeNull()
+  })
+
+  it('every unrenderable banner message directs the user to the list below (spec contract)', async () => {
+    const scenarios = [
+      { reason: 'cyclic' as const, expectedKeyword: /cycle/i, linkedIssues: () => [
+        linkedIssue({ id: 'issue-1', number: 1, prerequisiteNumbers: [2] }),
+        linkedIssue({ id: 'issue-2', number: 2, prerequisiteNumbers: [1] }),
+      ] },
+      { reason: 'empty' as const, expectedKeyword: /not enough/i, linkedIssues: () => [
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2 }),
+      ] },
+      { reason: 'error' as const, expectedKeyword: /graph is unavailable/i, linkedIssues: () => [
+        linkedIssue({ id: 'issue-1', number: 1 }),
+        linkedIssue({ id: 'issue-2', number: 2 }),
+      ] },
+    ]
+
+    for (const scenario of scenarios) {
+      widgetBehavior.mode = scenario.reason === 'cyclic' ? 'default' : scenario.reason
+      mocks.useEpic.mockReturnValue({
+        data: makeEpicWithLinkedIssues(scenario.linkedIssues()),
+        isLoading: false,
+      })
+
+      const { unmount } = renderPage()
+      fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+      const banner = await screen.findByTestId('linked-issues-graph-unavailable-banner')
+      expect(banner.textContent).toMatch(scenario.expectedKeyword)
+      expect(banner.textContent).toMatch(/use the list below/i)
+      unmount()
+      widgetBehavior.mode = 'default'
+    }
   })
 })
 
@@ -2931,9 +4177,9 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     const linkedStartButton = screen.getByTestId('linked-issue-start')
     const actionContainer = linkedStartButton.parentElement as HTMLElement
     expect(actionContainer).toBeTruthy()
+    expect(actionContainer.getAttribute('data-testid')).toBe('linked-issue-actions-row')
     expect(actionContainer.classList.contains('flex')).toBe(true)
     expect(actionContainer.classList.contains('flex-wrap')).toBe(true)
-    expect(actionContainer.classList.contains('shrink-0')).toBe(true)
     expect(actionContainer.classList.contains('gap-2')).toBe(true)
   })
 
@@ -3330,7 +4576,8 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
       expect(next).toHaveTextContent('#9 Priority candidate')
       expect(next.getAttribute('href')).toContain('/issues/9')
       expect(screen.queryByTestId('advancement-copy')).toBeNull()
-      expect(screen.queryByText(/still a draft/i)).toBeNull()
+      const advancementArea = screen.getByTestId('next-issue-region')
+      expect(advancementArea.textContent ?? '').not.toMatch(/still a draft/i)
     })
 
     it('renders idle-no-next reason copy when an idle epic has no startable candidate and no specific blocker', () => {
