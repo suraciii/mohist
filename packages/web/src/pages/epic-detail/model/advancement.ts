@@ -24,7 +24,7 @@ export interface AdvancementCopy {
 }
 
 function isUndelivered(issue: LinkedIssue): boolean {
-  return issue.status !== IssueStatus.Done && issue.status !== IssueStatus.Cancelled
+  return issue.status !== IssueStatus.Done
 }
 
 function isInProgress(issue: LinkedIssue): boolean {
@@ -83,17 +83,22 @@ export function deriveAdvancementState(context: AdvancementContext): Advancement
     return { kind: 'draft-blocker', issueNumber: candidate.number }
   }
 
+  if (isStartableCandidate(candidate)) {
+    return { kind: 'has-next', issueNumber: candidate.number }
+  }
+
   const externalPrereqs = candidate.externalPrerequisites ?? []
-  if (externalPrereqs.length > 0) {
+  if (
+    candidate.status === IssueStatus.Backlog
+    && !candidate.canStart
+    && candidate.startBlocker === null
+    && externalPrereqs.length > 0
+  ) {
     return {
       kind: 'external-prerequisite-blocker',
       issueNumber: candidate.number,
       prerequisiteNumbers: externalPrereqs.map(prereq => prereq.number),
     }
-  }
-
-  if (isStartableCandidate(candidate)) {
-    return { kind: 'has-next', issueNumber: candidate.number }
   }
 
   if (epicStatus === EpicStatus.Running) {
@@ -143,7 +148,7 @@ export function advancementCopy(state: AdvancementState): AdvancementCopy {
       }
     case 'nothing-pending':
       return {
-        text: 'All linked issues are delivered',
+        text: 'No pending startable linked issues',
         linkNumbers: [],
       }
   }

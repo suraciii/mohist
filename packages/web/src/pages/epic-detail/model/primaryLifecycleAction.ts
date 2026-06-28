@@ -6,15 +6,6 @@ export type PrimaryLifecycleAction =
   | { kind: 'resume-epic' }
   | { kind: 'mark-done' }
 
-export type PrimaryActionKind = PrimaryLifecycleAction['kind']
-
-const PRIMARY_ACTION_ORDER: PrimaryActionKind[] = [
-  'start-epic',
-  'pause-epic',
-  'resume-epic',
-  'mark-done',
-]
-
 export function primaryLifecycleAction(
   status: EpicStatus,
   readyToMarkDone: boolean,
@@ -40,12 +31,4 @@ export function primaryLifecycleAction(
   }
 
   return null
-}
-
-export function primaryActionKind(action: PrimaryLifecycleAction | null): PrimaryActionKind | null {
-  return action?.kind ?? null
-}
-
-export function isPrimaryActionKind(value: string): value is PrimaryActionKind {
-  return PRIMARY_ACTION_ORDER.includes(value as PrimaryActionKind)
 }

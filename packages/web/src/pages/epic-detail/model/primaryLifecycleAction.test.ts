@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EpicStatus } from '../../../entities/epic/model/types'
-import {
-  isPrimaryActionKind,
-  primaryActionKind,
-  primaryLifecycleAction,
-  type PrimaryActionKind,
-} from './primaryLifecycleAction'
+import { primaryLifecycleAction } from './primaryLifecycleAction'
 
 describe('primaryLifecycleAction', () => {
   describe('terminal statuses (done, closed) always return null', () => {
@@ -67,8 +62,7 @@ describe('primaryLifecycleAction', () => {
         expect(action).toBeNull()
         return
       }
-      expect(action).not.toBeNull()
-      expect(isPrimaryActionKind(action!.kind)).toBe(true)
+      expect(action?.kind).toMatch(/^(start-epic|pause-epic|resume-epic|mark-done)$/)
     })
 
     it('encodes the spec matrix exactly', () => {
@@ -93,30 +87,4 @@ describe('primaryLifecycleAction', () => {
       }
     })
   })
-})
-
-describe('primaryActionKind', () => {
-  it('returns the kind when given an action', () => {
-    expect(primaryActionKind({ kind: 'start-epic' })).toBe('start-epic')
-    expect(primaryActionKind({ kind: 'pause-epic' })).toBe('pause-epic')
-    expect(primaryActionKind({ kind: 'resume-epic' })).toBe('resume-epic')
-    expect(primaryActionKind({ kind: 'mark-done' })).toBe('mark-done')
-  })
-
-  it('returns null when given null', () => {
-    expect(primaryActionKind(null)).toBeNull()
-  })
-})
-
-describe('isPrimaryActionKind', () => {
-  const validKinds: PrimaryActionKind[] = ['start-epic', 'pause-epic', 'resume-epic', 'mark-done']
-
-  it.each(validKinds)('returns true for the canonical kind %s', (kind) => {
-    expect(isPrimaryActionKind(kind)).toBe(true)
-  })
-
-  it.each(['Start', 'PAUSE', 'resume', 'edit-epic', 'close-epic', 'delete', '', 'markdone', 'MarkDone'])
-    ('returns false for non-canonical value %s', (value) => {
-      expect(isPrimaryActionKind(value)).toBe(false)
-    })
 })

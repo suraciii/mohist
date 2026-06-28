@@ -4,58 +4,58 @@
 
 ## Repaired Items
 
-None.
+- None.
 
 ## Blocking Items
 
 - [ID: item-1]
   Severity: blocking
-  Scope: `packages/web/src/pages/epic-detail/model/advancement.ts`
-  Evidence: `deriveAdvancementState` chooses the display candidate with `const candidate = undelivered[0]` (`packages/web/src/pages/epic-detail/model/advancement.ts:63`), but the API sends detail linked issues in link-created order (`packages/server/src/Mohist.Server/Epic/Services/EpicQuerier.cs:224`-`227`) while server next-issue selection and next-reason selection use priority rank then issue number (`packages/server/src/Mohist.Server/Epic/Services/EpicProgress.cs:61`-`66`, `79`-`83`). This can render the wrong draft/external/has-next state, or show a contradictory blocker under a server-provided `progress.nextIssue`, when an older linked issue is not the highest-priority candidate. [disallowed:product-behavior-change]
-  SuggestedAction: Derive the candidate using the same display ordering contract as the server (`PriorityRank(priority)` then `number`) or use `progress.nextIssue`/`progress.nextIssueReason` as inputs so the UI cannot disagree with the API candidate.
-  Verification: Add unit tests where linked order differs from priority/number order, including a server `nextIssue` present while the first linked issue is draft-blocked, then run `npm run typecheck -w packages/web` and `npm run test:run -w packages/web`.
+  Scope: `packages/web/src/pages/epic-detail/model/advancement.ts`, `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx`
+  Evidence: `deriveAdvancementState` checks `externalPrerequisites.length > 0` before `isStartableCandidate` at `packages/web/src/pages/epic-detail/model/advancement.ts:86`, so any candidate with an external prerequisite record is classified as `external-prerequisite-blocker` even when `canStart === true` and `startBlocker === null`. The backend treats `ExternalPrerequisites` as descriptive out-of-epic prerequisite metadata (`packages/server/src/Mohist.Server/Epic/Services/EpicQuerier.cs:256`) and uses `CanStart`/`StartBlocker` as the actual blocker decision (`packages/server/src/Mohist.Server/Epic/Services/EpicQuerier.cs:246`). When the server also returns `progress.nextIssue`, the UI renders the startable next issue link and then renders blocker copy below it via `NextIssueAdvancementCopy` at `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:717`. This violates the acceptance criterion that an idle epic shows whether a startable next issue exists, and only explains a reason when no startable issue exists. [disallowed:product-behavior-change]
+  SuggestedAction: Classify a candidate as external-prerequisite-blocked only when it is not startable, or derive the blocker from `canStart`/`startBlocker` first and use `externalPrerequisites` only to enrich the reason/link targets. Add unit and page tests for a candidate with `canStart: true`, `startBlocker: null`, and non-empty `externalPrerequisites`, with `progress.nextIssue` present, asserting that no external-blocker copy is rendered.
+  Verification: Run `npm run typecheck -w packages/web`, `npm run test:run -w packages/web -- src/pages/epic-detail/model/advancement.test.ts src/pages/epic-detail/ui/EpicDetailPage.test.tsx`, and the focused Playwright spec after the fix.
   Status: open
 
 - [ID: item-2]
   Severity: warning
-  Scope: `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx`
-  Evidence: The new selector labels Pause and Resume as the single primary lifecycle action, but the rendered buttons use `variant="outline"` (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:617`-`638`), the same secondary treatment as Edit/Close. This does not satisfy the issue/spec requirement to突出/primary-highlight the lifecycle action for `running` and `paused` epics. [disallowed:product-behavior-change]
-  SuggestedAction: Render the selected primary lifecycle action with the default/prominent button variant consistently for Start Epic, Pause, Resume, and Mark Done; keep Edit/Close and disabled Mark Done secondary.
-  Verification: Add DOM/class or visual assertions for running and paused epics that distinguish the primary action from secondary actions, then run the web typecheck/test suite.
+  Scope: `packages/web/src/pages/epic-detail/model/advancement.ts`, `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx`
+  Evidence: `isUndelivered` excludes cancelled linked issues at `packages/web/src/pages/epic-detail/model/advancement.ts:26`, causing an epic whose linked issues are cancelled but not delivered to become `nothing-pending`; `advancementCopy` then displays `All linked issues are delivered` at `packages/web/src/pages/epic-detail/model/advancement.ts:144`. The server does not count cancelled issues as delivered (`packages/server/src/Mohist.Server/Epic/Services/EpicProgress.cs:14`) and still includes them in `TotalIssueCount` (`packages/server/src/Mohist.Server/Epic/Services/EpicProgress.cs:32`), so the page can show `0 / 1`, disabled Mark Done with `1 linked issue remains unfinished.`, and `All linked issues are delivered` at the same time. [disallowed:product-behavior-change]
+  SuggestedAction: Do not use delivered wording for `nothing-pending` unless `progress.readyToMarkDone` or delivered counts prove it. Either keep cancelled issues out of advancement but use neutral copy such as no pending startable linked issues, or pass progress readiness/counts into the copy decision. Add tests for all-cancelled and mixed done/cancelled linked issues.
+  Verification: Run `npm run typecheck -w packages/web` and `npm run test:run -w packages/web -- src/pages/epic-detail/model/advancement.test.ts src/pages/epic-detail/ui/EpicDetailPage.test.tsx` after adding the cancelled-status cases.
   Status: open
 
 - [ID: item-3]
-  Severity: warning
-  Scope: `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx`
-  Evidence: For a non-terminal epic with no linked issues, `readyToMarkDone` is false by server definition (`packages/server/src/Mohist.Server/Epic/Services/EpicProgress.cs:37`) and `unfinishedCount` becomes `0` (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:505`). The disabled Mark Done reason then renders `0 linked issues remain unfinished.` (`packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx:519`-`521`), which is visible on touch devices but does not explain why the Epic cannot be completed. [disallowed:product-behavior-change]
-  SuggestedAction: Add a zero-linked-issues reason such as requiring at least one linked issue before marking done, and cover it with an EpicDetailPage test.
-  Verification: Render an idle/running epic with `totalIssueCount: 0`, `deliveredCount: 0`, `readyToMarkDone: false`, assert the disabled reason is actionable and not a zero-unfinished contradiction, then run `npm run test:run -w packages/web`.
-  Status: open
-
-- [ID: item-4]
   Severity: test-gap
-  Scope: `packages/web/src/pages/epic-detail/ui/EpicDetailPage.test.tsx`
-  Evidence: The acceptance criteria require the summary to be visible in the first fold on desktop and at a mobile viewport. The added tests assert DOM order only; the mobile test name says `390px viewport`, but no viewport dimensions or layout measurement are set, and jsdom cannot prove first-fold visibility. The implementation likely improves hierarchy by moving the description after the summary, but the specific first-fold/mobile acceptance criterion is not verified.
-  SuggestedAction: Add a browser-level or component-layout check for a 390px viewport and a desktop viewport that confirms the progress, current activity, and next issue/reason summary elements are visible before the description consumes the fold.
-  Verification: Run the browser/layout test plus `npm run test:run -w packages/web`.
+  Scope: `packages/web/src/pages/epic-detail/model/advancement.test.ts`, `packages/web/src/pages/epic-detail/ui/EpicDetailPage.test.tsx`
+  Evidence: The new advancement tests encode the two incorrect edge cases instead of guarding against them: `packages/web/src/pages/epic-detail/model/advancement.test.ts:77` asserts all-cancelled as `nothing-pending`, while `packages/web/src/pages/epic-detail/model/advancement.test.ts:108` only covers external prerequisites on a non-startable candidate and never covers the common startable candidate with historical/delivered external prerequisite metadata. This leaves the acceptance-critical next issue / reason behavior unprotected.
+  SuggestedAction: Add regression tests for startable candidates with external prerequisite metadata and for cancelled linked issues before changing the implementation, so the corrected UI contract is locked down.
+  Verification: Run `npm run test:run -w packages/web -- src/pages/epic-detail/model/advancement.test.ts src/pages/epic-detail/ui/EpicDetailPage.test.tsx`.
   Status: open
 
 ## Follow-up Items
 
-None.
+- [ID: item-4]
+  Severity: follow-up
+  Scope: `packages/web/src/pages/epic-detail/model/primaryLifecycleAction.ts`
+  Evidence: `primaryActionKind` and `isPrimaryActionKind` are exported and unit-tested at `packages/web/src/pages/epic-detail/model/primaryLifecycleAction.ts:45`, but the product code only consumes `primaryLifecycleAction`. This adds a small amount of public surface and test noise without serving the feature.
+  SuggestedAction: Remove the unused exported helpers unless another consumer is expected soon.
+  Status: follow-up
 
 ## Pre-existing or Out-of-scope Items
 
 - [ID: item-5]
   Severity: info
-  Scope: `packages/web/src/pages/epic-detail/ui/EpicDetailPage.tsx`
-  Evidence: No security, persistence, migration, or public API contract changes were found in the product candidate. The change is web-only and uses existing API fields/mutation hooks.
-  SuggestedAction: No action required for this issue.
-  Status: out-of-scope
+  Scope: `packages/web` test configuration
+  Evidence: Vitest reports `test.poolOptions` was removed in Vitest 4 during both focused and full test runs. This is a repo configuration warning, not caused by the Epic detail candidate.
+  SuggestedAction: Update the Vitest config to the Vitest 4 pool option shape in a separate cleanup.
+  Status: pre-existing
 
 ## Verification
 
 - `npm run typecheck -w packages/web` passed.
-- `npm run test:run -w packages/web` passed: 173 files, 2559 passed, 1 skipped.
+- `npm run test:run -w packages/web -- src/pages/epic-detail/model/advancement.test.ts src/pages/epic-detail/model/primaryLifecycleAction.test.ts src/pages/epic-detail/ui/EpicDetailPage.test.tsx` passed: 196 tests.
+- `npm run test:run -w packages/web` passed: 173 files, 2564 passed, 1 skipped.
+- `npm run test:e2e -w packages/web -- tests/e2e/epic-detail-mobile-overflow.spec.ts` passed: 14 tests.
+- `git diff --check` passed.
 
 <promise>FAIL</promise>

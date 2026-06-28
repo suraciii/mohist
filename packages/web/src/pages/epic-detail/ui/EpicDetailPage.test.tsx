@@ -3281,6 +3281,36 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
       expect(screen.queryByTestId('advancement-copy')).toBeNull()
     })
 
+    it('does not render external-blocker copy below a startable next issue with prerequisite metadata', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({
+          status: EpicStatus.Idle,
+          progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: { id: 'issue-3', number: 3, title: 'Candidate' }, nextIssueReason: null, readyToMarkDone: false },
+          linkedIssues: [
+            linkedIssue({
+              id: 'issue-3',
+              number: 3,
+              title: 'Candidate',
+              status: IssueStatus.Backlog,
+              stage: WorkflowStage.Plan,
+              canStart: true,
+              startBlocker: null,
+              externalPrerequisites: [{ number: 77, title: 'Historical prerequisite', stage: 'done', status: 'done' }],
+            }),
+          ],
+        }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const next = screen.getByTestId('next-issue')
+      expect(next).toHaveTextContent('#3 Candidate')
+      expect(next.getAttribute('href')).toContain('/issues/3')
+      expect(screen.queryByTestId('advancement-copy')).toBeNull()
+      expect(screen.queryByText(/external issue/i)).toBeNull()
+    })
+
     it('does not show a lower-priority draft blocker under a server-provided next issue', () => {
       mocks.useEpic.mockReturnValue({
         data: makeEpic({
@@ -3336,6 +3366,47 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
 
       expect(screen.getByText('No linked issues yet')).toBeTruthy()
       expect(screen.queryByTestId('advancement-copy')).toBeNull()
+    })
+
+    it('uses neutral copy for an all-cancelled epic instead of delivered wording', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({
+          status: EpicStatus.Idle,
+          progress: { deliveredCount: 0, totalIssueCount: 1, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
+          linkedIssues: [
+            linkedIssue({ id: 'issue-7', number: 7, title: 'Cancelled issue', status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+          ],
+        }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const copy = screen.getByTestId('advancement-copy')
+      expect(screen.getByText('0 / 1')).toBeTruthy()
+      expect(copy.textContent).toContain('No startable next issue')
+      expect(copy.textContent).not.toContain('All linked issues are delivered')
+    })
+
+    it('uses neutral copy for mixed done and cancelled issues instead of delivered wording', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({
+          status: EpicStatus.Idle,
+          progress: { deliveredCount: 1, totalIssueCount: 2, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
+          linkedIssues: [
+            linkedIssue({ id: 'issue-1', number: 1, title: 'Done issue', status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+            linkedIssue({ id: 'issue-7', number: 7, title: 'Cancelled issue', status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+          ],
+        }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const copy = screen.getByTestId('advancement-copy')
+      expect(screen.getByText('1 / 2')).toBeTruthy()
+      expect(copy.textContent).toContain('No startable next issue')
+      expect(copy.textContent).not.toContain('All linked issues are delivered')
     })
 
     it('distinguishes advancement copy kinds without collapsing them into one message', () => {

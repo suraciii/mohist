@@ -74,14 +74,25 @@ describe('deriveAdvancementState', () => {
       expect(state).toEqual({ kind: 'nothing-pending' })
     })
 
-    it('treats all-cancelled as nothing-pending', () => {
+    it('does not describe all-cancelled issues as delivered', () => {
       const state = deriveAdvancementState({
         epicStatus: EpicStatus.Idle,
         linkedIssues: [
           makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
         ],
       })
-      expect(state).toEqual({ kind: 'nothing-pending' })
+      expect(state).toEqual({ kind: 'idle-no-next', reason: 'no startable issue' })
+    })
+
+    it('does not collapse mixed done and cancelled issues into delivered wording', () => {
+      const state = deriveAdvancementState({
+        epicStatus: EpicStatus.Idle,
+        linkedIssues: [
+          makeLinkedIssue({ id: 'i-1', number: 7, status: IssueStatus.Done, stage: WorkflowStage.Done, health: IssueHealth.Done, canStart: false }),
+          makeLinkedIssue({ id: 'i-2', number: 8, status: IssueStatus.Cancelled, stage: WorkflowStage.Done, health: IssueHealth.Cancelled, canStart: false }),
+        ],
+      })
+      expect(state).toEqual({ kind: 'idle-no-next', reason: 'no startable issue' })
     })
 
     it('returns nothing-pending for an empty linked-issues list', () => {
@@ -160,6 +171,24 @@ describe('deriveAdvancementState', () => {
           makeLinkedIssue({ id: 'i-1', number: 42, status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
         ],
       })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 42 })
+    })
+
+    it('does not let external prerequisite metadata override a startable candidate', () => {
+      const state = deriveAdvancementState({
+        epicStatus: EpicStatus.Idle,
+        linkedIssues: [
+          makeLinkedIssue({
+            id: 'i-1',
+            number: 42,
+            status: IssueStatus.Backlog,
+            canStart: true,
+            startBlocker: null,
+            externalPrerequisites: [{ number: 77, title: 'Historical prerequisite', stage: 'done', status: 'done' }],
+          }),
+        ],
+      })
+
       expect(state).toEqual({ kind: 'has-next', issueNumber: 42 })
     })
 
@@ -439,7 +468,8 @@ describe('advancementCopy', () => {
 
   it('returns copy without links for nothing-pending', () => {
     const copy = advancementCopy({ kind: 'nothing-pending' })
-    expect(copy.text).toContain('delivered')
+    expect(copy.text).toBe('No pending startable linked issues')
+    expect(copy.text).not.toContain('delivered')
     expect(copy.linkNumbers).toEqual([])
   })
 
