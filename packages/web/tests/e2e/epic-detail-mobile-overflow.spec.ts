@@ -10,6 +10,10 @@ const project = {
 
 const LONG_TITLE = 'EpicDetailPageMobileHeaderTitleWithAnUnbrokenEnglishTokenThatMustWrapInsideTheReadableColumnAtThreeHundredTwentyPixels'
 const LONG_DESCRIPTION = 'EpicDetailPageMobileHeaderDescriptionWithAnUnbrokenEnglishTokenThatMustWrapInsideTheDescriptionColumnAtThreeHundredTwentyPixels'
+const FULL_DESCRIPTION = [
+  LONG_DESCRIPTION,
+  ...Array.from({ length: 24 }, (_, index) => `Background paragraph ${index + 1} that should stay below the summary area.`),
+].join('\n\n')
 
 type EpicStatus = 'idle' | 'running' | 'done' | 'closed'
 
@@ -50,7 +54,7 @@ function makeEpic(status: EpicStatus) {
     id: `epic-${status}`,
     number: status === 'running' ? 7 : status === 'idle' ? 8 : status === 'done' ? 9 : 10,
     title: LONG_TITLE,
-    description: LONG_DESCRIPTION,
+    description: FULL_DESCRIPTION,
     priority: 'p1',
     status,
     createdAt: '2026-06-01T00:00:00Z',
@@ -102,6 +106,28 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
 }
 
+async function expectSummaryVisibleBeforeOverview(page: Page, viewportHeight: number) {
+  const summary = page.getByTestId('summary-grid')
+  const overview = page.getByTestId('overview-card')
+
+  await expect(summary).toBeVisible()
+  await expect(overview).toBeVisible()
+  await expect(summary.getByText('Progress', { exact: true })).toBeVisible()
+  await expect(summary.getByText('Current Activity', { exact: true })).toBeVisible()
+  await expect(summary.getByText('Next Issue', { exact: true })).toBeVisible()
+  await expect(summary.getByText('1 / 2')).toBeVisible()
+  await expect(summary.getByRole('link', { name: /#2 Dependent linked issue/ })).toBeVisible()
+
+  const summaryBox = await summary.boundingBox()
+  const overviewBox = await overview.boundingBox()
+  expect(summaryBox).not.toBeNull()
+  expect(overviewBox).not.toBeNull()
+  const summaryBottom = summaryBox!.y + summaryBox!.height
+  expect(summaryBox!.y).toBeGreaterThanOrEqual(0)
+  expect(summaryBottom).toBeLessThanOrEqual(viewportHeight)
+  expect(summaryBottom).toBeLessThan(overviewBox!.y)
+}
+
 test.describe('Epic detail mobile overflow', () => {
   for (const width of [320, 390, 430]) {
     for (const status of ['running', 'idle', 'done', 'closed'] as const) {
@@ -120,5 +146,23 @@ test.describe('Epic detail mobile overflow', () => {
         await expectNoHorizontalOverflow(page)
       })
     }
+  }
+})
+
+test.describe('Epic detail summary first fold', () => {
+  for (const viewport of [
+    { label: 'mobile 390px', width: 390, height: 900 },
+    { label: 'desktop', width: 1280, height: 900 },
+  ]) {
+    test(`shows progress, current activity, and next issue before overview on ${viewport.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await mockEpicApi(page)
+
+      await page.goto(`/${project.name}/epics/epic-running`)
+      await expect(page.getByRole('heading', { name: LONG_TITLE })).toBeVisible()
+      await expect(page.getByTestId('epic-description')).toContainText(LONG_DESCRIPTION)
+
+      await expectSummaryVisibleBeforeOverview(page, viewport.height)
+    })
   }
 })
