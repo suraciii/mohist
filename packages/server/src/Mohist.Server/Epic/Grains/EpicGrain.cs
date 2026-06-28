@@ -62,32 +62,12 @@ public class EpicGrain : Grain, IEpicGrain
 
         var row = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Id == epicId);
         if (row is null) throw new InvalidOperationException($"Epic {epicId} not found");
+        var targetIsTerminal = IsTerminalEpicStatus(row.Status);
 
         // Cross-aggregate uniqueness invariant: an issue may belong to at
-        // most one NON-TERMINAL epic (idle/running/paused). Memberships
-        // whose owning epic is terminal (done/closed) do NOT count toward
-        // this invariant and do NOT block re-homing the issue into a
-        // new non-terminal epic — see issue-179 / design D3.
-        //
-        // We pull every EpicIssueRow for the issue joined to its owning
-        // EpicRow.Status in one set-based query (post-D2 the index is no
-        // longer unique, so an issue may hold several terminal rows).
-        // Existing-link-to-this-epic is treated as idempotent.
-        // The terminal check is inlined to the literal set so EF Core
-        // can translate the LINQ to SQL — EpicProgress.IsTerminal is
-        // a managed helper that LINQ-to-SQL cannot lower.
-        var conflict = await (
-            from link in db.EpicIssues.AsNoTracking()
-            join epic in db.Epics.AsNoTracking()
-                on link.EpicId equals epic.Id
-            where link.ProjectId == projectId
-                && link.IssueId == issueId
-                && link.EpicId != epicId
-                && (epic.Status != EpicStatusName.Done && epic.Status != EpicStatusName.Closed)
-            select new { link.EpicId, epic.Title }
-        ).FirstOrDefaultAsync();
-
-        if (conflict is not null)
+        // most one non-terminal epic (idle/running/paused). Terminal target
+        // epics do not consume the active slot.
+        if (!targetIsTerminal && await GetActiveMembershipOwnerAsync(db, projectId, issueId, epicId) is { } conflict)
         {
             throw new InvalidOperationException(
                 $"Issue already belongs to Epic '{conflict.EpicId}' ({conflict.Title})");
@@ -111,9 +91,32 @@ public class EpicGrain : Grain, IEpicGrain
             IssueId = issueId,
             IssueNumber = issueNumber,
         });
+        if (!targetIsTerminal)
+        {
+            db.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = projectId,
+                IssueId = issueId,
+                EpicId = epicId,
+                IssueNumber = issueNumber,
+            });
+        }
         MapToRow(domain, row, now);
         ApplyPendingEvents(domain);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException) when (!targetIsTerminal)
+        {
+            var owner = await GetActiveMembershipOwnerAsync(projectId, issueId, epicId);
+            if (owner is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Issue already belongs to Epic '{owner.EpicId}' ({owner.Title})");
+            }
+            throw;
+        }
     }
 
     public async Task UnlinkIssueAsync(string issueId, string projectId)
@@ -135,6 +138,7 @@ public class EpicGrain : Grain, IEpicGrain
         var link = await db.EpicIssues.FirstOrDefaultAsync(
             l => l.ProjectId == projectId && l.EpicId == epicId && l.IssueId == issueId);
         if (link is not null) db.EpicIssues.Remove(link);
+        await ReleaseActiveMembershipAsync(db, projectId, epicId, issueId);
         MapToRow(domain, row, now);
         ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
@@ -163,6 +167,8 @@ public class EpicGrain : Grain, IEpicGrain
         var now = DateTimeOffset.UtcNow;
         domain.Pause(reason, now.UtcDateTime);
         MapToRow(domain, row, now);
+        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
         return ToDto(row);
@@ -268,6 +274,8 @@ public class EpicGrain : Grain, IEpicGrain
         }
 
         MapToRow(domain, row, now);
+        if (row.Status is EpicStatusName.Done or EpicStatusName.Closed)
+            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
         return ToDto(row);
@@ -353,6 +361,7 @@ public class EpicGrain : Grain, IEpicGrain
             var now = DateTimeOffset.UtcNow;
             domain.MarkDone(open, now.UtcDateTime);
             MapToRow(domain, row, now);
+            await ReleaseActiveMembershipsAsync(db, projectId, epicId);
             ApplyPendingEvents(domain);
             await db.SaveChangesAsync();
             return ToDto(row);
@@ -436,9 +445,45 @@ public class EpicGrain : Grain, IEpicGrain
         var now = DateTimeOffset.UtcNow;
         domain.MarkDone(open, now.UtcDateTime);
         MapToRow(domain, row, now);
+        await ReleaseActiveMembershipsAsync(db, projectId, epicId);
         ApplyPendingEvents(domain);
         await db.SaveChangesAsync();
         return ToDto(row);
+    }
+
+    private async Task<ActiveMembershipOwner?> GetActiveMembershipOwnerAsync(string projectId, string issueId, string currentEpicId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await GetActiveMembershipOwnerAsync(db, projectId, issueId, currentEpicId);
+    }
+
+    private static async Task<ActiveMembershipOwner?> GetActiveMembershipOwnerAsync(
+        MohistDbContext db, string projectId, string issueId, string currentEpicId)
+    {
+        return await (
+            from active in db.EpicActiveIssues.AsNoTracking()
+            join epic in db.Epics.AsNoTracking()
+                on active.EpicId equals epic.Id
+            where active.ProjectId == projectId
+                && active.IssueId == issueId
+                && active.EpicId != currentEpicId
+            select new ActiveMembershipOwner(active.EpicId, epic.Title)
+        ).FirstOrDefaultAsync();
+    }
+
+    private static async Task ReleaseActiveMembershipsAsync(MohistDbContext db, string projectId, string epicId)
+    {
+        var active = await db.EpicActiveIssues
+            .Where(row => row.ProjectId == projectId && row.EpicId == epicId)
+            .ToListAsync();
+        db.EpicActiveIssues.RemoveRange(active);
+    }
+
+    private static async Task ReleaseActiveMembershipAsync(MohistDbContext db, string projectId, string epicId, string issueId)
+    {
+        var active = await db.EpicActiveIssues.FirstOrDefaultAsync(row =>
+            row.ProjectId == projectId && row.EpicId == epicId && row.IssueId == issueId);
+        if (active is not null) db.EpicActiveIssues.Remove(active);
     }
 
     private async Task<HashSet<int>> ComputeOpenLinkedNumbersAsync(
@@ -541,6 +586,11 @@ public class EpicGrain : Grain, IEpicGrain
     private static string StatusName(EpicStatusEnum status) => EpicStatusName.ToName(status);
 
     private static EpicStatusEnum ParseStatus(string status) => EpicStatusName.Parse(status);
+
+    private static bool IsTerminalEpicStatus(string status) =>
+        status is EpicStatusName.Done or EpicStatusName.Closed;
+
+    private sealed record ActiveMembershipOwner(string EpicId, string Title);
 
     private static void ApplyPendingEvents(EpicAggregate epic)
     {

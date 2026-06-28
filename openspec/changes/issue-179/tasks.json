@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "Modified EpicGrain.cs (removed close side-effect + status-aware LinkIssueAsync), new EF Core migration + updated ModelSnapshot, updated/new specs in EpicLifecycleSpecs.cs and epic membership specs; `npm test` green.",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Rewrite Close_SetsStatusToClosedAndRemovesEpicIssueLinks (EpicLifecycleSpecs.cs) → Close_SetsStatusToClosedAndRetainsEpicIssueLinks. Fix the Assert.Empty(detail.LinkedIssues) assertion in Close_DoesNotChangeIssueStatus… → assert the linked issue is still present. Reuse EpicProgress.IsTerminal(string) for the terminal-status test in the duplicate check to avoid a second definition of 'terminal'. The EpicClosed domain event stays emitted (audit) but now has no subscriber."
     },
     {
@@ -40,7 +40,7 @@
       "type": "WRITE",
       "output": "Modified IssueQuerier.cs (primaryEpic projection filters terminal-epic memberships); new/updated specs in IssueQuerier specs; `npm test` green.",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Because T-001 guarantees at most one non-terminal membership per issue, the existing 'last write wins' loop naturally resolves to that single non-terminal epic once terminal memberships are filtered out — no explicit ordering needed. Verify no other read path assumed primaryEpic was always non-null for issues with epic memberships."
     }
   ]

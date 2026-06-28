@@ -254,6 +254,40 @@ public class EpicMembershipSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
+    public async Task ActiveMembershipSlot_PreventsTwoNonTerminalOwners_WhenPrechecksRace()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, epicId: "epic_active_a", status: "idle", number: 1);
+        await SeedEpicAsync(database, epicId: "epic_active_b", status: "running", number: 2);
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+
+        await using (var first = database.CreateDbContext())
+        {
+            first.EpicActiveIssues.Add(new EpicActiveIssueRow
+            {
+                ProjectId = ProjectId,
+                IssueId = "issue_1",
+                EpicId = "epic_active_a",
+                IssueNumber = 1,
+            });
+            await first.SaveChangesAsync();
+        }
+
+        await using var second = database.CreateDbContext();
+        second.EpicActiveIssues.Add(new EpicActiveIssueRow
+        {
+            ProjectId = ProjectId,
+            IssueId = "issue_1",
+            EpicId = "epic_active_b",
+            IssueNumber = 1,
+        });
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => second.SaveChangesAsync());
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
     public async Task UnlinkIssueAsync_RemovesOnlyThatMembership_AndLeavesOthersIntact()
     {
         // Even after the unique-index relaxation, UnlinkIssueAsync must
@@ -335,6 +369,27 @@ public class EpicMembershipSpecs
         // The EpicQuerier.ListAsync single SQL join reads EpicIssues
         // directly. Verifying the rows are still here proves the read
         // model will surface them.
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
+    [Fact]
+    public async Task SetStatusAsync_Closed_ReleasesActiveMembershipSlot_ButKeepsHistoryRows()
+    {
+        var database = CreateDatabase();
+        await SeedEpicAsync(database, status: "idle");
+        await SeedIssueAsync(database, issueId: "issue_1", issueNumber: 1);
+
+        var grain = CreateGrain(database.Factory, $"{ProjectId}:epic_1");
+        await grain.LinkIssueAsync("issue_1", 1, ProjectId);
+
+        await grain.SetStatusAsync("closed");
+
+        await using var verify = database.CreateDbContext();
+        Assert.Empty(await verify.EpicActiveIssues.AsNoTracking().ToListAsync());
+        Assert.Single(await verify.EpicIssues.AsNoTracking()
+            .Where(l => l.ProjectId == ProjectId && l.EpicId == "epic_1" && l.IssueId == "issue_1")
+            .ToListAsync());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]

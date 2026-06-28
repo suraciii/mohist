@@ -66,6 +66,34 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("EpicCounters");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicActiveIssueRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssueId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EpicId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ProjectId", "IssueId");
+
+                    b.HasIndex("ProjectId", "EpicId");
+
+                    b.ToTable("EpicActiveIssues");
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicIssueRow", b =>
                 {
                     b.Property<string>("EpicId")

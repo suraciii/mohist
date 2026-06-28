@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Epic.Domain;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -113,9 +114,18 @@ public class EpicQuerier : IScopedService
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(issueId))
             return null;
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var link = await db.EpicIssues.AsNoTracking()
-            .FirstOrDefaultAsync(l => l.ProjectId == projectId && l.IssueId == issueId);
-        return link?.EpicId;
+        var activeOwner = await (
+            from active in db.EpicActiveIssues.AsNoTracking()
+            join epic in db.Epics.AsNoTracking()
+                on active.EpicId equals epic.Id
+            where active.ProjectId == projectId
+                && active.IssueId == issueId
+                && epic.ProjectId == projectId
+                && epic.Status != EpicStatusName.Done
+                && epic.Status != EpicStatusName.Closed
+            select active.EpicId
+        ).FirstOrDefaultAsync();
+        return activeOwner;
     }
 
     private static EpicWithProgressDto BuildEpicWithProgress(
