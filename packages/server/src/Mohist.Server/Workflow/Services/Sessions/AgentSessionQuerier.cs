@@ -138,6 +138,93 @@ public class AgentSessionQuerier : IScopedService
             AgentSessionJsonHelper.StatusName(session) == "active");
     }
 
+    /// <summary>
+    /// Resolves the runner + activity state of a generic (non-workflow)
+    /// <see cref="AgentSession"/> for followup delivery (issue-129 T-004).
+    /// Distinct from <see cref="ResolveFollowupTargetAsync"/> which is
+    /// issue-anchored and returns null when the workflow-run label is
+    /// blank: generic sessions are addressed by their minted sessionId
+    /// alone, and the launch endpoint stamps
+    /// <c>source-kind = agent-launch</c> labels (no workflow-run lookup
+    /// key). The runner id is sourced from the grain's runtime (the
+    /// runner's <c>open</c> call is what stamps it onto the session after
+    /// the launch mints it with an empty RunnerId, per T-003). Active
+    /// state mirrors <see cref="AgentSessionJsonHelper.StatusName"/>.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the session has not yet been opened by a
+    /// runner (no RunnerId bound) — the same null result the issue-scoped
+    /// resolver returns for sessions without a workflowRunId, so the
+    /// endpoint maps null to 404 and the caller does not need to know
+    /// which lookup axis was missing.
+    /// </remarks>
+    public async Task<GenericFollowupTarget?> ResolveGenericFollowupTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return null;
+
+        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
+            return null;
+
+        // The session exists and belongs to the requested project. The
+        // RunnerId may be empty if the launch minted the session but the
+        // runner never opened it — that state is "inactive" from the
+        // followup perspective, not "not found". Surface IsActive=false
+        // and let the endpoint return 409 (matching the issue-scoped
+        // followup behaviour for inactive sessions).
+        var runnerId = record.Row.RunnerId;
+        var statusActive = !string.IsNullOrWhiteSpace(runnerId)
+            && !await IsTerminalSessionAsync(db, sessionId, ct)
+            && AgentSessionJsonHelper.StatusName(record.Session) == "active";
+
+        return new GenericFollowupTarget(
+            runnerId ?? string.Empty,
+            sessionId,
+            statusActive);
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the session has been explicitly closed via
+    /// a <c>session.closed</c> transcript event with a terminal status
+    /// (<c>completed</c>, <c>failed</c>, <c>stopped</c>). The transcript
+    /// is the source of truth for terminal state because the
+    /// <see cref="AgentSessionStatusSnapshot.LastDataAt"/> field is
+    /// updated by every runtime event (including the close event itself),
+    /// which makes the runtime-window heuristic in
+    /// <see cref="AgentSessionJsonHelper.StatusName"/> read "active" right
+    /// after the close — too permissive for followup delivery.
+    /// </summary>
+    private static async Task<bool> IsTerminalSessionAsync(MohistDbContext db, string sessionId, CancellationToken ct)
+    {
+        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (turnIds.Count == 0) return false;
+
+        var closed = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(p => turnIds.Contains(p.TurnId)
+                && (p.Type == "session_closed" || p.Type == "session.closed"))
+            .OrderByDescending(p => p.Sequence)
+            .ThenByDescending(p => p.Id)
+            .Select(p => p.PayloadJson)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(closed)) return false;
+
+        JsonElement payload;
+        try { payload = JSON.DeserializeElement(closed); }
+        catch { return false; }
+        if (payload.ValueKind != JsonValueKind.Object) return false;
+
+        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
+        return string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -771,4 +858,17 @@ public sealed record FollowupTarget(
     string RunnerId,
     string WorkflowRunId,
     string SessionName,
+    bool IsActive);
+
+/// <summary>
+/// Followup target for a generic (non-workflow) <see cref="AgentSession"/>
+/// (issue-129 T-004). Identifies a session by its minted
+/// <see cref="SessionId"/> alone — there is no <c>workflowRunId</c> /
+/// <c>sessionName</c> pair to carry. The runner uses
+/// <see cref="SessionId"/> to look up the active ACP session entry under
+/// the <c>generic:</c> prefix in <c>AcpSessionManager</c>.
+/// </summary>
+public sealed record GenericFollowupTarget(
+    string RunnerId,
+    string SessionId,
     bool IsActive);

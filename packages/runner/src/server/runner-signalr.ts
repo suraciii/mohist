@@ -8,6 +8,7 @@ import { WorkspaceManager } from "../runtime/workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
 import type { ServerConnection } from "./connection.js"
+import type { SessionTarget } from "../runtime/acp-connection.js"
 
 export interface FollowupTarget {
   readonly connection: ClientSideConnection
@@ -15,11 +16,47 @@ export interface FollowupTarget {
   readonly projectId: string
 }
 
-export type FollowupTargetResolver = (workflowRunId: string, sessionName: string) => FollowupTarget | null
+// Issue-129 T-004: the resolver takes a discriminated SessionTarget so a
+// single resolver can dispatch both workflow-shaped followups
+// (`{ kind: "workflow", projectId, workflowRunId, sessionName }`) and
+// generic (non-workflow) followups
+// (`{ kind: "generic", projectId, sessionId }`). Older runners that only
+// handle workflow followups are reached through the issue-scoped route
+// whose SignalR payload still carries the top-level `workflowRunId` /
+// `sessionName` fields; the T-004 build of the runner prefers `target`
+// when present and falls back to the top-level fields otherwise so the
+// wire is forward + backward compatible.
+export type FollowupTargetResolver = (target: SessionTarget) => FollowupTarget | null
 
+/**
+ * Discriminated session target carried in the unified
+ * `ReceiveFollowup` SignalR payload (issue-129 T-004). The runner
+ * branches on `kind` to pick the right `AcpSessionManager` key prefix
+ * (`workflow:` / `generic:`, T-002) and the right server-side runtime
+ * endpoint. Older runners that only know workflow followups can keep
+ * reading the top-level `workflowRunId` / `sessionName` fields the
+ * server still populates for the issue-scoped route.
+ */
+export interface ReceiveFollowupSessionTarget {
+  kind: "workflow" | "generic"
+  projectId: string
+  workflowRunId?: string
+  sessionName?: string
+  sessionId?: string
+}
+
+/**
+ * Unified payload delivered by the server-side `ReceiveFollowup` SignalR
+ * method. Workflow followups continue to populate the top-level
+ * `workflowRunId` / `sessionName` fields so older runners keep working;
+ * generic followups carry `target.kind === "generic"` and a `sessionId`
+ * instead. The `text` field is always present and non-empty (the server
+ * rejects empty / whitespace text with 400 before pushing).
+ */
 export interface ReceiveFollowupPayload {
-  workflowRunId: string
-  sessionName: string
+  workflowRunId?: string
+  sessionName?: string
+  target?: ReceiveFollowupSessionTarget
   text: string
 }
 
@@ -380,22 +417,33 @@ export class RunnerSignalRClient {
 
   private async handleFollowup(payload: ReceiveFollowupPayload | null | undefined): Promise<void> {
     if (!payload || typeof payload.text !== "string" || payload.text.length === 0) return
-    if (!payload.workflowRunId || !payload.sessionName) return
     if (!this.followupTargetResolver || !this.serverConnection) return
+
+    // Issue-129 T-004: branch on the discriminated `target.kind` so a
+    // single handler can deliver followups to either a workflow-shaped
+    // session or a generic (non-workflow) AgentSession. The
+    // server-side payload always carries the unified `target` shape
+    // (T-004 / D3); when the target is absent we fall back to the
+    // legacy top-level workflowRunId / sessionName fields so older
+    // server builds (no `target` field) keep working against the
+    // workflow followup route.
+    const sessionTarget = resolveSessionTarget(payload)
+    if (!sessionTarget) return
 
     let target: FollowupTarget | null
     try {
-      target = this.followupTargetResolver(payload.workflowRunId, payload.sessionName)
+      target = this.followupTargetResolver(sessionTarget)
     } catch (error) {
       console.error("followup target resolver threw:", error)
       return
     }
     if (!target) return
 
-    void this.serverConnection.workflowAgentSessionRuntimeEvents(
+    if (sessionTarget.kind === "workflow") {
+      void this.serverConnection.workflowAgentSessionRuntimeEvents(
         target.projectId,
-        payload.workflowRunId,
-        payload.sessionName,
+        sessionTarget.workflowRunId,
+        sessionTarget.sessionName,
         {
           workId: null,
           workType: null,
@@ -418,6 +466,33 @@ export class RunnerSignalRClient {
       ).catch((error) => {
         console.error("failed to emit followup session.input event:", error)
       })
+    } else {
+      void this.serverConnection.agentSessionRuntimeEvents(
+        target.projectId,
+        sessionTarget.sessionId,
+        {
+          workId: null,
+          workType: null,
+          stage: null,
+          runtimeEvents: [
+            {
+              type: "session.input",
+              payload: {
+                role: "user",
+                text: payload.text,
+                kind: "followup",
+                sentAt: new Date().toISOString(),
+                acpSessionId: target.sessionId,
+                source: "followup",
+              },
+            },
+          ],
+        },
+        new AbortController().signal,
+      ).catch((error) => {
+        console.error("failed to emit followup session.input event:", error)
+      })
+    }
 
     void target.connection
       .prompt({
@@ -622,4 +697,37 @@ export function isUnderRunnerRoot(root: string, candidate: string): boolean {
 
 function removal(removed: boolean, status: string, path: string | null, reason: string | null, message: string) {
   return { removed, status, path, reason, message }
+}
+
+// Issue-129 T-004: derives a discriminated `SessionTarget` from the
+// unified `ReceiveFollowup` SignalR payload. Prefers the `target` field
+// when present; falls back to the legacy top-level `workflowRunId` /
+// `sessionName` fields so older server builds (which only populate the
+// top-level fields on the issue-scoped route) keep working against the
+// workflow followup path. Returns `null` when neither carries a usable
+// target — the caller drops the message silently, matching the existing
+// "unknown session" contract.
+export function resolveSessionTarget(payload: ReceiveFollowupPayload): SessionTarget | null {
+  const target = payload.target
+  if (target) {
+    if (target.kind === "workflow") {
+      if (!target.workflowRunId || !target.sessionName) return null
+      const projectId = target.projectId ?? ""
+      if (!projectId) return null
+      return { kind: "workflow", projectId, workflowRunId: target.workflowRunId, sessionName: target.sessionName }
+    }
+    if (target.kind === "generic") {
+      if (!target.sessionId) return null
+      const projectId = target.projectId ?? ""
+      if (!projectId) return null
+      return { kind: "generic", projectId, sessionId: target.sessionId }
+    }
+    return null
+  }
+
+  // Legacy fallback for older server builds (no `target` field).
+  if (payload.workflowRunId && payload.sessionName) {
+    return { kind: "workflow", projectId: "", workflowRunId: payload.workflowRunId, sessionName: payload.sessionName }
+  }
+  return null
 }

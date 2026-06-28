@@ -9,7 +9,7 @@ import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from "./clean
 import { CleanupLoop, DefaultCleanupRunner } from "./cleanup-loop.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
-import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
+import { AcpSessionManager, createSharedAcpConnection, type SessionTarget, type SharedAcpConnection } from "./acp-connection.js"
 import { loadBuildInfo } from "./build-info.js"
 import type { RenderedWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
@@ -91,15 +91,25 @@ export class RunnerHost {
       {
         onReconnected: () => this.onDispatchReconnected(),
         serverConnection: this.connection,
-        followupTargetResolver: (workflowRunId, sessionName) => this.resolveFollowupTarget(workflowRunId, sessionName),
+        followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         registry: this.workspaceRegistry,
       },
     )
   }
 
-  private resolveFollowupTarget(workflowRunId: string, sessionName: string): { connection: ClientSideConnection; sessionId: string; projectId: string } | null {
+  // Issue-129 T-004: branches on `target.kind` so the same resolver
+  // services both the issue-scoped followup route (workflow-shaped) and
+  // the new generic AgentSession followup route. Workflow keys use the
+  // `workflow:` prefix; generic keys use the `generic:` prefix (T-002).
+  // Both branches silently return null when no matching ACP session
+  // entry exists — the runner SignalR handler drops unknown-session
+  // followups without throwing, matching the existing "runner offline
+  // / unknown session" contract.
+  private resolveFollowupTarget(target: SessionTarget): { connection: ClientSideConnection; sessionId: string; projectId: string } | null {
     if (!this.sharedAcpConnection) return null
-    const key = this.sessionManager.workflowKey(workflowRunId, sessionName)
+    const key = target.kind === "workflow"
+      ? this.sessionManager.workflowKey(target.workflowRunId, target.sessionName)
+      : this.sessionManager.genericKey(target.sessionId)
     const entry = this.sessionManager.get(key)
     if (!entry) return null
     const projectId = this.options.projectId ?? ""
