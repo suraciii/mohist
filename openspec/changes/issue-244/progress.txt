@@ -130,3 +130,9 @@ This file is the working memory for the implementation of issue-244 (Session 列
   - `packages/web/src/entities/coder-session/model/useWorkflowRunSessions.ts` — infinite-render fix (stable `EMPTY_SESSIONS` default, no spread in the sync effect). Unrelated to T-004 scope but exposed by it; fixed in the same commit to unblock the workflow.
 - `npm run typecheck -w packages/web` passes.
 - `npm run test:run -w packages/web` passes — 2714 tests across 182 files (1 skipped pre-existing; +7 new SessionPage sibling tests, +11 new `useSiblingSessions` hook tests, +1 test in each previously-hanging SessionPage file now actually executes).
+- T-004 re-verified on this re-run: nothing changed on disk; the prior commit (`288cfdac`) is already on `mohist/run-wr_698022607b4f43089d781ac7963197c5` and its working tree is clean.
+- Spec acceptance walked through:
+  - "Adjacent session navigation" — covered by `renders prev/next controls for a mid-sequence session`, `disables the previous control when the current session is the first sibling`, `disables the next control when the current session is the last sibling`, and the prev/next hrefs in every test (all within `/issues/:number/workflow/sessions/:sessionName`).
+  - "Sibling sessions sidebar" — covered by `renders the sidebar with one entry per workflow-run sibling`, `highlights the currently viewed session`, `uses the same session set as WorkflowSessionsPanel for the same workflow run`, and `hides the sidebar entirely when the workflow run has no sessions`.
+  - xl: visibility contract — sidebar `<aside>` has `hidden xl:flex` (`SessionPage.tsx:338`); prev/next controls live in the always-rendered `SessionHeader` (`SessionPage.tsx:447-451, 872, 892, 917, 936`).
+- `npm run typecheck -w packages/web` passes; full `vitest run` passes — 182 files / 2714 tests + 1 pre-existing skip in ~23s.
