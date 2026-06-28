@@ -230,3 +230,125 @@ describe('WorkflowSessionsPanel', () => {
     expect(screen.getByText(/No sessions match the current filters/)).toBeInTheDocument()
   })
 })
+
+describe('WorkflowSessionRow responsive layout', () => {
+  it('applies min-w-0 to the row link and header so content can shrink', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan',
+          sessionName: 'plan',
+          status: 'completed',
+          model: 'minimax/MiniMax-M3',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const row = screen.getByTestId('workflow-session-row')
+    expect(row.className).toContain('block')
+    expect(row.className).toContain('min-w-0')
+
+    const header = screen.getByTestId('workflow-session-row-header')
+    expect(header.className).toContain('flex')
+    expect(header.className).toContain('flex-wrap')
+    expect(header.className).toContain('min-w-0')
+  })
+
+  it('truncates the session name span and lets the model badge wrap to a second line', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan',
+          sessionName: 'plan',
+          status: 'completed',
+          model: 'configured/PlanModel',
+          eventSummary: { resolvedModel: 'resolved/PlanModel-Long-Resolved-Model-Name' },
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const row = screen.getByTestId('workflow-session-row')
+    const nameSpan = row.querySelector('span.font-mono')
+    expect(nameSpan).not.toBeNull()
+    expect(nameSpan!.className).toContain('truncate')
+    expect(nameSpan!.className).toContain('min-w-0')
+
+    const modelBadge = row.querySelector('span[title]')
+    expect(modelBadge).not.toBeNull()
+    expect(modelBadge!.className).toContain('truncate')
+    expect(modelBadge!.className).toContain('min-w-0')
+    expect(modelBadge!.className).toContain('ml-auto')
+    // On narrow viewports the badge must be allowed to shrink below 180px (max-w-full);
+    // on wider viewports the existing 180px ceiling (sm:max-w-[180px]) still applies.
+    expect(modelBadge!.className).toContain('max-w-full')
+    expect(modelBadge!.className).toContain('sm:max-w-[180px]')
+  })
+
+  it('keeps metric chips on a wrapping line and truncates the failure reason', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-build',
+          sessionName: 'build',
+          status: 'failed',
+          usage: { totalTokens: 10_000 },
+          failureReason: 'probe timed out because the runner exceeded its budget',
+          createdAt: '2026-06-12T10:03:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const metrics = screen.getByTestId('workflow-session-row-metrics')
+    expect(metrics.className).toContain('flex')
+    expect(metrics.className).toContain('flex-wrap')
+
+    const row = screen.getByTestId('workflow-session-row')
+    const failure = Array.from(row.querySelectorAll('div')).find(
+      (node) => node.textContent === 'probe timed out because the runner exceeded its budget',
+    )
+    expect(failure).toBeDefined()
+    expect(failure!.className).toContain('truncate')
+    expect(failure!.className).toContain('min-w-0')
+  })
+
+  it('does not declare any fixed-width class on the row or its children', () => {
+    mockedUseWorkflowRunSessions.mockReturnValue({
+      isLoading: false,
+      sessions: [
+        session({
+          id: 's-plan',
+          sessionName: 'plan',
+          status: 'completed',
+          model: 'minimax/MiniMax-M3',
+          failureReason: 'short',
+          createdAt: '2026-06-12T10:01:00.000Z',
+        }),
+      ],
+    })
+
+    render(<WorkflowSessionsPanel issueNumber={55} workflowRunId="workflow-run-1" />)
+
+    const row = screen.getByTestId('workflow-session-row')
+    const header = screen.getByTestId('workflow-session-row-header')
+    const metrics = screen.getByTestId('workflow-session-row-metrics')
+
+    // The model badge keeps `sm:max-w-[180px]` as an upper bound, but on narrow
+    // viewports `max-w-full` lets it shrink; nothing on the row declares a fixed
+    // `w-[Npx]` style that would force horizontal overflow.
+    const fixedWidthPattern = /(^|\s)w-\[\d+(?:\.\d+)?px\]/
+    expect(fixedWidthPattern.test(row.className)).toBe(false)
+    expect(fixedWidthPattern.test(header.className)).toBe(false)
+    expect(fixedWidthPattern.test(metrics.className)).toBe(false)
+  })
+})
