@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json.Nodes;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli.Tests.Support;
@@ -734,5 +735,314 @@ public class CliRunnerCommandSpecs
         Assert.Contains("maxWorkflowSlots: 7", stdout, StringComparison.Ordinal);
         Assert.Contains("capacity: 0/7 slots", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("maxWorkflowSlots: (unknown)", stdout, StringComparison.Ordinal);
+    }
+
+    private static object RunnerStatusEntry(
+        string id,
+        string hostname,
+        object? capacity,
+        string scopeType = "global",
+        string? projectId = null,
+        string? lastHeartbeatAt = null)
+    {
+        var scope = scopeType == "global"
+            ? (object)new { type = "global" }
+            : new { type = "project", projectId = projectId ?? "proj_test", projectName = "test-project" };
+
+        return new
+        {
+            id,
+            kind = "host",
+            hostname,
+            scope,
+            status = capacity is null ? "offline" : "online",
+            registeredAt = "2026-06-20T11:00:00Z",
+            lastHeartbeatAt = lastHeartbeatAt ?? DateTimeOffset.UtcNow.AddSeconds(-5).ToString("o"),
+            connectionState = capacity is null ? "disconnected" : "connected",
+            capabilities = new[] { "agent-run" },
+            coderModels = new[] { "openai/gpt-5.5" },
+            coderModelCount = 1,
+            capacity,
+            activeWorks = (object?)null,
+        };
+    }
+
+    [Fact]
+    public async Task RunnerStatus_Table_RendersThreeColumnSummaryWithIdleBusyStates()
+    {
+        var runners = new[]
+        {
+            RunnerStatusEntry("r-idle", "host-a", Capacity(0, 2)),
+            RunnerStatusEntry("r-busy", "host-b", Capacity(1, 2)),
+        };
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runners },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/runners", request.RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(3, lines.Length);
+        Assert.StartsWith("id", lines[0]);
+        Assert.Contains("heartbeat", lines[0]);
+        Assert.Contains("state", lines[0]);
+        Assert.Contains("r-idle", lines[1]);
+        Assert.Contains("idle", lines[1]);
+        Assert.Contains("r-busy", lines[2]);
+        Assert.Contains("busy", lines[2]);
+        Assert.DoesNotContain("kind", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("scope", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("hostname", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_Table_UnknownCapacityShowsUnknownState()
+    {
+        var runners = new[]
+        {
+            RunnerStatusEntry("r-offline", "host-z", capacity: null, scopeType: "project"),
+        };
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runners },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("r-offline", stdout, StringComparison.Ordinal);
+        Assert.Contains("unknown", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_Json_EmitsRawRunnerPayload()
+    {
+        var runners = new[]
+        {
+            RunnerStatusEntry("r-idle", "host-a", Capacity(0, 2)),
+            RunnerStatusEntry("r-busy", "host-b", Capacity(2, 2)),
+        };
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runners },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status", "-o", "json"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal($"/api/projects/{ActiveProjectId}/runners", request.RequestUri?.PathAndQuery);
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        Assert.NotNull(parsed);
+        var parsedRunners = parsed!["runners"] as JsonArray;
+        Assert.NotNull(parsedRunners);
+        Assert.Equal(2, parsedRunners!.Count);
+        var first = parsedRunners[0]!.AsObject();
+        Assert.Equal("r-idle", first["id"]?.GetValue<string>());
+        var capacity = first["capacity"]!.AsObject();
+        Assert.Equal(0, capacity["usedSlots"]?.GetValue<int>());
+        Assert.Equal(2, capacity["totalSlots"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task RunnerStatus_EmptyList_PrintsNoRunnersConnectedAndExitsZero()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runners = Array.Empty<object>() },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("No runners connected", stdout, StringComparison.Ordinal);
+        var lines = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Single(lines);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_EmptyListJson_EmitsRawPayloadWithEmptyRunnersArray()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runners = Array.Empty<object>() },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status", "-o", "json"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        Assert.NotNull(parsed);
+        var parsedRunners = parsed!["runners"] as JsonArray;
+        Assert.NotNull(parsedRunners);
+        Assert.Empty(parsedRunners!);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_Table_TreatsDecimalZeroUsedSlotsAsIdle()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"success":true,"data":{"runners":[{"id":"r-decimal-zero","kind":"host","hostname":"host-a","scope":{"type":"global"},"status":"online","registeredAt":"2026-06-20T11:00:00Z","lastHeartbeatAt":"2026-06-20T12:00:00Z","connectionState":"connected","capabilities":["agent-run"],"coderModels":["openai/gpt-5.5"],"coderModelCount":1,"capacity":{"usedSlots":0.0,"totalSlots":2.0},"activeWorks":null}]}}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            }));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var stdout = output.ToString();
+        Assert.Contains("r-decimal-zero", stdout, StringComparison.Ordinal);
+        Assert.Contains("idle", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("busy", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_NoActiveProject_FailsWithStandardError()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv(
+            (_, _) => throw new InvalidOperationException("API must not be called without an active project"),
+            activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mo project use", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_ExplicitProjectFlag_ResolvesAndQueriesIt()
+    {
+        var runners = new[]
+        {
+            RunnerStatusEntry("r-idle", "host-a", Capacity(0, 2)),
+        };
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runners },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status", "--project", "proj_other"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal("/api/projects/proj_other/runners", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_ServerDown_PrintsStandardErrorAndExitsNonZero()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            throw new HttpRequestException("connection refused"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Server is not running. Start with: mo server start", error.ToString());
+    }
+
+    [Fact]
+    public async Task RunnerServiceStatus_DryRun_InvokesSameInstallerStatusAction()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("service-status must not call the HTTP API"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "service-status", "--dry-run"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(handler.Requests);
+        var stdout = output.ToString();
+        Assert.Contains("Dry run: systemctl", stdout, StringComparison.Ordinal);
+        Assert.Contains("status", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerServiceStatus_Help_ListsServiceStatusWithSameOptions()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "service-status", "--help"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("Show runner managed service lifecycle status", stdout, StringComparison.Ordinal);
+        Assert.Contains("--dry-run", stdout, StringComparison.Ordinal);
+        Assert.Contains("--unit-dir", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_Help_ListsFocusedOnlineSummary()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status", "--help"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("online", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("idle", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("busy", stdout, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunnerHelp_ListsBothStatusAndServiceStatusVerbsDistinctly()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "--help"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("service-status", stdout, StringComparison.Ordinal);
+        Assert.Contains("status", stdout, StringComparison.Ordinal);
+        Assert.Contains("Show online runner summary", stdout, StringComparison.Ordinal);
+        Assert.Contains("Show runner managed service lifecycle status", stdout, StringComparison.Ordinal);
+        var statusIdx = stdout.IndexOf("status", StringComparison.Ordinal);
+        var serviceStatusIdx = stdout.IndexOf("service-status", StringComparison.Ordinal);
+        Assert.True(statusIdx >= 0);
+        Assert.True(serviceStatusIdx >= 0);
+        Assert.NotEqual(statusIdx, serviceStatusIdx);
     }
 }
