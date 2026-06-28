@@ -91,6 +91,35 @@ function EpicProgressBody({ progress }: { progress: EpicWithProgress['progress']
   )
 }
 
+function StartNextIssueButton({
+  issueNumber,
+  onStartNextIssue,
+  startPending,
+}: {
+  issueNumber: number
+  onStartNextIssue: (issueNumber: number) => void
+  startPending?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation()
+          onStartNextIssue(issueNumber)
+        }}
+        disabled={startPending}
+        data-testid="epic-card-start"
+        className="self-start"
+      >
+        {startPending ? 'Starting...' : 'Start next issue'}
+      </Button>
+    </div>
+  )
+}
+
 function EpicCardBody({
   epic,
   group,
@@ -142,22 +171,11 @@ function EpicCardBody({
           <span className="text-muted-foreground ml-1 break-words">{next.title}</span>
         </span>
         {onStartNextIssue && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={(e) => {
-                e.stopPropagation()
-                onStartNextIssue(next.number)
-              }}
-              disabled={startPending}
-              data-testid="epic-card-start"
-              className="self-start"
-            >
-              {startPending ? 'Starting...' : 'Start next issue'}
-            </Button>
-          </div>
+          <StartNextIssueButton
+            issueNumber={next.number}
+            onStartNextIssue={onStartNextIssue}
+            startPending={startPending}
+          />
         )}
       </div>
     )
@@ -172,6 +190,19 @@ function EpicCardBody({
   }
 
   if (group === 'paused') {
+    const next = progress.nextIssue
+    if (next && onStartNextIssue) {
+      return (
+        <div className="flex flex-col gap-1" data-testid="epic-card-paused-next">
+          <EpicProgressBody progress={progress} />
+          <StartNextIssueButton
+            issueNumber={next.number}
+            onStartNextIssue={onStartNextIssue}
+            startPending={startPending}
+          />
+        </div>
+      )
+    }
     return <EpicProgressBody progress={progress} />
   }
 
@@ -246,8 +277,8 @@ function EpicCard({
           <EpicCardBody
             epic={epic}
             group={group}
-            onStartNextIssue={group === 'readyToStart' ? onStartNextIssue : undefined}
-            startPending={group === 'readyToStart' ? startPending : undefined}
+            onStartNextIssue={group === 'readyToStart' || group === 'paused' ? onStartNextIssue : undefined}
+            startPending={group === 'readyToStart' || group === 'paused' ? startPending : undefined}
           />
         </div>
       </div>
@@ -397,6 +428,11 @@ export function EpicListPage() {
                     key={epic.id}
                     epic={epic}
                     group="paused"
+                    onStartNextIssue={handleStartNextIssue}
+                    startPending={
+                      pendingStartIssueNumber != null &&
+                      epic.progress.nextIssue?.number === pendingStartIssueNumber
+                    }
                   />
                 ))}
               </div>

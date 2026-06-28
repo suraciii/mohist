@@ -613,6 +613,18 @@ describe('EpicListPage basic actions', () => {
     expect(pausedBadge).toBeTruthy()
     expect(pausedCard!.textContent).toContain('Next: #11')
     expect(pausedCard!.textContent).toContain('Resume-ready paused work')
+
+    const pausedStartButton = pausedCard!.querySelector('[data-testid="epic-card-start"]') as HTMLElement
+    expect(pausedStartButton).toBeTruthy()
+    expect(pausedStartButton.textContent).toBe('Start next issue')
+
+    fireEvent.click(pausedStartButton)
+
+    expect(startMutate).toHaveBeenCalledWith(
+      11,
+      expect.objectContaining({ onSettled: expect.any(Function) }),
+    )
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it('keeps the legacy paused progress fallback for waiting, ready-to-mark-done, and empty paused cards', () => {
