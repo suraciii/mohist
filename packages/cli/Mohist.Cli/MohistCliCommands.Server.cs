@@ -121,11 +121,16 @@ internal static class RunnerCommands
         runner.Subcommands.Add(BuildSystemd("start", installer.StartRunnerAsync, installer));
         runner.Subcommands.Add(BuildSystemd("stop", installer.StopRunnerAsync, installer));
         runner.Subcommands.Add(BuildSystemd("restart", installer.RestartRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd("status", installer.StatusRunnerAsync, installer));
+        runner.Subcommands.Add(BuildSystemd(
+            "service-status",
+            "Show runner managed service lifecycle status",
+            installer.StatusRunnerAsync,
+            installer));
         runner.Subcommands.Add(BuildLogs(installer));
         runner.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallRunnerAsync, installer));
         runner.Subcommands.Add(BuildList(api, environment));
         runner.Subcommands.Add(BuildShow(api));
+        runner.Subcommands.Add(BuildStatus(api));
 
         return runner;
     }
@@ -226,6 +231,40 @@ internal static class RunnerCommands
         return cmd;
     }
 
+    private static Command BuildStatus(MohistCliApi api)
+    {
+        var cmd = new Command("status", "Show online runner summary (id, heartbeat, idle/busy state)");
+        var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(defaultValue: "table");
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx =>
+        {
+            var project = ctx.GetValue(projectOpt);
+            var projectId = ctx.GetValue(projectIdOpt);
+            var output = ctx.GetValue(outputOpt);
+            return StatusAsync();
+
+            async Task<int> StatusAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
+                if (resolvedProjectId is null)
+                    return 1;
+
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalid)
+                {
+                    api.Error.WriteLine(invalid.Message);
+                    return 1;
+                }
+                var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                return await api.PrintRunnerStatusAsync(resolvedProjectId, mode);
+            }
+        });
+        return cmd;
+    }
+
     private static MohistCliApi.RunnerScopeFilter? ParseScopeFilter(string raw)
     {
         if (string.Equals(raw, "all", StringComparison.OrdinalIgnoreCase))
@@ -262,9 +301,21 @@ internal static class RunnerCommands
         return cmd;
     }
 
-    private static Command BuildSystemd(string name, Func<ServiceCommandOptions, Task<int>> handler, IServiceInstaller installer)
+    private static Command BuildSystemd(
+        string name,
+        Func<ServiceCommandOptions, Task<int>> handler,
+        IServiceInstaller installer)
     {
-        var cmd = new Command(name, $"{name} runner managed service");
+        return BuildSystemd(name, $"{name} runner managed service", handler, installer);
+    }
+
+    private static Command BuildSystemd(
+        string name,
+        string description,
+        Func<ServiceCommandOptions, Task<int>> handler,
+        IServiceInstaller installer)
+    {
+        var cmd = new Command(name, description);
         var dryRunOpt = MohistCliCommands.DryRunOption();
         var unitDirOpt = MohistCliCommands.UnitDirOption();
         cmd.Options.Add(dryRunOpt);
