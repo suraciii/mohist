@@ -165,6 +165,7 @@ public sealed record WorkflowSessionDto(
     int? IssueNumber,
     string? RunnerId,
     string Status,
+    string? Stage,
     string? Model,
     string? WorkDir,
     int? ProcessPid,

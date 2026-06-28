@@ -83,11 +83,16 @@ public class WorkflowSessionSpecs
         Assert.Equal("/workspace", fetched.WorkDir);
         Assert.Equal(sessionName, detail.Session.SessionName);
         Assert.Equal("acp-1", detail.Session.AcpSessionId);
-        Assert.Equal("active", detail.Session.Status);
+        Assert.Equal("completed", detail.Session.Status);
+        Assert.Equal("plan", detail.Session.Stage);
+        Assert.NotNull(detail.Session.CompletedAt);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         var listed = Assert.Single(sessions);
         Assert.Equal(sessionName, listed.SessionName);
         Assert.Equal("acp-1", listed.AcpSessionId);
+        Assert.Equal("completed", listed.Status);
+        Assert.Equal("plan", listed.Stage);
+        Assert.NotNull(listed.CompletedAt);
         Assert.NotNull(listed.Usage);
         Assert.Equal(15, listed.Usage!.TotalTokens);
         Assert.Equal(3, detail.Transcript.PartCount);
@@ -160,6 +165,14 @@ public class WorkflowSessionSpecs
         Assert.Equal("task", turn.User.Kind);
         Assert.Contains(turn.Assistant, p => p.Type == "text" && p.Text == "starting work");
         Assert.Contains(turn.Assistant, p => p.Type == "error" && p.Kind == "failed" && p.Message == failureReason);
+
+        var workflowSessions = await _client.GetDataAsync<WorkflowSessionDto[]>($"/api/workflow-runs/{workflowRunId}/sessions");
+        var listed = Assert.Single(workflowSessions);
+        Assert.Equal("failed", listed.Status);
+        Assert.Equal("Build", listed.Stage);
+        Assert.NotNull(listed.CompletedAt);
+        Assert.Equal(failureReason, listed.FailureReason);
+        Assert.Equal(1, listed.ExitCode);
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
@@ -254,7 +267,7 @@ labels = new Dictionary<string, string>(StringComparer.Ordinal),
 
     private sealed record RunnerAgentSessionDto(RunnerAgentSessionKeyDto Key, string? AcpSessionId, string Status, string? WorkDir, string? Model);
     private sealed record RunnerAgentSessionKeyDto(string ProjectId, string WorkflowRunId, string SessionName);
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Model, WorkflowSessionUsageDto? Usage);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Stage, string? Model, string? CompletedAt, string? FailureReason, int? ExitCode, WorkflowSessionUsageDto? Usage);
     private sealed record WorkflowSessionUsageDto(long? TotalTokens);
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IssueSessionTranscriptTestResponse Transcript);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);

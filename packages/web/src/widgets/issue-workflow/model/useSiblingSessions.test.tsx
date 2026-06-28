@@ -23,6 +23,7 @@ function session(overrides: Partial<WorkflowRunSession>): WorkflowRunSession {
     issueNumber: overrides.issueNumber ?? 42,
     runnerId: overrides.runnerId ?? 'runner-1',
     status: overrides.status ?? 'completed',
+    stage: overrides.stage ?? 'plan',
     model: overrides.model ?? 'minimax/MiniMax-M3',
     workDir: overrides.workDir ?? null,
     processPid: overrides.processPid ?? null,

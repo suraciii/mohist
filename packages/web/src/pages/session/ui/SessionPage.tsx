@@ -329,6 +329,10 @@ interface SiblingSessionsSidebarProps {
   currentKey: string | null
 }
 
+export function isCurrentSiblingSession(sibling: Pick<WorkflowRunSession, 'id' | 'sessionName'>, currentKey: string | null): boolean {
+  return sibling.sessionName === currentKey || sibling.id === currentKey
+}
+
 function SiblingSessionsSidebar({ issueNumber, siblings, currentKey }: SiblingSessionsSidebarProps) {
   const toProjectPath = useProjectPath()
   if (siblings.length === 0) return null
@@ -344,7 +348,7 @@ function SiblingSessionsSidebar({ issueNumber, siblings, currentKey }: SiblingSe
       </div>
       <nav className="flex-1 overflow-y-auto p-1">
         {siblings.map((sibling) => {
-          const isCurrent = sibling.sessionName === currentKey
+          const isCurrent = isCurrentSiblingSession(sibling, currentKey)
           const path = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sibling.sessionName)}`)
           const baseClass = 'flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors min-w-0'
           const stateClass = isCurrent

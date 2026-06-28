@@ -22,6 +22,7 @@ function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonN
     issueNumber: 42,
     runnerId: 'runner-1',
     status: rest.status ?? 'completed',
+    stage: rest.stage ?? 'plan',
     model: rest.model ?? 'configured/model',
     workDir: null,
     processPid: null,
@@ -36,20 +37,21 @@ function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonN
 }
 
 describe('getSessionPipelineStage', () => {
-  it('returns the matching pipeline stage for known session names', () => {
-    expect(getSessionPipelineStage({ sessionName: 'plan' })).toBe('plan')
-    expect(getSessionPipelineStage({ sessionName: 'build' })).toBe('build')
-    expect(getSessionPipelineStage({ sessionName: 'check' })).toBe('check')
-    expect(getSessionPipelineStage({ sessionName: 'integrate' })).toBe('integrate')
+  it('returns the matching pipeline stage from metadata', () => {
+    expect(getSessionPipelineStage({ stage: 'plan' })).toBe('plan')
+    expect(getSessionPipelineStage({ stage: 'build' })).toBe('build')
+    expect(getSessionPipelineStage({ stage: 'check' })).toBe('check')
+    expect(getSessionPipelineStage({ stage: 'integrate' })).toBe('integrate')
   })
 
-  it('returns null for session names outside the pipeline', () => {
-    expect(getSessionPipelineStage({ sessionName: 'manual-fix' })).toBeNull()
-    expect(getSessionPipelineStage({ sessionName: '' })).toBeNull()
+  it('returns null for missing or unknown stages', () => {
+    expect(getSessionPipelineStage({ stage: 'manual-fix' })).toBeNull()
+    expect(getSessionPipelineStage({ stage: '' })).toBeNull()
+    expect(getSessionPipelineStage({ stage: null })).toBeNull()
   })
 
   it('matches case-insensitively', () => {
-    expect(getSessionPipelineStage({ sessionName: 'PLAN' })).toBe('plan')
+    expect(getSessionPipelineStage({ stage: 'PLAN' })).toBe('plan')
   })
 })
 
@@ -137,7 +139,8 @@ describe('useWorkflowSessionFiltering', () => {
     return [
       session({
         id: 's-check-1',
-        sessionName: 'check',
+        sessionName: 'review-repair-1',
+        stage: 'check',
         status: 'completed',
         createdAt: '2026-06-15T08:00:00.000Z',
         startedAt: '2026-06-15T08:01:00.000Z',
@@ -146,7 +149,8 @@ describe('useWorkflowSessionFiltering', () => {
       }),
       session({
         id: 's-build-failed',
-        sessionName: 'build',
+        sessionName: 'compile-assets-1',
+        stage: 'build',
         status: 'failed',
         createdAt: '2026-06-15T09:00:00.000Z',
         startedAt: '2026-06-15T09:05:00.000Z',
@@ -156,7 +160,8 @@ describe('useWorkflowSessionFiltering', () => {
       }),
       session({
         id: 's-plan-running',
-        sessionName: 'plan',
+        sessionName: 'proposal-draft-1',
+        stage: 'plan',
         status: 'running',
         createdAt: '2026-06-15T11:00:00.000Z',
         startedAt: '2026-06-15T11:30:00.000Z',
@@ -165,7 +170,8 @@ describe('useWorkflowSessionFiltering', () => {
       }),
       session({
         id: 's-integrate-completed',
-        sessionName: 'integrate',
+        sessionName: 'ship-pr-1',
+        stage: 'integrate',
         status: 'completed',
         createdAt: '2026-06-15T10:00:00.000Z',
         startedAt: '2026-06-15T10:01:00.000Z',

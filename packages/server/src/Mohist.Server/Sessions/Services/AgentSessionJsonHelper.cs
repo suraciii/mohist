@@ -69,6 +69,9 @@ public static class AgentSessionJsonHelper
             : null;
     }
 
+    public static int? GetIntProp(JsonElement? element, string name) =>
+        element is null ? null : GetIntProp(element.Value, name);
+
     public static bool? GetBoolProp(JsonElement element, string name)
     {
         if (element.ValueKind != JsonValueKind.Object) return null;

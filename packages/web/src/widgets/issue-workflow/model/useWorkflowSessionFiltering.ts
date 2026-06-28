@@ -19,10 +19,10 @@ export function isTerminalSessionStatus(status: string): boolean {
   return TERMINAL_STATUSES.has(status)
 }
 
-export function getSessionPipelineStage(session: Pick<WorkflowRunSession, 'sessionName'>): WorkflowPipelineStage | null {
-  const name = session.sessionName?.trim().toLowerCase() ?? ''
-  return (WORKFLOW_PIPELINE_STAGES as readonly string[]).includes(name)
-    ? (name as WorkflowPipelineStage)
+export function getSessionPipelineStage(session: Pick<WorkflowRunSession, 'stage'>): WorkflowPipelineStage | null {
+  const stage = session.stage?.trim().toLowerCase() ?? ''
+  return (WORKFLOW_PIPELINE_STAGES as readonly string[]).includes(stage)
+    ? (stage as WorkflowPipelineStage)
     : null
 }
 

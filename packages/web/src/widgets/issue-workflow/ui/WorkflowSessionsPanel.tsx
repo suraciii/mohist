@@ -188,7 +188,6 @@ function SessionFilterControls({
   availableStatuses,
   onStatusChange,
   stageFilter,
-  availableStages,
   onStageChange,
   sortKey,
   onSortChange,
@@ -197,7 +196,6 @@ function SessionFilterControls({
   availableStatuses: string[]
   onStatusChange: (value: string | null) => void
   stageFilter: WorkflowPipelineStage | null
-  availableStages: WorkflowPipelineStage[]
   onStageChange: (value: WorkflowPipelineStage | null) => void
   sortKey: WorkflowSessionSortKey
   onSortChange: (value: WorkflowSessionSortKey) => void
@@ -230,7 +228,7 @@ function SessionFilterControls({
         >
           <option value="">All stages</option>
           {WORKFLOW_PIPELINE_STAGES.map((stage) => (
-            <option key={stage} value={stage} disabled={!availableStages.includes(stage)}>
+            <option key={stage} value={stage}>
               {STAGE_LABELS[stage]}
             </option>
           ))}
@@ -303,7 +301,6 @@ export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSe
               availableStatuses={filtering.availableStatuses}
               onStatusChange={filtering.setStatusFilter}
               stageFilter={filtering.stageFilter}
-              availableStages={filtering.availableStages}
               onStageChange={filtering.setStageFilter}
               sortKey={filtering.sortKey}
               onSortChange={filtering.setSortKey}

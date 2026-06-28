@@ -21,7 +21,7 @@
       "type": "WRITE",
       "output": "Deleted files + cleaned barrel export; green typecheck and test run",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Grep already confirms zero external consumers. `formatDuration` in SessionHeader is duplicated in SessionPage, so deletion breaks no shared dependency."
     },
     {
@@ -44,7 +44,7 @@
       "type": "WRITE",
       "output": "useWorkflowSessionFiltering hook + filter/sort control row wired into WorkflowSessionsPanel + unit tests",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Token fallback: usage.totalTokens, else inputTokens + outputTokens, else 0. Duration logic mirrors SessionPage.tsx:272-276. Filtering/sorting are pure client-side view computations over data already fetched by useWorkflowRunSessions."
     },
     {
@@ -65,7 +65,7 @@
       "type": "WRITE",
       "output": "Responsive WorkflowSessionRow layout with min-w-0 + flex-wrap + truncate constraints",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The existing two-line layout already has flex-wrap on the metrics line; this task tightens constraints (min-w-0, truncate) rather than restructuring."
     },
     {
@@ -89,7 +89,7 @@
       "type": "WRITE",
       "output": "Prev/next nav controls + sibling sidebar on SessionPage + tests",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "The existing useCoderSessions call stays for current-session lookup; useWorkflowRunSessions is added for sibling parity with the panel. Match current session by sessionName (route identifier), fall back gracefully."
     }
   ]
