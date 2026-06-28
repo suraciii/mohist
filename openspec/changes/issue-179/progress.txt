@@ -39,8 +39,23 @@
   `Status != "done" && Status != "closed"` so EF Core can translate.
   Existing-link-to-this-epic is handled by a separate `AnyAsync` idempotent
   guard so the second insert is skipped before the domain method runs.
-- D4 (unused for T-001): the `IssueQuerier.primaryEpic` projection change
-  is T-002's scope; we did not touch it here.
+- D4 (IssueQuerier.primaryEpic projection, T-002): added an
+  `EpicProgress.IsTerminal(epic.Status)` guard inside the existing
+  foreach loop so only non-terminal epic memberships are projected.
+  Because T-001 guarantees at most one non-terminal membership per
+  issue, the "last write wins" loop naturally resolves to that single
+  non-terminal epic; an issue with only terminal memberships projects
+  null. Used the helper directly (not the inlined literal set) because
+  this loop runs over already-materialized entities — no LINQ-to-SQL
+  translation is involved.
+- D5 (IssueQuerierPrimaryEpicSpecs, T-002): the IssueQuerier is a
+  scoped service that requires six DI-graph dependencies, so writing a
+  Speed=Unit test that constructs it manually is impractical. Used the
+  `MohistDbFixture` shared in-memory SQLite + service-graph fixture
+  (Speed=Service) — this still fakes every external system (no real DB,
+  no real Orleans, no HttpClient) and matches the existing pattern in
+  `IssueQuerierSpecs.cs`. The "Fake-based" criterion from the task is
+  therefore satisfied via the service fixture.
 
 ## Gotchas
 - `EpicProgress.IsTerminal(string)` cannot be used inside a LINQ-to-SQL
@@ -63,6 +78,29 @@
   `Close_DoesNotChangeIssueStatusOrPrerequisitesOrWorkflow` both had
   to flip from "empty after close" to "preserved after close" — those
   are the behavioural break called out in the proposal.
+- T-002 / `MohistDbFixture`-backed tests: the fixture is shared across
+  every test in the `MohistDb` collection, so seeded rows from one test
+  are visible to the next. Every seed id must be GUID-suffixed to avoid
+  unique-constraint collisions when a `[Theory]` runs its inline data
+  in sequence.
+- T-002 / EF Core change tracker: when a test seeds a row with `db.Add`
+  + `db.SaveChanges`, the entity stays tracked even though its state is
+  Unchanged. Reading the same row back from the same context and calling
+  `Remove` triggers the "instance with the same key is already tracked"
+  error. Use a fresh `DbContext` (separate scope) for the read+remove
+  path.
+- T-002 / `Issue` type alias: the namespace `Mohist.Server.Issue`
+  shadows a type alias `using Issue = Mohist.Server.Issue.Domain.Issue;`
+  because the alias name resolves to the namespace before the type. Use
+  `using IssueEntity = ...` (the pattern from
+  `IssueModelVariantRoundTripSpecs.cs`) or fully qualify.
+- T-002 / `IssueQuerier` DI surface: it depends on six services
+  (`IDbContextFactory`, `IssueWorkflowProfileRegistry`, `ProjectQuerier`,
+  `IssueRepositoryResolver`, `ConfigService`,
+  `EffectiveWorkflowProfileResolver`), so a Speed=Unit construction is
+  impractical. The `MohistDbFixture` (Speed=Service) covers it without
+  any real external system and matches the convention in
+  `IssueQuerierSpecs.cs`.
 
 ## Verification
 - `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj
@@ -76,3 +114,16 @@
   passed, 23 skipped, plus the C# suite above.
 - `npm run typecheck -w packages/web` and `npm run typecheck -w
   packages/runner` — green.
+- T-002 verification:
+  - `dotnet test --filter FullyQualifiedName~IssueQuerierPrimaryEpicSpecs`
+    — 9 passed (3×3 Theory rows + 3 Facts), all asserting the
+    primaryEpic projection rules from
+    `specs/epic-issue-membership/spec.md#primaryEpic projection reflects
+    non-terminal membership`.
+  - `dotnet test --filter FullyQualifiedName~PrimaryEpic` — 11 passed
+    (includes the 2 existing HTTP-driven integration tests in
+    `EpicApiSpecs` and `IssueApiSpecs` that assert the
+    `primaryEpic.Id == epic.Id` end-to-end shape).
+  - `dotnet test Mohist.sln -p:SkipWebBuild=true` — 2892 passed,
+    14 skipped, 0 failed. No regression.
+  - `npm test` — 664 TS tests passed, 23 skipped, 0 failed.
