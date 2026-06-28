@@ -1,6 +1,5 @@
 export { useActivityCards } from './model/activity-cards'
 export { useActivityUsageSnapshot } from './model/usage-snapshot'
-export { SessionList } from './ui/SessionList'
 export { ActiveSessionCard, RecentCard, WaitingCard } from './ui/SessionCard'
 export { SessionRecoveryActions } from './ui/SessionRecoveryActions'
 export { UsageSnapshotLabel } from './ui/UsageSnapshotLabel'

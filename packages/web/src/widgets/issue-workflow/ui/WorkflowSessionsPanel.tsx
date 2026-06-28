@@ -4,6 +4,35 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components
 import { useWorkflowRunSessions, type WorkflowRunSession } from '../../../entities/coder-session'
 import { useProjectPath } from '../../../entities/project'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
+import {
+  WORKFLOW_PIPELINE_STAGES,
+  useWorkflowSessionFiltering,
+  type WorkflowPipelineStage,
+  type WorkflowSessionSortKey,
+} from '../model/useWorkflowSessionFiltering'
+
+const STATUS_LABELS: Record<string, string> = {
+  active: 'Active',
+  inactive: 'Inactive',
+  running: 'Running',
+  probing: 'Checking',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+}
+
+const STAGE_LABELS: Record<WorkflowPipelineStage, string> = {
+  plan: 'Plan',
+  build: 'Build',
+  check: 'Check',
+  integrate: 'Integrate',
+}
+
+const SORT_LABELS: Record<WorkflowSessionSortKey, string> = {
+  createdAt: 'Created',
+  tokens: 'Tokens',
+  duration: 'Duration',
+}
 
 interface WorkflowSessionsPanelProps {
   issueNumber: number
@@ -11,14 +40,7 @@ interface WorkflowSessionsPanelProps {
 }
 
 function statusLabel(status: string): string {
-  if (status === 'active') return 'Active'
-  if (status === 'inactive') return 'Inactive'
-  if (status === 'running') return 'Running'
-  if (status === 'probing') return 'Checking'
-  if (status === 'completed') return 'Completed'
-  if (status === 'failed') return 'Failed'
-  if (status === 'cancelled') return 'Cancelled'
-  return status
+  return STATUS_LABELS[status] ?? status
 }
 
 function StatusIcon({ status }: { status: string }) {
@@ -122,22 +144,26 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
   return (
     <Link
       to={transcriptPath}
-      className="block px-3 py-2 hover:bg-muted/60 transition-colors"
+      className="block min-w-0 px-3 py-2 hover:bg-muted/60 transition-colors"
+      data-testid="workflow-session-row"
       title={`Open ${session.sessionName} transcript`}
     >
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0" data-testid="workflow-session-row-header">
         <StatusIcon status={session.status} />
-        <span className="font-mono text-xs font-semibold text-foreground truncate">{session.sessionName}</span>
+        <span className="min-w-0 truncate font-mono text-xs font-semibold text-foreground">{session.sessionName}</span>
         {model && (
           <span
-            className="ml-auto max-w-[180px] truncate rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-medium text-foreground/80"
+            className="ml-auto min-w-0 max-w-full truncate rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-medium text-foreground/80 sm:max-w-[180px]"
             title={model}
           >
             {model}
           </span>
         )}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+      <div
+        className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
+        data-testid="workflow-session-row-metrics"
+      >
         <span>{statusLabel(session.status)}</span>
         <span>{usageText(session)}</span>
         {context && <span>{context}</span>}
@@ -151,27 +177,103 @@ function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; ses
         <span>{relativeTime(lastActivity)}</span>
       </div>
       {session.failureReason && (
-        <div className="mt-1 truncate text-[11px] text-red-600">{session.failureReason}</div>
+        <div className="mt-1 truncate min-w-0 text-[11px] text-red-600">{session.failureReason}</div>
       )}
     </Link>
   )
 }
 
+function SessionFilterControls({
+  statusFilter,
+  availableStatuses,
+  onStatusChange,
+  stageFilter,
+  onStageChange,
+  sortKey,
+  onSortChange,
+}: {
+  statusFilter: string | null
+  availableStatuses: string[]
+  onStatusChange: (value: string | null) => void
+  stageFilter: WorkflowPipelineStage | null
+  onStageChange: (value: WorkflowPipelineStage | null) => void
+  sortKey: WorkflowSessionSortKey
+  onSortChange: (value: WorkflowSessionSortKey) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1" data-testid="workflow-sessions-controls">
+      <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span>Status</span>
+        <select
+          aria-label="Filter sessions by status"
+          data-testid="workflow-sessions-status-filter"
+          value={statusFilter ?? ''}
+          onChange={(e) => onStatusChange(e.target.value || null)}
+          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <option value="">All statuses</option>
+          {availableStatuses.map((status) => (
+            <option key={status} value={status}>{statusLabel(status)}</option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span>Stage</span>
+        <select
+          aria-label="Filter sessions by stage"
+          data-testid="workflow-sessions-stage-filter"
+          value={stageFilter ?? ''}
+          onChange={(e) => onStageChange((e.target.value as WorkflowPipelineStage) || null)}
+          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <option value="">All stages</option>
+          {WORKFLOW_PIPELINE_STAGES.map((stage) => (
+            <option key={stage} value={stage}>
+              {STAGE_LABELS[stage]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+        <span>Sort</span>
+        <select
+          aria-label="Sort sessions"
+          data-testid="workflow-sessions-sort"
+          value={sortKey}
+          onChange={(e) => onSortChange(e.target.value as WorkflowSessionSortKey)}
+          className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          {(['createdAt', 'tokens', 'duration'] as const).map((key) => (
+            <option key={key} value={key}>{SORT_LABELS[key]}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
 export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSessionsPanelProps) {
   const { sessions, isLoading } = useWorkflowRunSessions(workflowRunId)
+  const filtering = useWorkflowSessionFiltering(sessions)
 
   if (!workflowRunId) return null
 
-  const sorted = [...sessions].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-  const totalTokens = sumNullable(sorted.map((session) => session.usage?.totalTokens))
-  const cost = summarizeCost(sorted)
-  const peakContext = summarizePeakContext(sorted)
+  const totalTokens = sumNullable(sessions.map((session) => session.usage?.totalTokens))
+  const cost = summarizeCost(sessions)
+  const peakContext = summarizePeakContext(sessions)
   const summary = [
-    `${sorted.length} session${sorted.length !== 1 ? 's' : ''}`,
+    `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`,
     totalTokens != null ? `${formatCompact(totalTokens)} processed` : '',
     peakContext ?? '',
     cost ?? '',
   ].filter(Boolean).join(' · ')
+
+  const filteredCount = filtering.sessions.length
+  const totalCount = filtering.totalCount
+  const filteredNotice =
+    filteredCount !== totalCount
+      ? `Showing ${filteredCount} of ${totalCount} sessions`
+      : null
 
   return (
     <Card data-testid="workflow-sessions-panel">
@@ -181,18 +283,38 @@ export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSe
           <MessageSquareIcon className="h-4 w-4 text-muted-foreground/70" aria-hidden="true" />
         </div>
         {summary && <div className="text-xs text-muted-foreground">{summary}</div>}
+        {filteredNotice && (
+          <div className="text-[11px] text-muted-foreground" data-testid="workflow-sessions-filter-notice">
+            {filteredNotice}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="p-0">
         {isLoading ? (
           <div className="px-3 pb-3 text-sm text-muted-foreground/70">Loading sessions...</div>
-        ) : sorted.length === 0 ? (
+        ) : sessions.length === 0 ? (
           <div className="px-3 pb-3 text-sm text-muted-foreground/70">No sessions yet</div>
         ) : (
-          <div className="divide-y divide-border/60">
-            {sorted.map((session) => (
-              <WorkflowSessionRow key={session.id} issueNumber={issueNumber} session={session} />
-            ))}
-          </div>
+          <>
+            <SessionFilterControls
+              statusFilter={filtering.statusFilter}
+              availableStatuses={filtering.availableStatuses}
+              onStatusChange={filtering.setStatusFilter}
+              stageFilter={filtering.stageFilter}
+              onStageChange={filtering.setStageFilter}
+              sortKey={filtering.sortKey}
+              onSortChange={filtering.setSortKey}
+            />
+            {filteredCount === 0 ? (
+              <div className="px-3 pb-3 text-sm text-muted-foreground/70">No sessions match the current filters.</div>
+            ) : (
+              <div className="divide-y divide-border/60">
+                {filtering.sessions.map((session) => (
+                  <WorkflowSessionRow key={session.id} issueNumber={issueNumber} session={session} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

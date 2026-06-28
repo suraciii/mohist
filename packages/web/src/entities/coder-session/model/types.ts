@@ -96,6 +96,7 @@ export interface WorkflowRunSession {
   issueNumber: number | null
   runnerId: string | null
   status: string
+  stage: string | null
   model: string | null
   workDir: string | null
   processPid: number | null
