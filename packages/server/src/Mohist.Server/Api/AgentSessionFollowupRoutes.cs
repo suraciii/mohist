@@ -28,6 +28,34 @@ public static class AgentSessionFollowupRoutes
         var group = app.MapGroup(FollowupPathPrefix)
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
+        group.MapGet("/{sessionId}", async (
+            HttpContext context,
+            string projectRef,
+            string sessionId,
+            AgentSessionQuerier sessions,
+            CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            var metadata = await sessions.GetGenericSessionMetadataAsync(project.Id, sessionId, ct);
+            return metadata is null
+                ? ApiResults.NotFound($"Agent session {sessionId} not found")
+                : ApiResults.Ok(metadata);
+        });
+
+        group.MapGet("/{sessionId}/transcript", async (
+            HttpContext context,
+            string projectRef,
+            string sessionId,
+            AgentSessionQuerier sessions,
+            CancellationToken ct) =>
+        {
+            var project = context.GetResolvedProject();
+            var transcript = await sessions.GetGenericSessionTranscriptAsync(project.Id, sessionId, ct);
+            return transcript is null
+                ? ApiResults.NotFound($"Agent session {sessionId} not found")
+                : ApiResults.Ok(transcript);
+        });
+
         group.MapPost("/{sessionId}/followup", async (
             HttpContext context,
             string projectRef,

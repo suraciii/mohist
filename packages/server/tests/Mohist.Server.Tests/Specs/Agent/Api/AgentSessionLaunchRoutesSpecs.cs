@@ -54,6 +54,9 @@ public class AgentSessionLaunchRoutesSpecs
             Assert.Equal(agent.Id, data.GetProperty("agentId").GetString());
             Assert.Equal("reviewer", data.GetProperty("agentName").GetString());
             Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("status").GetString()));
+            Assert.Equal(
+                $"/api/projects/{projectId}/agent-sessions/{sessionId}/transcript",
+                data.GetProperty("transcriptUrl").GetString());
 
             var query = await GetAgentSessionQueryAsync();
             var record = await query.FirstByLabelsAsync(
@@ -72,6 +75,61 @@ public class AgentSessionLaunchRoutesSpecs
             Assert.NotNull(snapshot);
             Assert.Equal(runnerId, snapshot!.RunnerId);
             Assert.False(string.IsNullOrWhiteSpace(snapshot.CurrentWorkId));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Agent)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Launch_GenericSession_IsReadableByProductMetadataAndTranscriptRoutes()
+    {
+        var projectId = await CreateProjectAsync("launch-read-session");
+        var runnerId = $"launch-read-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "readable-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var launch = await _fixture.Client.PostAsJsonAsync(
+                $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
+                new { prompt = "open product transcript" });
+
+            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    Type: RuntimeEventTypes.SessionInput,
+                    PayloadJson: "{\"text\":\"open product transcript\",\"kind\":\"task\"}"),
+            }));
+            for (var i = 0; i < 5; i++)
+            {
+                await grain.DeactivateForTestAsync();
+                await Task.Delay(150);
+            }
+
+            using var metadata = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agent-sessions/{sessionId}");
+            using var transcript = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agent-sessions/{sessionId}/transcript");
+
+            Assert.Equal(HttpStatusCode.OK, metadata.StatusCode);
+            var metadataPayload = await metadata.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(sessionId, metadataPayload.GetProperty("data").GetProperty("id").GetString());
+
+            Assert.Equal(HttpStatusCode.OK, transcript.StatusCode);
+            var transcriptPayload = await transcript.Content.ReadFromJsonAsync<JsonElement>();
+            var transcriptData = transcriptPayload.GetProperty("data");
+            Assert.True(transcriptData.GetProperty("turns").GetArrayLength() >= 1);
+            Assert.Equal("open product transcript", transcriptData.GetProperty("turns")[0].GetProperty("user").GetProperty("text").GetString());
         }
         finally
         {

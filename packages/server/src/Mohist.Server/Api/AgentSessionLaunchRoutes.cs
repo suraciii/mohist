@@ -25,7 +25,7 @@ namespace Mohist.Server.Api;
 /// <see cref="IAgentSessionGrain.OpenAsync"/> with <c>source-kind =
 /// agent-launch</c> labels + agent id/name + context-ref annotations, then
 /// submits the <see cref="AgentJobGrain"/> carrying the minted sessionId,
-/// and returns <c>201 { sessionId, agentId, agentName, status }</c>.
+/// and returns <c>201 { sessionId, agentId, agentName, status, transcriptUrl }</c>.
 /// </para>
 /// <para>
 /// Empty/whitespace prompt is rejected with 400 before any session or job
@@ -104,7 +104,8 @@ public static class AgentSessionLaunchRoutes
                         SessionId: sessionId,
                         AgentId: agent.Id,
                         AgentName: agent.Name,
-                        Status: "inactive")),
+                        Status: "inactive",
+                        TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(project.Id)}/agent-sessions/{Uri.EscapeDataString(sessionId)}/transcript")),
                 statusCode: 201);
         });
 
@@ -170,10 +171,12 @@ public sealed record AgentSessionLaunchContextRef(
 /// id is the caller-observable identity (matches the runtime-event
 /// identity on the runner side); the agent id and name echo the resolved
 /// profile; the status reflects the initial state immediately after
-/// dispatch.
+/// dispatch; transcriptUrl points at the product read path for the generic
+/// session transcript.
 /// </summary>
 public sealed record AgentSessionLaunchResponse(
     string SessionId,
     string AgentId,
     string AgentName,
-    string Status);
+    string Status,
+    string TranscriptUrl);

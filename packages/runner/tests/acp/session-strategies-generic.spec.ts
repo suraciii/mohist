@@ -86,11 +86,12 @@ class GenericFakeAgent {
 
 class FakeServerConnection {
   readonly calls: Array<{ event: string; type?: string; payload?: unknown; body?: unknown; sessionName?: string; sessionId?: string }> = []
+  nextGetGenericSession: { acpSessionId?: string | null; workDir?: string; model?: string | null } | null = null
   nextGenericSession: { acpSessionId?: string; workDir?: string; model?: string | null } = { acpSessionId: "acp-session-1", workDir: "D:/work" }
 
   async getAgentSession(_projectId: string, sessionId: string) {
     this.calls.push({ event: "getAgentSession", sessionId })
-    return null
+    return this.nextGetGenericSession
   }
 
   async openAgentSession(_projectId: string, sessionId: string, body: unknown) {
@@ -204,6 +205,21 @@ describe("runAcpAgentSession — generic session dispatch", () => {
     expect(events).not.toContain("openWorkflowAgentSession")
     expect(events).not.toContain("attachWorkflowAgentSession")
     expect(events).not.toContain("workflowAgentSessionRuntimeEvents")
+  })
+
+  it("PreMintedGenericSessionWithoutAcpSessionId_OpensBeforeRunning", async () => {
+    const fixture = createGenericFixture()
+    fixture.serverConnection.nextGetGenericSession = { acpSessionId: null, workDir: "D:/work" }
+    fixture.serverConnection.nextGenericSession = { acpSessionId: undefined, workDir: "D:/work" }
+
+    const result = await acpAgentAction(fixture.context({ with: { prompt: "run minted session" } as never }))
+
+    expect(result.status).toBe("success")
+    const events = fixture.serverConnection.calls.map((entry) => entry.event)
+    expect(events.indexOf("getAgentSession")).toBeGreaterThanOrEqual(0)
+    expect(events.indexOf("openAgentSession")).toBeGreaterThan(events.indexOf("getAgentSession"))
+    expect(events).toContain("attachAgentSession")
+    expect(events).not.toContain("openWorkflowAgentSession")
   })
 
   it("GenericSession_StoresCachedEntryUnderGenericKey", async () => {

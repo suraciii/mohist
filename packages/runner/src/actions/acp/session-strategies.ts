@@ -140,13 +140,16 @@ export async function runAcpGenericAgentSession(context: ActionContext, prompt: 
   const agentConfig = resolveAgentConfig(context.with)
   const requestedModel = resolveRequestedModel(context, agentConfig).model
   const existing = await serverConnection.getAgentSession(projectId, sessionId, context.signal)
-  const session = existing ?? await serverConnection.openAgentSession(projectId, sessionId, {
+  const openBody = {
     workId: context.workId,
     workType: context.workType,
     stage: context.stage,
     title: context.title,
     issueNumber: context.issueNumber,
-  }, context.signal)
+  }
+  const session = existing?.acpSessionId
+    ? existing
+    : await serverConnection.openAgentSession(projectId, sessionId, openBody, context.signal)
 
   if (session.acpSessionId) {
     const cached = manager.get(key)

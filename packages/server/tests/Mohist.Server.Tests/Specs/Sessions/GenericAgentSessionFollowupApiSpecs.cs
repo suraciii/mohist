@@ -137,6 +137,44 @@ public class GenericAgentSessionFollowupApiSpecs : IAsyncLifetime
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
+    public async Task GenericRunnerOpen_PreMintedLaunchSession_BindsRunnerIdForFollowupAndCancelResolution()
+    {
+        var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-open-binds-runner");
+
+        using var existing = await _client.GetAsync($"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}");
+        Assert.Equal(HttpStatusCode.OK, existing.StatusCode);
+        var existingPayload = await existing.Content.ReadFromJsonAsync<JsonElement>();
+        if (existingPayload.TryGetProperty("acpSessionId", out var acpSessionId))
+            Assert.True(acpSessionId.ValueKind == JsonValueKind.Null || string.IsNullOrEmpty(acpSessionId.GetString()));
+
+        await _fixture.Client.PostOkAsync(
+            $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
+            new
+            {
+                workId = $"work-{Guid.NewGuid():N}",
+                workType = "agent-job",
+                stage = "agent",
+                title = "bind pre-minted generic session",
+            });
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var info = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
+        Assert.Equal(_runnerId, info.RunnerId);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var querier = scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+        var followupTarget = await querier.ResolveGenericFollowupTargetAsync(project.Id, sessionId);
+        var cancelTarget = await querier.ResolveGenericCancelTargetAsync(project.Id, sessionId);
+
+        Assert.NotNull(followupTarget);
+        Assert.Equal(_runnerId, followupTarget!.RunnerId);
+        Assert.NotNull(cancelTarget);
+        Assert.Equal(_runnerId, cancelTarget!.RunnerId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
     public async Task GenericFollowupEndpoint_EmptyText_ReturnsBadRequest()
     {
         var (project, _, sessionId, _) = await LaunchGenericSessionAsync("gen-followup-empty");

@@ -446,7 +446,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task OnJobTimeoutAsync()
     {
-        if (_status != AgentJobStatus.Running || !JobTimeoutExceeded())
+        if (_status != AgentJobStatus.Running)
             return;
 
         _log.LogWarning(
