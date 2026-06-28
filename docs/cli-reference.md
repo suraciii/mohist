@@ -152,9 +152,18 @@ mo skills get <name>         # 获取 skill 的完整内容
 ## 安装与更新
 
 ```bash
-mo install                   # 从源码构建并安装 Mohist 组件
-mo update                    # 更新到最新版本
+# 安装为受管理服务（Linux: systemd user service；Windows: 计划任务）
+mo install server            # 写 unit、enable、启动、enable-linger
+mo install runner
+
+# 从源码更新（重建并以受管理方式重启）
+mo update                    # 更新全部（CLI + server + runner）
+mo update server             # 只更新 server
+mo update runner             # 只更新 runner
+mo update cli                # 只更新 mo CLI
 ```
+
+首次安装 `mo` 本身：仓库内 `bash scripts/install-mo.sh`。详见 [Self-host 部署](self-host.md)。
 
 ## 典型工作流脚本
 
