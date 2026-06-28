@@ -1617,6 +1617,7 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
     const pause = screen.getByTestId('pause-epic-trigger')
     expect(pause).toBeTruthy()
     expect(pause).toHaveTextContent('Pause')
+    expect(pause).toHaveClass('bg-primary')
 
     expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('resume-epic-trigger')).toBeNull()
@@ -1660,6 +1661,7 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
     const resume = screen.getByTestId('resume-epic-trigger')
     expect(resume).toBeTruthy()
     expect(resume).toHaveTextContent('Resume')
+    expect(resume).toHaveClass('bg-primary')
 
     expect(screen.queryByTestId('start-epic-trigger')).toBeNull()
     expect(screen.queryByTestId('pause-epic-trigger')).toBeNull()
@@ -1929,6 +1931,35 @@ describe('EpicDetailPage single prominent primary action (T-001)', () => {
 
     const reason = screen.getByTestId('mark-done-disabled-reason')
     expect(reason).toHaveTextContent('1 linked issue remains unfinished.')
+  })
+
+  it('renders an actionable visible reason when no linked issues exist', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        status: EpicStatus.Idle,
+        progress: {
+          deliveredCount: 0,
+          totalIssueCount: 0,
+          blockedIssues: [],
+          activeIssues: [],
+          nextIssue: null,
+          nextIssueReason: null,
+          readyToMarkDone: false,
+        },
+        linkedIssues: [],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const markDone = screen.getByTestId('mark-epic-done')
+    expect(markDone).toBeDisabled()
+    expect(markDone).not.toHaveAttribute('title')
+
+    const reason = screen.getByTestId('mark-done-disabled-reason')
+    expect(reason).toHaveTextContent('Link at least one issue before marking this Epic done.')
+    expect(reason).not.toHaveTextContent('0 linked issues remain unfinished.')
   })
 
   it('keeps Edit and Close Epic reachable as secondary actions across non-terminal statuses', () => {
@@ -3248,6 +3279,28 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
       expect(next.getAttribute('href')).toContain('/issues/3')
       // When nextIssue is present and state is has-next, no extra advancement copy is rendered
       expect(screen.queryByTestId('advancement-copy')).toBeNull()
+    })
+
+    it('does not show a lower-priority draft blocker under a server-provided next issue', () => {
+      mocks.useEpic.mockReturnValue({
+        data: makeEpic({
+          status: EpicStatus.Idle,
+          progress: { deliveredCount: 0, totalIssueCount: 2, blockedIssues: [], activeIssues: [], nextIssue: { id: 'issue-9', number: 9, title: 'Priority candidate' }, nextIssueReason: null, readyToMarkDone: false },
+          linkedIssues: [
+            linkedIssue({ id: 'issue-4', number: 4, title: 'Older draft', priority: 'p3', canStart: false, startBlocker: { kind: 'draft' } }),
+            linkedIssue({ id: 'issue-9', number: 9, title: 'Priority candidate', priority: 'p0', canStart: true, startBlocker: null }),
+          ],
+        }),
+        isLoading: false,
+      })
+
+      renderPage()
+
+      const next = screen.getByTestId('next-issue')
+      expect(next).toHaveTextContent('#9 Priority candidate')
+      expect(next.getAttribute('href')).toContain('/issues/9')
+      expect(screen.queryByTestId('advancement-copy')).toBeNull()
+      expect(screen.queryByText(/still a draft/i)).toBeNull()
     })
 
     it('renders idle-no-next reason copy when an idle epic has no startable candidate and no specific blocker', () => {

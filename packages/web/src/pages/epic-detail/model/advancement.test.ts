@@ -162,6 +162,28 @@ describe('deriveAdvancementState', () => {
       })
       expect(state).toEqual({ kind: 'has-next', issueNumber: 42 })
     })
+
+    it('uses priority rank then issue number instead of linked order for the display candidate', () => {
+      const state = deriveAdvancementState({
+        epicStatus: EpicStatus.Idle,
+        linkedIssues: [
+          makeLinkedIssue({ id: 'i-old', number: 1, priority: 'p4', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ id: 'i-next', number: 3, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+        ],
+      })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 3 })
+    })
+
+    it('breaks equal priority ties by issue number instead of linked order', () => {
+      const state = deriveAdvancementState({
+        epicStatus: EpicStatus.Idle,
+        linkedIssues: [
+          makeLinkedIssue({ id: 'i-later', number: 20, priority: 'p1', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+          makeLinkedIssue({ id: 'i-earlier', number: 10, priority: 'p1', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+        ],
+      })
+      expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 10 })
+    })
   })
 
   describe('returns running-but-idle for a running epic with no in-progress and no specific blocker', () => {
@@ -319,6 +341,17 @@ describe('deriveAdvancementState', () => {
         ],
       })
       expect(state).toEqual({ kind: 'draft-blocker', issueNumber: 12 })
+    })
+
+    it('does not let an older lower-priority draft contradict a higher-priority startable next issue', () => {
+      const state = deriveAdvancementState({
+        epicStatus: EpicStatus.Running,
+        linkedIssues: [
+          makeLinkedIssue({ id: 'i-draft', number: 4, priority: 'p3', status: IssueStatus.Backlog, canStart: false, startBlocker: { kind: 'draft' } }),
+          makeLinkedIssue({ id: 'i-server-next', number: 9, priority: 'p0', status: IssueStatus.Backlog, canStart: true, startBlocker: null }),
+        ],
+      })
+      expect(state).toEqual({ kind: 'has-next', issueNumber: 9 })
     })
   })
 

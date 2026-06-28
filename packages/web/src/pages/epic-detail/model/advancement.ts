@@ -39,6 +39,23 @@ function isStartableCandidate(issue: LinkedIssue): boolean {
   )
 }
 
+function priorityRank(priority: LinkedIssue['priority']): number {
+  switch (priority) {
+    case 'p0': return 0
+    case 'p1': return 1
+    case 'p2': return 2
+    case 'p3': return 3
+    case 'p4': return 4
+    default: return 9
+  }
+}
+
+function byServerCandidateOrder(a: LinkedIssue, b: LinkedIssue): number {
+  const rankDelta = priorityRank(a.priority) - priorityRank(b.priority)
+  if (rankDelta !== 0) return rankDelta
+  return a.number - b.number
+}
+
 function describeCandidateBlocker(issue: LinkedIssue): string {
   const blocker = issue.startBlocker
   if (blocker === null) return 'no startable issue'
@@ -50,12 +67,12 @@ function describeCandidateBlocker(issue: LinkedIssue): string {
 export function deriveAdvancementState(context: AdvancementContext): AdvancementState {
   const { epicStatus, linkedIssues } = context
 
-  const inProgressIssue = linkedIssues.find(isInProgress)
+  const inProgressIssue = linkedIssues.filter(isInProgress).sort((a, b) => a.number - b.number)[0]
   if (inProgressIssue) {
     return { kind: 'waiting-for-in-progress', issueNumber: inProgressIssue.number }
   }
 
-  const undelivered = linkedIssues.filter(isUndelivered)
+  const undelivered = linkedIssues.filter(isUndelivered).sort(byServerCandidateOrder)
   if (undelivered.length === 0) {
     return { kind: 'nothing-pending' }
   }

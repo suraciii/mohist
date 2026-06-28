@@ -516,9 +516,11 @@ export function EpicDetailPage() {
       ? null
       : isPaused
         ? 'Resume this Epic before marking it done.'
-        : unfinishedCount === 1
-          ? '1 linked issue remains unfinished.'
-          : `${unfinishedCount} linked issues remain unfinished.`
+        : epic.progress.totalIssueCount === 0
+          ? 'Link at least one issue before marking this Epic done.'
+          : unfinishedCount === 1
+            ? '1 linked issue remains unfinished.'
+            : `${unfinishedCount} linked issues remain unfinished.`
   const isClosed = epic.status === EpicStatus.Closed
   const isDone = epic.status === EpicStatus.Done
   const linkedIssueCount = epic.linkedIssues.length
@@ -617,7 +619,6 @@ export function EpicDetailPage() {
             {primaryAction?.kind === 'pause-epic' && (
               <Button
                 type="button"
-                variant="outline"
                 onClick={() => setPauseConfirmOpen(true)}
                 disabled={pauseEpic.isPending}
                 data-testid="pause-epic-trigger"
@@ -628,7 +629,6 @@ export function EpicDetailPage() {
             {primaryAction?.kind === 'resume-epic' && (
               <Button
                 type="button"
-                variant="outline"
                 onClick={() => resumeEpic.mutate(epicId)}
                 disabled={resumeEpic.isPending}
                 data-testid="resume-epic-trigger"
