@@ -1,0 +1,74 @@
+Issue 280 — Mobile-first adaptation of Epic linked-issue rows & Graph.
+
+## Codebase Patterns
+
+- `pages/epic-detail/model/` houses pure-derived helpers
+  (`primaryLifecycleAction.ts`, `advancement.ts`). T-001 adds
+  `startBlockerReason.ts` to the same folder with its own `.test.ts`.
+- `LinkedIssueRow` is a private helper component inside
+  `pages/epic-detail/ui/EpicDetailPage.tsx`, not exported. Tests assert
+  structure via DOM queries (`data-testid` on row/rows) and class names.
+- The component test setup uses vitest + jsdom; pixel-level overflow is
+  not asserted (jsdom can't measure scrollWidth/clientWidth or apply CSS
+  media queries). All layout assertions are structural: classes, DOM
+  order, testid presence.
+- Project UI testids use `kebab-case`. New testids added by T-001:
+  `linked-issue-row`, `linked-issue-reading-row`, `linked-issue-metadata-row`,
+  `linked-issue-actions-row`, `linked-issue-blocker-reason`,
+  `linked-issue-title`, `linked-issue-remove` (Remove button).
+- `canInlineStartRow(issue, hasInProgress)` is the sole gate for the Start
+  button; the deriveStartBlockerReason function reuses the same boolean as
+  the sole render gate for the blocker reason.
+
+## Decisions / Discoveries (T-001)
+
+- D1 vertical layout: row container `<Card className="flex flex-col gap-2 p-4">`
+  with four children in DOM order:
+    1. reading row (`flex min-w-0 items-baseline gap-2`) — `#number` link +
+       title; title span uses `min-w-0 flex-1 break-words [overflow-wrap:anywhere]`.
+    2. metadata row (`flex flex-wrap items-center gap-2 ...`) — health tone
+       span + status Badge + priority Badge.
+    3. blocker reason paragraph — only when `showStart === false`. Uses
+       `[overflow-wrap:anywhere]` so long reasons don't blow out narrow rows.
+    4. actions row (`flex flex-wrap gap-2`) — Start button (only when
+       `showStart`) + Remove button.
+- D2 title wrap: span replaces the old `truncate` div; class changes from
+  `truncate` to `break-words [overflow-wrap:anywhere]` so long unbroken
+  tokens break inside the available row width.
+- D3 start-blocker reason: pure function `deriveStartBlockerReason({
+  issue, hasInProgress })` in `pages/epic-detail/model/startBlockerReason.ts`.
+  Branch order (first match wins):
+    - hasInProgress → 'Another issue is in progress'
+    - startBlocker.kind === 'draft' → 'Still a draft'
+    - startBlocker.kind === 'waiting-for' → `Waiting for #${issue.number}`
+    - health === blocked → 'Blocked'
+    - fallback → 'Not startable'
+  Note: deriveStartBlockerReason is called only when `canInlineStartRow`
+  has already returned false — it does not duplicate the gating logic,
+  only derives the human-readable reason.
+- The Remove button kept its existing onClick→onRemove behavior on T-001.
+  The two-step confirm flow is owned by T-002 (per task scope).
+
+## Gotchas
+
+- An existing test asserted that the LinkedIssueRow action container has
+  class `shrink-0`. After restructuring to a vertical column the action
+  row is no longer horizontally constrained by a sibling, so `shrink-0`
+  was dropped; the test was updated to assert `data-testid=
+  linked-issue-actions-row` instead (matching the new testid added).
+- An existing advancement-copy test used `screen.queryByText(/still a
+  draft/i)` to assert the Next Issue column doesn't surface a draft
+  reason. After T-001 the LinkedIssueRow legitimately shows
+  'Still a draft' as the row's blocker reason, so the assertion was
+  scoped to the `next-issue-region` testid (where the advancement copy
+  actually lives). The semantic intent of the test is preserved.
+
+## Verification
+
+- `npm run typecheck -w packages/web` — passes.
+- `npm run test:run -w packages/web` — 2739 passed, 1 skipped, 0 failed.
+  (Previously 2727 passed; 12 new tests added by T-001:
+  7 model unit tests in `startBlockerReason.test.ts` and 5 component
+  tests in the new `EpicDetailPage LinkedIssueRow vertical task line
+  layout (T-001)` describe block. Note: an additional 7 tests are in
+  that describe block; the diff to 2739 covers 7 + 5 = 12 net new.)

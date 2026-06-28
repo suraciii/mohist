@@ -26,6 +26,7 @@ import {
   deriveAdvancementState,
   type AdvancementState,
 } from '../model/advancement'
+import { deriveStartBlockerReason } from '../model/startBlockerReason'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
@@ -107,21 +108,42 @@ function LinkedIssueRow({
 }) {
   const toProjectPath = useProjectPath()
   const showStart = canInlineStartRow(issue, hasInProgress)
+  const blockerReason = showStart
+    ? null
+    : deriveStartBlockerReason({ issue, hasInProgress })
 
   return (
-    <Card className="flex items-center justify-between gap-4 p-4">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Link to={toProjectPath(`/issues/${issue.number}`)} data-testid="linked-issue-nav-link" data-issue-number={issue.number} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
-            #{issue.number}
-          </Link>
-          <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
-          <Badge variant="secondary">{toTitleCase(issue.status)}</Badge>
-          {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
-        </div>
-        <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>
+    <Card className="flex flex-col gap-2 p-4" data-testid="linked-issue-row">
+      <div className="flex min-w-0 items-baseline gap-2" data-testid="linked-issue-reading-row">
+        <Link
+          to={toProjectPath(`/issues/${issue.number}`)}
+          data-testid="linked-issue-nav-link"
+          data-issue-number={issue.number}
+          className="shrink-0 font-medium text-blue-600 hover:text-blue-700 hover:underline"
+        >
+          #{issue.number}
+        </Link>
+        <span
+          className="min-w-0 flex-1 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]"
+          data-testid="linked-issue-title"
+        >
+          {issue.title}
+        </span>
       </div>
-      <div className="flex shrink-0 flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="linked-issue-metadata-row">
+        <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
+        <Badge variant="secondary">{toTitleCase(issue.status)}</Badge>
+        {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
+      </div>
+      {blockerReason && (
+        <p
+          className="text-xs text-muted-foreground [overflow-wrap:anywhere]"
+          data-testid="linked-issue-blocker-reason"
+        >
+          {blockerReason}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2" data-testid="linked-issue-actions-row">
         {showStart && (
           <Button
             type="button"
@@ -137,6 +159,7 @@ function LinkedIssueRow({
           variant="outline"
           onClick={() => onRemove(issue.id)}
           disabled={disabled}
+          data-testid="linked-issue-remove"
         >
           Remove
         </Button>

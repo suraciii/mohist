@@ -2431,6 +2431,316 @@ describe('EpicDetailPage LinkedIssueRow inline Start', () => {
   })
 })
 
+describe('EpicDetailPage LinkedIssueRow vertical task line layout (T-001)', () => {
+  const addMutate = vi.fn()
+  const removeMutate = vi.fn()
+  const startMutate = vi.fn()
+  const doneMutate = vi.fn()
+  const closeMutate = vi.fn()
+  const updateMutate = vi.fn()
+
+  function makeEpic(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'epic-12345678',
+      number: null,
+      title: 'Epic title',
+      description: 'Epic description',
+      priority: 'p1',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      progress: {
+        deliveredCount: 0,
+        totalIssueCount: 0,
+        blockedIssues: [],
+        activeIssues: [],
+        nextIssue: null,
+        nextIssueReason: null,
+        readyToMarkDone: false,
+      },
+      linkedIssues: [],
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.useProject.mockReturnValue({ projectId: 'proj-1' })
+    mocks.useIssues.mockReturnValue({ data: issues })
+    mocks.useAddEpicIssue.mockReturnValue({ mutate: addMutate, isPending: false, isError: false })
+    mocks.useRemoveEpicIssue.mockReturnValue({ mutate: removeMutate, isPending: false, isError: false })
+    mocks.useStartIssue.mockReturnValue({ mutate: startMutate, isPending: false, isError: false })
+    mocks.useMarkEpicDone.mockReturnValue({ mutate: doneMutate, isPending: false })
+    mocks.useCloseEpic.mockReturnValue({ mutate: closeMutate, isPending: false })
+    mocks.useUpdateEpic.mockReturnValue({ mutate: updateMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function getRow(): HTMLElement {
+    return screen.getByTestId('linked-issue-row')
+  }
+
+  it('uses a vertical flex-col container instead of the old horizontal two-column layout', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const row = getRow()
+    expect(row.classList.contains('flex')).toBe(true)
+    expect(row.classList.contains('flex-col')).toBe(true)
+    expect(row.classList.contains('justify-between')).toBe(false)
+    expect(row.classList.contains('items-center')).toBe(false)
+  })
+
+  it('keeps reading-row (#number + title) at the top, then metadata row, then blocker reason, then actions row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-7',
+            number: 7,
+            title: 'Blocked item',
+            status: IssueStatus.Backlog,
+            canStart: false,
+            startBlocker: { kind: 'waiting-for', issue: { number: 99, title: 'X' } },
+            health: IssueHealth.Active,
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const row = getRow()
+    const readingRow = screen.getByTestId('linked-issue-reading-row')
+    const metadataRow = screen.getByTestId('linked-issue-metadata-row')
+    const blockerReason = screen.getByTestId('linked-issue-blocker-reason')
+    const actionsRow = screen.getByTestId('linked-issue-actions-row')
+
+    expect(row.children[0]).toBe(readingRow)
+    expect(row.children[1]).toBe(metadataRow)
+    expect(row.children[2]).toBe(blockerReason)
+    expect(row.children[3]).toBe(actionsRow)
+  })
+
+  it('uses break-words + [overflow-wrap:anywhere] on the title instead of truncate', () => {
+    const LONG_TITLE =
+      'LinkedIssueRowLongEnglishTitleWithAnUnbrokenTokenThatMustWrapInsideTheRowAtThreeHundredTwentyPixels'
+
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: LONG_TITLE }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const title = screen.getByTestId('linked-issue-title')
+    expect(title.textContent).toBe(LONG_TITLE)
+    expect(title.classList.contains('break-words')).toBe(true)
+    expect(title.classList.contains('[overflow-wrap:anywhere]')).toBe(true)
+    expect(title.classList.contains('truncate')).toBe(false)
+  })
+
+  it('uses flex-wrap on the metadata row so health/status/priority badges wrap at narrow widths', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const metadataRow = screen.getByTestId('linked-issue-metadata-row')
+    expect(metadataRow.classList.contains('flex')).toBe(true)
+    expect(metadataRow.classList.contains('flex-wrap')).toBe(true)
+  })
+
+  it('places the number link and the title on the same primary reading row', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const readingRow = screen.getByTestId('linked-issue-reading-row')
+    const navLink = screen.getByTestId('linked-issue-nav-link')
+    const title = screen.getByTestId('linked-issue-title')
+    expect(readingRow.contains(navLink)).toBe(true)
+    expect(readingRow.contains(title)).toBe(true)
+  })
+
+  it('does NOT show the blocker reason when the issue is inline-startable', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Candidate issue' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.queryByTestId('linked-issue-blocker-reason')).toBeNull()
+  })
+
+  it('shows the "Still a draft" blocker reason when the issue has a draft blocker', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Draft candidate',
+            canStart: false,
+            startBlocker: { kind: 'draft' },
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Still a draft')
+  })
+
+  it('shows the "Waiting for #N" blocker reason when the issue has a waiting-for blocker', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Waiting on upstream',
+            canStart: false,
+            startBlocker: { kind: 'waiting-for', issue: { number: 42, title: 'Upstream' } },
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Waiting for #42')
+  })
+
+  it('shows the "Blocked" reason when health is blocked but no blocker is set', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Blocked by upstream issue',
+            canStart: false,
+            health: IssueHealth.Blocked,
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Blocked')
+  })
+
+  it('shows the "Another issue is in progress" reason when a sibling is running', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-1', number: 1, title: 'Running', status: IssueStatus.InProgress, stage: WorkflowStage.Build, health: IssueHealth.Active }),
+          linkedIssue({ id: 'issue-2', number: 2, title: 'Next candidate' }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reasons = screen.getAllByTestId('linked-issue-blocker-reason')
+    expect(reasons.length).toBeGreaterThanOrEqual(1)
+    expect(reasons.some(r => r.textContent === 'Another issue is in progress')).toBe(true)
+  })
+
+  it('shows the "Not startable" fallback reason when the issue is not startable for an unrecognized reason', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({
+            id: 'issue-3',
+            number: 3,
+            title: 'Done-ish issue',
+            status: IssueStatus.Done,
+            stage: WorkflowStage.Done,
+            health: IssueHealth.Done,
+            canStart: false,
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const reason = screen.getByTestId('linked-issue-blocker-reason')
+    expect(reason.textContent).toBe('Not startable')
+  })
+
+  it('keeps Start button gated by canInlineStartRow: present only when inline-startable', () => {
+    mocks.useEpic.mockReturnValue({
+      data: makeEpic({
+        linkedIssues: [
+          linkedIssue({ id: 'issue-3', number: 3, title: 'Startable candidate' }),
+          linkedIssue({
+            id: 'issue-4',
+            number: 4,
+            title: 'Non-startable',
+            canStart: false,
+            startBlocker: { kind: 'draft' },
+          }),
+        ],
+      }),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getAllByTestId('linked-issue-start')).toHaveLength(1)
+    const rows = screen.getAllByTestId('linked-issue-row')
+    expect(rows).toHaveLength(2)
+    expect(screen.getAllByTestId('linked-issue-blocker-reason')).toHaveLength(1)
+  })
+})
+
 describe('EpicDetailPage linked issues view toggle', () => {
   const addMutate = vi.fn()
   const removeMutate = vi.fn()
@@ -2931,9 +3241,9 @@ describe('EpicDetailPage mobile layout structural contract', () => {
     const linkedStartButton = screen.getByTestId('linked-issue-start')
     const actionContainer = linkedStartButton.parentElement as HTMLElement
     expect(actionContainer).toBeTruthy()
+    expect(actionContainer.getAttribute('data-testid')).toBe('linked-issue-actions-row')
     expect(actionContainer.classList.contains('flex')).toBe(true)
     expect(actionContainer.classList.contains('flex-wrap')).toBe(true)
-    expect(actionContainer.classList.contains('shrink-0')).toBe(true)
     expect(actionContainer.classList.contains('gap-2')).toBe(true)
   })
 
@@ -3330,7 +3640,8 @@ describe('EpicDetailPage summary-first information architecture (T-002)', () => 
       expect(next).toHaveTextContent('#9 Priority candidate')
       expect(next.getAttribute('href')).toContain('/issues/9')
       expect(screen.queryByTestId('advancement-copy')).toBeNull()
-      expect(screen.queryByText(/still a draft/i)).toBeNull()
+      const advancementArea = screen.getByTestId('next-issue-region')
+      expect(advancementArea.textContent ?? '').not.toMatch(/still a draft/i)
     })
 
     it('renders idle-no-next reason copy when an idle epic has no startable candidate and no specific blocker', () => {
