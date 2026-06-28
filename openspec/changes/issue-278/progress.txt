@@ -1,0 +1,49 @@
+# Issue 278 — progress notes
+
+This file is the working memory for the implementation of T-001 (and eventually T-002) of the issue-278 change set.
+
+## Codebase Patterns
+
+- **Pure selector placement.** Pure model helpers live next to features under `…/<feature>/model/*.ts` and are paired with a `*.test.ts` for isolated unit tests. See `packages/web/src/widgets/epic-dependency-graph/model/readiness.ts` + `readiness.test.ts` for the canonical example: pure function, types in the same file, exhaustive matrix tests. T-001 follows the same shape under `packages/web/src/pages/epic-detail/model/`.
+- **Test setup for pure selectors.** `readiness.test.ts` uses `import { describe, it, expect } from 'vitest'` directly — no React, no `@vitest-environment jsdom` comment. The selector module re-exports its input enums from entities (e.g. `EpicStatus`) so consumers do not need a second import.
+- **Epic entity status.** `EpicStatus` enum (`idle | running | paused | done | closed`) lives at `packages/web/src/entities/epic/model/types.ts`. `parseEpicStatus` treats legacy `active` as `idle` — the selector takes the already-parsed enum, not the raw string.
+- **Mark Done spec matrix** (from `specs/epic-lifecycle/spec.md`):
+  - `idle` → `Start Epic` (primary)
+  - `running` → `Pause` (primary)
+  - `paused` → `Resume` (primary, regardless of `readyToMarkDone`)
+  - `idle|running` + `readyToMarkDone` → `Mark Done` (primary, replaces Start/Pause)
+  - `done|closed` → no lifecycle action
+  - `Mark Done` is **always** rendered for non-terminal epics, as disabled secondary with on-screen reason when not primary.
+- **Disabled reason copy** (D4): paused → "Resume this Epic before marking it done." ; otherwise → `${n} linked ${n===1?'issue':'issues'} remain unfinished.`
+- **Test hooks used by EpicDetailPage.test.tsx** (must remain stable so existing tests keep passing): `start-epic-trigger`, `pause-epic-trigger`, `resume-epic-trigger`, `mark-epic-done`, `close-epic-trigger`, `edit-epic-button`, `pause-reason`, `epic-description`. The action group is found via `parentElement` of `edit-epic-button`.
+- **Mark-Done disabled reason element:** the spec mandates a new visible element with `data-testid="mark-done-disabled-reason"`. The disabled button must **not** carry a `title` attribute.
+- **Action group contract:** the parent of `edit-epic-button` is the action group; existing structural contract tests assert that `start-epic-trigger` / `pause-epic-trigger` / `resume-epic-trigger` / `mark-epic-done` / `close-epic-trigger` are present or absent inside that group per status. T-001 must preserve the per-status assertions and add new ones for the `readyToMarkDone` cases.
+
+## Decisions
+
+- Selector name: `primaryLifecycleAction(status, readyToMarkDone): PrimaryAction | null`. `PrimaryAction` is a discriminated union keyed on `kind` so callers can render with confidence and exhaustive switch. `null` means "no primary action" (terminal states).
+- The selector is the single source of truth — the page renders the action identified by the selector as the prominent primary `Button` (variant `default`), and renders `Mark Done` separately as a disabled secondary button when the selector's primary is **not** `mark-done` and the epic is non-terminal.
+- The `Edit` and `Close Epic` buttons stay where they are (secondary outline) — the spec scope for T-001 explicitly preserves them.
+- The disabled-reason copy table lives in the page (next to existing `markDoneTooltip` derivation) — the selector returns `null` when there's no action; the page derives the reason text from `isPaused` and `unfinishedCount` (mirrors D4).
+
+## Gotchas
+
+- The existing tests assert that `pause-epic-trigger` shows alongside `mark-epic-done` on a non-paused non-ready running epic (mobile layout test). After T-001 the running non-ready case keeps `pause-epic-trigger` and keeps `mark-epic-done` (disabled) — both assertions remain valid because the spec requires Mark Done to remain rendered (disabled) on every non-terminal epic. **No changes needed in those tests.**
+- The existing test `disables Mark Done while progress is not ready and explains unfinished issue count` asserts `expect(markDone).toHaveAttribute('title', '2 linked issues remain unfinished')`. After T-001 the button must **not** carry a `title`; the reason is rendered in a sibling element with `data-testid="mark-done-disabled-reason"`. This test will be **updated** to assert the new on-screen reason instead of the `title` attribute.
+- The existing test `enables Mark Done and runs the mark-done mutation when progress is ready` asserts `expect(markDone).not.toHaveAttribute('title')` — that still holds (enabled buttons never had a title).
+- `isPaused` precondition in the visible-reason derivation: when `status === paused` and `readyToMarkDone === true`, the spec says Resume is primary, Mark Done is disabled-with-reason "Resume this Epic before marking it done." That is the **paused** reason path; the unfinished-count path applies when Mark Done is disabled for a non-paused epic.
+
+## Status
+
+- T-001 implemented and verified locally.
+- New selector at `packages/web/src/pages/epic-detail/model/primaryLifecycleAction.ts` (+ `.test.ts`) with 36 unit tests covering every (status × readyToMarkDone) cell.
+- `EpicDetailPage.tsx` now renders the single prominent primary selected from the selector and renders Mark Done separately as a disabled secondary with an on-screen `<p data-testid="mark-done-disabled-reason">` reason instead of a `title` tooltip.
+- `EpicDetailPage.test.tsx` updated: existing title-tooltip assertions replaced with on-screen-reason assertions; added a new `describe('EpicDetailPage single prominent primary action (T-001)')` block covering the full primary-action matrix, the paused-ready Resume-primary case, the terminal no-action case, and disabled-Mark-Done visible-reason cases (paused + unfinished singular/plural).
+- `npm run typecheck -w packages/web` passes.
+- `npm run test:run -w packages/web` passes — 2505 tests across 172 files, including 137 in `src/pages/epic-detail/` (101 in `EpicDetailPage.test.tsx` + 36 in `primaryLifecycleAction.test.ts`).
+
+## Learnings for T-002
+
+- The action row now mixes primary and secondary `Button`s; the disabled-Mark-Done region already wraps the button + reason in a `div` with `data-testid="mark-done-disabled-region"`. T-002's summary restructure can reuse the page-shell action row layout but should NOT move the disabled-Mark-Done region — the on-screen reason must stay adjacent to its button per the D4 contract.
+- The page uses `primaryAction?.kind === 'mark-done'` to decide which Mark Done variant to render; T-002 should keep that pattern and not introduce a second selector.
+- The selector returns `null` for terminal states; T-002's summary grid does not depend on the selector and can render normally for terminal epics (the existing summary grid stays in the header card).

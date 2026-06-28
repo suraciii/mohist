@@ -17,6 +17,10 @@ import {
 import { canInlineStartRow, EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
 import { EditEpicDialog } from '../../../features/edit-epic'
 import { ApiError } from '../../../shared/api/client'
+import {
+  primaryLifecycleAction,
+  type PrimaryLifecycleAction,
+} from '../model/primaryLifecycleAction'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
@@ -447,17 +451,21 @@ export function EpicDetailPage() {
   const submitDisabled = !selectedIssueId || addEpicIssue.isPending
   const unfinishedCount = Math.max(epic.progress.totalIssueCount - epic.progress.deliveredCount, 0)
   const isPaused = epic.status === EpicStatus.Paused
-  const isIdle = epic.status === EpicStatus.Idle
-  const isRunning = epic.status === EpicStatus.Running
-  const isSelfDriving = isIdle || isRunning
-  const markDoneBlocked = isPaused || (isSelfDriving && !epic.progress.readyToMarkDone)
-  const markDoneTooltip = isPaused
-    ? 'Resume this Epic before marking it done'
-    : markDoneBlocked
-      ? unfinishedCount === 1
-        ? '1 linked issue remains unfinished'
-        : `${unfinishedCount} linked issues remain unfinished`
-      : undefined
+  const isTerminal = epic.status === EpicStatus.Done || epic.status === EpicStatus.Closed
+  const primaryAction: PrimaryLifecycleAction | null = primaryLifecycleAction(
+    epic.status,
+    epic.progress.readyToMarkDone,
+  )
+  const isMarkDonePrimary = primaryAction?.kind === 'mark-done'
+  const markDoneDisabledReason: string | null = isTerminal
+    ? null
+    : isMarkDonePrimary
+      ? null
+      : isPaused
+        ? 'Resume this Epic before marking it done.'
+        : unfinishedCount === 1
+          ? '1 linked issue remains unfinished.'
+          : `${unfinishedCount} linked issues remain unfinished.`
   const isClosed = epic.status === EpicStatus.Closed
   const isDone = epic.status === EpicStatus.Done
   const linkedIssueCount = epic.linkedIssues.length
@@ -551,7 +559,7 @@ export function EpicDetailPage() {
             >
               Edit
             </Button>
-            {isIdle && (
+            {primaryAction?.kind === 'start-epic' && (
               <Button
                 type="button"
                 onClick={() => startEpic.mutate(epicId)}
@@ -561,7 +569,7 @@ export function EpicDetailPage() {
                 {startEpic.isPending ? 'Starting...' : 'Start Epic'}
               </Button>
             )}
-            {isRunning && (
+            {primaryAction?.kind === 'pause-epic' && (
               <Button
                 type="button"
                 variant="outline"
@@ -572,7 +580,7 @@ export function EpicDetailPage() {
                 {pauseEpic.isPending ? 'Pausing...' : 'Pause'}
               </Button>
             )}
-            {isPaused && (
+            {primaryAction?.kind === 'resume-epic' && (
               <Button
                 type="button"
                 variant="outline"
@@ -583,16 +591,38 @@ export function EpicDetailPage() {
                 {resumeEpic.isPending ? 'Resuming...' : 'Resume'}
               </Button>
             )}
-            {!isDone && !isClosed && (
+            {primaryAction?.kind === 'mark-done' && (
               <Button
                 type="button"
                 onClick={() => markEpicDone.mutate(epic.id)}
-                disabled={markEpicDone.isPending || markDoneBlocked}
-                title={markDoneTooltip}
+                disabled={markEpicDone.isPending}
                 data-testid="mark-epic-done"
               >
                 {markEpicDone.isPending ? 'Marking...' : 'Mark Done'}
               </Button>
+            )}
+            {!isTerminal && !isMarkDonePrimary && (
+              <div
+                className="flex flex-col items-start gap-1 md:items-end"
+                data-testid="mark-done-disabled-region"
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled
+                  data-testid="mark-epic-done"
+                >
+                  Mark Done
+                </Button>
+                {markDoneDisabledReason && (
+                  <p
+                    data-testid="mark-done-disabled-reason"
+                    className="text-xs text-muted-foreground [overflow-wrap:anywhere]"
+                  >
+                    {markDoneDisabledReason}
+                  </p>
+                )}
+              </div>
             )}
             {!isDone && !isClosed && (
               <Button
