@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
 const FOCUS_BAIL_SELECTOR =
-  'input, textarea, select, [contenteditable="true"], [data-composer-input]'
+  'input, textarea, select, [contenteditable], [data-composer-input]'
 
 const ACTIVATION_THRESHOLD_PX = 120
 

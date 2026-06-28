@@ -312,6 +312,25 @@ describe('useTurnKeyboardNav', () => {
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
+    it('does not navigate when a [contenteditable] element without an explicit true value is focused', () => {
+      const { container } = setupHarness({
+        turnCount: 3,
+        containerTop: 0,
+        turnTops: [50, 1100, 2100],
+      })
+
+      const editable = document.createElement('div')
+      editable.setAttribute('contenteditable', '')
+      editable.tabIndex = 0
+      container.appendChild(editable)
+      editable.focus()
+
+      expect(document.activeElement).toBe(editable)
+
+      dispatchPageKeyDown('j')
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled()
+    })
+
     it('does not navigate when a [data-composer-input] element is focused (j)', () => {
       const { container } = setupHarness({
         turnCount: 3,
