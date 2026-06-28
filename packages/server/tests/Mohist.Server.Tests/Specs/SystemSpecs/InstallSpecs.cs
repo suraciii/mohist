@@ -104,7 +104,7 @@ public class InstallSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task InstallServer_WithoutCustomUrl_UsesDefaultListenUrl()
+    public async Task InstallServer_WithoutCustomUrl_OmitsListenUrl()
     {
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
@@ -125,7 +125,9 @@ public class InstallSpecs
         await installer.InstallServerAsync(options);
 
         var unitContent = files.Read("/units/mohist.service");
-        Assert.Contains("http://127.0.0.1:3456", unitContent);
+        Assert.DoesNotContain("--urls", unitContent);
+        Assert.DoesNotContain("http://", unitContent);
+        Assert.Contains("dotnet run --project", unitContent);
     }
 
     private sealed class FakeFileSystem : Mohist.Server.Tests.Support.FakeFileSystem

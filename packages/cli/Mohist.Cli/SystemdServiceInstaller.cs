@@ -31,14 +31,19 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
     {
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
+        // 默认不在 unit 里写死监听地址，让 server 读 ~/.mohist/config.jsonc；
+        // 仅当用户显式传 --listen-url 时才追加 --urls。
+        var serverArgs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(options.ListenUrl))
+        {
+            serverArgs.Add("--urls");
+            serverArgs.Add(options.ListenUrl);
+        }
         var unit = new SystemdUnit(
             Name: ServerUnit,
             Description: "Mohist Server",
             WorkingDirectory: repoRoot,
-            ExecStart: DotnetRun(ResolveExecutable("dotnet"), repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", [
-                "--urls",
-                options.ListenUrl ?? "http://127.0.0.1:3456",
-            ]),
+            ExecStart: DotnetRun(ResolveExecutable("dotnet"), repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", serverArgs),
             Environment: new Dictionary<string, string>
             {
                 ["PATH"] = BuildServicePath(),

@@ -67,8 +67,11 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         var taskName = ServerTaskName;
         var startupPath = ServerStartupPath();
         var metadataPath = ServerMetadataPath();
-        var listenUrl = options.ListenUrl ?? "http://127.0.0.1:3456";
-        var spec = new ServerLauncherSpec(SanitizeForCmdAssignment(repoRoot), SanitizeForCmdAssignment(listenUrl));
+        var listenUrl = options.ListenUrl;
+        // 默认不写死监听地址，让 server 读 ~/.mohist/config.jsonc；仅当用户显式
+        // 传 --listen-url 时才生成 ASPNETCORE_URLS 行。
+        var sanitizedListenUrl = listenUrl is null ? null : SanitizeForCmdAssignment(listenUrl);
+        var spec = new ServerLauncherSpec(SanitizeForCmdAssignment(repoRoot), sanitizedListenUrl);
         var launcherBody = RenderServerLauncher(spec);
 
         if (options.DryRun)
@@ -746,13 +749,12 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         var logFile = @"%USERPROFILE%\.mohist\server\out.log";
         var project = @"packages\server\src\Mohist.Server\Mohist.Server.csproj";
         var repoRoot = QuoteForCmdBody(spec.RepoRoot);
-        if (string.IsNullOrEmpty(spec.ListenUrl))
-            throw new ArgumentException("ServerLauncherSpec.ListenUrl must be provided", nameof(spec));
 
         var sb = new StringBuilder();
         sb.AppendLine("@echo off");
         sb.AppendLine($"cd /d {repoRoot}");
-        sb.AppendLine($"set \"ASPNETCORE_URLS={spec.ListenUrl}\"");
+        if (!string.IsNullOrEmpty(spec.ListenUrl))
+            sb.AppendLine($"set \"ASPNETCORE_URLS={spec.ListenUrl}\"");
         sb.AppendLine($"dotnet run --project {project} >> \"{logFile}\" 2>&1");
         return sb.ToString();
     }

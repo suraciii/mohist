@@ -187,6 +187,36 @@ public class WindowsInstallSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
+    public void RenderServerLauncher_WithoutListenUrl_OmitsAspnetcoreUrls()
+    {
+        var installer = CreateInstaller(new FakeFileSystem(), new FakeCommandExecutor());
+        var body = installer.RenderServerLauncher(
+            new WindowsScheduledTaskInstaller.ServerLauncherSpec(@"C:\repo", null));
+
+        Assert.DoesNotContain("ASPNETCORE_URLS", body);
+        Assert.Contains("dotnet run --project", body);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
+    public async Task InstallServer_WithoutListenUrl_OmitsAspnetcoreUrlsInLauncher()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var installer = CreateInstaller(files, commands);
+
+        var exitCode = await installer.InstallServerAsync(InstallOptions(repoRoot: @"C:\repo"));
+
+        Assert.Equal(0, exitCode);
+        var body = files.ReadAllText(ServerLauncher);
+        Assert.DoesNotContain("ASPNETCORE_URLS", body);
+        Assert.Contains("dotnet run --project", body);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
+    [Fact]
     public void QuoteForCmdBody_And_QuoteForSchtasksTr_ProduceDifferentOutputs_ForSamePath()
     {
         // The two helpers target different runtimes (cmd body vs. schtasks /TR
