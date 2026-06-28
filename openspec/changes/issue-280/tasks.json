@@ -23,7 +23,7 @@
       "type": "WRITE",
       "output": "Updated LinkedIssueRow in EpicDetailPage.tsx; new model/startBlockerReason.ts + test; updated/added component tests",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Design D1 (vertical layout), D2 (title wrapping), D3 (start-blocker reason derivation). Desktop also uses the vertical layout — no md: dual-branch. Keep Start button existing behavior and testid."
     },
     {
@@ -47,7 +47,7 @@
       "type": "WRITE",
       "output": "Updated LinkedIssueRow with confirmation dialog in EpicDetailPage.tsx; updated component tests",
       "dependsOn": ["T-001"],
-      "passes": false,
+      "passes": true,
       "notes": "Design D4. Reuse existing Dialog component (same pattern as Close/Pause confirm dialogs at EpicDetailPage.tsx:905-985). Confirmation state is local to LinkedIssueRow, not hoisted to page. Do NOT use window.confirm (AGENTS.md: no real external systems)."
     },
     {
@@ -71,7 +71,7 @@
       "type": "WRITE",
       "output": "Updated graph region in EpicDetailPage.tsx; updated/added component tests",
       "dependsOn": [],
-      "passes": false,
+      "passes": true,
       "notes": "Design D5. Pure CSS degradation — no useMediaQuery/useIsMobile JS hook. Use md:overflow-visible on the scroll container for desktop to avoid unnecessary scrollbars. Tab toggle (EpicDetailPage.tsx:798-828) classes and data-testids stay unchanged."
     },
     {
@@ -95,7 +95,7 @@
       "type": "WRITE",
       "output": "Updated graph region with banner logic and showList extension in EpicDetailPage.tsx; new Error Boundary component; updated/added tests",
       "dependsOn": ["T-003"],
-      "passes": false,
+      "passes": true,
       "notes": "Design D6. Renderability type stays 'renderable'|'cyclic'|'empty' — unknown states are covered by the fallback banner text, not by extending the type. Error Boundary is lightweight and wraps only DependencyGraphWidget."
     }
   ]

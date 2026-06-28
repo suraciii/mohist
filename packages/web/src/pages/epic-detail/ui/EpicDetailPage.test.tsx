@@ -3181,7 +3181,7 @@ describe('EpicDetailPage linked issues view toggle', () => {
     expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
   })
 
-  it('hides the toggle entirely when the epic has zero linked issues and shows the list', () => {
+  it('keeps the Graph tab reachable with an empty-data explanation when the epic has zero linked issues', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpicWithLinkedIssues([]),
       isLoading: false,
@@ -3190,11 +3190,23 @@ describe('EpicDetailPage linked issues view toggle', () => {
     renderPage()
 
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
-    expect(screen.queryByTestId('linked-issues-view-toggle')).toBeNull()
-    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    expect(screen.getByTestId('linked-issues-view-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const graphRegion = screen.getByTestId('linked-issues-graph-region')
+    expect(graphRegion).toHaveAttribute('data-renderability', 'empty')
+    const banner = screen.getByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toHaveAttribute('data-reason', 'empty')
+    expect(banner.textContent).toMatch(/not enough/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+    expect(screen.getByTestId('linked-issues-list-region')).toHaveAttribute('data-fallback-for', 'empty')
+    expect(screen.getByText('No linked issues yet.')).toBeInTheDocument()
   })
 
-  it('hides the toggle when the epic has exactly one linked issue and shows the list', () => {
+  it('keeps the Graph tab reachable with an empty-data explanation when the epic has exactly one linked issue', () => {
     mocks.useEpic.mockReturnValue({
       data: makeEpicWithLinkedIssues([
         makeLinkedIssue({ id: 'issue-1', number: 1, title: 'Lone issue' }),
@@ -3205,8 +3217,21 @@ describe('EpicDetailPage linked issues view toggle', () => {
     renderPage()
 
     expect(screen.getByTestId('linked-issues-list-region')).toBeInTheDocument()
-    expect(screen.queryByTestId('linked-issues-view-toggle')).toBeNull()
-    expect(screen.queryByTestId('linked-issues-graph-region')).toBeNull()
+    expect(screen.getByTestId('linked-issues-view-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issues-view-list')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('linked-issues-view-graph')).toHaveAttribute('aria-selected', 'false')
+
+    fireEvent.click(screen.getByTestId('linked-issues-view-graph'))
+
+    const graphRegion = screen.getByTestId('linked-issues-graph-region')
+    expect(graphRegion).toHaveAttribute('data-renderability', 'empty')
+    const banner = screen.getByTestId('linked-issues-graph-unavailable-banner')
+    expect(banner).toHaveAttribute('data-reason', 'empty')
+    expect(banner.textContent).toMatch(/not enough/i)
+    expect(banner.textContent).toMatch(/use the list below/i)
+    expect(screen.getByTestId('linked-issues-list-region')).toHaveAttribute('data-fallback-for', 'empty')
+    expect(screen.getByText('Lone issue')).toBeInTheDocument()
+    expect(screen.getByTestId('linked-issue-row')).toBeInTheDocument()
   })
 
   it('falls back to the list view when the graph reports a cycle', async () => {

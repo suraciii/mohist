@@ -561,11 +561,15 @@ export function EpicDetailPage() {
   const advancementInfo = useMemo(() => advancementCopy(advancement), [advancement])
 
   const linkedIssuesForGraph = epic?.linkedIssues ?? []
-  const graphAvailable = linkedIssuesForGraph.length >= 2
-  const graphSelected = graphAvailable && linkedIssuesView === 'graph'
+  const graphSelected = linkedIssuesView === 'graph'
   const linkedIssuesGraphInputKey = graphInputKey(linkedIssuesForGraph)
-  const graphHasReported = graphRenderError || graphRenderable.reason !== null
-  const graphUnrenderable = graphHasReported && !graphRenderable.renderable
+  const graphEmptyByInput = linkedIssuesForGraph.length < 2
+  const effectiveGraphRenderable = graphEmptyByInput
+    ? { renderable: false, reason: 'empty' as const }
+    : graphRenderable
+  const effectiveGraphRenderError = graphEmptyByInput ? false : graphRenderError
+  const graphHasReported = effectiveGraphRenderError || effectiveGraphRenderable.reason !== null
+  const graphUnrenderable = graphSelected && graphHasReported && !effectiveGraphRenderable.renderable
   const showList = !graphSelected || graphUnrenderable
 
   useEffect(() => {
@@ -889,45 +893,43 @@ export function EpicDetailPage() {
       <Card className="p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-foreground">Linked Issues</h2>
-          {graphAvailable && (
-            <div
-              role="tablist"
-              aria-label="Linked Issues view"
-              data-testid="linked-issues-view-toggle"
-              className="inline-flex items-center rounded-md border bg-muted/40 p-0.5 text-sm"
+          <div
+            role="tablist"
+            aria-label="Linked Issues view"
+            data-testid="linked-issues-view-toggle"
+            className="inline-flex items-center rounded-md border bg-muted/40 p-0.5 text-sm"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={linkedIssuesView === 'list'}
+              data-testid="linked-issues-view-list"
+              data-view="list"
+              onClick={() => setLinkedIssuesView('list')}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                linkedIssuesView === 'list'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={linkedIssuesView === 'list'}
-                data-testid="linked-issues-view-list"
-                data-view="list"
-                onClick={() => setLinkedIssuesView('list')}
-                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                  linkedIssuesView === 'list'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                List
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={linkedIssuesView === 'graph'}
-                data-testid="linked-issues-view-graph"
-                data-view="graph"
-                onClick={() => setLinkedIssuesView('graph')}
-                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                  linkedIssuesView === 'graph'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Graph
-              </button>
-            </div>
-          )}
+              List
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={linkedIssuesView === 'graph'}
+              data-testid="linked-issues-view-graph"
+              data-view="graph"
+              onClick={() => setLinkedIssuesView('graph')}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                linkedIssuesView === 'graph'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Graph
+            </button>
+          </div>
         </div>
         <form onSubmit={handleAddIssue} className="mt-4 flex flex-col gap-3 sm:flex-row">
           <EpicIssueSelector
@@ -956,11 +958,11 @@ export function EpicDetailPage() {
             className="mt-6"
             data-testid="linked-issues-graph-region"
             data-renderability={
-              graphRenderError
+              effectiveGraphRenderError
                 ? 'error'
-                : graphRenderable.renderable
+                : effectiveGraphRenderable.renderable
                   ? 'renderable'
-                  : (graphRenderable.reason ?? 'loading')
+                  : (effectiveGraphRenderable.reason ?? 'loading')
             }
           >
             <p
@@ -970,7 +972,10 @@ export function EpicDetailPage() {
               Graph works best on wider screens — swipe to explore.
             </p>
             {(() => {
-              const banner = deriveGraphBannerState({ graphRenderError, graphRenderable })
+              const banner = deriveGraphBannerState({
+                graphRenderError: effectiveGraphRenderError,
+                graphRenderable: effectiveGraphRenderable,
+              })
               if (!banner.show) return null
               return (
                 <div
@@ -1004,9 +1009,9 @@ export function EpicDetailPage() {
             data-testid="linked-issues-list-region"
             data-fallback-for={
               graphSelected
-                ? graphRenderError
+                ? effectiveGraphRenderError
                   ? 'error'
-                  : (graphRenderable.reason ?? undefined)
+                  : (effectiveGraphRenderable.reason ?? undefined)
                 : undefined
             }
           >
