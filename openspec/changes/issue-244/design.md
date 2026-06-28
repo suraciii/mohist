@@ -19,7 +19,8 @@ Both hooks are live-updating (SSE event subscriptions). `WorkflowRunSession` has
 
 **Constraints:**
 
-- Per the proposal, this is a **web-only change** — no server, runner, CLI, API, or persistence changes. Filtering and sorting are client-side in-memory computations over data already fetched by existing hooks.
+- Filtering and sorting are client-side in-memory computations over data fetched by existing hooks.
+- The workflow sessions API/read model is intentionally extended to include the list-discovery fields the frontend needs: stage, terminal status, `completedAt`, failure reason, and exit code. No runner, CLI, or persistence changes are required.
 - The spec requires the sidebar session set to match the panel set for the same workflow run, and navigation (prev/next) to follow `createdAt` ascending.
 
 ## Goals / Non-Goals

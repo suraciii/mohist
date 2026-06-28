@@ -29,5 +29,6 @@ Session 列表与发现面目前是碎片化且未完成的：`SessionDetail` �
   - `packages/web/src/widgets/issue-workflow/ui/WorkflowSessionsPanel.tsx`：接入筛选、排序控件，调整 `WorkflowSessionRow` 行布局。
   - `packages/web/src/pages/session/ui/SessionPage.tsx`：新增「前一个/后一个 session」导航与同级 sessions 侧边栏编排。
   - `packages/web/src/entities/coder-session/`：复用既有 `useCoderSessions` / `useWorkflowRunSessions` 数据源，新增筛选/排序/相邻 session 派生逻辑。
+- **server API/read model**：扩展 workflow sessions DTO/read model，使 `useWorkflowRunSessions` 能直接获得 stage、终态 status、`completedAt`、failure reason、exit code 等列表发现字段；这些字段支撑 status/stage 筛选、duration 排序与失败信息展示。
 - **测试**：`packages/web` 扩展筛选、排序、行换行、前/后导航、侧边栏渲染等用例。
-- **Server / Runner / CLI / API / 持久化**：无改动；筛选与排序为前端内存计算。
+- **Runner / CLI / 持久化**：无改动；筛选与排序为前端内存计算。
