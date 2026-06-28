@@ -19,49 +19,38 @@ Mohist 是 self-hosted 产品。这篇覆盖长跑部署、开机自启、远程
 
 ### Linux（systemd user service）
 
+前提：已按 [快速上手](getting-started.md) `npm install && npm run build` 构建过，并装好 `mo` CLI（仓库内 `bash scripts/install-mo.sh`）。
+
 ```bash
-# 创建 user systemd 目录
-mkdir -p ~/.config/systemd/user/
-
-# 安装 Mohist
-mo install
-
-# 安装为 systemd user service
-mo install service --type systemd-user
-
-# 启动 + 开机自启
-systemctl --user start mohist-server
-systemctl --user start mohist-runner
-systemctl --user enable mohist-server mohist-runner
-
-# 让 user service 在你没登录时也跑
-loginctl enable-linger $USER
+# 安装为 systemd user service（自动写 unit、enable、启动、enable-linger）
+mo install server
+mo install runner
 ```
+
+两个 unit：`mohist.service`（server）、`mohist-runner.service`（runner）。`mo install` 已自动 `enable` + `restart` + `loginctl enable-linger`，所以**未登录或开机也会运行**。
 
 常用命令：
 
 ```bash
-systemctl --user status mohist-server
-systemctl --user status mohist-runner
-systemctl --user restart mohist-server
-journalctl --user -u mohist-server -f    # 实时日志
+systemctl --user status mohist mohist-runner
+systemctl --user restart mohist             # 或：mo update server（推荐）
+journalctl --user -u mohist -f               # 实时日志
 ```
 
-### macOS（launchd）
+> 重启受管理服务优先用 `mo update server` / `mo update runner`，不要手动 `dotnet run`：会触发 runner id 漂移，导致 workflow sticky assignment 失配。
 
-```bash
-mo install service --type launchd
-```
+### macOS
 
-会在 `~/Library/LaunchAgents/` 下生成 plist，登录后自动启动。
+`mo install` 暂不支持 macOS（CLI 仅实现 Linux systemd 与 Windows 计划任务）。开发期用 `npm run dev:server` / `npm run dev:runner`，或自行编写 launchd plist。
 
 ### Windows（Scheduled Task）
 
-```powershell
-mo install service --type scheduled-task
+```bash
+mo install server
+mo install runner
 ```
 
-会在 Task Scheduler 里创建登录时启动的任务。
+会按平台自动在 Task Scheduler 里创建登录时启动的任务。
 
 ## 场景 2：家用 server / NAS（always-on）
 
@@ -72,13 +61,14 @@ mo install service --type scheduled-task
 1. **装系统依赖**：.NET 11 SDK、Node 18、opencode（按官方文档）
 2. **clone Mohist 仓库**：`git clone <mohist> /opt/mohist && cd /opt/mohist && npm install && npm run build`
 3. **创建专用用户**（推荐）：`sudo useradd -m -s /bin/bash mohist`
-4. **配 systemd system service**：
+4. **装为 systemd user service**（在专用用户下运行）：
 
 ```bash
-sudo mo install service --type systemd --user mohist
-sudo systemctl enable --now mohist-server
-sudo systemctl enable --now mohist-runner
+sudo -u mohist mo install server --repo-root /opt/mohist
+sudo -u mohist mo install runner --repo-root /opt/mohist
 ```
+
+Mohist 目前只提供 systemd **user** service（非 system service）。专用用户 + `enable-linger`（`mo install` 会自动执行）即可实现 always-on、开机自启。
 
 5. **从你的笔记本访问**：
 
@@ -213,7 +203,8 @@ cd /opt/mohist
 git pull
 npm install
 npm run build
-sudo systemctl restart mohist-server mohist-runner
+mo update            # 重建并以受管理方式重启 server + runner（同步更新 mo CLI）
+# 或只更新其一：mo update server / mo update runner
 ```
 
 升级前**备份数据库**。Mohist 还没有自动迁移（roadmap），版本间 schema 偶尔会变。
@@ -223,8 +214,8 @@ sudo systemctl restart mohist-server mohist-runner
 简单的健康检查：
 
 ```bash
-# cron 每 5 分钟检查
-*/5 * * * * curl -sf http://localhost:3456/api/health || systemctl restart mohist-server
+# user cron 每 5 分钟检查（user service 要加 --user）
+*/5 * * * * curl -sf http://localhost:3456/api/health || systemctl --user restart mohist
 ```
 
 严肃监控：把 Mohist 日志接到 Loki / ELK，把 health 接到 Prometheus / Uptime Kuma。
