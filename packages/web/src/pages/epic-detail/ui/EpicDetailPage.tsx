@@ -21,6 +21,11 @@ import {
   primaryLifecycleAction,
   type PrimaryLifecycleAction,
 } from '../model/primaryLifecycleAction'
+import {
+  advancementCopy,
+  deriveAdvancementState,
+  type AdvancementState,
+} from '../model/advancement'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
@@ -107,7 +112,7 @@ function LinkedIssueRow({
     <Card className="flex items-center justify-between gap-4 p-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Link to={toProjectPath(`/issues/${issue.number}`)} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
+          <Link to={toProjectPath(`/issues/${issue.number}`)} data-testid="linked-issue-nav-link" data-issue-number={issue.number} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
             #{issue.number}
           </Link>
           <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
@@ -229,6 +234,46 @@ function CurrentActivityList({
         </li>
       ))}
     </ul>
+  )
+}
+
+interface NextIssueAdvancementCopyProps {
+  advancement: AdvancementState
+  copy: ReturnType<typeof advancementCopy>
+  toProjectPath: (path: string) => string
+}
+
+function NextIssueAdvancementCopy({ advancement, copy, toProjectPath }: NextIssueAdvancementCopyProps) {
+  if (advancement.kind === 'has-next') {
+    return null
+  }
+  if (copy.linkNumbers.length === 0) {
+    return (
+      <div
+        className="mt-1.5 text-sm text-foreground/80"
+        data-testid="advancement-copy"
+      >
+        {copy.text}
+      </div>
+    )
+  }
+  return (
+    <div className="mt-1.5 space-y-1" data-testid="advancement-copy">
+      <div className="text-sm text-foreground/80">{copy.text}</div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        {copy.linkNumbers.map(number => (
+          <Link
+            key={number}
+            to={toProjectPath(`/issues/${number}`)}
+            data-testid="advancement-link"
+            data-issue-number={number}
+            className="font-medium text-blue-600 hover:text-blue-700 hover:underline"
+          >
+            #{number}
+          </Link>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -422,6 +467,14 @@ export function EpicDetailPage() {
     [availableIssues],
   )
 
+  const advancement: AdvancementState = useMemo(
+    () => epic
+      ? deriveAdvancementState({ epicStatus: epic.status, linkedIssues: epic.linkedIssues })
+      : { kind: 'nothing-pending' },
+    [epic],
+  )
+  const advancementInfo = useMemo(() => advancementCopy(advancement), [advancement])
+
   if (isLoading) {
     return <div className="flex items-center justify-center py-12 text-muted-foreground">Loading...</div>
   }
@@ -541,14 +594,6 @@ export function EpicDetailPage() {
               )}
             </div>
             <h1 className="mt-2 text-2xl font-bold text-foreground [overflow-wrap:anywhere]">{epic.title}</h1>
-            {epic.description && (
-              <div
-                className="mt-3 text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]"
-                data-testid="epic-description"
-              >
-                <MarkdownReader content={epic.description} baseHeadingLevel={3} />
-              </div>
-            )}
           </div>
           <div className="flex flex-wrap justify-start gap-2 md:justify-end">
             <Button
@@ -638,9 +683,19 @@ export function EpicDetailPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-6 grid gap-4 md:grid-cols-3" data-testid="summary-grid">
           <div className="rounded-lg bg-muted p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Progress</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Progress</div>
+              {epic.progress.readyToMarkDone && !isTerminal && (
+                <span
+                  data-testid="progress-ready-to-mark-done"
+                  className="rounded bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-700"
+                >
+                  Ready to mark done
+                </span>
+              )}
+            </div>
             <div className="mt-2 text-2xl font-semibold text-foreground">
               {epic.progress.deliveredCount} / {epic.progress.totalIssueCount}
             </div>
@@ -651,24 +706,56 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next Issue</div>
             {epic.progress.nextIssue ? (
-              <Link
-                to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)}
-                data-testid="next-issue"
-                className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
-              >
-                #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
-              </Link>
-            ) : epic.progress.readyToMarkDone ? (
-              <div className="mt-2 text-sm font-medium text-green-700">Ready to mark done</div>
-            ) : epic.progress.nextIssueReason ? (
-              <div
-                className="mt-2 text-sm text-foreground/80"
-                data-testid="next-issue-reason"
-              >
-                {epic.progress.nextIssueReason}
+              <div className="mt-2" data-testid="next-issue-region">
+                <Link
+                  to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)}
+                  data-testid="next-issue"
+                  className="block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                  #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
+                </Link>
+                <NextIssueAdvancementCopy
+                  advancement={advancement}
+                  copy={advancementInfo}
+                  toProjectPath={toProjectPath}
+                />
               </div>
-            ) : (
+            ) : epic.progress.readyToMarkDone ? (
+              <div
+                className="mt-2 text-sm font-medium text-green-700"
+                data-testid="next-issue-ready-to-mark-done"
+              >
+                Ready to mark done
+              </div>
+            ) : epic.linkedIssues.length === 0 ? (
               <div className="mt-2 text-sm text-muted-foreground">No linked issues yet</div>
+            ) : (
+              <div className="mt-2 space-y-1.5" data-testid="advancement-copy">
+                <div className="text-sm text-foreground/80">{advancementInfo.text}</div>
+                {advancementInfo.linkNumbers.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                    {advancementInfo.linkNumbers.map(number => (
+                      <Link
+                        key={number}
+                        to={toProjectPath(`/issues/${number}`)}
+                        data-testid="advancement-link"
+                        data-issue-number={number}
+                        className="font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        #{number}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {isPaused && (
+              <p
+                data-testid="resume-re-evaluation-hint"
+                className="mt-2 text-xs text-muted-foreground"
+              >
+                Resuming will re-evaluate advancement (readiness and the next startable issue).
+              </p>
             )}
           </div>
           <div className="rounded-lg bg-muted p-4">
@@ -680,6 +767,23 @@ export function EpicDetailPage() {
           </div>
         </div>
       </Card>
+
+      {epic.description && (
+        <Card className="p-6" data-testid="overview-card">
+          <h2 className="text-lg font-semibold text-foreground">Overview</h2>
+          <div
+            className="mt-3 text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]"
+            data-testid="epic-description"
+          >
+            <MarkdownReader
+              content={epic.description}
+              baseHeadingLevel={3}
+              mode="collapsible"
+              collapsedHeight={320}
+            />
+          </div>
+        </Card>
+      )}
 
       <Card className="p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
