@@ -1,0 +1,19 @@
+## Codebase Patterns
+
+- Top-level CLI command groups follow the pattern in `MohistCliCommands.Agent.cs`, `Otel.cs`, `Server.cs` etc.: `static class XxxCommands { public static Command Build(MohistCliApi api[, IServiceProvider provider]) }`, registered in `MohistCliCommands.Build`. Use `MohistCliApi.OutputOption(defaultValue)` for `-o`, `MohistCliApi.ValidateOutputMode` for parsing, `MohistCliApi.RenderTableAsync` only for tabular data.
+- For single-object multi-section rendering (e.g. `runner show`), use a dedicated `RenderXxx(JsonObject)` helper inside `MohistCliApi` alongside the public `PrintXxxAsync` method, NOT the `TableShape` dispatch — the existing `RenderRunnerShow` (`MohistCliApi.cs:341`) is the established pattern.
+- `SystemInfoResponse` (`packages/server/src/Mohist.Server/SystemInfo/SystemInfoDtos.cs:87`) is nested: `{ running, source, install, update, services, paths }`, each with its own subfields. System.Text.Json with `JsonSerializerDefaults.Web` (used by both server's `ApiResults.Ok` and CLI's `JsonOptions`) serializes PascalCase record fields as camelCase, so navigate nested fields as `running.version`, `source.dirty` etc.
+- `PrintResponseAsync` already strips `{ success, data }` envelopes, but it only handles happy-path printing. For commands needing both table + JSON with degraded fallback, do the HTTP call manually + read `node["data"]` directly, similar to `PrintRunnerShowAsync` (`MohistCliApi.cs:285`).
+- For graceful server-down degradation, always print the notice to `_err` (TextWriter Error) AND a local subset to `_out`, regardless of mode. JSON mode wraps the local subset as a partial `{running/source/install/update/services/paths: null, cliVersion, degraded: true}` object (mirroring `SystemInfoResponse`) so JSON consumers get a stable shape.
+- `TryGetCliVersion` derives version locally from the Mohist.Cli assembly's `AssemblyInformationalVersionAttribute` (stripping the `+<hash>` suffix if present). Does NOT pull in `InfoCollector` (Decision 3 — coupling avoided).
+- xUnit CLI specs in `packages/cli/tests/Mohist.Cli.Tests/` use `RecordingHttpHandler` + `MohistCliCommands.RunAsync(http, args, output, error, fileSystem, executor, env)` pattern, with `FakeFileSystem` for active project state and `MockEnvironmentVariableProvider` (from `EnvironmentAbstractions.TestHelpers` package) for env vars.
+- `MohistCliCommands.cs:152` builds the parser with `CommandLineParser.Parse(root, args, parseConfig).InvokeAsync(config)`. `Output`/`Error` go through the same `TextWriter`s provided to `RunAsync`, so tests can assert on stdout/stderr separately.
+
+## T-001 Discoveries
+
+- `mo system info` is the first new top-level group in `MohistCliCommands.Build`; inserted between `InfoCommands` and `ServerCommands` (matches the proposal: top-level alongside `info`/`status`).
+- The endpoint `/api/system/info` (`SystemRoutes.cs:12`) is genuinely global — no project resolution needed. `_http.GetAsync("/api/system/info")` works without `ResolveProjectIdAsync`.
+- Record types serialize as camelCase via `JsonSerializerDefaults.Web`, so nested traversal reads `data["running"]?["version"]` (not `data["Running"]?["Version"]`).
+- `WriteKeyValue` (`MohistCliApi.cs:416`) prints empty value as `key:` (no trailing space), matching the established `RenderRunnerShow` style.
+- Tests should import `EnvironmentAbstractions.TestHelpers` for `MockEnvironmentVariableProvider`. `FakeFileSystem` path normalization uses `Path.GetFullPath`, so absolute paths from `Environment.GetFolderPath(SpecialFolder.UserProfile)` work consistently.
+- The live `mo system info` against the dev server produces six sections with all fields populated; the dev `mohist.service` shows `mode: local-source`, `serviceManager: systemd-user`, full Identity/Source/Install/Update/Services/Paths.

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -410,6 +411,165 @@ internal sealed class MohistCliApi
             if (used is not null && total is not null)
                 WriteKeyValue("  capacity", $"{used}/{total} slots");
         }
+    }
+
+    public async Task<int> PrintSystemInfoAsync(string mode)
+    {
+        HttpResponseMessage response;
+        try
+        {
+            response = await _http.GetAsync("/api/system/info");
+        }
+        catch (HttpRequestException)
+        {
+            await RenderSystemInfoDegradedAsync(mode);
+            return 0;
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+
+        if (node is null)
+        {
+            await RenderSystemInfoDegradedAsync(mode);
+            return 0;
+        }
+
+        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
+        if (!success)
+        {
+            var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+            var code = node["code"]?.GetValue<string>();
+            _err.WriteLine(code is null ? error : $"{error} ({code})");
+            return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+
+        var data = node["data"];
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            _out.WriteLine(data is null ? "null" : data.ToJsonString(JsonOptions));
+            return 0;
+        }
+
+        if (data is JsonObject obj)
+        {
+            RenderSystemInfo(obj);
+            return 0;
+        }
+
+        _out.WriteLine(data is null ? "(no data)" : data.ToJsonString(JsonOptions));
+        return 0;
+    }
+
+    private async Task RenderSystemInfoDegradedAsync(string mode)
+    {
+        var cliVersion = TryGetCliVersion();
+
+        _err.WriteLine("Server is not running. Start with: mo server start");
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            var payload = new JsonObject
+            {
+                ["running"] = null,
+                ["source"] = null,
+                ["install"] = null,
+                ["update"] = null,
+                ["services"] = null,
+                ["paths"] = null,
+                ["cliVersion"] = cliVersion,
+                ["degraded"] = true,
+            };
+            _out.WriteLine(payload.ToJsonString(JsonOptions));
+            await Task.CompletedTask;
+            return;
+        }
+
+        _out.WriteLine("Server diagnostics unavailable (server not reachable).");
+        _out.WriteLine();
+        _out.WriteLine("CLI (local)");
+        WriteKeyValue("  version", cliVersion ?? "<unknown>");
+        await Task.CompletedTask;
+    }
+
+    internal void RenderSystemInfo(JsonObject data)
+    {
+        var running = data["running"] as JsonObject;
+        var source = data["source"] as JsonObject;
+        var install = data["install"] as JsonObject;
+        var update = data["update"] as JsonObject;
+        var services = data["services"] as JsonObject;
+        var paths = data["paths"] as JsonObject;
+
+        _out.WriteLine("Identity");
+        WriteKeyValue("  version", StringOfNullable(running, "version"));
+        WriteKeyValue("  gitHash", StringOfNullable(running, "gitHash"));
+        WriteKeyValue("  startedAt", StringOfNullable(running, "startedAt"));
+
+        _out.WriteLine();
+        _out.WriteLine("Source");
+        WriteKeyValue("  path", StringOfNullable(source, "path"));
+        WriteKeyValue("  branch", StringOfNullable(source, "branch"));
+        WriteKeyValue("  head", StringOfNullable(source, "head"));
+        WriteKeyValue("  dirty", BoolOfNullable(source, "dirty")?.ToString().ToLowerInvariant() ?? "");
+
+        _out.WriteLine();
+        _out.WriteLine("Install");
+        WriteKeyValue("  mode", StringOfNullable(install, "mode"));
+        WriteKeyValue("  serviceManager", StringOfNullable(install, "serviceManager"));
+        WriteKeyValue("  serverUnit", StringOfNullable(install, "serverUnit"));
+        WriteKeyValue("  runnerUnit", StringOfNullable(install, "runnerUnit"));
+        WriteKeyValue("  reason", StringOfNullable(install, "reason"));
+
+        _out.WriteLine();
+        _out.WriteLine("Update");
+        WriteKeyValue("  status", StringOfNullable(update, "status"));
+        WriteKeyValue("  available", BoolOfNullable(update, "available")?.ToString().ToLowerInvariant() ?? "");
+        WriteKeyValue("  reason", StringOfNullable(update, "reason"));
+
+        _out.WriteLine();
+        _out.WriteLine("Services");
+        WriteKeyValue("  server", StringOfNullable(services, "server"));
+        WriteKeyValue("  runner", StringOfNullable(services, "runner"));
+
+        _out.WriteLine();
+        _out.WriteLine("Paths");
+        WriteKeyValue("  db", StringOfNullable(paths, "db"));
+        WriteKeyValue("  config", StringOfNullable(paths, "config"));
+        WriteKeyValue("  logs", StringOfNullable(paths, "logs"));
+        WriteKeyValue("  opencode", StringOfNullable(paths, "opencode"));
+    }
+
+    private static string? TryGetCliVersion()
+    {
+        try
+        {
+            var assembly = typeof(MohistCliApi).Assembly;
+            var informationalVersion = assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(informationalVersion))
+            {
+                var plusIndex = informationalVersion.IndexOf('+');
+                if (plusIndex > 0)
+                    return informationalVersion[..plusIndex];
+                return informationalVersion;
+            }
+
+            return assembly.GetName().Version?.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? BoolOfNullable(JsonNode? node, string key)
+    {
+        if (node is null) return null;
+        var value = node[key];
+        if (value is null) return null;
+        return value.GetValue<bool>();
     }
 
     private void WriteKeyValue(string key, string value)
