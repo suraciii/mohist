@@ -4,23 +4,38 @@ import { onAgentEvent } from '../../agent/@x/events'
 import { getWorkflowRunSessions } from '../api/client'
 import type { WorkflowRunSession } from './types'
 
+const EMPTY_SESSIONS: WorkflowRunSession[] = []
+
+interface LiveSessionState {
+  workflowRunId: string | null | undefined
+  sessions: WorkflowRunSession[]
+}
+
 export function useWorkflowRunSessions(workflowRunId: string | null | undefined) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['workflow-runs', workflowRunId, 'sessions'] as const, [workflowRunId])
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = EMPTY_SESSIONS, isLoading } = useQuery({
     queryKey,
     queryFn: () => getWorkflowRunSessions(workflowRunId!),
     enabled: !!workflowRunId,
     staleTime: 30 * 1000,
   })
 
-  const [liveSessions, setLiveSessions] = useState<WorkflowRunSession[]>([])
+  const [liveState, setLiveState] = useState<LiveSessionState>({
+    workflowRunId: null,
+    sessions: EMPTY_SESSIONS,
+  })
   const mountedRef = useRef(true)
 
   useEffect(() => {
-    if (isLoading) return
-    setLiveSessions([...sessions])
-  }, [sessions, isLoading])
+    if (!workflowRunId || isLoading) {
+      setLiveState((prev) => prev.workflowRunId === workflowRunId
+        ? prev
+        : { workflowRunId, sessions: EMPTY_SESSIONS })
+      return
+    }
+    setLiveState({ workflowRunId, sessions })
+  }, [workflowRunId, sessions, isLoading])
 
   useEffect(() => {
     mountedRef.current = true
@@ -39,47 +54,62 @@ export function useWorkflowRunSessions(workflowRunId: string | null | undefined)
       }),
       onAgentEvent('coder_session_completed', (detail) => {
         if (!mountedRef.current) return
-        setLiveSessions((prev) => prev.map((session) =>
-          session.id === detail.coderSessionId
-            ? { ...session, status: detail.status, completedAt: new Date().toISOString() }
-            : session,
-        ))
+        setLiveState((prev) => prev.workflowRunId === workflowRunId
+          ? {
+              ...prev,
+              sessions: prev.sessions.map((session) =>
+                session.id === detail.coderSessionId
+                  ? { ...session, status: detail.status, completedAt: new Date().toISOString() }
+                  : session,
+              ),
+            }
+          : prev)
       }),
       onAgentEvent('coder_session_status_changed', (detail) => {
         if (!mountedRef.current) return
-        setLiveSessions((prev) => prev.map((session) =>
-          session.id === detail.coderSessionId
-            ? {
-                ...session,
-                status: detail.status,
-                acpSessionId: detail.acpSessionId ?? session.acpSessionId,
-                ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
-                ...(detail.failureReason !== undefined && { failureReason: detail.failureReason }),
-              }
-            : session,
-        ))
+        setLiveState((prev) => prev.workflowRunId === workflowRunId
+          ? {
+              ...prev,
+              sessions: prev.sessions.map((session) =>
+                session.id === detail.coderSessionId
+                  ? {
+                      ...session,
+                      status: detail.status,
+                      acpSessionId: detail.acpSessionId ?? session.acpSessionId,
+                      ...(detail.lastDataAt !== undefined && { lastDataAt: detail.lastDataAt }),
+                      ...(detail.failureReason !== undefined && { failureReason: detail.failureReason }),
+                    }
+                  : session,
+              ),
+            }
+          : prev)
       }),
       onAgentEvent('usage.updated', (detail) => {
         if (!mountedRef.current) return
-        setLiveSessions((prev) => prev.map((session) =>
-          session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
-            ? {
-                ...session,
-                usage: {
-                  ...(session.usage ?? {}),
-                  ...(detail.inputTokens !== undefined && { inputTokens: detail.inputTokens }),
-                  ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
-                  ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
-                  ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
-                  ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
-                  ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
-                  ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
-                  ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
-                  ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
-                },
-              }
-            : session,
-        ))
+        setLiveState((prev) => prev.workflowRunId === workflowRunId
+          ? {
+              ...prev,
+              sessions: prev.sessions.map((session) =>
+                session.id === detail.coderSessionId || session.acpSessionId === detail.acpSessionId
+                  ? {
+                      ...session,
+                      usage: {
+                        ...(session.usage ?? {}),
+                        ...(detail.inputTokens !== undefined && { inputTokens: detail.inputTokens }),
+                        ...(detail.outputTokens !== undefined && { outputTokens: detail.outputTokens }),
+                        ...(detail.totalTokens !== undefined && { totalTokens: detail.totalTokens }),
+                        ...(detail.cachedReadTokens !== undefined && { cachedReadTokens: detail.cachedReadTokens }),
+                        ...(detail.thoughtTokens !== undefined && { thoughtTokens: detail.thoughtTokens }),
+                        ...(detail.costAmount !== undefined && { costAmount: detail.costAmount }),
+                        ...(detail.costCurrency !== undefined && { costCurrency: detail.costCurrency }),
+                        ...(detail.contextWindowUsed !== undefined && { contextWindowUsed: detail.contextWindowUsed }),
+                        ...(detail.contextWindowSize !== undefined && { contextWindowSize: detail.contextWindowSize }),
+                      },
+                    }
+                  : session,
+              ),
+            }
+          : prev)
       }),
     ]
 
@@ -90,7 +120,7 @@ export function useWorkflowRunSessions(workflowRunId: string | null | undefined)
   }, [workflowRunId, queryClient, queryKey])
 
   return {
-    sessions: liveSessions,
+    sessions: liveState.workflowRunId === workflowRunId ? liveState.sessions : EMPTY_SESSIONS,
     isLoading,
   }
 }

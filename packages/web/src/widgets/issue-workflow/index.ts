@@ -24,3 +24,23 @@ export type {
   RuntimeCurrentTask,
   RuntimeSummary,
 } from './model/derive-runtime-decision'
+export {
+  WORKFLOW_PIPELINE_STAGES,
+  WORKFLOW_SESSION_SORT_KEYS,
+  computeSessionDurationMs,
+  getSessionPipelineStage,
+  getSessionTotalTokens,
+  isTerminalSessionStatus,
+  useWorkflowSessionFiltering,
+} from './model/useWorkflowSessionFiltering'
+export type {
+  UseWorkflowSessionFilteringOptions,
+  UseWorkflowSessionFilteringResult,
+  WorkflowPipelineStage,
+  WorkflowSessionSortKey,
+} from './model/useWorkflowSessionFiltering'
+export { useSiblingSessions } from './model/useSiblingSessions'
+export type {
+  SiblingSessionNavigation,
+  UseSiblingSessionsOptions,
+} from './model/useSiblingSessions'
