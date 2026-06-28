@@ -34,8 +34,8 @@ export function PromptBlock({ prompt }: PromptBlockProps) {
 
   if (isLegacy) {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-gray-300 text-white px-4 py-2.5 text-sm">
+      <div className="flex justify-end min-w-0">
+        <div className="max-w-[90%] sm:max-w-[80%] min-w-0 rounded-2xl rounded-br-sm bg-gray-300 text-white px-4 py-2.5 text-sm">
           <div className="flex items-center gap-2 text-xs text-gray-200 mb-1.5">
             <span className="font-medium">{KIND_LABELS[prompt.kind] ?? prompt.kind}</span>
             <span className="text-gray-300">·</span>
@@ -50,8 +50,8 @@ export function PromptBlock({ prompt }: PromptBlockProps) {
   }
 
   return (
-    <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-gray-200 text-gray-800 px-4 py-2.5 text-sm">
+    <div className="flex justify-end min-w-0">
+      <div className="max-w-[90%] sm:max-w-[80%] min-w-0 rounded-2xl rounded-br-sm bg-gray-200 text-gray-800 px-4 py-2.5 text-sm">
         <div className="flex items-center gap-2 text-xs text-gray-500 mb-1.5">
           <span className="font-medium">{KIND_LABELS[prompt.kind] ?? prompt.kind}</span>
           <span className="text-gray-400">·</span>

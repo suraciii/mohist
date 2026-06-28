@@ -1,6 +1,10 @@
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
-import { StickySessionTitle } from './StickySessionTitle'
+import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { TurnList } from './TurnList'
+import { TurnTocRail, buildTurnTocEntries } from './TurnToc'
+import { TranscriptToolbar } from './TranscriptToolbar'
+import { CopyFullTextButton } from './CopyFullTextButton'
 
 interface TranscriptEmptyStateProps {
   isRunning: boolean
@@ -23,6 +27,8 @@ export function TranscriptEmptyState({ isRunning }: TranscriptEmptyStateProps) {
   )
 }
 
+export type TurnRefsMap = Map<number, HTMLDivElement>
+
 interface SessionTranscriptLayoutProps {
   title: string
   turnCount: number
@@ -31,37 +37,57 @@ interface SessionTranscriptLayoutProps {
   isRunning: boolean
   isThinking?: boolean
   isStreaming?: boolean
+  scrollContainerRef?: RefObject<HTMLElement | null>
 }
 
 export function SessionTranscriptLayout({
-  title,
-  turnCount,
   turns,
-  statusKind,
   isRunning,
   isThinking,
   isStreaming,
+  scrollContainerRef,
 }: SessionTranscriptLayoutProps) {
-  return (
-    <div className="flex flex-col h-full">
-      <StickySessionTitle
-        title={title}
-        statusKind={statusKind}
-        turnCount={turnCount}
-        isRunning={isRunning}
-      />
+  const turnRefs = useRef<TurnRefsMap>(new Map()).current
+  const [refsVersion, setRefsVersion] = useState(0)
 
-      <div className="flex-1 overflow-y-auto px-4 py-6" data-scrollable="">
-        {turns.length === 0 ? (
+  useEffect(() => {
+    setRefsVersion((version) => version + 1)
+  }, [turns.length])
+
+  const entries = useMemo(
+    () => buildTurnTocEntries(turns, turnRefs),
+    [turns, turnRefs, refsVersion],
+  )
+
+  useTurnKeyboardNav({
+    scrollContainerRef,
+    turnRefs,
+    turnCount: turns.length,
+  })
+
+  return (
+    <div className="px-4 py-6 min-w-0" data-scrollable="">
+      {turns.length === 0 ? (
+        <div className="max-w-2xl mx-auto">
           <TranscriptEmptyState isRunning={isRunning} />
-        ) : (
-          <TurnList turns={turns} />
-        )}
-        {isThinking && turns.length > 0 && (
-          <ThinkingPlaceholder />
-        )}
-        {isStreaming && <StreamingIndicator />}
-      </div>
+        </div>
+      ) : (
+        <div className="lg:grid lg:grid-cols-[1fr_180px] lg:gap-6 lg:max-w-4xl lg:mx-auto">
+          <div className="min-w-0">
+            <TranscriptToolbar
+              entries={entries}
+              rightSlot={<CopyFullTextButton turns={turns} />}
+            />
+            <TurnList turns={turns} turnRefs={turnRefs} />
+            {isThinking && turns.length > 0 && <ThinkingPlaceholder />}
+            {isStreaming && <StreamingIndicator />}
+          </div>
+          <TurnTocRail
+            entries={entries}
+            actionSlot={<CopyFullTextButton turns={turns} label="Copy" />}
+          />
+        </div>
+      )}
     </div>
   )
 }
