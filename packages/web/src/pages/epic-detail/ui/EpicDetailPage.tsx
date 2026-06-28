@@ -26,6 +26,8 @@ import {
   deriveAdvancementState,
   type AdvancementState,
 } from '../model/advancement'
+import { deriveStartBlockerReason } from '../model/startBlockerReason'
+import { deriveGraphBannerState } from '../model/graphBanner'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
@@ -40,7 +42,11 @@ import {
   DialogTitle,
 } from '@/shared/ui/components/dialog'
 import { MarkdownReader } from '@/shared/ui'
-import { DependencyGraphWidget, type Renderability } from '../../../widgets/epic-dependency-graph'
+import {
+  DependencyGraphErrorBoundary,
+  DependencyGraphWidget,
+  type Renderability,
+} from '../../../widgets/epic-dependency-graph'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -106,22 +112,49 @@ function LinkedIssueRow({
   hasInProgress: boolean
 }) {
   const toProjectPath = useProjectPath()
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
   const showStart = canInlineStartRow(issue, hasInProgress)
+  const blockerReason = showStart
+    ? null
+    : deriveStartBlockerReason({ issue, hasInProgress })
+
+  function handleConfirmRemove() {
+    setRemoveConfirmOpen(false)
+    onRemove(issue.id)
+  }
 
   return (
-    <Card className="flex items-center justify-between gap-4 p-4">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Link to={toProjectPath(`/issues/${issue.number}`)} data-testid="linked-issue-nav-link" data-issue-number={issue.number} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
-            #{issue.number}
-          </Link>
-          <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
-          <Badge variant="secondary">{toTitleCase(issue.status)}</Badge>
-          {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
-        </div>
-        <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>
+    <Card className="flex flex-col gap-2 p-4" data-testid="linked-issue-row">
+      <div className="flex min-w-0 items-baseline gap-2" data-testid="linked-issue-reading-row">
+        <Link
+          to={toProjectPath(`/issues/${issue.number}`)}
+          data-testid="linked-issue-nav-link"
+          data-issue-number={issue.number}
+          className="shrink-0 font-medium text-blue-600 hover:text-blue-700 hover:underline"
+        >
+          #{issue.number}
+        </Link>
+        <span
+          className="min-w-0 flex-1 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]"
+          data-testid="linked-issue-title"
+        >
+          {issue.title}
+        </span>
       </div>
-      <div className="flex shrink-0 flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="linked-issue-metadata-row">
+        <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
+        <Badge variant="secondary">{toTitleCase(issue.status)}</Badge>
+        {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
+      </div>
+      {blockerReason && (
+        <p
+          className="text-xs text-muted-foreground [overflow-wrap:anywhere]"
+          data-testid="linked-issue-blocker-reason"
+        >
+          {blockerReason}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2" data-testid="linked-issue-actions-row">
         {showStart && (
           <Button
             type="button"
@@ -134,13 +167,44 @@ function LinkedIssueRow({
         )}
         <Button
           type="button"
-          variant="outline"
-          onClick={() => onRemove(issue.id)}
+          variant="ghost"
+          onClick={() => setRemoveConfirmOpen(true)}
           disabled={disabled}
+          data-testid="linked-issue-remove"
         >
           Remove
         </Button>
       </div>
+      <Dialog open={removeConfirmOpen} onOpenChange={(v) => !v && setRemoveConfirmOpen(false)}>
+        <DialogContent data-testid="linked-issue-remove-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>Remove #{issue.number} from this Epic?</DialogTitle>
+            <DialogDescription>
+              Unlinking does not change the issue&apos;s workflow state. The issue will remain in the project and can be re-linked to this or another Epic later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRemoveConfirmOpen(false)}
+              disabled={disabled}
+              data-testid="linked-issue-remove-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmRemove}
+              disabled={disabled}
+              data-testid="linked-issue-remove-confirm"
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
@@ -173,6 +237,18 @@ function getCandidateUnavailableReason(issue: Issue): string | null {
 
 function isCandidateSelectable(issue: Issue): boolean {
   return getCandidateUnavailableReason(issue) === null
+}
+
+function graphInputKey(linkedIssues: LinkedIssue[]): string {
+  return linkedIssues
+    .map(issue => {
+      const prerequisites = (issue.prerequisiteNumbers ?? []).join(',')
+      const externals = (issue.externalPrerequisites ?? [])
+        .map(external => `${external.number}:${external.status}:${external.title}`)
+        .join(',')
+      return `${issue.id}:${issue.number}:${prerequisites}:${externals}`
+    })
+    .join('|')
 }
 
 interface CurrentActivityEntryProps {
@@ -451,9 +527,18 @@ export function EpicDetailPage() {
     renderable: false,
     reason: null,
   })
+  const [graphRenderError, setGraphRenderError] = useState(false)
 
   const handleGraphRenderabilityChange = useCallback((state: { renderable: boolean; reason: Renderability | null }) => {
     setGraphRenderable(state)
+    if (state.renderable) {
+      setGraphRenderError(false)
+    }
+  }, [])
+
+  const handleGraphRenderError = useCallback(() => {
+    setGraphRenderError(true)
+    setGraphRenderable({ renderable: false, reason: null })
   }, [])
 
   const availableIssues = useMemo(() => {
@@ -474,6 +559,29 @@ export function EpicDetailPage() {
     [epic],
   )
   const advancementInfo = useMemo(() => advancementCopy(advancement), [advancement])
+
+  const linkedIssuesForGraph = epic?.linkedIssues ?? []
+  const graphSelected = linkedIssuesView === 'graph'
+  const linkedIssuesGraphInputKey = graphInputKey(linkedIssuesForGraph)
+  const graphEmptyByInput = linkedIssuesForGraph.length < 2
+  const effectiveGraphRenderable = graphEmptyByInput
+    ? { renderable: false, reason: 'empty' as const }
+    : graphRenderable
+  const effectiveGraphRenderError = graphEmptyByInput ? false : graphRenderError
+  const graphHasReported = effectiveGraphRenderError || effectiveGraphRenderable.reason !== null
+  const graphUnrenderable = graphSelected && graphHasReported && !effectiveGraphRenderable.renderable
+  const showList = !graphSelected || graphUnrenderable
+
+  useEffect(() => {
+    setGraphRenderError(false)
+    setGraphRenderable({ renderable: false, reason: null })
+  }, [linkedIssuesGraphInputKey])
+
+  useEffect(() => {
+    if (!graphSelected) {
+      setGraphRenderError(false)
+    }
+  }, [graphSelected])
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12 text-muted-foreground">Loading...</div>
@@ -524,9 +632,6 @@ export function EpicDetailPage() {
   const isClosed = epic.status === EpicStatus.Closed
   const isDone = epic.status === EpicStatus.Done
   const linkedIssueCount = epic.linkedIssues.length
-  const graphAvailable = linkedIssueCount >= 2
-  const graphSelected = graphAvailable && linkedIssuesView === 'graph'
-  const showList = !graphSelected || graphRenderable.reason === 'cyclic' || graphRenderable.reason === 'empty'
 
   function handleConfirmClose() {
     closeEpic.mutate(epicId, {
@@ -562,7 +667,7 @@ export function EpicDetailPage() {
     })
   }
 
-  const hasInProgress = epic.linkedIssues.some(i => i.status === IssueStatus.InProgress)
+  const inProgressIssueId = epic.linkedIssues.find(i => i.status === IssueStatus.InProgress)?.id ?? null
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
@@ -788,45 +893,43 @@ export function EpicDetailPage() {
       <Card className="p-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-foreground">Linked Issues</h2>
-          {graphAvailable && (
-            <div
-              role="tablist"
-              aria-label="Linked Issues view"
-              data-testid="linked-issues-view-toggle"
-              className="inline-flex items-center rounded-md border bg-muted/40 p-0.5 text-sm"
+          <div
+            role="tablist"
+            aria-label="Linked Issues view"
+            data-testid="linked-issues-view-toggle"
+            className="inline-flex items-center rounded-md border bg-muted/40 p-0.5 text-sm"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={linkedIssuesView === 'list'}
+              data-testid="linked-issues-view-list"
+              data-view="list"
+              onClick={() => setLinkedIssuesView('list')}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                linkedIssuesView === 'list'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={linkedIssuesView === 'list'}
-                data-testid="linked-issues-view-list"
-                data-view="list"
-                onClick={() => setLinkedIssuesView('list')}
-                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                  linkedIssuesView === 'list'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                List
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={linkedIssuesView === 'graph'}
-                data-testid="linked-issues-view-graph"
-                data-view="graph"
-                onClick={() => setLinkedIssuesView('graph')}
-                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                  linkedIssuesView === 'graph'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Graph
-              </button>
-            </div>
-          )}
+              List
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={linkedIssuesView === 'graph'}
+              data-testid="linked-issues-view-graph"
+              data-view="graph"
+              onClick={() => setLinkedIssuesView('graph')}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                linkedIssuesView === 'graph'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Graph
+            </button>
+          </div>
         </div>
         <form onSubmit={handleAddIssue} className="mt-4 flex flex-col gap-3 sm:flex-row">
           <EpicIssueSelector
@@ -854,12 +957,49 @@ export function EpicDetailPage() {
           <div
             className="mt-6"
             data-testid="linked-issues-graph-region"
-            data-renderability={graphRenderable.renderable ? 'renderable' : (graphRenderable.reason ?? 'loading')}
+            data-renderability={
+              effectiveGraphRenderError
+                ? 'error'
+                : effectiveGraphRenderable.renderable
+                  ? 'renderable'
+                  : (effectiveGraphRenderable.reason ?? 'loading')
+            }
           >
-            <DependencyGraphWidget
-              linkedIssues={epic.linkedIssues}
-              onRenderabilityChange={handleGraphRenderabilityChange}
-            />
+            <p
+              className="mb-2 text-xs text-muted-foreground md:hidden"
+              data-testid="linked-issues-graph-narrow-hint"
+            >
+              Graph works best on wider screens — swipe to explore.
+            </p>
+            {(() => {
+              const banner = deriveGraphBannerState({
+                graphRenderError: effectiveGraphRenderError,
+                graphRenderable: effectiveGraphRenderable,
+              })
+              if (!banner.show) return null
+              return (
+                <div
+                  className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 [overflow-wrap:anywhere]"
+                  data-testid="linked-issues-graph-unavailable-banner"
+                  data-reason={banner.reason ?? undefined}
+                >
+                  {banner.message}
+                </div>
+              )
+            })()}
+            {!graphUnrenderable && (
+              <div
+                className="overflow-x-auto md:overflow-visible"
+                data-testid="linked-issues-graph-scroll-container"
+              >
+                <DependencyGraphErrorBoundary onError={handleGraphRenderError}>
+                  <DependencyGraphWidget
+                    linkedIssues={epic.linkedIssues}
+                    onRenderabilityChange={handleGraphRenderabilityChange}
+                  />
+                </DependencyGraphErrorBoundary>
+              </div>
+            )}
           </div>
         ) : null}
 
@@ -867,24 +1007,33 @@ export function EpicDetailPage() {
           <div
             className="mt-6 space-y-3"
             data-testid="linked-issues-list-region"
-            data-fallback-for={graphSelected ? graphRenderable.reason ?? undefined : undefined}
+            data-fallback-for={
+              graphSelected
+                ? effectiveGraphRenderError
+                  ? 'error'
+                  : (effectiveGraphRenderable.reason ?? undefined)
+                : undefined
+            }
           >
             {epic.linkedIssues.length === 0 ? (
               <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
                 No linked issues yet.
               </div>
             ) : (
-              epic.linkedIssues.map(issue => (
-                <LinkedIssueRow
-                  key={issue.id}
-                  issue={issue}
-                  onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
-                  onStart={handleStartIssue}
-                  disabled={removeEpicIssue.isPending}
-                  startPending={pendingStartIssueNumber === issue.number}
-                  hasInProgress={hasInProgress}
-                />
-              ))
+              epic.linkedIssues.map(issue => {
+                const hasInProgressSibling = inProgressIssueId !== null && inProgressIssueId !== issue.id
+                return (
+                  <LinkedIssueRow
+                    key={issue.id}
+                    issue={issue}
+                    onRemove={(issueId) => removeEpicIssue.mutate({ epicId: epic.id, issueId })}
+                    onStart={handleStartIssue}
+                    disabled={removeEpicIssue.isPending}
+                    startPending={pendingStartIssueNumber === issue.number}
+                    hasInProgress={hasInProgressSibling}
+                  />
+                )
+              })
             )}
           </div>
         ) : null}

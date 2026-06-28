@@ -37,7 +37,7 @@ export function DependencyGraphSkeleton() {
   return (
     <div
       data-testid="epic-dep-graph-skeleton"
-      className="h-[560px] w-full rounded-lg border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground"
+      className="h-[560px] w-full min-w-[640px] rounded-lg border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground"
     >
       Loading dependency graph…
     </div>

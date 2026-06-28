@@ -85,7 +85,7 @@ export function DependencyGraphCanvas({
   return (
     <div
       data-testid="epic-dep-graph-canvas"
-      className="h-[560px] w-full rounded-lg border bg-background"
+      className="h-[560px] w-full min-w-[640px] rounded-lg border bg-background"
     >
       <ReactFlow
         nodes={prepared.nodes}
