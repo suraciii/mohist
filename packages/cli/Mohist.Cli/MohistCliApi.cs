@@ -413,6 +413,52 @@ internal sealed class MohistCliApi
         }
     }
 
+    public async Task<int> PrintOpencodeModelsAsync(string projectId, string mode)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            _err.WriteLine(MohistCliCommands.NoActiveProjectMessage);
+            return 1;
+        }
+
+        JsonNode? data;
+        try
+        {
+            data = await GetDataAsync($"/api/projects/{Uri.EscapeDataString(projectId)}/opencode/models");
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+        catch (ApiResponseException ex)
+        {
+            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+
+        if (data is null)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return 1;
+        }
+
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            _out.WriteLine(data.ToJsonString(JsonOptions));
+            return 0;
+        }
+
+        var models = data["models"] as JsonArray ?? new JsonArray();
+        foreach (var item in models)
+        {
+            var id = item?.GetValue<string>();
+            if (!string.IsNullOrEmpty(id))
+                _out.WriteLine(id);
+        }
+        return 0;
+    }
+
     public async Task<int> PrintSystemInfoAsync(string mode)
     {
         HttpResponseMessage response;
