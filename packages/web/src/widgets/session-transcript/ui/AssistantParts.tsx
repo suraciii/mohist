@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import Markdown from 'react-markdown'
 import { Button } from '@/shared/ui/components/button'
 import type { DisplayAssistantPart } from '../model/session-transcript-display'
 import { ToolRowView, ContextGroupView } from './tool-views'
+import { TranscriptMarkdown } from './TranscriptMarkdown'
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString()
@@ -27,29 +27,7 @@ export function AssistantTextPartView({ text, completedAt, isStreaming }: Assist
 
   return (
     <div className="max-w-[90%]">
-      <div className="text-sm text-gray-800 leading-relaxed">
-        <Markdown
-          components={{
-            code({ children, className }) {
-              const match = /language-(\w+)/.exec(className ?? '')
-              const isInline = !match && !className
-              if (isInline) {
-                return <code className="px-1 py-0.5 bg-gray-100 rounded text-gray-800 text-xs font-mono">{children}</code>
-              }
-              return (
-                <code className={`${className ?? ''} block overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono`}>
-                  {children}
-                </code>
-              )
-            },
-            pre({ children }) {
-              return <pre className="overflow-x-auto rounded bg-gray-50 p-3 text-xs font-mono">{children}</pre>
-            },
-          }}
-        >
-          {text}
-        </Markdown>
-      </div>
+      <TranscriptMarkdown content={text} />
       <div className="mt-1 flex items-center gap-2">
         {(isIncomplete || isStreaming) && (
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
