@@ -87,6 +87,7 @@ describe('TranscriptMarkdown wrapper', () => {
     expect(css).toContain('.transcript-md')
     expect(css).toMatch(/\.transcript-md\s+\.hljs\s*\{/)
     expect(css).toMatch(/\.transcript-md\s+\.hljs-keyword/)
+    expect(css).not.toContain('}}')
   })
 
   it('does not inject a duplicate <style> tag when multiple TranscriptMarkdown instances are mounted', () => {

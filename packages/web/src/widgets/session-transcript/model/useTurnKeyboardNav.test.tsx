@@ -30,6 +30,10 @@ interface SetupResult {
   unmount: () => void
 }
 
+function dispatchPageKeyDown(key: string, init: KeyboardEventInit = {}) {
+  fireEvent.keyDown(window, { key, ...init })
+}
+
 function setupHarness(options: SetupOptions): SetupResult {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -89,39 +93,39 @@ describe('useTurnKeyboardNav', () => {
 
   describe('j moves to the next turn', () => {
     it('scrolls to ref K+1 when current turn is K=1 (only turn 1 above threshold)', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(2))
     })
 
     it('scrolls to ref K+1 when current turn is K=2 (turns 1-2 above threshold)', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(3))
     })
 
     it('calls scrollIntoView({ block: "start" }) on the target ref', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 2,
         containerTop: 0,
         turnTops: [50, 1100],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       const arg = scrollIntoViewSpy.mock.calls[0]?.[0]
       expect(arg).toMatchObject({ block: 'start' })
@@ -130,26 +134,26 @@ describe('useTurnKeyboardNav', () => {
 
   describe('k moves to the previous turn', () => {
     it('scrolls to ref K-1 when current turn is K=2', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
       })
 
-      fireEvent.keyDown(container, { key: 'k' })
+      dispatchPageKeyDown('k')
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(1))
     })
 
     it('scrolls to ref K-1 when current turn is K=3 (all turns above threshold)', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-1500, -500, 50],
       })
 
-      fireEvent.keyDown(container, { key: 'k' })
+      dispatchPageKeyDown('k')
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(2))
@@ -158,25 +162,25 @@ describe('useTurnKeyboardNav', () => {
 
   describe('boundary clamping (no-op at ends)', () => {
     it('j at the last turn is a no-op (does not scroll past the last turn)', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-1500, -500, 50],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
     it('k at the first turn is a no-op (does not scroll before the first turn)', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'k' })
+      dispatchPageKeyDown('k')
 
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
@@ -184,55 +188,55 @@ describe('useTurnKeyboardNav', () => {
 
   describe('g and G move to transcript boundaries', () => {
     it('g (no shift) scrolls to the first turn regardless of current position', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-1500, -500, 50],
       })
 
-      fireEvent.keyDown(container, { key: 'g' })
+      dispatchPageKeyDown('g')
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(1))
     })
 
     it('G (uppercase) scrolls to the last turn', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'G' })
+      dispatchPageKeyDown('G')
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(3))
     })
 
     it('shift+g (key=g with shiftKey=true) scrolls to the last turn', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'g', shiftKey: true })
+      dispatchPageKeyDown('g', { shiftKey: true })
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(3))
     })
 
     it('g and G both target the same turn when there is only one turn', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 1,
         containerTop: 0,
         turnTops: [50],
       })
 
-      fireEvent.keyDown(container, { key: 'g' })
+      dispatchPageKeyDown('g')
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(1))
 
-      fireEvent.keyDown(container, { key: 'G' })
+      dispatchPageKeyDown('G')
       expect(scrollIntoViewSpy.mock.instances[scrollIntoViewSpy.mock.calls.length - 1]).toBe(turnRefs.get(1))
     })
   })
@@ -251,7 +255,7 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(textarea)
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
@@ -268,7 +272,7 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(input)
 
-      fireEvent.keyDown(container, { key: 'k' })
+      dispatchPageKeyDown('k')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
@@ -285,7 +289,7 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(select)
 
-      fireEvent.keyDown(container, { key: 'g' })
+      dispatchPageKeyDown('g')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
@@ -304,7 +308,7 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(editable)
 
-      fireEvent.keyDown(container, { key: 'G' })
+      dispatchPageKeyDown('G')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
@@ -323,7 +327,7 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(composer)
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
@@ -342,7 +346,7 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(nested)
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
@@ -359,13 +363,13 @@ describe('useTurnKeyboardNav', () => {
 
       expect(document.activeElement).toBe(textarea)
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
 
       textarea.blur()
       expect(document.activeElement).not.toBe(textarea)
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(2))
     })
@@ -373,83 +377,83 @@ describe('useTurnKeyboardNav', () => {
 
   describe('modifier-key suppression', () => {
     it('does not navigate when metaKey is held (j)', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'j', metaKey: true })
+      dispatchPageKeyDown('j', { metaKey: true })
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
     it('does not navigate when ctrlKey is held (k)', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [-500, 50, 1100],
       })
 
-      fireEvent.keyDown(container, { key: 'k', ctrlKey: true })
+      dispatchPageKeyDown('k', { ctrlKey: true })
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
     it('does not navigate when altKey is held (g)', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'g', altKey: true })
+      dispatchPageKeyDown('g', { altKey: true })
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
     it('does not navigate when altKey+shift is held on G', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'G', altKey: true })
+      dispatchPageKeyDown('G', { altKey: true })
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
   })
 
   describe('current-turn derivation uses getBoundingClientRect on demand', () => {
     it('derives currentIndex as 0 when no turn is above the threshold', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [500, 1500, 2500],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(1))
     })
 
     it('derives currentIndex as the LAST turn whose top is at or above the threshold (j scrolls to next)', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 5,
         containerTop: 0,
         turnTops: [-500, -300, 100, 1500, 2500],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(4))
     })
 
     it('honors the scroll container offset (containerTop > 0)', () => {
-      const { container, turnRefs } = setupHarness({
+      const { turnRefs } = setupHarness({
         turnCount: 3,
         containerTop: 200,
         turnTops: [180, 290, 1500],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
 
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs.get(3))
     })
@@ -457,48 +461,48 @@ describe('useTurnKeyboardNav', () => {
 
   describe('listener lifecycle', () => {
     it('detaches the listener on unmount', () => {
-      const { container, unmount } = setupHarness({
+      const { unmount } = setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
 
       unmount()
 
-      fireEvent.keyDown(container, { key: 'j' })
+      dispatchPageKeyDown('j')
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('edge cases', () => {
     it('is a no-op when turnCount is 0', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 0,
         containerTop: 0,
         turnTops: [],
       })
 
-      fireEvent.keyDown(container, { key: 'j' })
-      fireEvent.keyDown(container, { key: 'k' })
-      fireEvent.keyDown(container, { key: 'g' })
-      fireEvent.keyDown(container, { key: 'G' })
+      dispatchPageKeyDown('j')
+      dispatchPageKeyDown('k')
+      dispatchPageKeyDown('g')
+      dispatchPageKeyDown('G')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
 
     it('is a no-op on unrelated keys', () => {
-      const { container } = setupHarness({
+      setupHarness({
         turnCount: 3,
         containerTop: 0,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(container, { key: 'a' })
-      fireEvent.keyDown(container, { key: 'Enter' })
-      fireEvent.keyDown(container, { key: 'ArrowDown' })
-      fireEvent.keyDown(container, { key: '?' })
+      dispatchPageKeyDown('a')
+      dispatchPageKeyDown('Enter')
+      dispatchPageKeyDown('ArrowDown')
+      dispatchPageKeyDown('?')
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
   })

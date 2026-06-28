@@ -82,7 +82,10 @@ export function SessionTranscriptLayout({
             {isThinking && turns.length > 0 && <ThinkingPlaceholder />}
             {isStreaming && <StreamingIndicator />}
           </div>
-          <TurnTocRail entries={entries} />
+          <TurnTocRail
+            entries={entries}
+            actionSlot={<CopyFullTextButton turns={turns} label="Copy" />}
+          />
         </div>
       )}
     </div>

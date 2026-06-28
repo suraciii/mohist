@@ -3,6 +3,7 @@ import type {
   DisplayAssistantPart,
   DisplayToolPart,
   DisplayContextGroupPart,
+  DisplayChangedFile,
   DisplayPrompt,
   PromptKind,
 } from './session-transcript-display'
@@ -57,8 +58,50 @@ function toolSummaryLine(tool: DisplayToolPart): string {
   return `[tool ${tool.normalizedName}]`
 }
 
-function contextGroupSummary(group: DisplayContextGroupPart): string {
-  return `[context-group] ${group.title}`
+function changedFileLine(file: DisplayChangedFile): string {
+  const counts: string[] = []
+  if (file.additions !== undefined) counts.push(`+${file.additions}`)
+  if (file.deletions !== undefined) counts.push(`-${file.deletions}`)
+  const countSuffix = counts.length > 0 ? ` (${counts.join(' ')})` : ''
+  const moveSuffix = file.operation === 'moved' && file.oldPath ? ` from ${file.oldPath}` : ''
+  return `  [changed-file] ${file.operation} ${file.path}${moveSuffix}${countSuffix}`
+}
+
+function labeledBlock(label: string, text: string | undefined): string[] {
+  if (!text) return []
+  return [`  ${label}:`, text]
+}
+
+function jsonBlock(label: string, value: unknown): string[] {
+  if (value === undefined || value === null) return []
+  return [`  ${label}:`, JSON.stringify(value, null, 2)]
+}
+
+function toolLines(tool: DisplayToolPart): string[] {
+  const lines = [toolSummaryLine(tool)]
+  lines.push(...labeledBlock('input', tool.input ?? tool.rawInput))
+  if (tool.rawInput && tool.rawInput !== tool.input) {
+    lines.push(...labeledBlock('raw input', tool.rawInput))
+  }
+  lines.push(...labeledBlock('output', tool.output ?? tool.rawOutput))
+  if (tool.rawOutput && tool.rawOutput !== tool.output) {
+    lines.push(...labeledBlock('raw output', tool.rawOutput))
+  }
+  lines.push(...jsonBlock('details', tool.details))
+  if (tool.error) lines.push(`  [tool-error] ${tool.error}`)
+  if (tool.changedFiles && tool.changedFiles.length > 0) {
+    lines.push('  changed files:')
+    lines.push(...tool.changedFiles.map(changedFileLine))
+  }
+  return lines
+}
+
+function contextGroupLines(group: DisplayContextGroupPart): string[] {
+  const lines = [`[context-group] ${group.title}`]
+  for (const tool of group.tools) {
+    lines.push(...toolLines(tool).map((line) => `  ${line}`))
+  }
+  return lines
 }
 
 function assistantPartLines(part: DisplayAssistantPart): string[] {
@@ -68,9 +111,9 @@ function assistantPartLines(part: DisplayAssistantPart): string[] {
     case 'reasoning':
       return [`[reasoning omitted, ${formatReasoningSizeKb(part.text)} KB]`]
     case 'tool':
-      return [toolSummaryLine(part)]
+      return toolLines(part)
     case 'context-group':
-      return [contextGroupSummary(part)]
+      return contextGroupLines(part)
     case 'error':
       return [`[error] ${part.message}`]
     case 'divider':

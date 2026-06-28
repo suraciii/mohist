@@ -51,8 +51,6 @@ export function useTurnKeyboardNav({
   turnCountRef.current = turnCount
 
   useEffect(() => {
-    const target: EventTarget = scrollContainerRef?.current ?? window
-
     const handler = (event: Event) => {
       const ke = event as KeyboardEvent
       if (ke.metaKey || ke.ctrlKey || ke.altKey) return
@@ -90,7 +88,7 @@ export function useTurnKeyboardNav({
       ref.scrollIntoView({ block: 'start' })
     }
 
-    target.addEventListener('keydown', handler)
-    return () => target.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [scrollContainerRef])
 }

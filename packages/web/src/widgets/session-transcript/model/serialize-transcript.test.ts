@@ -198,6 +198,80 @@ describe('serializeTranscriptPlainText', () => {
     expect(out).toContain('[context-group] Gathering context · 2 reads')
   })
 
+  it('copies visible tool details including input, output, error, changed files, and nested context-group tools', () => {
+    const turns: DisplayTurn[] = [
+      makeTurn({
+        id: 't1',
+        startedAt: '2024-05-15T10:00:00.000Z',
+        prompt: { kind: 'task', title: 'Detailed tools' },
+        assistantParts: [
+          {
+            id: 'tool-1',
+            partType: 'tool',
+            toolCallId: 'tc-1',
+            normalizedName: 'bash',
+            toolName: 'bash',
+            status: 'failed',
+            displayTitle: 'npm test',
+            input: '{"command":"npm test"}',
+            output: 'failing test output',
+            rawInput: 'raw command input',
+            rawOutput: 'raw command output',
+            error: 'exit code 1',
+            details: { shell: 'bash', durationMs: 1250 },
+            changedFiles: [
+              { path: 'src/a.ts', operation: 'modified', additions: 2, deletions: 1 },
+              { path: 'src/new.ts', operation: 'created', additions: 12 },
+              { path: 'src/renamed.ts', oldPath: 'src/old.ts', operation: 'moved' },
+            ],
+            startedAt: '2024-05-15T10:00:01.000Z',
+            hasError: true,
+            isContextTool: false,
+          },
+          {
+            id: 'cg1',
+            partType: 'context-group',
+            title: 'Gathering context · 1 read',
+            hasError: false,
+            tools: [
+              {
+                id: 'nested-tool',
+                partType: 'tool',
+                toolCallId: 'tc-2',
+                normalizedName: 'read',
+                toolName: 'read',
+                status: 'completed',
+                target: 'src/context.ts',
+                input: '{"filePath":"src/context.ts"}',
+                output: 'export const context = true',
+                startedAt: '2024-05-15T10:00:02.000Z',
+                hasError: false,
+                isContextTool: true,
+              },
+            ],
+          },
+        ],
+      }),
+    ]
+
+    const out = serializeTranscriptPlainText(turns)
+
+    expect(out).toContain('[tool bash] npm test')
+    expect(out).toContain('  input:\n{"command":"npm test"}')
+    expect(out).toContain('  raw input:\nraw command input')
+    expect(out).toContain('  output:\nfailing test output')
+    expect(out).toContain('  raw output:\nraw command output')
+    expect(out).toContain('  details:\n{\n  "shell": "bash",\n  "durationMs": 1250\n}')
+    expect(out).toContain('  [tool-error] exit code 1')
+    expect(out).toContain('  [changed-file] modified src/a.ts (+2 -1)')
+    expect(out).toContain('  [changed-file] created src/new.ts (+12)')
+    expect(out).toContain('  [changed-file] moved src/renamed.ts from src/old.ts')
+    expect(out).toContain('[context-group] Gathering context · 1 read')
+    expect(out).toContain('  [tool read] src/context.ts')
+    expect(out).toContain('    input:\n  {"filePath":"src/context.ts"}')
+    expect(out).toContain('    output:\n  export const context = true')
+  })
+
   it('renders error parts as [error] <message>', () => {
     const turns: DisplayTurn[] = [
       makeTurn({

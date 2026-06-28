@@ -126,8 +126,7 @@ code.hljs {
 .hljs-property,
 .hljs-punctuation,
 .hljs-tag {
-  /* purposely ignored */
-   
+  color: inherit
 }`
 
 const TRANSCRIPT_MD_SCOPE = '.transcript-md'
@@ -172,12 +171,13 @@ function scopeFlattenCss(css: string, scope: string): string {
     const open = buffer.indexOf('{')
     if (open < 0) return
     const selectorList = buffer.slice(0, open)
-    const decls = buffer.slice(open + 1)
+    const close = buffer.lastIndexOf('}')
+    const decls = buffer.slice(open + 1, close < 0 ? undefined : close)
     const selectors = selectorList
       .split(',')
       .map((part) => prefixSelector(part, scope))
       .filter(Boolean)
-    if (selectors.length > 0) {
+    if (selectors.length > 0 && decls.trim()) {
       out.push(`${selectors.join(',\n')} {${decls}}`)
     }
     buffer = ''

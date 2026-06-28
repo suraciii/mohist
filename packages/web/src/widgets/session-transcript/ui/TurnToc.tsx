@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import type { DisplayTurn, PromptKind } from '../model/session-transcript-display'
 
 const KIND_LABELS: Record<PromptKind, string> = {
@@ -105,19 +105,23 @@ export function TurnTocList({
 
 interface TurnTocRailProps extends TurnTocListBaseProps {
   scrollContainerRef?: RefObject<HTMLElement>
+  actionSlot?: ReactNode
 }
 
-export function TurnTocRail(props: TurnTocRailProps) {
+export function TurnTocRail({ actionSlot, ...tocProps }: TurnTocRailProps) {
   return (
     <aside
       data-turn-toc-rail=""
       className="hidden lg:block w-[180px] shrink-0 sticky top-4 self-start"
     >
-      <div className="text-[11px] uppercase tracking-wide text-gray-400 font-medium px-2 mb-2">
-        Turns
+      <div className="flex items-center justify-between gap-2 px-2 mb-2">
+        <div className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">
+          Turns
+        </div>
+        {actionSlot}
       </div>
       <nav aria-label="Session transcript table of contents">
-        <TurnTocList {...props} />
+        <TurnTocList {...tocProps} />
       </nav>
     </aside>
   )

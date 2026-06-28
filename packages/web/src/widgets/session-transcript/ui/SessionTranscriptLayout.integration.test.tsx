@@ -243,6 +243,31 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
       expect(tocTrigger).not.toBeNull()
     })
 
+    it('also mounts a desktop-visible CopyFullTextButton in the lg+ TOC rail', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+
+      const rail = document.querySelector('[data-turn-toc-rail]')
+      expect(rail).not.toBeNull()
+      expect(rail?.className).toContain('lg:block')
+
+      const copyButton = rail!.querySelector('[data-copy-full-text]') as HTMLButtonElement | null
+      expect(copyButton).not.toBeNull()
+      expect(copyButton?.disabled).toBe(false)
+      expect(copyButton?.textContent).toBe('Copy')
+    })
+
+    it('keeps copy available in both viewport layouts for non-empty transcripts', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+
+      const copyButtons = document.querySelectorAll('[data-copy-full-text]')
+      expect(copyButtons).toHaveLength(2)
+      for (const button of Array.from(copyButtons) as HTMLButtonElement[]) {
+        expect(button.disabled).toBe(false)
+      }
+    })
+
     it('renders the grid with the lg-only two-column measure on lg+', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
       const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
@@ -387,18 +412,34 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
       }
     }
 
-    it('fires keydown on the supplied scrollContainerRef and scrolls to the next turn', () => {
+    it('fires keydown from window and scrolls to the next turn', () => {
       const turns: DisplayTurn[] = [
         makeTurn({ id: 'a' }),
         makeTurn({ id: 'b' }),
         makeTurn({ id: 'c' }),
       ]
-      const { scrollContainer, turnRefs } = renderWithScrollContainer({
+      const { turnRefs } = renderWithScrollContainer({
         turns,
         turnTops: [50, 1100, 2100],
       })
 
-      fireEvent.keyDown(scrollContainer, { key: 'j' })
+      fireEvent.keyDown(window, { key: 'j' })
+
+      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
+      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[1])
+    })
+
+    it('fires keydown from document body and scrolls to the next turn', () => {
+      const turns: DisplayTurn[] = [
+        makeTurn({ id: 'a' }),
+        makeTurn({ id: 'b' }),
+      ]
+      const { turnRefs } = renderWithScrollContainer({
+        turns,
+        turnTops: [50, 1100],
+      })
+
+      fireEvent.keyDown(document.body, { key: 'j' })
 
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
       expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[1])
@@ -406,17 +447,17 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
 
     it('detaches the listener when the layout unmounts', () => {
       const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      const { scrollContainer, unmount } = renderWithScrollContainer({
+      const { unmount } = renderWithScrollContainer({
         turns,
         turnTops: [50],
       })
 
-      fireEvent.keyDown(scrollContainer, { key: 'g' })
+      fireEvent.keyDown(window, { key: 'g' })
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
 
       unmount()
 
-      fireEvent.keyDown(scrollContainer, { key: 'g' })
+      fireEvent.keyDown(window, { key: 'g' })
       expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
     })
 
@@ -431,10 +472,10 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
       scrollContainer.appendChild(textarea)
       textarea.focus()
 
-      fireEvent.keyDown(scrollContainer, { key: 'g' })
-      fireEvent.keyDown(scrollContainer, { key: 'G' })
-      fireEvent.keyDown(scrollContainer, { key: 'j' })
-      fireEvent.keyDown(scrollContainer, { key: 'k' })
+      fireEvent.keyDown(window, { key: 'g' })
+      fireEvent.keyDown(window, { key: 'G' })
+      fireEvent.keyDown(window, { key: 'j' })
+      fireEvent.keyDown(window, { key: 'k' })
       expect(scrollIntoViewSpy).not.toHaveBeenCalled()
     })
   })
@@ -442,39 +483,17 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
 
 describe('SessionTranscriptLayout narrow viewport no-overflow integration', () => {
   let originalInnerWidth: number
-  let originalScrollWidthDescriptor: PropertyDescriptor | undefined
-  let originalClientWidthDescriptor: PropertyDescriptor | undefined
   let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     originalInnerWidth = window.innerWidth
-    originalScrollWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth')
-    originalClientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
     scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
   })
 
   afterEach(() => {
     Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: originalInnerWidth })
-    if (originalScrollWidthDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidthDescriptor)
-    }
-    if (originalClientWidthDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidthDescriptor)
-    }
     scrollIntoViewSpy.mockRestore()
   })
-
-  function fakeOverflowMeasurements(scrollable: HTMLElement, overflowPx: number) {
-    const baseClientWidth = 320
-    Object.defineProperty(scrollable, 'clientWidth', {
-      configurable: true,
-      get: () => baseClientWidth,
-    })
-    Object.defineProperty(scrollable, 'scrollWidth', {
-      configurable: true,
-      get: () => baseClientWidth + overflowPx,
-    })
-  }
 
   function renderLongLineTranscript(width: number) {
     Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width })
@@ -512,29 +531,55 @@ describe('SessionTranscriptLayout narrow viewport no-overflow integration', () =
   }
 
   it.each([320, 375, 430])(
-    'does not push horizontal overflow on the scroll container at %ipx when the class contract is honored',
-    (width) => {
-      const { scrollable } = renderLongLineTranscript(width)
-      fakeOverflowMeasurements(scrollable, 0)
-      expect(scrollable.scrollWidth).toBeLessThanOrEqual(scrollable.clientWidth)
-    },
-  )
-
-  it.each([320, 375, 430])(
-    'className contract is applied so truncation works at %ipx: max-w-[90%] sm:max-w-[80%] + min-w-0',
+    'className contract protects long prompt/card/code content at %ipx',
     (width) => {
       const { view } = renderLongLineTranscript(width)
+      const scrollable = view.container.querySelector('[data-scrollable]')
+      expect(scrollable?.className).toContain('min-w-0')
+
       const promptBubble = view.container.querySelector('.rounded-2xl')
       expect(promptBubble).not.toBeNull()
       expect(promptBubble!.className).toContain('max-w-[90%]')
       expect(promptBubble!.className).toContain('sm:max-w-[80%]')
       expect(promptBubble!.className).toContain('min-w-0')
 
+      const promptParent = promptBubble!.parentElement
+      expect(promptParent?.className).toContain('min-w-0')
+
       const turnList = view.container.querySelector('[role="log"]')
       expect(turnList?.className).toContain('min-w-0')
 
       const railParent = view.container.querySelector('[data-turn-toc-rail]')?.parentElement
       expect(railParent?.className).toContain('lg:grid-cols-[1fr_180px]')
+      expect(railParent?.className).toContain('lg:max-w-4xl')
+
+      const markdown = view.container.querySelector('.transcript-md')
+      expect(markdown?.className).toContain('leading-relaxed')
+      const assistantCard = markdown?.parentElement
+      expect(assistantCard?.className).toContain('max-w-[90%]')
+      expect(assistantCard?.className).toContain('sm:max-w-[80%]')
+      expect(assistantCard?.className).toContain('min-w-0')
     },
   )
+
+  it('fenced assistant code blocks carry max-width and horizontal-scroll classes for long lines', () => {
+    const turns: DisplayTurn[] = [makeTurn({
+      id: 'code',
+      assistantParts: [
+        {
+          id: 'code-part',
+          partType: 'text',
+          text: '```ts\nconst value = "' + 'x'.repeat(160) + '"\n```',
+          startedAt: '2024-05-15T10:00:01.000Z',
+          completedAt: '2024-05-15T10:00:02.000Z',
+        },
+      ],
+    })]
+
+    const { container } = render(<SessionTranscriptLayout turns={turns} turnCount={1} title="t" statusKind="completed" isRunning={false} />)
+    const pre = container.querySelector('.transcript-md pre')
+    expect(pre).not.toBeNull()
+    expect(pre?.className).toContain('max-w-full')
+    expect(pre?.className).toContain('overflow-x-auto')
+  })
 })
