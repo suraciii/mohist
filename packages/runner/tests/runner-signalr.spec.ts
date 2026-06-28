@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as signalR from "@microsoft/signalr"
-import { isUnderRunnerRoot, resolveWorkspaceQuery, resolveSessionTarget, RunnerSignalRClient, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { isUnderRunnerRoot, resolveWorkspaceQuery, resolveSessionTarget, RunnerSignalRClient, type CancelAgentSessionPayload, type ReceiveFollowupPayload, setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 import type { CommandResult } from "../src/system/process.js"
 
@@ -457,6 +457,7 @@ interface MockServerConnection {
 
 interface MockConnection {
   prompt: AnyFn
+  cancel?: AnyFn
 }
 
 function buildClient(opts: {
@@ -1059,5 +1060,182 @@ describe("resolveSessionTarget (T-004)", () => {
       text: "x",
     }
     expect(resolveSessionTarget(payload)).toBeNull()
+  })
+})
+
+// Issue-129 T-005: server→runner `CancelAgentSession` SignalR
+// invocation. The handler is distinct from the fire-and-forget
+// `ReceiveFollowup`: it MUST return a `{ state: ... }` reply that the
+// HTTP endpoint mirrors verbatim, so the API can never pretend success
+// (design D6). The handler is registered with `connection.on(...)`; the
+// signalR client returns the handler's resolved value back to the server.
+function emitCancel(builder: CapturedBuilder, payload: CancelAgentSessionPayload | null | undefined): Promise<unknown> {
+  const handler = builder.handlers.get("CancelAgentSession")
+  if (!handler) throw new Error("CancelAgentSession handler was not registered")
+  return Promise.resolve(handler(payload))
+}
+
+describe("RunnerSignalRClient CancelAgentSession handler (T-005)", () => {
+  function genericCancelPayload(sessionId: string): CancelAgentSessionPayload {
+    return {
+      target: { kind: "generic", projectId: "proj-1", sessionId },
+    }
+  }
+
+  it("CancellableSession_ResolverHits_ConnectionCancelInvokedAndRepliesCancelled", async () => {
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn((target: SessionTarget) => {
+      expect(target.kind).toBe("generic")
+      if (target.kind === "generic") {
+        expect(target.sessionId).toBe("gen-session-1")
+        expect(target.projectId).toBe("proj-1")
+      }
+      return { connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }
+    })
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+
+    expect(reply).toEqual({ state: "cancelled" })
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(cancel).toHaveBeenCalledWith({ sessionId: "acp-1" })
+  })
+
+  it("UnknownSession_ResolverReturnsNull_RepliesNotCancellableAndDoesNotCallCancel", async () => {
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn(() => null)
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("unknown"))) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it("NoResolverRegistered_RepliesNotCancellableAndDoesNotCallCancel", async () => {
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+
+    buildClient({ resolver: null, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it("NoCancelMethodOnConnection_RepliesNotCancellable", async () => {
+    // Defensive: the current ACP SDK defines `cancel` on every
+    // ClientSideConnection, but the handler must report honestly if a
+    // future / custom connection omits the method.
+    const connection: MockConnection = { prompt: vi.fn() /* no cancel */ }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+  })
+
+  it("ConnectionCancelRejects_RepliesNotCancellableAndLogs", async () => {
+    const cancel = vi.fn(async () => {
+      throw new Error("transport dropped")
+    })
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(errorSpy).toHaveBeenCalledWith(
+      "cancel connection.cancel rejected:",
+      expect.stringContaining("transport dropped"),
+    )
+    errorSpy.mockRestore()
+  })
+
+  it("ResolverThrows_RepliesNotCancellableAndLogs", async () => {
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn(() => { throw new Error("resolver boom") })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, genericCancelPayload("gen-session-1"))) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(cancel).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalledWith("cancel target resolver threw:", expect.any(Error))
+    errorSpy.mockRestore()
+  })
+
+  it("NullOrMissingPayload_RepliesNotCancellable", async () => {
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const replyFromNull = (await emitCancel(builder, null)) as { state: string }
+    const replyFromMissing = (await emitCancel(builder, undefined)) as { state: string }
+    const replyFromNoTarget = (await emitCancel(builder, { target: undefined as unknown as never })) as { state: string }
+
+    expect(replyFromNull).toEqual({ state: "not-cancellable" })
+    expect(replyFromMissing).toEqual({ state: "not-cancellable" })
+    expect(replyFromNoTarget).toEqual({ state: "not-cancellable" })
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it("WorkflowShapedTarget_RepliesNotCancellable", async () => {
+    // The product cancel endpoint only addresses generic sessions today;
+    // a `workflow` target through this method is treated as
+    // not-cancellable (the issue-scoped session lifecycle has no cancel
+    // surface) rather than being misrouted to the followup code path.
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, {
+      target: { kind: "workflow", projectId: "proj-1", workflowRunId: "wr-1", sessionName: "work-1" },
+    })) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(cancel).not.toHaveBeenCalled()
+  })
+
+  it("GenericTargetWithoutSessionId_RepliesNotCancellable", async () => {
+    const cancel = vi.fn(async () => undefined)
+    const connection: MockConnection = { prompt: vi.fn(), cancel }
+    const resolver = vi.fn(() => ({ connection: connection as never, sessionId: "acp-1", projectId: "proj-1" }))
+
+    buildClient({ resolver, serverConnection: null })
+    const builder = lastBuilder()
+
+    const reply = (await emitCancel(builder, {
+      target: { kind: "generic", projectId: "proj-1" },
+    })) as { state: string }
+
+    expect(reply).toEqual({ state: "not-cancellable" })
+    expect(cancel).not.toHaveBeenCalled()
   })
 })

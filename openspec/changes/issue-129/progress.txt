@@ -584,3 +584,178 @@ section first).
   transport never sees the dropped message; the runner logs nothing
   for the null branch (matches the pre-T-004 "unknown session" log
   silence).
+
+## T-005 — Generic AgentSession cancel
+
+### Findings
+
+- `AgentSessionCancelRoutes.cs` (`packages/server/src/Mohist.Server/Api/`)
+  hosts the product-level generic cancel endpoint:
+  `POST /api/projects/{projectRef}/agent-sessions/{sessionId}/cancel`.
+  Distinct from the existing
+  `POST /api/projects/{projectRef}/issues/{number}/sessions/{name}/...`
+  routes (different URL, different resolver). Applied
+  `ProjectResolutionEndpointFilter` so unknown project refs return the
+  standard 404 from the filter instead of a downstream miss.
+- Endpoint contract:
+  1. `ResolveGenericCancelTargetAsync(projectId, sessionId)` — null
+     result → 404 (`not_found`). Cross-project sessions leak as null
+     → 404 (same cross-project guard as the followup resolver).
+  2. Terminal short-circuit: `target.TerminalState` non-empty
+     (transcript carries a `session.closed` event with status
+     completed/failed/stopped) → 200 `{ state: <terminal-state> }`.
+     The server never invokes the runner when the session is already
+     terminal — there is no turn to cancel and the runner cannot change
+     the recorded outcome.
+  3. No runner ever bound (`RunnerId` empty) → 200
+     `{ state: "not-cancellable" }`. Defensive: by construction a
+     session without a bound runner cannot have any ACP connection to
+     cancel.
+  4. Runner bound but `RunnerConnectionTracker` has no live SignalR
+     connection for it → 200 `{ state: "not-cancellable" }`. The runner
+     is offline; the API surfaces that honestly.
+  5. Otherwise invoke `CancelAgentSession` on the runner's connectionId
+     via SignalR (server→runner invocation with reply path). The reply
+     is mirrored verbatim into the HTTP response — the API never
+     invents a state.
+  6. Empty / null reply from the runner → 502 `runner_no_response` so a
+     missing reply is loud (not a silent success).
+- `ResolveGenericCancelTargetAsync` (in `AgentSessionQuerier.cs`) is
+  distinct from `ResolveGenericFollowupTargetAsync` (T-004). Cancel is
+  best-effort over ACP, so the endpoint needs both the runner id AND
+  the terminal-state verdict up front. The terminal-state verdict lets
+  the server short-circuit without invoking the runner for
+  completed/failed/stopped sessions. `TerminalState` is null when the
+  session is not yet terminal — the endpoint must call the runner.
+- `ReadTerminalStateAsync` (private helper in
+  `AgentSessionQuerier.cs`) reads the most-recent
+  `session.closed` / `session_closed` transcript event and returns its
+  `status` field verbatim. Only `completed` / `failed` / `stopped` are
+  recognised as terminal; any other status returns null so the endpoint
+  falls through to the runner (the agent might still be running or the
+  event payload might be malformed).
+- `AgentSessionCancelReply` (`record(string? State)`) is the typed
+  SignalR reply. The route never inspects the value beyond "is it
+  non-empty" — the runner's word is final, so the API mirrors whatever
+  string it gets back (`cancelled`, `not-cancellable`, or a
+  terminal-state name). This is design D6's "the API can never fake
+  success" guarantee.
+- New server→runner SignalR method `CancelAgentSession` is added
+  distinctly from `ReceiveFollowup`:
+  - `ReceiveFollowup` is registered with `connection.on(...)` and
+    returns void (fire-and-forget — the runner handler's resolved value
+    is ignored).
+  - `CancelAgentSession` is registered with `connection.on(...)` and
+    the SignalR transport serialises the resolved value back to the
+    server as the invocation's reply.
+  - The wire payload is the same `target: SessionTarget` shape
+    introduced in T-004; only generic targets are reachable through
+    this method today because the issue-scoped session lifecycle has no
+    cancel surface.
+- Runner-side handler `handleCancel` in
+  `packages/runner/src/server/runner-signalr.ts`:
+  - Validates `payload.target` is `kind: "generic"` with a `sessionId`
+    and `projectId` (matching the product endpoint contract).
+  - Resolves the live ACP session via the same
+    `FollowupTargetResolver` used for followups, keying the
+    `AcpSessionManager` by `generic:{sessionId}` (T-002 prefix).
+  - Calls `connection.cancel?.({ sessionId })` if the connection
+    advertises cancellation. The `?.` guard handles a hypothetical
+    older connection that did not advertise cancel (the current ACP
+    SDK always defines it on `ClientSideConnection`).
+  - Reports `{ state: "cancelled" }` on successful send,
+    `{ state: "not-cancellable" }` for any of: no resolver, no live
+    ACP session, missing `cancel` method, transport-level cancel
+    failure. Never invents a terminal-state — the server is the
+    source of truth.
+- `RecordingRunnerHubContext` test double (in
+  `packages/server/tests/Mohist.Server.Tests/Support/MohistIntegrationFixture.cs`)
+  gained:
+  - `Invocations` list and `RecordedRunnerHubInvocation` record so
+    specs can assert against server-side invocations.
+  - `SetInvocationResponse(method, response)` so specs can pre-program
+    the runner's reply for typed `InvokeAsync<T>` calls.
+  - Explicit `IClientProxy IHubClients<IClientProxy>.Client(...)` and
+    `ISingleClientProxy IHubClients.Client(...)` implementations.
+    Both are needed because `IHubClients` (non-generic) declares
+    `Client(string) -> ISingleClientProxy` and the default
+    `NonInvokingSingleClientProxy` throws on `InvokeCoreAsync`. The
+    existing `SendCoreAsync` path is unchanged.
+  - `RecordingClientProxy` now implements `ISingleClientProxy` so the
+    `InvokeCoreAsync<T>` path is reachable through the recording
+    hub. The typed reply is sourced from
+    `SetInvocationResponse(method, ...)` and falls back to `default(T)`
+    when no response is registered.
+- Tests added:
+  - `tests/Sessions/GenericAgentSessionCancelApiSpecs.cs` (server,
+    integration): covers all five status code branches — 200 with
+    runner-reported `cancelled`, 200 with runner-reported
+    `not-cancellable`, 200 with runner-reported terminal-state
+    (`failed`), 200 with server-short-circuit on each of completed /
+    failed / stopped, 404 unknown session, 404 cross-project, 200
+    not-cancellable when runner offline. Plus three resolver unit
+    tests: unknown session → null, active session → null
+    TerminalState, terminal session → non-null TerminalState.
+  - `tests/runner-signalr.spec.ts` (runner): the
+    `describe("...CancelAgentSession handler (T-005)")` block covers
+    cancellable session (cancel invoked with the right sessionId),
+    unknown session (resolver returns null → not-cancellable, no
+    cancel call), no resolver registered (not-cancellable, no call),
+    connection without `cancel` method (not-cancellable), cancel
+    transport rejects (not-cancellable + logged), resolver throws
+    (not-cancellable + logged), null / missing / no-target payload
+    (not-cancellable), workflow-shaped target (not-cancellable, no
+    call), generic target without sessionId (not-cancellable, no
+    call).
+
+### Gotchas
+
+- **The runner reply is opaque to the server.** The server mirrors the
+  runner's reported state verbatim into the HTTP response — it does
+  not whitelist `cancelled` / `not-cancellable` / terminal-state names
+  or coerce unknown strings. This is by design (D6): if a future
+  agent advertises a richer state vocabulary the API surfaces it
+  without server-side changes. The 502 `runner_no_response` guard is
+  the only server-side rewrite — it only fires when the SignalR
+  transport returns no value at all.
+- **`ConnectionId` empty vs `RunnerId` empty are different states.**
+  `RunnerId` empty means no runner has ever opened the session (the
+  launch minted it with empty `RunnerId`, design D2); the server
+  reports `not-cancellable` without consulting the SignalR tracker.
+  `ConnectionId` empty means the runner bound itself then dropped the
+  SignalR connection; the same `not-cancellable` reply but the lookup
+  path is different. Both branches test the same outcome but assert
+  distinct intermediate states.
+- **The runner's `connection.cancel?.()` is a notification, not a
+  request.** It resolves once the message is on the wire, not when the
+  agent honours it. The agent decides what to do; the runner is honest
+  about the attempt. Returning `{ state: "cancelled" }` after a
+  successful `await cancel(...)` is the contract — the HTTP caller may
+  need to poll the session's status to observe the agent's actual
+  response.
+- **`MockConnection` gained a `cancel?` field** in the runner-signalr
+  spec's `buildClient` helper so existing tests still compile (no
+  cancel method by default) and the new cancel specs can opt in by
+  passing `{ prompt: vi.fn(), cancel: vi.fn() }`. Existing workflow
+  followup tests are unaffected because they don't invoke the cancel
+  handler.
+- **`ISingleClientProxy` implementation is required, not optional.**
+  ASP.NET Core's `IHubClients.Client(string)` on the non-generic
+  interface returns `ISingleClientProxy` whose default
+  `NonInvokingSingleClientProxy` throws `NotImplementedException` on
+  `InvokeCoreAsync<T>`. The recording hub's explicit implementation
+  implements both `IClientProxy IHubClients<IClientProxy>.Client(...)`
+  and `ISingleClientProxy IHubClients.Client(...)` so the typed
+  invocation path is reachable through the test double. This was the
+  only server-side test-infrastructure change needed for T-005.
+- **The cross-spec runner registry pollution pattern (T-004) is
+  reused**: each test in `GenericAgentSessionCancelApiSpecs` registers
+  its own runner via the per-instance `_runnerId` and unregisters it
+  in `DisposeAsync`. This prevents the global runner registry from
+  carrying stale work items between tests and avoids collisions with
+  the launch-route spec's `FindAgentJobGrainAsync` helper.
+- **`AgentSessionCancelReply` is not a public API contract today** —
+  it's a transport record shared between the server route and the
+  test double. Both sides treat it as a thin wrapper around the
+  runner's reported string; the runner itself emits an untyped
+  `{ state: "..." }` JSON object via SignalR.

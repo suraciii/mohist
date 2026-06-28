@@ -187,6 +187,87 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
+    /// Resolves the cancel target for a generic (non-workflow)
+    /// <see cref="AgentSession"/> (issue-129 T-005). Distinct from
+    /// <see cref="ResolveGenericFollowupTargetAsync"/>: cancel is
+    /// best-effort over ACP, so the endpoint needs the runner id AND the
+    /// terminal-state verdict up front — if the session is already terminal
+    /// the server short-circuits without calling the runner at all. The
+    /// returned <see cref="GenericCancelTarget.TerminalState"/> is the
+    /// verbatim <c>status</c> field of the most recent
+    /// <c>session.closed</c> transcript event
+    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), so the HTTP
+    /// response can mirror the runner's reported state without inventing a
+    /// value.
+    /// </summary>
+    /// <remarks>
+    /// Returns <c>null</c> when the session is unknown OR belongs to a
+    /// different project (cross-project leakage guard), matching the
+    /// null-return contract <see cref="ResolveGenericFollowupTargetAsync"/>
+    /// uses for the same cases.
+    /// </remarks>
+    public async Task<GenericCancelTarget?> ResolveGenericCancelTargetAsync(string projectId, string sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var records = await _sessionQuery.ListByIdsAsync([sessionId], ct);
+        var record = records.FirstOrDefault();
+        if (record is null) return null;
+
+        var sessionProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId);
+        if (!string.Equals(sessionProjectId, projectId, StringComparison.Ordinal))
+            return null;
+
+        var runnerId = record.Row.RunnerId;
+        var terminalState = await ReadTerminalStateAsync(db, sessionId, ct);
+
+        return new GenericCancelTarget(
+            runnerId ?? string.Empty,
+            sessionId,
+            terminalState);
+    }
+
+    /// <summary>
+    /// Reads the most recent <c>session.closed</c> / <c>session_closed</c>
+    /// transcript event and returns its <c>status</c> field
+    /// (<c>completed</c> / <c>failed</c> / <c>stopped</c>), or <c>null</c>
+    /// when no terminal event has been recorded yet. Used by
+    /// <see cref="ResolveGenericCancelTargetAsync"/> to short-circuit the
+    /// cancel endpoint on already-terminal sessions (issue-129 T-005).
+    /// </summary>
+    private static async Task<string?> ReadTerminalStateAsync(MohistDbContext db, string sessionId, CancellationToken ct)
+    {
+        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
+            .Where(t => t.SessionId == sessionId)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+        if (turnIds.Count == 0) return null;
+
+        var closed = await db.AgentSessionTranscriptParts.AsNoTracking()
+            .Where(p => turnIds.Contains(p.TurnId)
+                && (p.Type == "session_closed" || p.Type == "session.closed"))
+            .OrderByDescending(p => p.Sequence)
+            .ThenByDescending(p => p.Id)
+            .Select(p => p.PayloadJson)
+            .FirstOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(closed)) return null;
+
+        JsonElement payload;
+        try { payload = JSON.DeserializeElement(closed); }
+        catch { return null; }
+        if (payload.ValueKind != JsonValueKind.Object) return null;
+
+        var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
+        if (string.IsNullOrWhiteSpace(status)) return null;
+        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "stopped", StringComparison.OrdinalIgnoreCase))
+        {
+            return status.ToLowerInvariant();
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Returns <c>true</c> when the session has been explicitly closed via
     /// a <c>session.closed</c> transcript event with a terminal status
     /// (<c>completed</c>, <c>failed</c>, <c>stopped</c>). The transcript
@@ -872,3 +953,19 @@ public sealed record GenericFollowupTarget(
     string RunnerId,
     string SessionId,
     bool IsActive);
+
+/// <summary>
+/// Cancel target for a generic (non-workflow) <see cref="AgentSession"/>
+/// (issue-129 T-005). Carries the runner id (so the server can resolve
+/// the runner's SignalR connection) and the most-recent terminal state
+/// observed in the session's transcript (so the endpoint can short-circuit
+/// without ever invoking the runner when the session is already
+/// <c>completed</c> / <c>failed</c> / <c>stopped</c>). <see cref="TerminalState"/>
+/// is <c>null</c> when the session is not yet terminal, in which case the
+/// endpoint must call the runner and let it report the cancellation
+/// outcome (design D6).
+/// </summary>
+public sealed record GenericCancelTarget(
+    string RunnerId,
+    string SessionId,
+    string? TerminalState);

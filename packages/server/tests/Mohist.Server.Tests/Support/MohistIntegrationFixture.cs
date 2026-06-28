@@ -190,6 +190,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
 {
     private readonly RecordingHubClients _clients;
+    private readonly Dictionary<string, object?> _invocationResponses = new(StringComparer.Ordinal);
 
     public RecordingRunnerHubContext()
     {
@@ -197,10 +198,31 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
     }
 
     public List<RecordedRunnerHubMessage> SentMessages { get; } = [];
+    public List<RecordedRunnerHubInvocation> Invocations { get; } = [];
     public IHubClients Clients => _clients;
     public IGroupManager Groups { get; } = new NoopGroupManager();
 
-    public void Clear() => SentMessages.Clear();
+    public void Clear()
+    {
+        SentMessages.Clear();
+        Invocations.Clear();
+    }
+
+    /// <summary>
+    /// Registers a return value the recording proxy should hand back when a
+    /// server-side invocation targets the named method on any connection
+    /// (issue-129 T-005). Only the most recent registration for a method
+    /// wins, so a test can overwrite a prior response between assertions.
+    /// </summary>
+    public void SetInvocationResponse(string method, object? response)
+    {
+        _invocationResponses[method] = response;
+    }
+
+    private object? ResolveInvocationResponse(string method)
+    {
+        return _invocationResponses.TryGetValue(method, out var value) ? value : null;
+    }
 
     private sealed class RecordingHubClients : IHubClients
     {
@@ -213,7 +235,19 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
 
         public IClientProxy All => new RecordingClientProxy(_context, "all");
         public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => new RecordingClientProxy(_context, "all-except");
-        public IClientProxy Client(string connectionId) => new RecordingClientProxy(_context, connectionId);
+        // IHubClients<T> declares `Client(string) -> T` (IClientProxy here);
+        // the non-generic IHubClients inherits from IHubClients<IClientProxy>
+        // and re-declares `Client(string) -> ISingleClientProxy` with a default
+        // implementation that wraps the IClientProxy in a
+        // NonInvokingSingleClientProxy (which throws NotImplementedException
+        // for InvokeCoreAsync<T>). Implement both overloads explicitly so
+        // callers using the non-generic IHubClients.Client(connectionId) also
+        // get an ISingleClientProxy that records invocations (issue-129
+        // T-005 CancelAgentSession). The recording proxy implements both
+        // IClientProxy and ISingleClientProxy so the wire semantics are
+        // unchanged for SendCoreAsync.
+        IClientProxy IHubClients<IClientProxy>.Client(string connectionId) => new RecordingClientProxy(_context, connectionId);
+        ISingleClientProxy IHubClients.Client(string connectionId) => new RecordingClientProxy(_context, connectionId);
         public IClientProxy Clients(IReadOnlyList<string> connectionIds) => new RecordingClientProxy(_context, string.Join(",", connectionIds));
         public IClientProxy Group(string groupName) => new RecordingClientProxy(_context, groupName);
         public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => new RecordingClientProxy(_context, groupName);
@@ -222,7 +256,7 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
         public IClientProxy Users(IReadOnlyList<string> userIds) => new RecordingClientProxy(_context, string.Join(",", userIds));
     }
 
-    private sealed class RecordingClientProxy : IClientProxy
+    private sealed class RecordingClientProxy : ISingleClientProxy
     {
         private readonly RecordingRunnerHubContext _context;
         private readonly string _connectionId;
@@ -238,6 +272,21 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
             _context.SentMessages.Add(new RecordedRunnerHubMessage(_connectionId, method, args));
             return Task.CompletedTask;
         }
+
+        public Task<T> InvokeCoreAsync<T>(string method, object?[] args, CancellationToken cancellationToken = default)
+        {
+            _context.Invocations.Add(new RecordedRunnerHubInvocation(_connectionId, method, args));
+            var response = _context.ResolveInvocationResponse(method);
+            if (response is T typed)
+            {
+                return Task.FromResult(typed);
+            }
+            // Fall back to default(T) when no response is registered or the
+            // registered response is the wrong runtime type. Tests that
+            // exercise the typed return path must set the response to the
+            // exact T via SetInvocationResponse before invoking the route.
+            return Task.FromResult(default(T)!);
+        }
     }
 
     private sealed class NoopGroupManager : IGroupManager
@@ -248,3 +297,5 @@ public sealed class RecordingRunnerHubContext : IHubContext<RunnerHub>
 }
 
 public sealed record RecordedRunnerHubMessage(string ConnectionId, string Method, IReadOnlyList<object?> Arguments);
+
+public sealed record RecordedRunnerHubInvocation(string ConnectionId, string Method, IReadOnlyList<object?> Arguments);
