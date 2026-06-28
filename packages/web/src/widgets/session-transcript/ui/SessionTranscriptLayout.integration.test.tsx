@@ -312,6 +312,120 @@ describe('SessionTranscriptLayout TOC + toolbar + responsive integration', () =>
       expect(log?.className).toContain('min-w-0')
     })
   })
+
+  describe('useTurnKeyboardNav wiring into SessionTranscriptLayout', () => {
+    function makeRect(top: number, height = 200): DOMRect {
+      return {
+        top,
+        left: 0,
+        right: 0,
+        bottom: top + height,
+        width: 0,
+        height,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect
+    }
+
+    function renderWithScrollContainer({
+      turns,
+      containerTop = 0,
+      turnTops,
+    }: {
+      turns: DisplayTurn[]
+      containerTop?: number
+      turnTops: number[]
+    }) {
+      const scrollContainer = document.createElement('div')
+      document.body.appendChild(scrollContainer)
+      const scrollContainerRef = { current: scrollContainer }
+
+      const rectMap = new Map<Element, DOMRect>()
+      rectMap.set(scrollContainer, makeRect(containerTop, 800))
+
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        return rectMap.get(this) ?? makeRect(0, 0)
+      })
+
+      const view = render(
+        <SessionTranscriptLayout
+          turns={turns}
+          turnCount={turns.length}
+          title="t"
+          statusKind="completed"
+          isRunning={false}
+          scrollContainerRef={scrollContainerRef}
+        />,
+      )
+
+      const turnRefs = Array.from(document.querySelectorAll<HTMLDivElement>('[data-turn-ref]'))
+      turnRefs.forEach((el, i) => {
+        rectMap.set(el, makeRect(turnTops[i] ?? 1000 * (i + 1), 200))
+      })
+
+      return {
+        scrollContainer,
+        scrollContainerRef,
+        turnRefs,
+        unmount: () => {
+          view.unmount()
+          scrollContainer.remove()
+        },
+      }
+    }
+
+    it('fires keydown on the supplied scrollContainerRef and scrolls to the next turn', () => {
+      const turns: DisplayTurn[] = [
+        makeTurn({ id: 'a' }),
+        makeTurn({ id: 'b' }),
+        makeTurn({ id: 'c' }),
+      ]
+      const { scrollContainer, turnRefs } = renderWithScrollContainer({
+        turns,
+        turnTops: [50, 1100, 2100],
+      })
+
+      fireEvent.keyDown(scrollContainer, { key: 'j' })
+
+      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
+      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[1])
+    })
+
+    it('detaches the listener when the layout unmounts', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      const { scrollContainer, unmount } = renderWithScrollContainer({
+        turns,
+        turnTops: [50],
+      })
+
+      fireEvent.keyDown(scrollContainer, { key: 'g' })
+      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
+
+      unmount()
+
+      fireEvent.keyDown(scrollContainer, { key: 'g' })
+      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('respects the focus-deferral contract when the followup composer is focused', () => {
+      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
+      const { scrollContainer } = renderWithScrollContainer({
+        turns,
+        turnTops: [50],
+      })
+
+      const textarea = document.createElement('textarea')
+      scrollContainer.appendChild(textarea)
+      textarea.focus()
+
+      fireEvent.keyDown(scrollContainer, { key: 'g' })
+      fireEvent.keyDown(scrollContainer, { key: 'G' })
+      fireEvent.keyDown(scrollContainer, { key: 'j' })
+      fireEvent.keyDown(scrollContainer, { key: 'k' })
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled()
+    })
+  })
 })
 
 describe('SessionTranscriptLayout narrow viewport no-overflow integration', () => {

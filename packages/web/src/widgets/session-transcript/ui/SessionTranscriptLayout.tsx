@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { DisplayTurn } from '../model/session-transcript-display'
+import { useTurnKeyboardNav } from '../model/useTurnKeyboardNav'
 import { TurnList } from './TurnList'
 import { TurnTocRail, buildTurnTocEntries } from './TurnToc'
 import { TranscriptToolbar } from './TranscriptToolbar'
@@ -35,6 +36,7 @@ interface SessionTranscriptLayoutProps {
   isRunning: boolean
   isThinking?: boolean
   isStreaming?: boolean
+  scrollContainerRef?: RefObject<HTMLElement | null>
 }
 
 export function SessionTranscriptLayout({
@@ -42,6 +44,7 @@ export function SessionTranscriptLayout({
   isRunning,
   isThinking,
   isStreaming,
+  scrollContainerRef,
 }: SessionTranscriptLayoutProps) {
   const turnRefs = useRef<TurnRefsMap>(new Map()).current
   const [refsVersion, setRefsVersion] = useState(0)
@@ -54,6 +57,12 @@ export function SessionTranscriptLayout({
     () => buildTurnTocEntries(turns, turnRefs),
     [turns, turnRefs, refsVersion],
   )
+
+  useTurnKeyboardNav({
+    scrollContainerRef,
+    turnRefs,
+    turnCount: turns.length,
+  })
 
   return (
     <div className="px-4 py-6 min-w-0" data-scrollable="">

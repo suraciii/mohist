@@ -778,6 +778,7 @@ export function SessionPage() {
           isRunning={isRunning}
           isThinking={isThinking}
           isStreaming={isStreaming}
+          scrollContainerRef={scrollContainerRef}
         />
       </div>
 
