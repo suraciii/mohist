@@ -7,6 +7,8 @@
 - The local `SessionHeader` function lives in `SessionPage.tsx:267`, not in `widgets/coder-session/ui/SessionHeader.tsx`. There is also a widget-level `<SessionHeader>` (different component, used in issue-detail / session cards). Issue-243 work targets the local one only.
 - `SessionTranscriptLayout`'s outer `<div className="flex flex-col h-full">` wrapper is gone after T-001 — the parent (`SessionPage.tsx:769-777`) is now the scroll container (`flex-1 overflow-y-auto`). The layout itself is just the `data-scrollable=""` inner region. Future tasks adding the toolbar / TOC / keyboard hook should mount into the layout, not the parent.
 - `SessionPage` already pulls in `<SessionFollowupComposer>` at the bottom of the main branch (line 779). The followup composer has a `[data-composer-input]` attribute that the future `useTurnKeyboardNav` (T-005) can use to bail out on j/k/g/G.
+- `packages/web/src/widgets/session-transcript/ui/AssistantParts.render.test.tsx` is co-located with `AssistantParts.tsx` (the `.render.test.tsx` suffix) — the convention for new widget render tests in this directory. `tests/*.test.tsx` is the convention for higher-level SessionPage/integration tests. Co-locate new `TurnList`-level tests with the source file.
+- The shared `formatTime` helper at `packages/web/src/shared/lib/format-time.ts` is `toLocaleString()` (date + time), NOT `toLocaleTimeString()`. The transcript's local `formatTime` in `AssistantParts.tsx:7` (and the new one in `TurnList.tsx:7`) is `toLocaleTimeString()` (time only). They are different functions; T-002 specifically references the AssistantParts-style local helper. Don't accidentally import the shared one.
 
 ## T-001 Decisions
 
@@ -31,3 +33,27 @@
   - `main branch session header back-link uses whitespace-nowrap and never wraps` — asserts the breadcrumb Link has `whitespace-nowrap` + `shrink-0`.
   - `main branch session header metadata cluster stacks vertically below sm` — asserts the metadata cluster parent has both `flex-col` and `sm:flex-row` so it stacks on mobile and goes horizontal at `sm+`.
   - `main branch session header issue title truncates with min-w-0` — feeds a 120-char issue title, asserts the breadcrumb title span has `truncate` + `min-w-0`.
+
+## T-002 Decisions
+
+- D2: Added a one-line `TurnHeader` (`TurnList.tsx:55-73`) above `PromptBlock` inside `TurnItem` showing the 1-based turn index and a clock time. Layout: a right-aligned (`flex justify-end`) `text-xs text-gray-400` row that visually sits above the right-aligned prompt bubble — small subtle marker, doesn't compete with the prompt bubble's own kind/sentAt header inside it. Inner span: `<span>Turn {index}</span>` (bold `text-gray-500`) + `·` separator + `<time dateTime={startedAt}>{formatTime(startedAt)}</time>`. The `data-turn-index="N"`, `data-turn-index-label="Turn N"`, and `data-turn-timestamp=""` attributes give stable selectors for tests and future TOC/refs wiring. The `<time>` `dateTime` attribute carries the raw ISO from `startedAt` so screen readers + future keyboard nav can read it; `title={startedAt}` exposes the raw ISO on hover. Local `formatTime` (toLocaleTimeString, time-only) is duplicated as a 2-line helper inside `TurnList.tsx` rather than imported — matches the existing `AssistantParts.tsx:7` pattern (the helper is intentionally not shared). `TurnItem` gained an `index: number` prop so the index lives at the iteration site (`TurnList.tsx:23`) and `TurnItem` doesn't recompute it from `turn.id`. No new model field; `DisplayTurn.startedAt` IS the source of truth.
+- D2: Did NOT touch `PromptBlock`. It still renders `formatDateTime(prompt.sentAt)` inside the prompt bubble — that's prompt-level context (kind + sentAt in the bubble header) and is conceptually distinct from the new turn-level timestamp rendered above the bubble. The acceptance criterion "the turn header is the single source for the turn-level time" is satisfied by adding exactly one `[data-turn-timestamp]` per turn; the existing prompt-bubble timestamp is contextual to the prompt and was out of scope per the design's "do not render the timestamp inside PromptBlock" instruction.
+
+## T-002 Gotchas
+
+- `compareDocumentPosition` returns a bitmask — `(node.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING)` is the right pattern to assert "A precedes B in document order". Treat the bitmask as truthy, not as a boolean expression (`expect(mask & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()`), since the raw value is non-zero but not always equal to 4.
+- `new Date(iso).toLocaleTimeString()` is locale-sensitive. Inside jsdom the default locale is consistent across the test run, so the test can compare against the same expression it expects the component to compute. Don't hardcode the formatted string in tests; compute it the same way the production code does.
+- `<PromptBlock>` uses `.rounded-2xl` on its inner bubble; the test can locate the prompt bubble via `container.querySelector('.rounded-2xl')` (jsdom renders the first match). Avoids brittle class-name coupling to Tailwind utilities not relevant to the timestamp assertion.
+
+## T-002 Verification
+
+- `npm run typecheck -w packages/web` → clean.
+- `npm run test:run -w packages/web` → 2467 passed | 1 skipped (was 2460 before T-002; +7 new tests).
+- New tests in `packages/web/src/widgets/session-transcript/ui/TurnList.render.test.tsx` under `describe('TurnList turn header timestamps')`:
+  - `renders a timestamp element for every turn in a multi-turn fixture with text matching each startedAt` — 3-turn fixture; asserts `querySelectorAll('[data-turn-timestamp]').length === 3` and each `[i].textContent === new Date(turns[i].startedAt).toLocaleTimeString()` and `getAttribute('datetime') === turns[i].startedAt`.
+  - `numbers turn headers 1-based in document order` — asserts `[data-turn-index-label]` text is "Turn 1", "Turn 2", "Turn 3".
+  - `positions the turn header above the prompt block inside TurnItem` — uses `compareDocumentPosition` + `Node.DOCUMENT_POSITION_FOLLOWING` to assert the turn header precedes the prompt bubble (`.rounded-2xl`) in document order.
+  - `uses toLocaleTimeString formatting consistent with AssistantParts formatTime helper` — asserts the timestamp text equals `toLocaleTimeString()` and is NOT equal to `toLocaleString()`, locking in the time-only format.
+  - `does not duplicate the turn-level timestamp for legacy-missing prompt kinds` — single-turn `legacy-missing` fixture; asserts exactly one `[data-turn-timestamp]` exists and its `datetime` matches `turn.startedAt`. PromptBlock's internal prompt-level sentAt is left untouched by design.
+  - `renders a TurnHeader for every prompt kind, not just legacy-missing` — 6-turn fixture covering all `PromptKind` values; asserts `[data-turn-timestamp]`.length === 6 and each `datetime` matches the corresponding `startedAt`.
+  - `renders no timestamp elements for an empty turn list` — empty fixture; asserts `querySelectorAll('[data-turn-timestamp]')` is empty.

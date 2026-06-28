@@ -4,6 +4,10 @@ import type { DisplayTurn, DisplayChangedFile } from '../model/session-transcrip
 import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'
 
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString()
+}
+
 interface TurnListProps {
   turns: DisplayTurn[]
 }
@@ -15,8 +19,8 @@ export function TurnList({ turns }: TurnListProps) {
       className="space-y-6 max-w-2xl mx-auto"
       style={{ contentVisibility: 'auto' }}
     >
-      {turns.map((turn) => (
-        <TurnItem key={turn.id} turn={turn} />
+      {turns.map((turn, index) => (
+        <TurnItem key={turn.id} turn={turn} index={index + 1} />
       ))}
     </div>
   )
@@ -24,11 +28,13 @@ export function TurnList({ turns }: TurnListProps) {
 
 interface TurnItemProps {
   turn: DisplayTurn
+  index: number
 }
 
-export function TurnItem({ turn }: TurnItemProps) {
+export function TurnItem({ turn, index }: TurnItemProps) {
   return (
     <div className="space-y-3">
+      <TurnHeader index={index} startedAt={turn.startedAt} />
       <PromptBlock prompt={turn.prompt} />
 
       {turn.assistantParts.length > 0 && (
@@ -38,6 +44,30 @@ export function TurnItem({ turn }: TurnItemProps) {
       {turn.changedFiles.length > 0 && (
         <TurnDiffs files={turn.changedFiles} />
       )}
+    </div>
+  )
+}
+
+interface TurnHeaderProps {
+  index: number
+  startedAt: string
+}
+
+function TurnHeader({ index, startedAt }: TurnHeaderProps) {
+  return (
+    <div
+      data-turn-index={index}
+      className="flex justify-end text-xs text-gray-400"
+    >
+      <span className="flex items-center gap-1.5">
+        <span data-turn-index-label="" className="font-medium text-gray-500">
+          Turn {index}
+        </span>
+        <span aria-hidden="true">·</span>
+        <time dateTime={startedAt} data-turn-timestamp="" title={startedAt}>
+          {formatTime(startedAt)}
+        </time>
+      </span>
     </div>
   )
 }
