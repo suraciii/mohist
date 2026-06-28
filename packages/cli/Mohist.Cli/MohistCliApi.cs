@@ -373,7 +373,7 @@ internal sealed class MohistCliApi
 
         if (string.Equals(mode, "json", StringComparison.Ordinal))
         {
-            _out.WriteLine(runners.ToJsonString(JsonOptions));
+            _out.WriteLine(data.ToJsonString(JsonOptions));
             return 0;
         }
 

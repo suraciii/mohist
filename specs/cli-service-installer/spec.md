@@ -208,7 +208,7 @@ On Windows, status output SHALL combine install registration state (Scheduled Ta
 
 #### Scenario: Status reports install registration
 
-- [x] **WHEN** the user runs `mo server status` or `mo runner status` on Windows
+- [x] **WHEN** the user runs `mo server status` or `mo runner service-status` on Windows
 - **THEN** the output SHALL indicate whether a Scheduled Task is registered
 - **AND** the output SHALL indicate whether a Startup-fallback launcher is installed
 - **AND** the output SHALL indicate whether the generated `~/.mohist/service/mohist-<kind>.cmd` launcher file is present
@@ -217,7 +217,7 @@ On Windows, status output SHALL combine install registration state (Scheduled Ta
 
 #### Scenario: Status reports live runtime state
 
-- [x] **WHEN** the user runs `mo server status` or `mo runner status` on Windows
+- [x] **WHEN** the user runs `mo server status` or `mo runner service-status` on Windows
 - **THEN** the output SHALL indicate whether the service is currently running
 - **AND** for server status, the output SHALL indicate whether `http://localhost:3456/api/health` is reachable
 - **AND** for runner status, the output SHALL reflect the runner online / offline state

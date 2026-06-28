@@ -121,7 +121,11 @@ internal static class RunnerCommands
         runner.Subcommands.Add(BuildSystemd("start", installer.StartRunnerAsync, installer));
         runner.Subcommands.Add(BuildSystemd("stop", installer.StopRunnerAsync, installer));
         runner.Subcommands.Add(BuildSystemd("restart", installer.RestartRunnerAsync, installer));
-        runner.Subcommands.Add(BuildSystemd("service-status", installer.StatusRunnerAsync, installer));
+        runner.Subcommands.Add(BuildSystemd(
+            "service-status",
+            "Show runner managed service lifecycle status",
+            installer.StatusRunnerAsync,
+            installer));
         runner.Subcommands.Add(BuildLogs(installer));
         runner.Subcommands.Add(BuildSystemd("uninstall", installer.UninstallRunnerAsync, installer));
         runner.Subcommands.Add(BuildList(api, environment));
@@ -297,9 +301,21 @@ internal static class RunnerCommands
         return cmd;
     }
 
-    private static Command BuildSystemd(string name, Func<ServiceCommandOptions, Task<int>> handler, IServiceInstaller installer)
+    private static Command BuildSystemd(
+        string name,
+        Func<ServiceCommandOptions, Task<int>> handler,
+        IServiceInstaller installer)
     {
-        var cmd = new Command(name, $"{name} runner managed service");
+        return BuildSystemd(name, $"{name} runner managed service", handler, installer);
+    }
+
+    private static Command BuildSystemd(
+        string name,
+        string description,
+        Func<ServiceCommandOptions, Task<int>> handler,
+        IServiceInstaller installer)
+    {
+        var cmd = new Command(name, description);
         var dryRunOpt = MohistCliCommands.DryRunOption();
         var unitDirOpt = MohistCliCommands.UnitDirOption();
         cmd.Options.Add(dryRunOpt);

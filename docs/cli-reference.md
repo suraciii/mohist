@@ -102,10 +102,21 @@ mo server status             # 检查 server 状态
 
 ```bash
 mo runner start              # 前台启动 runner
-mo runner status             # runner 状态
+mo runner status             # 在线 runner 摘要（id、心跳、idle/busy）
+mo runner service-status     # runner 托管服务状态（systemd / Scheduled Task）
+mo runner list               # 当前 project 的 runner 详情列表
 ```
 
 详见 [Runner 指南](runner.md)。
+
+## 只读诊断
+
+```bash
+mo system info               # 服务端系统诊断（identity/source/install/update/services/paths）
+mo opencode models           # 当前 project 可用 coder 模型 ID，每行一个
+```
+
+以上命令支持 `-o table|json`。
 
 ## Repository 管理
 

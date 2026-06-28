@@ -38,9 +38,12 @@ internal sealed partial class TableRenderer
     {
         if (row is not JsonObject obj) return "unknown";
         if (obj["capacity"] is not JsonObject capacity) return "unknown";
-        var usedSlots = NumberOf(capacity, "usedSlots");
-        if (string.IsNullOrEmpty(usedSlots)) return "unknown";
-        return usedSlots == "0" ? "idle" : "busy";
+        var usedSlots = capacity["usedSlots"];
+        if (usedSlots is not JsonValue value) return "unknown";
+        if (value.TryGetValue<int>(out var i)) return i == 0 ? "idle" : "busy";
+        if (value.TryGetValue<long>(out var l)) return l == 0 ? "idle" : "busy";
+        if (value.TryGetValue<double>(out var d) && !double.IsNaN(d)) return d == 0d ? "idle" : "busy";
+        return "unknown";
     }
 
     private void RenderRepoList(JsonNode? data)

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json.Nodes;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli.Tests.Support;
@@ -847,10 +848,12 @@ public class CliRunnerCommandSpecs
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal($"/api/projects/{ActiveProjectId}/runners", request.RequestUri?.PathAndQuery);
-        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonArray;
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
         Assert.NotNull(parsed);
-        Assert.Equal(2, parsed!.Count);
-        var first = parsed[0]!.AsObject();
+        var parsedRunners = parsed!["runners"] as JsonArray;
+        Assert.NotNull(parsedRunners);
+        Assert.Equal(2, parsedRunners!.Count);
+        var first = parsedRunners[0]!.AsObject();
         Assert.Equal("r-idle", first["id"]?.GetValue<string>());
         var capacity = first["capacity"]!.AsObject();
         Assert.Equal(0, capacity["usedSlots"]?.GetValue<int>());
@@ -878,7 +881,7 @@ public class CliRunnerCommandSpecs
     }
 
     [Fact]
-    public async Task RunnerStatus_EmptyListJson_EmitsEmptyArray()
+    public async Task RunnerStatus_EmptyListJson_EmitsRawPayloadWithEmptyRunnersArray()
     {
         var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -891,9 +894,36 @@ public class CliRunnerCommandSpecs
             http, ["runner", "status", "-o", "json"], output, error, fileSystem, executor, env);
 
         Assert.Equal(0, exitCode);
-        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonArray;
+        var parsed = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
         Assert.NotNull(parsed);
-        Assert.Empty(parsed!);
+        var parsedRunners = parsed!["runners"] as JsonArray;
+        Assert.NotNull(parsedRunners);
+        Assert.Empty(parsedRunners!);
+    }
+
+    [Fact]
+    public async Task RunnerStatus_Table_TreatsDecimalZeroUsedSlotsAsIdle()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"success":true,"data":{"runners":[{"id":"r-decimal-zero","kind":"host","hostname":"host-a","scope":{"type":"global"},"status":"online","registeredAt":"2026-06-20T11:00:00Z","lastHeartbeatAt":"2026-06-20T12:00:00Z","connectionState":"connected","capabilities":["agent-run"],"coderModels":["openai/gpt-5.5"],"coderModelCount":1,"capacity":{"usedSlots":0.0,"totalSlots":2.0},"activeWorks":null}]}}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            }));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "status"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Single(handler.Requests);
+        var stdout = output.ToString();
+        Assert.Contains("r-decimal-zero", stdout, StringComparison.Ordinal);
+        Assert.Contains("idle", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("busy", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -973,6 +1003,7 @@ public class CliRunnerCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
+        Assert.Contains("Show runner managed service lifecycle status", stdout, StringComparison.Ordinal);
         Assert.Contains("--dry-run", stdout, StringComparison.Ordinal);
         Assert.Contains("--unit-dir", stdout, StringComparison.Ordinal);
     }
@@ -1006,6 +1037,8 @@ public class CliRunnerCommandSpecs
         var stdout = output.ToString();
         Assert.Contains("service-status", stdout, StringComparison.Ordinal);
         Assert.Contains("status", stdout, StringComparison.Ordinal);
+        Assert.Contains("Show online runner summary", stdout, StringComparison.Ordinal);
+        Assert.Contains("Show runner managed service lifecycle status", stdout, StringComparison.Ordinal);
         var statusIdx = stdout.IndexOf("status", StringComparison.Ordinal);
         var serviceStatusIdx = stdout.IndexOf("service-status", StringComparison.Ordinal);
         Assert.True(statusIdx >= 0);
