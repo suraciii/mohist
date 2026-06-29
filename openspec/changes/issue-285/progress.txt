@@ -39,3 +39,16 @@
 - Missing subscription row → `InboxSubscriptionState` default (all-enabled) → gate passes → MVP behavior preserved
 - No in-process cache; each projected event reads subscription fresh from store
 - Test DI scope must explicitly register `InboxSubscriptionStore` (the production scope uses `AddMohistConventionalServices` auto-registration via `IScopedService` marker; the test harness builds its own scope manually)
+
+## T-003 — Project-scoped subscription read and update HTTP API
+
+### Files Modified
+- `packages/server/src/Mohist.Server/Api/InboxRoutes.cs` — added GET /subscription + PUT /subscription endpoints, `InboxSubscriptionDto` inline with `[JsonPropertyName]` matching `NotificationKinds`, `FromState`/`ToState` mappers
+
+### Files Created
+- `packages/server/tests/Mohist.Server.Tests/Specs/Api/InboxSubscriptionApiSpecs.cs` — 6 API tests covering default read, persist+re-read, unknown-key 400, missing-key 400, project isolation, unknown project 404
+
+### Key Decisions (followed design.md D5)
+- PUT endpoint accepts `JsonElement` body for key validation against `NotificationKinds.IsDefined` before deserializing to DTO
+- `InboxSubscriptionDto` uses `[JsonPropertyName("workflow_failed")]` etc. so JSON keys match `NotificationKind` values exactly (snake_case), not camelCase
+- All six acceptance criteria verified by tests: read default, update+re-read, unknown-key rejection, missing-key rejection, project isolation, and unknown project 404 from ProjectResolutionEndpointFilter

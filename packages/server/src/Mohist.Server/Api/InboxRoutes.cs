@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Inbox;
 
 namespace Mohist.Server.Api;
@@ -70,8 +72,82 @@ public static class InboxRoutes
                 : ApiResults.Ok(new { itemId, archived = true });
         });
 
+        // GET /api/projects/{projectRef}/inbox/subscription
+        group.MapGet("/subscription", async (HttpContext context, InboxSubscriptionStore store) =>
+        {
+            var pid = context.GetResolvedProject().Id;
+            var state = await store.GetAsync(pid);
+            return ApiResults.Ok(InboxSubscriptionDto.FromState(state));
+        });
+
+        // PUT /api/projects/{projectRef}/inbox/subscription
+        group.MapPut("/subscription", async (HttpContext context, InboxSubscriptionStore store, JsonElement body) =>
+        {
+            foreach (var prop in body.EnumerateObject())
+            {
+                if (!NotificationKinds.IsDefined(prop.Name))
+                    return ApiResults.BadRequest($"Unknown notification kind: '{prop.Name}'");
+            }
+
+            var required = new[]
+            {
+                NotificationKinds.WorkflowFailed,
+                NotificationKinds.ApprovalRequested,
+                NotificationKinds.IssueStarted,
+                NotificationKinds.IssueCompleted,
+            };
+            var provided = body.EnumerateObject().Select(p => p.Name).ToHashSet();
+            var missing = required.Where(k => !provided.Contains(k)).ToArray();
+            if (missing.Length > 0)
+                return ApiResults.BadRequest($"Missing required keys: {string.Join(", ", missing)}");
+
+            var pid = context.GetResolvedProject().Id;
+            var json = body.GetRawText();
+            var dto = JsonSerializer.Deserialize<InboxSubscriptionDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = false });
+            if (dto is null)
+                return ApiResults.BadRequest("Invalid subscription payload");
+
+            var result = await store.SetAsync(pid, dto.ToState());
+            return ApiResults.Ok(InboxSubscriptionDto.FromState(result));
+        });
+
         return app;
     }
+}
+
+/// <summary>
+/// Response/request DTO for inbox subscription preferences. Maps between
+/// the API JSON contract (camelCase bool properties) and the internal
+/// <see cref="InboxSubscriptionState"/> record. Each property corresponds
+/// to one <see cref="NotificationKinds"/> value.
+/// </summary>
+public sealed class InboxSubscriptionDto
+{
+    [JsonPropertyName("workflow_failed")]
+    public bool WorkflowFailed { get; init; }
+
+    [JsonPropertyName("approval_requested")]
+    public bool ApprovalRequested { get; init; }
+
+    [JsonPropertyName("issue_started")]
+    public bool IssueStarted { get; init; }
+
+    [JsonPropertyName("issue_completed")]
+    public bool IssueCompleted { get; init; }
+
+    public static InboxSubscriptionDto FromState(InboxSubscriptionState state) => new()
+    {
+        WorkflowFailed = state.WorkflowFailedEnabled,
+        ApprovalRequested = state.ApprovalRequestedEnabled,
+        IssueStarted = state.IssueStartedEnabled,
+        IssueCompleted = state.IssueCompletedEnabled,
+    };
+
+    public InboxSubscriptionState ToState() => new(
+        WorkflowFailedEnabled: WorkflowFailed,
+        ApprovalRequestedEnabled: ApprovalRequested,
+        IssueStartedEnabled: IssueStarted,
+        IssueCompletedEnabled: IssueCompleted);
 }
 
 /// <summary>
