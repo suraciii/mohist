@@ -1,9 +1,14 @@
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Tests.Specs.Workflow;
@@ -89,10 +94,55 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         var (buildTask, _) = await PollWorkAnyAsync();
 
         var workflowGrain = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            workflowGrain.RerunFromStageAsync("plan"));
+        var result = await workflowGrain.RerunFromStageAsync("plan");
 
-        Assert.Contains("active_work_in_range", ex.Message);
+        Assert.False(result.Success);
+        Assert.Equal("active_work_in_range", result.Code);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RerunFromStage_RuntimeVariablesPreservedAndReadableByNewAttempt()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("plan",
+                [new("draft", "Draft", "spec/task")],
+                [new("plan-ok", "Plan OK", "spec/check")]),
+            new StageDefinition("build",
+                [new("compile", "Compile", "spec/task", With("{\"answer\":\"${{ vars.answer }}\"}"))],
+                [new("build-ok", "Build OK", "spec/check")]),
+        ]));
+
+        var (firstTask, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, firstTask.WorkId, "completed");
+        var (firstChecks, r2) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(r2, firstChecks, "plan-ok");
+
+        var (buildTask, r3) = await PollWorkAnyAsync();
+        await ReportAsync(r3, buildTask.WorkId, "completed");
+        var (buildChecks, r4) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(r4, buildChecks, "build-ok");
+
+        var runProfile = new WorkflowRunProfileManager(new PooledDbContextFactory<MohistDbContext>(
+            new DbContextOptionsBuilder<MohistDbContext>()
+                .UseSqlite(_fixture.ConnectionString)
+                .Options));
+        await runProfile.PatchVariablesAsync(_workflowId!, new VariableBundle(
+            Vars: JsonDocument.Parse("{\"answer\":42}").RootElement.Clone()));
+
+        var workflowGrain = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
+        await workflowGrain.RerunFromStageAsync("build");
+
+        var preserved = await runProfile.GetVariablesAsync(_workflowId!);
+        Assert.NotNull(preserved.Vars);
+        Assert.Equal(42, preserved.Vars.Value.GetProperty("answer").GetInt32());
+
+        var (rerunBuildTask, _) = await PollWorkAnyAsync();
+        Assert.NotNull(rerunBuildTask.With);
+        using var withDoc = JsonDocument.Parse(rerunBuildTask.With!);
+        Assert.Equal(42, withDoc.RootElement.GetProperty("answer").GetInt32());
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
@@ -223,10 +273,10 @@ public class RerunFromStageSpecs : WorkflowGrainSpecs
         Assert.NotNull(stateBefore!.Owner);
 
         var workflowGrain = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            workflowGrain.RerunFromStageAsync("plan"));
+        var result = await workflowGrain.RerunFromStageAsync("plan");
 
-        Assert.Contains("active_work_in_range", ex.Message);
+        Assert.False(result.Success);
+        Assert.Equal("active_work_in_range", result.Code);
 
         var stateAfter = await lockGrain.GetStateAsync();
         Assert.NotNull(stateAfter);

@@ -31,6 +31,7 @@ public static partial class WorkflowRunExtensions
                 })
                 .ToList();
             current.Initialized = true;
+            run.MarkStageReached(current.Id);
             current.Status = StageRunStatus.Running;
             return run.Advance();
         }

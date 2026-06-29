@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -138,16 +137,16 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest("Stage is required for rerun-from-stage");
             try
             {
-                await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(req.Stage);
-            }
-            catch (InvalidOperationException ex) when (TryParseRerunFromStageRejection(ex, out var code, out var message, out var details))
-            {
-                return code switch
+                var result = await grains.GetGrain<IWorkflowGrain>(wrId).RerunFromStageAsync(req.Stage);
+                if (!result.Success)
                 {
-                    "unknown_stage" or "stage_not_reached" => ApiResults.BadRequest(message, code, details),
-                    "active_work_in_range" => ApiResults.Conflict(message, code, details),
-                    _ => ApiResults.BadRequest(message, code, details),
-                };
+                    return result.Code switch
+                    {
+                        "unknown_stage" or "stage_not_reached" => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                        "active_work_in_range" => ApiResults.Conflict(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                        _ => ApiResults.BadRequest(result.Error ?? "Workflow control rejected", result.Code, result.Details),
+                    };
+                }
             }
             catch (Exception ex) when (IsWorkflowRunStateCorruption(ex))
             {
@@ -246,30 +245,6 @@ public static partial class IssueRoutes
         }
 
         return false;
-    }
-
-    private static bool TryParseRerunFromStageRejection(InvalidOperationException ex, out string code, out string message, out object? details)
-    {
-        details = null;
-        code = "";
-        message = ex.Message;
-
-        var match = System.Text.RegularExpressions.Regex.Match(
-            ex.Message, @"^RerunFromStage rejected \[([^\]]+)\]: (.*?)(\|.*)?$");
-        if (!match.Success)
-            return false;
-
-        code = match.Groups[1].Value;
-        message = match.Groups[2].Value;
-
-        if (match.Groups[3].Success)
-        {
-            var detailsJson = match.Groups[3].Value.TrimStart('|');
-            if (!string.IsNullOrWhiteSpace(detailsJson))
-                details = JsonSerializer.Deserialize<JsonElement>(detailsJson);
-        }
-
-        return true;
     }
 
     internal sealed record RejectRequest(string? Message);

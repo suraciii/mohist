@@ -16,7 +16,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<string> RequestChangesAsync(string body);
     Task RetryAsync();
     Task RerunAsync();
-    Task RerunFromStageAsync(string stageId);
+    Task<WorkflowControlResult> RerunFromStageAsync(string stageId);
     Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
     Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
@@ -97,6 +97,19 @@ public enum WorkflowAssignmentStatus
 {
     Assigned,
     Rejected
+}
+
+[GenerateSerializer]
+public sealed record WorkflowControlResult(
+    [property: Id(0)] bool Success,
+    [property: Id(1)] string? Code = null,
+    [property: Id(2)] string? Error = null,
+    [property: Id(3)] JsonElement? Details = null)
+{
+    public static WorkflowControlResult Ok() => new(true);
+
+    public static WorkflowControlResult Rejected(string code, string error, JsonElement? details = null) =>
+        new(false, code, error, details);
 }
 
 /// <summary>

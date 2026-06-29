@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -140,7 +141,13 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> RerunFromStage(string stageId)
         {
             var targetIdx = run.Stages.FindIndex(s => s.Id == stageId);
-            var currentIdx = run.Stages.FindIndex(s => s.Id == run.CurrentStageId);
+            var reachedStageIds = run.ReachedStageIds.ToHashSet(StringComparer.Ordinal);
+            foreach (var reached in run.Stages.Where(s => s.Initialized).Select(s => s.Id))
+                reachedStageIds.Add(reached);
+            var eligibleStages = run.Stages
+                .Where(s => reachedStageIds.Contains(s.Id))
+                .Select(s => s.Id)
+                .ToList();
 
             if (targetIdx < 0)
                 throw new WorkflowControlRejectionException(
@@ -148,18 +155,16 @@ public static partial class WorkflowRunExtensions
                     $"Stage '{stageId}' is not part of this workflow run.",
                     new
                     {
-                        eligibleStages = run.Stages.Where(s =>
-                            run.Stages.IndexOf(s) <= currentIdx).Select(s => s.Id).ToList()
+                        eligibleStages
                     });
 
-            if (targetIdx > currentIdx)
+            if (!reachedStageIds.Contains(stageId))
                 throw new WorkflowControlRejectionException(
                     "stage_not_reached",
                     $"Stage '{stageId}' has not been reached yet. Choose a stage the workflow run has already reached.",
                     new
                     {
-                        eligibleStages = run.Stages.Where(s =>
-                            run.Stages.IndexOf(s) <= currentIdx).Select(s => s.Id).ToList()
+                        eligibleStages
                     });
 
             for (var i = targetIdx; i < run.Stages.Count; i++)

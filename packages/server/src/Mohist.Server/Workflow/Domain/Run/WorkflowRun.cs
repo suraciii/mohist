@@ -43,6 +43,7 @@ public sealed class WorkflowRun
     public WorkflowAssignment? Assignment { get; set; }
     public string? CurrentStageId { get; set; }
     public required List<StageRun> Stages { get; init; }
+    public List<string> ReachedStageIds { get; set; } = new();
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public FailureDetails? Failure { get; set; }
