@@ -45,7 +45,7 @@
         "The command advertises `--project`/`--project-id` options (shares MohistCliCommands.ProjectRefOption), matching the project-resolution conventions of reject/stop.",
         "`rerun-from-stage` is added to the CLI project-ref [Theory] in IssueCliRemainingProjectRefSpecs.cs so --project/--project-id are advertised in --help.",
         "New CLI spec (mirroring CliIssueRejectAndStopSpecs.cs) covers: successful POST body shape, missing --stage usage error, and project-id alias resolution.",
-        "CLI typecheck (`npm run typecheck -w packages/cli` if applicable) and CLI tests pass; existing retry/rerun CLI behavior is unchanged."
+        "`dotnet build Mohist.sln` succeeds with TreatWarningsAsErrors and CLI tests pass (CLI is a .NET project covered by `npm test` / `dotnet test Mohist.sln`; there is no `packages/cli` npm workspace); existing retry/rerun CLI behavior is unchanged."
       ],
       "priority": 2,
       "mode": "AFK",
