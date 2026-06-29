@@ -125,8 +125,8 @@ export function ArchivedPage() {
                         </div>
                       )}
                       <div className="mt-2 flex items-center gap-3 text-[10px] text-gray-400">
-                        {issue.updatedAt && (
-                          <span>Completed {formatRelativeTime(issue.updatedAt)}</span>
+                        {(issue.completedAt ?? issue.updatedAt) && (
+                          <span>Completed {formatRelativeTime(issue.completedAt ?? issue.updatedAt)}</span>
                         )}
                         {issue.archivedAt && (
                           <span>Archived {formatRelativeTime(issue.archivedAt)}</span>

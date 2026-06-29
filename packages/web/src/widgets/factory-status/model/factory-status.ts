@@ -39,7 +39,7 @@ export function deriveFactoryStatus(
       awaitingApproval += 1
     }
 
-    if (issue.status === 'done' && isTodayLocal(issue.updatedAt)) {
+    if (issue.status === 'done' && issue.completedAt && isTodayLocal(issue.completedAt)) {
       shippedToday += 1
     }
   }

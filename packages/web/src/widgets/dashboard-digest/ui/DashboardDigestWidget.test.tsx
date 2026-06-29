@@ -174,7 +174,7 @@ describe('DashboardDigestWidget', () => {
     expect(screen.queryByTestId('dashboard-digest-empty')).toBeNull()
   })
 
-  it('renders completed rows in most-recent-first order', () => {
+  it('renders completed rows in most-recent-first order by completedAt', () => {
     useIssuesMock.mockReturnValue({
       data: [
         makeIssue({
@@ -182,6 +182,7 @@ describe('DashboardDigestWidget', () => {
           number: 10,
           title: 'Older done',
           status: IssueStatus.Done,
+          completedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
           updatedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
         }),
         makeIssue({
@@ -189,6 +190,7 @@ describe('DashboardDigestWidget', () => {
           number: 11,
           title: 'Newer done',
           status: IssueStatus.Done,
+          completedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
           updatedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
         }),
       ],

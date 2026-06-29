@@ -59,7 +59,7 @@ export function DashboardDigestWidget() {
         testId="dashboard-digest-completed"
         label="Completed"
         issues={completed}
-        timestampFor={(issue) => issue.updatedAt}
+        timestampFor={(issue) => issue.completedAt ?? issue.updatedAt}
       />
       <DigestSection
         testId="dashboard-digest-failed"

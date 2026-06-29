@@ -106,6 +106,7 @@ export interface Issue {
   agentConfig?: Record<string, unknown> | null
   stageModels?: Record<string, string> | null
   stageModelVariants?: Record<string, string> | null
+  completedAt?: string
   archivedAt?: string
   blockedReason?: string
   prerequisites?: IssuePrerequisiteSummary[]

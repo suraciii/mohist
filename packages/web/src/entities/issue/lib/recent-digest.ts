@@ -42,7 +42,7 @@ export function deriveRecentDigest(
     }
   }
 
-  completed.sort((a, b) => compareDesc(parseTimestamp(a.updatedAt), parseTimestamp(b.updatedAt)))
+  completed.sort((a, b) => compareDesc(parseTimestamp(a.completedAt ?? ''), parseTimestamp(b.completedAt ?? '')))
   failed.sort((a, b) => compareDesc(parseTimestamp(a.updatedAt), parseTimestamp(b.updatedAt)))
 
   const archived = archivedIssues

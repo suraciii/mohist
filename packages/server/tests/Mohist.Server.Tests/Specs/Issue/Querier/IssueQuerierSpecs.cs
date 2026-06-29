@@ -1666,6 +1666,118 @@ public class IssueQuerierSpecs
         Assert.Equal(0.0, resultB.Window7d.FirstTimeRightRate);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task ListAsync_ForDoneIssue_IncludesCompletedAt()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-completedat-list-{Guid.NewGuid():N}", Name = "CompletedAt List" };
+        var completedAt = new DateTime(2026, 6, 15, 10, 30, 0, DateTimeKind.Utc);
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_completedat_list_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Done with completedAt",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Done,
+            CompletedAt = completedAt,
+        };
+        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var list = await service.ListAsync(project.Id, project);
+
+        var item = Assert.Single(list);
+        Assert.Equal(completedAt.ToString("o"), item.CompletedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DetailAsync_ForCancelledIssue_IncludesCompletedAt()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-completedat-detail-{Guid.NewGuid():N}", Name = "CompletedAt Detail" };
+        var completedAt = new DateTime(2026, 6, 20, 14, 0, 0, DateTimeKind.Utc);
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_completedat_detail_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Cancelled with completedAt",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Cancelled,
+            CompletedAt = completedAt,
+        };
+        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var detail = await service.GetAsync(project.Id, issue.Number, project);
+
+        Assert.NotNull(detail);
+        Assert.Equal(completedAt.ToString("o"), detail.CompletedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DetailAsync_ForNonTerminalIssue_CompletedAtIsNull()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-completedat-null-{Guid.NewGuid():N}", Name = "CompletedAt Null" };
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_completedat_null_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Backlog no completedAt",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+        };
+        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var detail = await service.GetAsync(project.Id, issue.Number, project);
+
+        Assert.NotNull(detail);
+        Assert.Null(detail.CompletedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public async Task DetailAsync_ArchivedIssue_ExposesSameCompletedAt()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-completedat-archived-{Guid.NewGuid():N}", Name = "CompletedAt Archived" };
+        var completedAt = new DateTime(2026, 6, 25, 9, 15, 0, DateTimeKind.Utc);
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = $"issue_completedat_archived_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Archived done issue",
+            Status = Mohist.Server.Issue.Domain.IssueStatus.Done,
+            CompletedAt = completedAt,
+            ArchivedAt = new DateTime(2026, 6, 26, 12, 0, 0, DateTimeKind.Utc),
+        };
+        db.Issues.Add(new IssueRow { IssueId = issue.Id, State = IssueStore.Serialize(issue) });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var detail = await service.GetAsync(project.Id, issue.Number, project);
+
+        Assert.NotNull(detail);
+        Assert.Equal(completedAt.ToString("o"), detail.CompletedAt);
+        Assert.NotNull(detail.ArchivedAt);
+    }
+
     private static int _seedIssueCounter = 0;
     private static Mohist.Server.Issue.Domain.Issue SeedIssue(
         MohistDbContext db,

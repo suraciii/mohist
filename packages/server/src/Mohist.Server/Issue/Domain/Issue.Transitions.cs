@@ -174,8 +174,10 @@ public sealed partial class Issue
         if (_status == IssueStatus.Done) return false;
         if (_status != IssueStatus.InProgress)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
+        var completedAt = now ?? DateTime.UtcNow;
+        _completedAt = completedAt;
         _status = IssueStatus.Done;
-        Touch(now);
+        Touch(completedAt);
         RecordEvent(new IssueWorkCompleted(workflowRunId));
         return true;
     }
@@ -202,8 +204,10 @@ public sealed partial class Issue
     {
         if (_status == IssueStatus.Done || _archivedAt != null)
             throw new InvalidOperationException($"Issue #{Number} cannot close");
+        var completedAt = now ?? DateTime.UtcNow;
+        _completedAt = completedAt;
         _status = IssueStatus.Cancelled;
-        Touch(now);
+        Touch(completedAt);
         RecordEvent(new IssueClosed(reason));
     }
 

@@ -1,6 +1,6 @@
 ### Requirement: Digest zone renders recent issue history summary
 
-The Dashboard `Digest` zone SHALL render a recent-history summary composed of three categories of issues, each limited to a fixed top-N count: recently **completed** issues, recently **failed** issues, and recently **archived** issues. Completed and failed issues SHALL be derived from the active issue set ordered by `updatedAt`; archived issues SHALL be derived from the archived issue set ordered by `archivedAt`. Each summary row SHALL display the issue number, title, and a relative timestamp (for example "2h ago", "3d ago"). The top-N count SHALL be a fixed constant and SHALL NOT be user-configurable.
+The Dashboard `Digest` zone SHALL render a recent-history summary composed of three categories of issues, each limited to a fixed top-N count: recently **completed** issues, recently **failed** issues, and recently **archived** issues. Completed issues SHALL be derived from the active issue set ordered by `completedAt` (the issue's persisted completion time); failed issues SHALL be derived from the active issue set ordered by `updatedAt`; archived issues SHALL be derived from the archived issue set ordered by `archivedAt`. Each summary row SHALL display the issue number, title, and a relative timestamp (for example "2h ago", "3d ago"). The top-N count SHALL be a fixed constant and SHALL NOT be user-configurable.
 
 #### Scenario: All three categories render with recent issues
 
@@ -25,7 +25,16 @@ The Dashboard `Digest` zone SHALL render a recent-history summary composed of th
 #### Scenario: Rows are ordered by most recent first
 
 - **WHEN** the Digest zone renders a category with multiple issues
-- **THEN** the rows SHALL be ordered by their respective timestamp (`updatedAt` for completed/failed, `archivedAt` for archived) with the most recent first
+- **THEN** the completed category rows SHALL be ordered by `completedAt` with the most recent first
+- **AND** the failed category rows SHALL be ordered by `updatedAt` with the most recent first
+- **AND** the archived category rows SHALL be ordered by `archivedAt` with the most recent first
+
+#### Scenario: Editing a completed issue does not resurface it in recently completed
+
+- **WHEN** a `done` issue was completed on a prior day
+- **AND** the issue's `updatedAt` is bumped to the current day by a post-completion edit
+- **THEN** the issue SHALL NOT jump to the top of the recently completed list
+- **AND** the recently completed list ordering SHALL be driven by `completedAt`, not by `updatedAt`
 
 ### Requirement: Digest rows navigate to issue detail
 
