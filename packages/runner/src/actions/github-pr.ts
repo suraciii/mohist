@@ -20,11 +20,11 @@ export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
 }
 
 const PR_CHECKS_POLL_INTERVAL_MS_DEFAULT = 15_000
-// How long to keep polling after `gh pr view --json statusCheckRollup` reports
-// zero checks before concluding the branch genuinely has no CI and proceeding
-// to merge. Long enough to ride out the registration window right after a push
-// / force push (GitHub hasn't turned the workflow run into a check run yet),
-// short enough that repos without CI don't wait forever.
+// How long to keep polling after GitHub reports no checks before concluding
+// the branch genuinely has no CI and proceeding to merge.
+// Long enough to ride out the registration window right after a push / force
+// push (GitHub hasn't turned the workflow run into a check run yet), short
+// enough that repos without CI don't wait forever.
 const PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT = 120_000
 
 // How long to poll mergeStateStatus after checks pass before giving up.
@@ -815,31 +815,41 @@ async function waitForPrChecks(
     const checksOutput = combinedGhOutput(checksResult)
     record("gh-pr-checks", `pr view ${prNumber} --json statusCheckRollup`, checksResult.exitCode, checksOutput)
     if (checksResult.exitCode !== 0) {
-      return {
-        kind: "failure",
-        message: checksOutput,
-        output: checksOutput,
-      }
-    } else {
-      const entries = parseStatusCheckRollup(checksResult.stdout)
-      if (entries.length === 0) {
+      // Right after a push / force-push, GitHub can briefly report no check
+      // runs before the workflow registers. Poll that state for a bounded
+      // grace window, then allow repos with no CI to merge.
+      if (looksLikeNoChecksReported(checksOutput)) {
         if (noChecksSince === null) noChecksSince = Date.now()
         if (Date.now() - noChecksSince >= prChecksNoChecksGraceMs) {
           return { kind: "ok" }
         }
-        try {
-          await delayWithSignal(prChecksPollIntervalMs, signal)
-          continue
-        } catch (error) {
-          return {
-            kind: "cancelled",
-            message: errorMessage(error),
-            output: `cancelled during wait: ${errorMessage(error)}`,
-          }
+      } else {
+        return {
+          kind: "failure",
+          message: checksOutput,
+          output: checksOutput,
         }
       }
-      noChecksSince = null
-      const classification = classifyPrChecks(entries)
+    } else {
+      const checks = parsePrStatusCheckRollup(checksResult.stdout)
+      if (checks.length === 0) {
+        if (noChecksSince === null) noChecksSince = Date.now()
+        if (Date.now() - noChecksSince < prChecksNoChecksGraceMs) {
+          try {
+            await delayWithSignal(prChecksPollIntervalMs, signal)
+          } catch (error) {
+            return {
+              kind: "cancelled",
+              message: errorMessage(error),
+              output: `cancelled during wait: ${errorMessage(error)}`,
+            }
+          }
+          continue
+        }
+      } else {
+        noChecksSince = null
+      }
+      const classification = classifyPrChecks(checks)
       if (classification.kind === "failed") {
         return {
           kind: "failure",
@@ -887,7 +897,7 @@ export interface PrCheckEntry {
   state: string
 }
 
-export function parseStatusCheckRollup(stdout: string): PrCheckEntry[] {
+export function parsePrStatusCheckRollup(stdout: string): PrCheckEntry[] {
   const trimmed = stdout.trim()
   if (!trimmed) return []
   let parsed: unknown
@@ -909,28 +919,25 @@ export function parseStatusCheckRollup(stdout: string): PrCheckEntry[] {
         ? (obj["context"] as string)
         : ""
     const status = typeof obj["status"] === "string" ? (obj["status"] as string) : ""
-    const conclusion = typeof obj["conclusion"] === "string"
-      ? (obj["conclusion"] as string)
-      : typeof obj["state"] === "string"
-        ? (obj["state"] as string)
-        : ""
-    out.push({
-      name,
-      bucket: checkRollupBucket(status, conclusion),
-      state: conclusion || status,
-    })
+    const rawState = typeof obj["state"] === "string" ? (obj["state"] as string) : ""
+    const conclusion = typeof obj["conclusion"] === "string" ? (obj["conclusion"] as string) : ""
+    const state = conclusion || rawState || status
+    const bucket = classifyRollupBucket(status || rawState, conclusion)
+    out.push({ name, bucket, state })
   }
   return out
 }
 
-function checkRollupBucket(status: string, conclusion: string): string {
-  const normalizedStatus = status.toLowerCase()
-  const normalizedConclusion = conclusion.toLowerCase()
-  if (normalizedStatus && normalizedStatus !== "completed") return "pending"
-  if (!normalizedConclusion) return "pending"
-  if (normalizedConclusion === "success" || normalizedConclusion === "neutral") return "pass"
-  if (normalizedConclusion === "skipped") return "skip"
-  return "fail"
+function classifyRollupBucket(status: string, conclusion: string): string {
+  const normalizedStatus = status.toUpperCase()
+  const normalizedConclusion = conclusion.toUpperCase()
+  if (normalizedConclusion === "SUCCESS") return "pass"
+  if (normalizedConclusion === "SKIPPED" || normalizedConclusion === "NEUTRAL") return "skip"
+  if (normalizedConclusion === "FAILURE" || normalizedConclusion === "ERROR" || normalizedConclusion === "CANCELLED" || normalizedConclusion === "ACTION_REQUIRED") return "fail"
+  if (normalizedStatus === "SUCCESS") return "pass"
+  if (normalizedStatus === "SKIPPED" || normalizedStatus === "NEUTRAL") return "skip"
+  if (normalizedStatus === "FAILURE" || normalizedStatus === "ERROR" || normalizedStatus === "CANCELLED" || normalizedStatus === "ACTION_REQUIRED") return "fail"
+  return "pending"
 }
 
 type PrChecksClassification =
@@ -961,6 +968,11 @@ function formatFailedCheck(entry: PrCheckEntry): string {
   const bucket = entry.bucket || "FAIL"
   const state = entry.state && entry.state !== bucket ? ` (state=${entry.state})` : ""
   return `${label} [bucket=${bucket}]${state}`
+}
+
+// GitHub can return this before checks register, or permanently for repos with no CI.
+export function looksLikeNoChecksReported(output: string): boolean {
+  return /no checks reported/i.test(output)
 }
 
 export async function runGhPrecheck(gh: GhRunner, workDir: string, signal: AbortSignal): Promise<{ ok: true; output: string } | { ok: false; exitCode: number; output: string; message: string }> {

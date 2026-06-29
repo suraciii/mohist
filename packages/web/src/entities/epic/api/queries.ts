@@ -30,7 +30,6 @@ export function useCreateEpic() {
     mutationFn: (data) => createEpic({ ...data, projectId: projectId ?? undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
-      toast.success('Epic created')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
