@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -127,6 +128,49 @@ public class InboxSubscriptionApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("true")]
+    [InlineData("42")]
+    public async Task Put_NonObjectBody_ReturnsBadRequestAndPersistsNothing(string json)
+    {
+        var projectId = await CreateProjectAsync("sub-non-object");
+
+        using var response = await PutJsonAsync(
+            $"/api/projects/{projectId}/inbox/subscription",
+            json);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertDefaultSubscriptionAsync(projectId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
+    [Fact]
+    public async Task Put_NonBooleanProperty_ReturnsBadRequestAndPersistsNothing()
+    {
+        var projectId = await CreateProjectAsync("sub-non-bool");
+        var json = """
+            {
+              "workflow_failed": "yes",
+              "approval_requested": true,
+              "issue_started": true,
+              "issue_completed": true
+            }
+            """;
+
+        using var response = await PutJsonAsync(
+            $"/api/projects/{projectId}/inbox/subscription",
+            json);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertDefaultSubscriptionAsync(projectId);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task Subscription_ProjectIsolation_ScopedByProject()
     {
@@ -176,5 +220,22 @@ public class InboxSubscriptionApiSpecs
             "/api/projects",
             new { name = $"{prefix}-{Guid.NewGuid():N}" });
         return project.GetProperty("id").GetString()!;
+    }
+
+    private async Task AssertDefaultSubscriptionAsync(string projectId)
+    {
+        var sub = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{projectId}/inbox/subscription");
+
+        Assert.True(sub.GetProperty("workflow_failed").GetBoolean());
+        Assert.True(sub.GetProperty("approval_requested").GetBoolean());
+        Assert.True(sub.GetProperty("issue_started").GetBoolean());
+        Assert.True(sub.GetProperty("issue_completed").GetBoolean());
+    }
+
+    private async Task<HttpResponseMessage> PutJsonAsync(string url, string json)
+    {
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await _client.PutAsync(url, content);
     }
 }

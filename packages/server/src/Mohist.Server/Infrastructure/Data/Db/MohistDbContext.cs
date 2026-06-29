@@ -610,6 +610,10 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueStartedEnabled).IsRequired();
             entity.Property(e => e.IssueCompletedEnabled).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasOne<ProjectRow>()
+                .WithOne()
+                .HasForeignKey<InboxSubscriptionRow>(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 

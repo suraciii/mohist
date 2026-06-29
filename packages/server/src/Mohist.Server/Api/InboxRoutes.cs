@@ -83,10 +83,26 @@ public static class InboxRoutes
         // PUT /api/projects/{projectRef}/inbox/subscription
         group.MapPut("/subscription", async (HttpContext context, InboxSubscriptionStore store, JsonElement body) =>
         {
-            foreach (var prop in body.EnumerateObject())
+            if (body.ValueKind != JsonValueKind.Object)
+                return ApiResults.BadRequest("Subscription payload must be a JSON object");
+
+            JsonProperty[] properties;
+            try
+            {
+                properties = body.EnumerateObject().ToArray();
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.BadRequest("Subscription payload must be a JSON object");
+            }
+
+            foreach (var prop in properties)
             {
                 if (!NotificationKinds.IsDefined(prop.Name))
                     return ApiResults.BadRequest($"Unknown notification kind: '{prop.Name}'");
+
+                if (prop.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    return ApiResults.BadRequest($"Notification kind '{prop.Name}' must be a boolean");
             }
 
             var required = new[]
@@ -96,14 +112,26 @@ public static class InboxRoutes
                 NotificationKinds.IssueStarted,
                 NotificationKinds.IssueCompleted,
             };
-            var provided = body.EnumerateObject().Select(p => p.Name).ToHashSet();
+            var provided = properties.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
             var missing = required.Where(k => !provided.Contains(k)).ToArray();
             if (missing.Length > 0)
                 return ApiResults.BadRequest($"Missing required keys: {string.Join(", ", missing)}");
 
             var pid = context.GetResolvedProject().Id;
             var json = body.GetRawText();
-            var dto = JsonSerializer.Deserialize<InboxSubscriptionDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = false });
+            InboxSubscriptionDto? dto;
+            try
+            {
+                dto = JsonSerializer.Deserialize<InboxSubscriptionDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = false });
+            }
+            catch (JsonException)
+            {
+                return ApiResults.BadRequest("Invalid subscription payload");
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.BadRequest("Invalid subscription payload");
+            }
             if (dto is null)
                 return ApiResults.BadRequest("Invalid subscription payload");
 

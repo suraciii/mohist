@@ -133,6 +133,27 @@ describe('InboxSubscriptionSection', () => {
     })
   })
 
+  it('preserves earlier rapid toggle changes in later whole-object mutations', async () => {
+    const mutateMock = vi.fn()
+    useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
+    useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: mutateMock })
+
+    const user = userEvent.setup()
+    renderSection()
+
+    const toggles = screen.getAllByRole('switch')
+    await user.click(toggles[0])
+    await user.click(toggles[1])
+
+    expect(mutateMock).toHaveBeenCalledTimes(2)
+    expect(mutateMock).toHaveBeenLastCalledWith({
+      workflow_failed: false,
+      approval_requested: false,
+      issue_started: true,
+      issue_completed: true,
+    })
+  })
+
   it('shows loading state when subscription is loading', () => {
     useInboxSubscriptionMock.mockReturnValue({ data: undefined, isLoading: true })
     useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
@@ -161,14 +182,14 @@ describe('InboxSubscriptionSection', () => {
     expect(labelTexts).toContain('Issue completed')
   })
 
-  it('does not render notifications text in PreferencesSection (non-goal guard preserved)', () => {
+  it('uses outcome-oriented settings copy', () => {
     useInboxSubscriptionMock.mockReturnValue({ data: ALL_ENABLED, isLoading: false })
     useUpdateInboxSubscriptionMock.mockReturnValue({ mutate: vi.fn() })
 
     renderSection()
 
-    // The section title "Inbox Notifications" uses "Inbox" not "Notifications" alone
-    // This is in a new tab, so it doesn't affect PreferencesSection
-    expect(screen.getByText('Inbox Notifications')).toBeInTheDocument()
+    expect(screen.getByText('Inbox recording')).toBeInTheDocument()
+    expect(screen.getByText('Workflow updates')).toBeInTheDocument()
+    expect(screen.getByText('Choose which workflow updates create future inbox items.')).toBeInTheDocument()
   })
 })

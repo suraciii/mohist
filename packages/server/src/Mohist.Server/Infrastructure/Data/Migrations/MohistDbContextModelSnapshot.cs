@@ -685,6 +685,15 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Project.ProjectRow", null)
+                        .WithOne()
+                        .HasForeignKey("Mohist.Server.Infrastructure.Data.Inbox.InboxSubscriptionRow", "ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Runner.RunnerWorkRow", b =>
                 {
                     b.Property<long>("Id")

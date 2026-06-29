@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Inbox;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -49,6 +50,25 @@ public class InboxSubscriptionsMigrationSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
+    public async Task Up_HasForeignKeyToProjectsOnProjectId()
+    {
+        await using var database = CreateDatabase();
+        await using var context = database.CreateDbContext();
+        var migrator = context.GetService<IMigrator>();
+
+        await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
+
+        var foreignKeys = await ReadForeignKeysAsync(context, "InboxSubscriptions");
+        var fk = Assert.Single(foreignKeys);
+        Assert.Equal("Projects", fk.Table);
+        Assert.Equal("ProjectId", fk.From);
+        Assert.Equal("Id", fk.To);
+        Assert.Equal("CASCADE", fk.OnDelete);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
     public async Task Up_StoresAndReadsSubscriptionRow()
     {
         await using var database = CreateDatabase();
@@ -56,6 +76,15 @@ public class InboxSubscriptionsMigrationSpecs
         var migrator = context.GetService<IMigrator>();
 
         await migrator.MigrateAsync("20260629003200_AddInboxSubscriptionsTable");
+
+        context.Projects.Add(new ProjectRow
+        {
+            Id = "proj_a",
+            Name = "project-a",
+            RepositoriesJson = "[]",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
 
         context.InboxSubscriptions.Add(new InboxSubscriptionRow
         {
@@ -163,6 +192,27 @@ public class InboxSubscriptionsMigrationSpecs
         return columns.ToArray();
     }
 
+    private static async Task<ForeignKeyInfo[]> ReadForeignKeysAsync(
+        MohistDbContext context,
+        string tableName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT \"table\", \"from\", \"to\", \"on_delete\" FROM pragma_foreign_key_list('{tableName}')";
+
+        var result = new List<ForeignKeyInfo>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result.Add(new ForeignKeyInfo(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3)));
+        }
+        return result.ToArray();
+    }
+
     private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)
     {
         var connection = context.Database.GetDbConnection();
@@ -214,4 +264,6 @@ public class InboxSubscriptionsMigrationSpecs
 
         public MohistDbContext CreateDbContext() => new(Options);
     }
+
+    private sealed record ForeignKeyInfo(string Table, string From, string To, string OnDelete);
 }

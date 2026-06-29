@@ -32,6 +32,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_InboxSubscriptions", x => x.ProjectId);
+                    table.ForeignKey(
+                        name: "FK_InboxSubscriptions_Projects_ProjectId",
+                        column: x => x.ProjectId,
+                        principalTable: "Projects",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
         }
 

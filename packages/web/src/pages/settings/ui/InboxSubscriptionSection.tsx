@@ -1,8 +1,10 @@
 import { Switch } from '@base-ui/react/switch'
+import { useEffect, useRef, useState } from 'react'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Label } from '@/shared/ui/components/label'
 import {
   NOTIFICATION_KINDS,
+  type InboxSubscription,
   type NotificationKind,
   useInboxSubscription,
   useUpdateInboxSubscription,
@@ -23,30 +25,48 @@ const KIND_ORDER: NotificationKind[] = [
   NOTIFICATION_KINDS.IssueCompleted,
 ]
 
+const DEFAULT_SUBSCRIPTION: InboxSubscription = {
+  [NOTIFICATION_KINDS.WorkflowFailed]: true,
+  [NOTIFICATION_KINDS.ApprovalRequested]: true,
+  [NOTIFICATION_KINDS.IssueStarted]: true,
+  [NOTIFICATION_KINDS.IssueCompleted]: true,
+}
+
 export function InboxSubscriptionSection() {
   const { data: subscription, isLoading } = useInboxSubscription()
   const update = useUpdateInboxSubscription()
+  const [draft, setDraft] = useState<InboxSubscription>(DEFAULT_SUBSCRIPTION)
+  const draftRef = useRef<InboxSubscription>(DEFAULT_SUBSCRIPTION)
+
+  useEffect(() => {
+    if (subscription) {
+      draftRef.current = subscription
+      setDraft(subscription)
+    }
+  }, [subscription])
 
   function handleToggle(kind: NotificationKind, checked: boolean) {
-    if (!subscription) return
-    update.mutate({
-      ...subscription,
+    const next = {
+      ...draftRef.current,
       [kind]: checked,
-    })
+    }
+    draftRef.current = next
+    setDraft(next)
+    update.mutate(next)
   }
 
   return (
-    <SettingsSection title="Inbox Notifications">
-      <CardSection title="Notification Kinds">
+    <SettingsSection title="Inbox recording">
+      <CardSection title="Workflow updates">
         <p className="mb-4 text-sm text-muted-foreground">
-          Choose which notification kinds are recorded in this project's inbox.
+          Choose which workflow updates create future inbox items.
         </p>
         {isLoading ? (
           <div className="py-2 text-sm text-muted-foreground">Loading subscription preferences...</div>
         ) : (
           <div className="space-y-3">
             {KIND_ORDER.map((kind) => {
-              const checked = subscription?.[kind] ?? true
+              const checked = draft[kind]
               return (
                 <Label key={kind} className="flex cursor-pointer items-center justify-between gap-4 py-1">
                   <span>{KIND_LABELS[kind]}</span>
