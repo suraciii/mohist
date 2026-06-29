@@ -19,3 +19,10 @@
 - The old docs had `activeIssues` in the progress JSON example — kept it as is (it's a count, not a status label; internal symbol name, not user-facing copy).
 - `--project` is the canonical CLI option name; `--project-id` is a backwards-compatible alias.
 - Pause API supports an optional `reason` body parameter (verified in EpicRoutes.cs PauseRouteAsync reads PauseEpicRequest with Reason).
+
+## T-002
+
+- Rewrote concepts.md Epic section from passive "一组相关 Issue 的集合" to self-driving framing: planning + advancement unit.
+- Added idle default + Start triggers autonomous progression.
+- Replaced example bullets with a concise single paragraph; linked to epics.md for full lifecycle.
+- One-liner at top of file still uses "多个相关 Issue 组成 Epic" (acceptable as simplified summary).
