@@ -60,6 +60,7 @@ public class MohistDbContext : DbContext
     public DbSet<RunnerRow> Runners { get; set; } = null!;
     public DbSet<RunnerWorkRow> RunnerWorks { get; set; } = null!;
     public DbSet<InboxItemRow> InboxItems { get; set; } = null!;
+    public DbSet<InboxSubscriptionRow> InboxSubscriptions { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -597,6 +598,18 @@ public class MohistDbContext : DbContext
             // Project-scoped lookups for mark-read / archive mutations.
             entity.HasIndex(e => new { e.ProjectId, e.Id })
                 .HasDatabaseName("IX_InboxItems_ProjectId_Id");
+        });
+
+        modelBuilder.Entity<InboxSubscriptionRow>(entity =>
+        {
+            entity.ToTable("InboxSubscriptions");
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkflowFailedEnabled).IsRequired();
+            entity.Property(e => e.ApprovalRequestedEnabled).IsRequired();
+            entity.Property(e => e.IssueStartedEnabled).IsRequired();
+            entity.Property(e => e.IssueCompletedEnabled).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
         });
     }
 
