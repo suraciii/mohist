@@ -23,7 +23,7 @@
 > 日常工作：创建和推进 issue，把多个 issue 组织成 Epic 做产品规划。
 
 - [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
-- [用 Epic 规划](epics.md) —— 把零散 issue 组织成产品里程碑
+- [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品里程碑
 
 ## 板块 4：观察与操作
 

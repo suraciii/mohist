@@ -42,3 +42,11 @@
 - Removed the stale "当前 CLI 不支持的：Epic 管理" note from docs/cli-reference.md.
 - Added "Epic 管理" section with the full 11 subcommand list (verified against MohistCliCommands.Epic.cs).
 - Noted start/pause/resume are idempotent, cross-linked to epics.md#epic-的生命周期 for lifecycle semantics.
+
+## T-005
+
+- Spot-checked docs/README.md and docs/getting-started.md Epic one-liners.
+- Both had "把零散 issue 组织成产品里程碑/路线" — purely static organizer framing.
+- Added "可自动推进" to both one-liners (minimal change, signals self-driving capability).
+- Both already link to epics.md; section intro in README.md left unchanged (neutral section description).
+- Scoped grep confirmed no 'active' as Epic status or "只/仅是组织" claim in either file.
