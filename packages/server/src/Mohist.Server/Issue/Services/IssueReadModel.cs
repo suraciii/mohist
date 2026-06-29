@@ -29,6 +29,7 @@ public class IssueReadModel
     public string CreatedAt { get; set; } = "";
     public string UpdatedAt { get; set; } = "";
     public string? ArchivedAt { get; set; }
+    public string? CompletedAt { get; set; }
     [JsonPropertyName("approvalState")]
     public StageApproval? StageApproval { get; set; }
     public string? BlockedReason { get; set; }

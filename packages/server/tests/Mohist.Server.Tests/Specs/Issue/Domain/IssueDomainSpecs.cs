@@ -138,4 +138,116 @@ public class IssueDomainSpecs
         Assert.NotNull(reloaded);
         Assert.Equal("low", reloaded!.Risk);
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void NonTerminal_Issue_HasNullCompletedAt()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Backlog item",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+
+        Assert.Null(issue.CompletedAt);
+
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc));
+        Assert.Null(issue.CompletedAt);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Complete_SetsCompletedAt_WhenEnteringDone()
+    {
+        var now = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Feature",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
+
+        issue.Complete("wr_1", now);
+
+        Assert.Equal(now, issue.CompletedAt);
+        Assert.Equal(now, issue.UpdatedAt);
+        Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, issue.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Close_SetsCompletedAt_WhenEnteringCancelled()
+    {
+        var now = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Feature",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
+
+        issue.Close(now: now);
+
+        Assert.Equal(now, issue.CompletedAt);
+        Assert.Equal(now, issue.UpdatedAt);
+        Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Cancelled, issue.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Reopen_PreservesCompletedAt()
+    {
+        var terminalMoment = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Feature",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
+        issue.Close(now: terminalMoment);
+
+        issue.Reopen(new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(terminalMoment, issue.CompletedAt);
+        Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Backlog, issue.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void Recomplete_AfterReopen_OverwritesCompletedAt()
+    {
+        var firstComplete = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
+        var secondComplete = new DateTime(2026, 6, 6, 2, 0, 0, DateTimeKind.Utc);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Feature",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
+        issue.Close(now: firstComplete);
+
+        issue.Reopen(new DateTime(2026, 6, 5, 3, 0, 0, DateTimeKind.Utc));
+        issue.ClearStoppedWorkflow("wr_1", new DateTime(2026, 6, 5, 3, 5, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_2", new DateTime(2026, 6, 5, 3, 10, 0, DateTimeKind.Utc));
+        issue.Complete("wr_2", secondComplete);
+
+        Assert.Equal(secondComplete, issue.CompletedAt);
+        Assert.NotEqual(firstComplete, issue.CompletedAt);
+        Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, issue.Status);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
+    [Fact]
+    public void State_RoundTripsCompletedAt()
+    {
+        var now = new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_1", "project-1", 1, "Feature",
+            now: new DateTime(2026, 6, 5, 1, 0, 0, DateTimeKind.Utc));
+        issue.StartWorkflow("wr_1", new DateTime(2026, 6, 5, 1, 30, 0, DateTimeKind.Utc));
+        issue.Complete("wr_1", now);
+
+        var json = IssueStore.Serialize(issue);
+        var reloaded = IssueStore.Deserialize(json);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(now, reloaded!.CompletedAt);
+        Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Done, reloaded.Status);
+    }
 }

@@ -24,6 +24,7 @@ function makeIssue(overrides: {
   status: 'backlog' | 'in_progress' | 'done' | 'cancelled'
   createdAt: string
   updatedAt: string
+  completedAt?: string
   archivedAt?: string
   id?: string
   number?: number
@@ -39,6 +40,7 @@ function makeIssue(overrides: {
     labels: {},
     createdAt: overrides.createdAt,
     updatedAt: overrides.updatedAt,
+    completedAt: overrides.completedAt,
     archivedAt: overrides.archivedAt,
     isDraft: false,
     canStart: true,
@@ -110,14 +112,27 @@ describe('deriveRecentDigest', () => {
     expect(result.failed).toEqual([])
   })
 
-  it('orders completed by updatedAt desc (most recent first)', () => {
-    const oldest = makeIssue({ status: 'done', createdAt: daysAgo(5), updatedAt: daysAgo(4), number: 1 })
-    const middle = makeIssue({ status: 'done', createdAt: daysAgo(3), updatedAt: daysAgo(2), number: 2 })
-    const newest = makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(1), number: 3 })
+  it('orders completed by completedAt desc (most recent first)', () => {
+    const oldest = makeIssue({ status: 'done', createdAt: daysAgo(5), updatedAt: daysAgo(5), completedAt: daysAgo(4), number: 1 })
+    const middle = makeIssue({ status: 'done', createdAt: daysAgo(3), updatedAt: daysAgo(3), completedAt: daysAgo(2), number: 2 })
+    const newest = makeIssue({ status: 'done', createdAt: daysAgo(2), updatedAt: daysAgo(2), completedAt: daysAgo(1), number: 3 })
 
     const result = deriveRecentDigest([oldest, newest, middle], [])
 
     expect(result.completed.map((i) => i.number)).toEqual([3, 2, 1])
+  })
+
+  it('orders completed by completedAt desc even when updatedAt differs (post-completion edit)', () => {
+    const doneYesterday = makeIssue({
+      status: 'done', createdAt: daysAgo(5), updatedAt: daysAgo(5), completedAt: daysAgo(1), number: 1,
+    })
+    const doneTwoDaysAgo = makeIssue({
+      status: 'done', createdAt: daysAgo(5), updatedAt: hoursAgo(0), completedAt: daysAgo(2), number: 2,
+    })
+
+    const result = deriveRecentDigest([doneYesterday, doneTwoDaysAgo], [])
+
+    expect(result.completed.map((i) => i.number)).toEqual([1, 2])
   })
 
   it('orders failed by updatedAt desc (most recent first)', () => {
@@ -151,6 +166,7 @@ describe('deriveRecentDigest', () => {
         status: 'done',
         createdAt: daysAgo(10),
         updatedAt: hoursAgo(8 - i),
+        completedAt: hoursAgo(8 - i),
         number: 100 + i,
       }),
     )
@@ -168,6 +184,7 @@ describe('deriveRecentDigest', () => {
         status: 'done',
         createdAt: daysAgo(10),
         updatedAt: hoursAgo(6 - i),
+        completedAt: hoursAgo(6 - i),
         number: 200 + i,
       }),
     )
@@ -262,6 +279,7 @@ describe('deriveRecentDigest', () => {
           status: i % 3 === 0 ? 'done' : i % 3 === 1 ? 'cancelled' : 'backlog',
           createdAt: daysAgo((i % 10) + 1),
           updatedAt: hoursAgo(i),
+          completedAt: i % 3 === 0 ? hoursAgo(i) : undefined,
           number: i + 1,
         }),
       )

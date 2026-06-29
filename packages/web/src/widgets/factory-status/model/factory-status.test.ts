@@ -117,14 +117,30 @@ describe('deriveFactoryStatus', () => {
     expect(deriveFactoryStatus(issues, makeAgentStatus()).awaitingApproval).toBe(1)
   })
 
-  it('counts only done issues updated today as shippedToday', () => {
+  it('counts only done issues completed today as shippedToday', () => {
     const issues: Issue[] = [
-      makeIssue({ id: 'today', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
-      makeIssue({ id: 'yesterday', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: yesterdayIso }),
+      makeIssue({ id: 'today', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
+      makeIssue({ id: 'yesterday', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: yesterdayIso, updatedAt: yesterdayIso }),
       makeIssue({ id: 'in-progress', status: IssueStatus.InProgress, health: IssueHealth.Active, updatedAt: todayIso }),
     ]
 
     expect(deriveFactoryStatus(issues, makeAgentStatus()).shippedToday).toBe(1)
+  })
+
+  it('does not count a done issue without completedAt as shippedToday (null guard)', () => {
+    const issues: Issue[] = [
+      makeIssue({ id: 'no-completed', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
+    ]
+
+    expect(deriveFactoryStatus(issues, makeAgentStatus()).shippedToday).toBe(0)
+  })
+
+  it('does not count a done issue completed on a prior day whose updatedAt is today', () => {
+    const issues: Issue[] = [
+      makeIssue({ id: 'old-done', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: yesterdayIso, updatedAt: todayIso }),
+    ]
+
+    expect(deriveFactoryStatus(issues, makeAgentStatus()).shippedToday).toBe(0)
   })
 
   it('returns all fields together for a mixed input', () => {
@@ -133,9 +149,9 @@ describe('deriveFactoryStatus', () => {
       makeIssue({ id: 'run-2', status: IssueStatus.InProgress, health: IssueHealth.Active }),
       makeIssue({ id: 'approve-1', approvalState: { status: 'awaiting', requestedAt: todayIso } }),
       makeIssue({ id: 'approve-2', approvalState: { status: 'awaiting', requestedAt: todayIso } }),
-      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
-      makeIssue({ id: 'ship-2', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
-      makeIssue({ id: 'ship-old', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: yesterdayIso }),
+      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
+      makeIssue({ id: 'ship-2', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
+      makeIssue({ id: 'ship-old', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: yesterdayIso, updatedAt: yesterdayIso }),
     ]
 
     expect(deriveFactoryStatus(issues, makeAgentStatus({ runnerAvailable: true }))).toEqual({

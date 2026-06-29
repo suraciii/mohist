@@ -1,19 +1,4 @@
-### Requirement: Factory status headline is pinned full-width atop the dashboard
-
-The Dashboard SHALL render a full-width **factory status headline** as the topmost first-screen element, spanning the full content width above every zone and above the Attention Hero. The headline MUST be the first dashboard element visible without scrolling so a user can judge factory health ("can I walk away / do I need to step in now") in a single glance. The headline SHALL render whenever the Dashboard renders for a project that has at least one project; it SHALL NOT be hidden by empty data.
-
-#### Scenario: Headline renders above all zones full-width
-
-- **WHEN** the Dashboard page renders for a project that has at least one project
-- **THEN** the page SHALL render the factory status headline as the topmost dashboard element
-- **AND** the headline SHALL span the full content width
-- **AND** the headline SHALL appear above the Attention Hero and above the `Pulse`, `Productivity`, and `Digest` zones
-
-#### Scenario: Headline renders even with no activity
-
-- **WHEN** the Dashboard page renders and there are no in-flight issues, no awaiting-approval issues, and nothing shipped today
-- **THEN** the factory status headline SHALL still render at the top of the dashboard
-- **AND** its field values SHALL reflect zero counts rather than the headline being omitted
+## MODIFIED Requirements
 
 ### Requirement: Headline surfaces runner-online, in-flight, awaiting-approval, and today-shipped fields
 
@@ -57,26 +42,3 @@ The today-shipped field SHALL be computed from `status === 'done'` issues whose 
 - **AND** the issue's `updatedAt` is bumped to the current day by a post-completion edit
 - **THEN** the issue SHALL NOT be counted in today-shipped
 - **AND** the today-shipped count SHALL be driven by `completedAt`, not by `updatedAt`
-
-### Requirement: Headline reserves a today-cost field slot that ships empty
-
-The headline SHALL surface a **today-cost** field positioned alongside the runner-online, in-flight, awaiting-approval, and today-shipped fields. The field SHALL be populated from the project's agent cost rollup endpoint (`agent-cost-metrics` `todayCost`) - the slot that previously shipped empty pending that endpoint is now connected to the rollup value. The headline SHALL source the value from the rollup endpoint rather than recomputing it over the local session set. The empty/zero-sample case (the rollup returning no sessions with usage for the current day) SHALL render in a way that is visibly distinct from a literal zero-cost value, so a missing or empty rollup is not mistaken for free operation; a genuine `todayCost` of zero produced by sessions with usage that summed to zero SHALL render as a real numeric zero, distinct from the empty case.
-
-#### Scenario: Today-cost field is populated from the rollup endpoint
-
-- **WHEN** the factory status headline renders and the agent cost rollup endpoint returns a `todayCost` value with a non-empty sample
-- **THEN** the today-cost field SHALL display that numeric `todayCost` value
-- **AND** the value SHALL come from the rollup endpoint rather than being recomputed locally over the session set
-- **AND** the runner-online, in-flight, awaiting-approval, and today-shipped fields SHALL continue to render their real values
-
-#### Scenario: Empty today-cost is distinct from a zero value
-
-- **WHEN** the agent cost rollup returns the empty/zero-sample result for `todayCost` (no sessions with usage for the current day)
-- **THEN** the today-cost field SHALL render an empty/no-data placeholder
-- **AND** the slot SHALL NOT display a numeric zero that could be mistaken for an actual computed cost
-
-#### Scenario: Genuine zero today-cost renders as a real zero
-
-- **WHEN** the agent cost rollup returns a `todayCost` of zero produced by sessions with usage that summed to zero
-- **THEN** the today-cost field SHALL render a numeric zero
-- **AND** it SHALL be distinguishable from the empty/zero-sample placeholder

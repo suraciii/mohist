@@ -12,6 +12,7 @@ public sealed partial class Issue
     private string? _risk;
     private DateTime _updatedAt;
     private DateTime? _archivedAt;
+    private DateTime? _completedAt;
     private string? _workflowRunId;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
@@ -66,6 +67,12 @@ public sealed partial class Issue
     {
         get => _archivedAt;
         init => _archivedAt = value;
+    }
+
+    public DateTime? CompletedAt
+    {
+        get => _completedAt;
+        init => _completedAt = value;
     }
 
     /// <summary>

@@ -131,7 +131,7 @@ describe('FactoryStatusHeadline rendering', () => {
       makeIssue({ id: 'run-1', status: IssueStatus.InProgress, health: IssueHealth.Active }),
       makeIssue({ id: 'run-2', status: IssueStatus.InProgress, health: IssueHealth.Active }),
       makeIssue({ id: 'approve-1', approvalState: { status: 'awaiting', requestedAt: todayIso } }),
-      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
+      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
     ]
     mocks.agentStatus = makeAgentStatus({ runnerAvailable: true })
 
@@ -246,7 +246,7 @@ describe('FactoryStatusHeadline today-cost', () => {
     mocks.issues = [
       makeIssue({ id: 'run-1', status: IssueStatus.InProgress, health: IssueHealth.Active }),
       makeIssue({ id: 'approve-1', approvalState: { status: 'awaiting', requestedAt: todayIso } }),
-      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
+      makeIssue({ id: 'ship-1', status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
     ]
 
     renderHeadline()
