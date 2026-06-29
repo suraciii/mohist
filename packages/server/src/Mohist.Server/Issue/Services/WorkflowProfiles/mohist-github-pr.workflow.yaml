@@ -226,9 +226,6 @@ stages:
         uses: mohist/github-pr-status
         with:
           prNumber: ${{ vars.github.pr.number }}
-          source: ${{ workspace.branch }}
-          target: ${{ repository.baseBranch }}
-          remote: origin
 
   - stage: integrate
     lockBehavior: sequential

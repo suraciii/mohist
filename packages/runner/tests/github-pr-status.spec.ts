@@ -2,29 +2,19 @@ import { afterEach, describe, expect, it } from "vitest"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 import { createDefaultRegistry } from "../src/actions/registry.js"
 import {
+  __testing,
   githubPrStatusAction,
   parseGitHubPrStatusExpectation,
   setGitHubPrStatusGhRunnerForTest,
-  setGitHubPrStatusGitRunnerForTest,
 } from "../src/actions/github-pr-status.js"
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string }
-type GitResponse = { success: boolean; stdout: string; stderr: string; exitCode: number; combinedOutput: string }
 
 const WORKSPACE_PATH = "/workspace"
 
 afterEach(() => {
-  setGitHubPrStatusGitRunnerForTest(null)
   setGitHubPrStatusGhRunnerForTest(null)
 })
-
-function ok(stdout: string): GitResponse {
-  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
-}
-
-function fail(stderr: string, stdout = ""): GitResponse {
-  return { success: false, stdout, stderr, exitCode: 1, combinedOutput: [stdout.trim(), stderr.trim()].filter(Boolean).join("\n") }
-}
 
 function ghOk(stdout: string, stderr = ""): CommandResult {
   return { exitCode: 0, stdout, stderr }
@@ -61,45 +51,26 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
   }
 }
 
-function installGit(respond: (workDir: string, args: string[], signal: AbortSignal) => GitResponse | Promise<GitResponse>) {
-  setGitHubPrStatusGitRunnerForTest(async (workDir, args, signal) => await respond(workDir, args, signal))
-}
-
 function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
   setGitHubPrStatusGhRunnerForTest(async (cmd, args, cwd, _signal) => await respond(cmd, args, cwd))
 }
 
 const PR_VIEW_OPEN = JSON.stringify({
-  number: 42,
   url: "https://github.com/acme/repo/pull/42",
   state: "OPEN",
   isDraft: false,
-  baseRefName: "master",
-  baseRefOid: "base-sha",
-  headRefOid: "head-sha",
-  headRefName: "mohist/run-wr-gh-status-1",
 })
 
 const PR_VIEW_DRAFT = JSON.stringify({
-  number: 42,
   url: "https://github.com/acme/repo/pull/42",
   state: "OPEN",
   isDraft: true,
-  baseRefName: "master",
-  baseRefOid: "base-sha",
-  headRefOid: "head-sha",
-  headRefName: "mohist/run-wr-gh-status-1",
 })
 
 const PR_VIEW_MERGED = JSON.stringify({
-  number: 42,
   url: "https://github.com/acme/repo/pull/42",
   state: "MERGED",
   isDraft: false,
-  baseRefName: "master",
-  baseRefOid: "base-sha",
-  headRefOid: "head-sha",
-  headRefName: "mohist/run-wr-gh-status-1",
 })
 
 describe("mohist/github-pr-status registry", () => {
@@ -112,7 +83,6 @@ describe("mohist/github-pr-status registry", () => {
 describe("mohist/github-pr-status action", () => {
   it("returns success when the PR is OPEN and not draft (default ready+open expectations)", async () => {
     const ghCalls: string[] = []
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       ghCalls.push(full)
@@ -132,10 +102,10 @@ describe("mohist/github-pr-status action", () => {
     expect(parsed.isDraft).toBe(false)
     expect(parsed.expectations).toEqual(["open", "ready"])
     expect(parsed.missing).toEqual([])
+    expect(ghCalls).toContain("gh pr view 42 --json url,state,isDraft")
   })
 
   it("rejects a draft PR by default", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_DRAFT)
@@ -151,7 +121,6 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("rejects a non-open PR by default", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_MERGED)
@@ -167,10 +136,9 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("fails with expect=merged when the PR state is OPEN", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
-      if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
+      if (full === "gh pr view 42 --json url,state") return ghOk(PR_VIEW_OPEN)
       return ghFail(`unexpected gh call: ${full}`)
     })
 
@@ -184,7 +152,6 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("passes expect=merged when the PR state is MERGED", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_MERGED)
@@ -200,7 +167,6 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("rejects a draft PR when expect=ready is set", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_DRAFT)
@@ -214,48 +180,7 @@ describe("mohist/github-pr-status action", () => {
     expect(parsed.missing).toContain("ready")
   })
 
-  it("passes head-matches when local HEAD SHA equals PR head SHA", async () => {
-    installGit((_workDir, args) => {
-      const cmd = args.join(" ")
-      if (cmd === "rev-parse mohist/run-wr-gh-status-1") return ok("head-sha\n")
-      return fail(`unexpected git call: ${cmd}`)
-    })
-    installGh((cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
-      return ghFail(`unexpected gh call: ${full}`)
-    })
-
-    const result = await githubPrStatusAction(context({ prNumber: 42, expect: "head-matches" }))
-
-    expect(result.status).toBe("success")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.localHeadSha).toBe("head-sha")
-    expect(parsed.headSha).toBe("head-sha")
-    expect(parsed.missing).toEqual([])
-  })
-
-  it("fails head-matches when local HEAD SHA differs from PR head SHA", async () => {
-    installGit((_workDir, args) => {
-      const cmd = args.join(" ")
-      if (cmd === "rev-parse mohist/run-wr-gh-status-1") return ok("different-sha\n")
-      return fail(`unexpected git call: ${cmd}`)
-    })
-    installGh((cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
-      return ghFail(`unexpected gh call: ${full}`)
-    })
-
-    const result = await githubPrStatusAction(context({ prNumber: 42, expect: "head-matches" }))
-
-    expect(result.status).toBe("failure")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.missing).toContain("head-matches")
-  })
-
   it("resolves prNumber from vars.github.pr.number when omitted from with", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh((cmd, args) => {
       const full = [cmd, ...args].join(" ")
       if (full.startsWith("gh pr view 7")) return ghOk(PR_VIEW_OPEN.replace("42", "7"))
@@ -279,7 +204,6 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("returns failure when gh pr view fails", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh(() => ghFail("gh: not found"))
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
@@ -292,7 +216,6 @@ describe("mohist/github-pr-status action", () => {
   })
 
   it("returns failure when gh pr view returns unparseable JSON", async () => {
-    installGit(() => ok("head-sha\n"))
     installGh(() => ghOk("not-json"))
 
     const result = await githubPrStatusAction(context({ prNumber: 42 }))
@@ -301,25 +224,14 @@ describe("mohist/github-pr-status action", () => {
     expect(result.message).toContain("unparseable JSON")
   })
 
-  it("combines multiple expectations in the order they appear in expect", async () => {
-    installGit(() => ok("head-sha\n"))
-    installGh((cmd, args) => {
-      const full = [cmd, ...args].join(" ")
-      if (full.startsWith("gh pr view 42")) return ghOk(PR_VIEW_OPEN)
-      return ghFail(`unexpected gh call: ${full}`)
-    })
-
-    const result = await githubPrStatusAction(context({ prNumber: 42, expect: "head-matches, in-sync, base-matches" }))
-
-    expect(result.status).toBe("success")
-    const parsed = JSON.parse(result.output!)
-    expect(parsed.expectations).toEqual(["head-matches", "in-sync", "base-matches"])
-    expect(parsed.missing).toEqual([])
-  })
-
   it("ignores unknown expectation tokens", async () => {
-    expect(parseGitHubPrStatusExpectation("merged, foo, in-sync")).toEqual(["merged", "in-sync"])
+    expect(parseGitHubPrStatusExpectation("merged, foo")).toEqual(["merged"])
     expect(parseGitHubPrStatusExpectation(null)).toEqual(["open", "ready"])
     expect(parseGitHubPrStatusExpectation("")).toEqual(["open", "ready"])
+  })
+
+  it("requests only fields needed by each expectation set", () => {
+    expect(__testing.buildPrViewFields(["open", "ready"])).toEqual(["url", "state", "isDraft"])
+    expect(__testing.buildPrViewFields(["merged"])).toEqual(["url", "state"])
   })
 })

@@ -2,17 +2,10 @@ import type { ActionContext, ActionResult } from "../core/types.js"
 import { numberInput, stringInput } from "../core/json.js"
 import { stringAt } from "../core/json-path.js"
 import { runCommand } from "../system/process.js"
-import { git as defaultGit } from "./git.js"
 
-type GitRunner = typeof defaultGit
 type GhRunner = typeof runCommand
 
-let git: GitRunner = defaultGit
 let gh: GhRunner = runCommand
-
-export function setGitHubPrStatusGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
-}
 
 export function setGitHubPrStatusGhRunnerForTest(runner: GhRunner | null) {
   gh = runner ?? runCommand
@@ -22,9 +15,6 @@ export type GitHubPrStatusExpectation =
   | "open"
   | "ready"
   | "merged"
-  | "head-matches"
-  | "base-matches"
-  | "in-sync"
 
 export interface GitHubPrStatusStep {
   name: string
@@ -40,15 +30,8 @@ export interface GitHubPrStatusOutput {
   prUrl: string | null
   prState: string | null
   isDraft: boolean | null
-  baseRefName: string | null
-  baseSha: string | null
-  headSha: string | null
-  localHeadSha: string | null
   expectations: GitHubPrStatusExpectation[]
   missing: GitHubPrStatusExpectation[]
-  source: string | null
-  target: string | null
-  remote: string | null
   message: string | null
   output: string
   steps: GitHubPrStatusStep[]
@@ -58,9 +41,6 @@ const VALID_EXPECTATIONS: ReadonlySet<GitHubPrStatusExpectation> = new Set([
   "open",
   "ready",
   "merged",
-  "head-matches",
-  "base-matches",
-  "in-sync",
 ])
 
 const DEFAULT_EXPECTATIONS: GitHubPrStatusExpectation[] = ["open", "ready"]
@@ -83,17 +63,9 @@ export function parseGitHubPrStatusExpectation(value: string | null | undefined)
 }
 
 interface PrViewFull {
-  number?: number
   url?: string
   state?: string
   isDraft?: boolean
-  baseRefName?: string
-  baseRef?: { name?: string }
-  baseRepository?: { nameWithOwner?: string }
-  baseRefOid?: string
-  headRefOid?: string
-  headRefName?: string
-  headRepository?: { nameWithOwner?: string }
 }
 
 export function parsePrViewFull(stdout: string): PrViewFull | null {
@@ -133,26 +105,12 @@ function emptyStatusOutput(message: string): GitHubPrStatusOutput {
     prUrl: null,
     prState: null,
     isDraft: null,
-    baseRefName: null,
-    baseSha: null,
-    headSha: null,
-    localHeadSha: null,
     expectations: [],
     missing: [],
-    source: null,
-    target: null,
-    remote: null,
     message,
     output: message,
     steps: [],
   }
-}
-
-function classifyGhFailure(_stdout: string, stderr: string): string {
-  const text = stderr.toLowerCase()
-  if (text.includes("not found") || text.includes("could not resolve")) return "pr-state-conflict"
-  if (text.includes("auth") || text.includes("login")) return "config-error"
-  return "retry-safe"
 }
 
 export async function githubPrStatusAction(context: ActionContext): Promise<ActionResult> {
@@ -165,13 +123,6 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
     }
   }
 
-  const source = stringInput(context.with, "source") ?? stringAt(context.variables, ["workspace", "branch"]) ?? "HEAD"
-  const target = stringInput(context.with, "target")
-    ?? stringAt(context.variables, ["repository", "baseBranch"])
-    ?? stringAt(context.variables, ["project", "defaultBranch"])
-    ?? stringAt(context.variables, ["project", "baseBranch"])
-    ?? "main"
-  const remote = stringInput(context.with, "remote") ?? "origin"
   const expect = parseGitHubPrStatusExpectation(stringInput(context.with, "expect"))
   const workDir = stringAt(context.variables, ["workspace", "path"]) ?? context.workDir
 
@@ -179,24 +130,18 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
   const recordStep = (name: string, command: string, exitCode: number, output: string) => {
     steps.push({ name, command, exitCode, output })
   }
+  const prViewFields = buildPrViewFields(expect)
 
   const viewResult = await gh(
     "gh",
-    [
-      "pr",
-      "view",
-      String(prNumber),
-      "--json",
-      "number,url,state,isDraft,baseRefName,baseRefOid,headRefOid,headRefName",
-    ],
+    ["pr", "view", String(prNumber), "--json", prViewFields.join(",")],
     workDir,
     context.signal,
   )
   const viewOutput = combinedGhOutput(viewResult)
-  recordStep("gh-pr-view", `pr view ${prNumber} --json number,url,state,...`, viewResult.exitCode, viewOutput)
+  recordStep("gh-pr-view", `pr view ${prNumber} --json ${prViewFields.join(",")}`, viewResult.exitCode, viewOutput)
 
   if (viewResult.exitCode !== 0) {
-    const errorCode = classifyGhFailure(viewResult.stdout, viewResult.stderr)
     return buildOutput({
       kind: "github-pr-status",
       status: "failed",
@@ -204,15 +149,8 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
       prUrl: null,
       prState: null,
       isDraft: null,
-      baseRefName: null,
-      baseSha: null,
-      headSha: null,
-      localHeadSha: null,
       expectations: expect,
       missing: expect,
-      source,
-      target,
-      remote,
       message: `gh pr view ${prNumber} failed: ${viewOutput}`,
       output: viewOutput,
       steps,
@@ -228,15 +166,8 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
       prUrl: null,
       prState: null,
       isDraft: null,
-      baseRefName: null,
-      baseSha: null,
-      headSha: null,
-      localHeadSha: null,
       expectations: expect,
       missing: expect,
-      source,
-      target,
-      remote,
       message: `gh pr view ${prNumber} returned unparseable JSON: ${viewOutput}`,
       output: viewOutput,
       steps,
@@ -246,51 +177,12 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
   const prUrl = view.url ?? null
   const prState = view.state ?? null
   const isDraft = view.isDraft ?? null
-  const baseRefName = view.baseRefName ?? view.baseRef?.name ?? null
-  const baseSha = view.baseRefOid ?? null
-  const headSha = view.headRefOid ?? null
-
-  let localHeadSha: string | null = null
-  if (expect.includes("head-matches") || expect.includes("in-sync")) {
-    const local = await git(workDir, ["rev-parse", source], context.signal)
-    const localOutput = combinedGhOutput(local)
-    recordStep("git-rev-parse", `rev-parse ${source}`, local.exitCode, localOutput)
-    if (local.success) {
-      localHeadSha = local.stdout.trim() || null
-    } else {
-      return buildOutput({
-        kind: "github-pr-status",
-        status: "failed",
-        prNumber,
-        prUrl,
-        prState,
-        isDraft,
-        baseRefName,
-        baseSha,
-        headSha,
-        localHeadSha: null,
-        expectations: expect,
-        missing: expect.filter((entry) => entry === "head-matches" || entry === "in-sync"),
-        source,
-        target,
-        remote,
-        message: `git rev-parse ${source} failed: ${localOutput}`,
-        output: localOutput,
-        steps,
-      })
-    }
-  }
 
   const missing: GitHubPrStatusExpectation[] = []
   for (const expectation of expect) {
     const satisfied = evaluateExpectation(expectation, {
       prState,
       isDraft,
-      baseRefName,
-      baseSha,
-      headSha,
-      localHeadSha,
-      target,
     })
     if (!satisfied) missing.push(expectation)
   }
@@ -307,15 +199,8 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
     prUrl,
     prState,
     isDraft,
-    baseRefName,
-    baseSha,
-    headSha,
-    localHeadSha,
     expectations: expect,
     missing,
-    source,
-    target,
-    remote,
     message: summary,
     output: viewOutput,
     steps,
@@ -325,11 +210,6 @@ export async function githubPrStatusAction(context: ActionContext): Promise<Acti
 interface ExpectationContext {
   prState: string | null
   isDraft: boolean | null
-  baseRefName: string | null
-  baseSha: string | null
-  headSha: string | null
-  localHeadSha: string | null
-  target: string
 }
 
 function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: ExpectationContext): boolean {
@@ -340,15 +220,15 @@ function evaluateExpectation(expectation: GitHubPrStatusExpectation, ctx: Expect
       return ctx.prState === "OPEN" && ctx.isDraft === false
     case "merged":
       return ctx.prState === "MERGED"
-    case "head-matches":
-      return ctx.headSha !== null && ctx.localHeadSha !== null && ctx.headSha === ctx.localHeadSha
-    case "base-matches":
-      return ctx.baseRefName !== null && ctx.baseRefName === ctx.target
-    case "in-sync":
-      return ctx.headSha !== null && ctx.localHeadSha !== null && ctx.headSha === ctx.localHeadSha && ctx.baseRefName === ctx.target
     default:
       return false
   }
+}
+
+function buildPrViewFields(expect: GitHubPrStatusExpectation[]): string[] {
+  const fields = ["url", "state"]
+  if (expect.includes("ready")) fields.push("isDraft")
+  return fields
 }
 
 function numberFromVariables(variables: unknown): number | null {
@@ -367,13 +247,10 @@ function numberFromVariables(variables: unknown): number | null {
   return null
 }
 
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
 export const __testing = {
   DEFAULT_EXPECTATIONS,
   VALID_EXPECTATIONS,
+  buildPrViewFields,
   evaluateExpectation,
   parseGitHubPrStatusExpectation,
 }

@@ -200,9 +200,6 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
       uses: mohist/github-pr-status
       with:
         prNumber: ${{ vars.github.pr.number }}
-        source: ${{ workspace.branch }}
-        target: ${{ repository.baseBranch }}
-        remote: origin
 
   requiresApproval: true
 
@@ -311,8 +308,8 @@ PR 生命周期：plan 文档产出后打开 draft PR；check 阶段完成 AI re
 - `check` stage 在 `ai-review` 通过后执行 `push` 同步最新代码到远程 PR，
   再执行 `mark-pr-ready` 标记 PR ready，然后运行只读的 `github-pr-status`
   check 确认 PR 状态，等待人工批准。
-- `github-pr-status` 有两种使用模式：check 阶段做只读确认（PR 已 ready，head/base
-  匹配）；integrate 阶段用 `expect: merged` 验证 PR 已合入。
+- `github-pr-status` 有两种使用模式：check 阶段做只读确认（PR 已 ready）；
+  integrate 阶段用 `expect: merged` 验证 PR 已合入。
 - `ai-review` 的 `expect.markers.oneOf: [PASS, FAIL]` 保证 agent 产出合规
   marker；`failIf: FAIL` 让 action 在 marker 匹配到 FAIL 时返回失败，output
   中 `promise` 字段值为 `FAIL`。recovery handler 用 `when: promise=FAIL`
