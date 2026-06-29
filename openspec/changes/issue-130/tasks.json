@@ -88,7 +88,7 @@
       "id": "T-005",
       "title": "Agent workbench read API: list, summary, and transcript routes",
       "spec": "specs/http-api/spec.md#agent-scoped-session-list-endpoint",
-      "description": "Extract the agentRef (agent_* id-else-name) resolution currently inline in AgentSessionLaunchRoutes into a shared AgentRefResolver used by launch and the new list endpoint. Register GET /api/projects/{projectRef}/agents/{agentRef}/sessions?status=&limit= returning the agent-scoped list. Reshape the existing GET /api/projects/{projectRef}/agent-sessions/{sessionId} route (already registered in AgentSessionFollowupRoutes) to return GenericAgentSessionSummaryDto. Add GET /api/projects/{projectRef}/agent-sessions/{sessionId}/transcript reusing the existing transcript query path without requiring a workflow run id or session name. Unknown agentRef/sessionId return 404 and never return a workflow session.",
+      "description": "Extract the agentRef (agent_* id-else-name) resolution currently inline in AgentSessionLaunchRoutes into a shared AgentRefResolver used by launch and the new list endpoint. Register GET /api/projects/{projectRef}/agents/{agentRef}/sessions?status=&limit= returning the agent-scoped list. Reshape the existing GET /api/projects/{projectRef}/agent-sessions/{sessionId} route (already registered in AgentSessionFollowupRoutes) to return GenericAgentSessionSummaryDto. The GET /api/projects/{projectRef}/agent-sessions/{sessionId}/transcript route is already registered from #129 (AgentSessionFollowupRoutes.cs) and served by GetGenericSessionTranscriptAsync; verify it satisfies the spec (transcript and runtime events without requiring a workflow run id or session name; unknown sessionId returns 404) and add integration coverage rather than re-registering it. Unknown agentRef/sessionId return 404 and never return a workflow session.",
       "acceptanceCriteria": [
         "GET .../agents/{agentRef}/sessions returns 200 with recency-ordered generic sessions, each carrying session id, agent id, agent name, status, created, last-activity, and resolved model; honors ?status= and is distinct from the project-wide .../agent/sessions and the workflow .../issues/{n}/sessions lists",
         "Unknown {agentRef} returns 404",
@@ -100,7 +100,7 @@
       "priority": 3,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "AgentRefResolver shared helper, new agent-scoped list route handler, reshaped summary route handler, new transcript route handler, and integration specs.",
+      "output": "AgentRefResolver shared helper, new agent-scoped list route handler, reshaped summary route handler, verified/covered transcript route handler, and integration specs.",
       "dependsOn": ["T-002", "T-003"],
       "passes": false,
       "notes": "The summary route path is unchanged from #129; only the response body becomes additive. Do not overload the existing project-wide GET .../agent/sessions — the spec mandates a distinct agent-scoped route with an explicit {agentRef} path segment."
