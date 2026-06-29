@@ -1,0 +1,21 @@
+# progress.txt — issue 282
+
+## T-001
+
+### Key decisions
+- Five-state lifecycle (idle/running/paused/done/closed) replaces the old three-state (active/done/closed).
+- idle is default; done/closed are terminal.
+- Start/Pause/Resume documented in a single table covering CLI/Web UI/API with idempotency note.
+- Auto-advancement only applies to running; idle/paused do not auto-advance.
+- Running-but-idle is a situation explained by nextIssueReason, not a sixth state.
+- Epic influences advancement but does not change per-issue workflow rules.
+
+### Derivation sources
+- CLI examples: verified against `mo epic --help` real output (start/pause/resume/done/close/link/unlink/list/show/create/update all exist).
+- HTTP API examples: verified against `Api/EpicRoutes.cs` — endpoints are POST /start, /pause, /resume, /done, /close under `/api/projects/{projectRef}/epics/{id}`.
+- Web UI labels: documented as "Start Epic", "Pause", "Resume" (matching UI from 278/279/281).
+
+### Gotchas
+- The old docs had `activeIssues` in the progress JSON example — kept it as is (it's a count, not a status label; internal symbol name, not user-facing copy).
+- `--project` is the canonical CLI option name; `--project-id` is a backwards-compatible alias.
+- Pause API supports an optional `reason` body parameter (verified in EpicRoutes.cs PauseRouteAsync reads PauseEpicRequest with Reason).
