@@ -394,4 +394,27 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"context:     {contextWindowUsedBefore} → {contextWindowUsed} ({contextUsagePercent})");
         _out.WriteLine($"status:      {status}");
     }
+
+    private void RenderIssueArchiveCompleted(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var message = StringOf(data, "message");
+        var archived = NumberOf(data, "archived");
+        var skipped = NumberOf(data, "skipped");
+
+        if (!string.IsNullOrEmpty(message))
+        {
+            _out.WriteLine(message);
+        }
+        else
+        {
+            _out.WriteLine($"archived: {archived}");
+            _out.WriteLine($"skipped:  {skipped}");
+        }
+    }
 }

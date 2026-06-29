@@ -830,6 +830,7 @@ internal sealed class MohistCliApi
         ProjectTemplateList,
         ProjectTemplateShow,
         ProjectWorkflowProfile,
+        IssueArchiveCompleted,
     }
 
     internal static TableShape ParseTableShape(string? shape)

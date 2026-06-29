@@ -1,0 +1,143 @@
+using System.Net;
+using Mohist.Cli.Tests.Support;
+using Xunit;
+
+namespace Mohist.Cli.Tests;
+
+public class CliIssueCommandSpecs
+{
+    private const string ActiveProjectId = "proj_test";
+
+    [Fact]
+    public async Task ArchiveAllCompleted_Table_PrintsServerResult()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    archived = 5,
+                    skipped = 2,
+                    skippedNumbers = new[] { 7, 9 },
+                    message = "Archived 5 completed issues, skipped 2",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "--all-completed"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/issues/archive-completed", request.RequestUri?.PathAndQuery);
+        Assert.Equal("{}", request.Body);
+        Assert.Contains("Archived 5 completed issues, skipped 2", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ArchiveAllCompleted_Json_EmitsRawServerResponse()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    archived = 3,
+                    skipped = 0,
+                    skippedNumbers = Array.Empty<int>(),
+                    message = "Archived 3 completed issues, skipped 0",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "--all-completed", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"success\": true", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"archived\": 3", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"message\": \"Archived 3 completed issues, skipped 0\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ArchiveAllCompleted_NoProject_FailsClearly()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called with no project"),
+            activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "--all-completed"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(MohistCliCommands.NoActiveProjectMessage, error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ArchiveAllCompleted_MutuallyExclusiveWithNumber_FailsClearly()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called when mutually exclusive args are passed"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "42", "--all-completed"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ArchiveAllCompleted_InvalidOutput_FailsWithoutCallingApi()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called when output mode is invalid"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "--all-completed", "-o", "yaml"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("--output must be 'table' or 'json'", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ArchiveAllCompleted_ProjectIdOverride_UsesProjectIdArgument()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { archived = 1, skipped = 0, skippedNumbers = Array.Empty<int>(), message = "Archived 1 completed issues" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "--all-completed", "--project-id", "proj_by_id"],
+            output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_by_id/issues/archive-completed", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    private static (HttpClient http, RecordingHttpHandler handler, StringWriter output, StringWriter error, FakeFileSystem fileSystem, FakeCommandExecutor executor) SetupEnv(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder,
+        string? activeProjectId = ActiveProjectId)
+    {
+        var handler = new RecordingHttpHandler(responder);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var fileSystem = new FakeFileSystem();
+        if (activeProjectId is not null)
+        {
+            fileSystem.AddFile(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".mohist", "cli-state.json"),
+                $"{{\"activeProjectId\":\"{activeProjectId}\"}}");
+        }
+        var executor = new FakeCommandExecutor();
+        return (http, handler, output, error, fileSystem, executor);
+    }
+}

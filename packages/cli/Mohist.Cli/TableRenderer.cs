@@ -141,6 +141,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentSessionTranscript:
                 RenderAgentSessionTranscript(data);
                 break;
+            case MohistCliApi.TableShape.IssueArchiveCompleted:
+                RenderIssueArchiveCompleted(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;

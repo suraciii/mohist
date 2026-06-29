@@ -105,6 +105,7 @@ mo issue resume <number>
 mo issue stop <number>
 mo issue rebase <number>
 mo issue archive <number>
+mo issue archive --all-completed [options]
 mo issue unarchive <number>
 mo issue comment <number> <body>
 mo issue prerequisite-add <number> <prereq>
@@ -133,6 +134,7 @@ mo issue workflow [subcommand]
 | `--label <key=value>` | create, update | 标签：`key=value` 设置、`-key` 移除，可多次 |
 | `--model <id>` | create | 指定 AI 模型 |
 | `--workflow-profile <id>` | create | 指定 workflow profile |
+| `--all-completed` | archive | 批量归档所有已完成且未归档的 issue |
 | `--project <name>` | 所有 | 指定 project |
 | `--archived` | list | 看归档 |
 | `--all` | list | 看全部（含归档） |

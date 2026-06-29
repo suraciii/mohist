@@ -757,25 +757,51 @@ internal static class IssueCommands
         };
         var allCompletedOpt = new Option<bool>("--all-completed") { Description = "Archive all completed issues" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption("table");
         cmd.Arguments.Add(numberArg);
         cmd.Options.Add(allCompletedOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(projectIdOpt);
+        cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx =>
         {
             var allCompleted = ctx.GetValue(allCompletedOpt);
             var project = ctx.GetValue(projectOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var number = ctx.GetValue(numberArg);
+            var output = ctx.GetValue(outputOpt);
             return ArchiveAsync();
 
             async Task<int> ArchiveAsync()
             {
+                var validation = MohistCliApi.ValidateOutputMode(output);
+                if (validation is MohistCliApi.OutputModeResult.Invalid invalidOutput)
+                {
+                    api.Error.WriteLine(invalidOutput.Message);
+                    return 1;
+                }
+
+                if (allCompleted && number is not null)
+                {
+                    api.Error.WriteLine("<number> and --all-completed are mutually exclusive");
+                    return 1;
+                }
+
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;
+
                 if (allCompleted)
-                    return await api.PrintPostAsync(ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"), new { });
+                {
+                    var mode = ((MohistCliApi.OutputModeResult.Valid)validation).Mode;
+                    return await api.PrintPostWithOutputAsync(
+                        ProjectIssuesPath(resolvedProjectId, "/issues/archive-completed"),
+                        new { },
+                        mode,
+                        nameof(MohistCliApi.TableShape.IssueArchiveCompleted),
+                        rawJson: true);
+                }
+
                 return await api.PrintPostAsync(
                     ProjectIssuesPath(resolvedProjectId, $"/issues/{Uri.EscapeDataString(number!)}/archive"),
                     new { });

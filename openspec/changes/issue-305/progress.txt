@@ -39,3 +39,21 @@
 - No new `TableShape` or renderer needed — `AgentSessionFollowup` (delivery: sent) matches the response shape exactly
 - `--text` option requires a value (Option<string?>), so theory tests for followup must include `--text "x"` extra args
 - The `PrintEnvelopeAsync` with `rawJson: true` returns the full envelope including success, so JSON mode test checks for `"success": true` (unlike the usual `-o json` that strips the envelope)
+
+## T-004 Recordings
+
+- `BuildArchive` already existed but used `PrintPostAsync` (no `-o` support). Refactored to add:
+  - `OutputOption` (default "table") + `ValidateOutputMode`
+  - Mutual exclusivity check between `<number>` and `--all-completed` (before project resolution)
+  - For `--all-completed`: uses `PrintPostWithOutputAsync` with `IssueArchiveCompleted` table shape and `rawJson: true`
+  - Single-issue archive path unchanged (still uses `PrintPostAsync`)
+- New `TableShape.IssueArchiveCompleted` added to enum in `MohistCliApi.cs`
+- New `RenderIssueArchiveCompleted` in `TableRenderer.Issues.cs` — prints message if present, otherwise shows archived/skipped counts
+- Server response for `/archive-completed` is `{archived: N, skipped: N, skippedNumbers: [...], message: "..."}`
+- Test file `CliIssueCommandSpecs.cs` created (no existing file existed) with 6 tests:
+  - `ArchiveAllCompleted_Table_PrintsServerResult` — table mode, checks POST path/body/output message
+  - `ArchiveAllCompleted_Json_EmitsRawServerResponse` — JSON mode with `rawJson: true`, checks full envelope in stdout
+  - `ArchiveAllCompleted_NoProject_FailsClearly` — no active project, checks `NoActiveProjectMessage` on stderr
+  - `ArchiveAllCompleted_MutuallyExclusiveWithNumber_FailsClearly` — both `<number>` and `--all-completed`, checks mutually exclusive error on stderr
+  - `ArchiveAllCompleted_InvalidOutput_FailsWithoutCallingApi` — invalid `-o` mode, fails early without API call
+  - `ArchiveAllCompleted_ProjectIdOverride_UsesProjectIdArgument` — `--project-id` override verified in URL
