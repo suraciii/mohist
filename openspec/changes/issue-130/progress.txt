@@ -120,6 +120,45 @@
   - Active generic session appears in `/agent/status` activeAgents
   - Workflow card has no agentId/agentName in JSON
 - The existing `AgentSessionLaunchRoutesSpecs.Launch_GenericSession_IsReadableByProductMetadataAndTranscriptRoutes`
-  test is broken by T-003's DTO change from `AgentSessionMetadataDto` (has `Id`)
-  to `GenericAgentSessionSummaryDto` (has `SessionId`). This is a pre-existing
-  T-003 issue, not caused by T-004.
+  test was broken by T-003's DTO change from `AgentSessionMetadataDto` (has `Id`)
+  to `GenericAgentSessionSummaryDto` (has `SessionId`). T-005 fixed the broken
+  assertion to check `sessionId` instead of `id`, and added agent identity checks.
+
+### T-005: Agent workbench read API routes + AgentRefResolver
+
+#### AgentRefResolver extracted
+- `AgentRefResolver` (`Api/AgentRefResolver.cs`) is a new shared static class
+  with the same `agent_*`-id-else-name resolution logic previously inlined in
+  `AgentSessionLaunchRoutes.cs:115-132`. Launch route now calls
+  `AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef)`.
+  Removing the `private static async Task<AgentInfo?> ResolveAgentAsync` method
+  from the launch routes simplifies the launch file.
+
+#### New list route: `GET .../agents/{agentRef}/sessions`
+- `AgentSessionListRoutes.cs` registers a `MapGet("/sessions")` on the same
+  `/api/projects/{projectRef}/agents/{agentRef}` group as the launch endpoint.
+  Resolves `agentRef` via `AgentRefResolver`, parses `?status=` as comma-
+  separated status filter, passes through to `ListAgentSessionsAsync`.
+- Registered in `MohistApiRegistration.cs` between launch and followup routes.
+
+#### Summary route unchanged (already returns GenericAgentSessionSummaryDto)
+- T-003 already changed the `GET .../agent-sessions/{sessionId}` handler to
+  return `GenericAgentSessionSummaryDto`. No route change needed for T-005.
+
+#### Transcript route verified
+- `GET .../agent-sessions/{sessionId}/transcript` already calls
+  `GetGenericSessionTranscriptAsync` which uses `FindGenericSessionAsync`
+  (filters by `source-kind=agent-launch`). Unknown sessionId → 404.
+  No re-registration needed.
+
+#### Integration specs
+- `AgentSessionReadApiSpecs` covers 11 scenarios:
+  - List by agent id (recency order), by agent name (resolves same set)
+  - Status filter (running, failed, multi-status combination)
+  - Unknown agentRef → 404
+  - Summary returns enriched DTO with agent identity and no workflow fields
+  - Summary for unknown sessionId → 404
+  - Summary for workflow session → 404 (never returns workflow session)
+  - Transcript returns without workflow run id; unknown → 404
+  - Transcript for workflow session → 404
+  - List distinctness: agent-scoped vs project-wide list
