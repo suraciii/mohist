@@ -827,6 +827,8 @@ internal sealed class MohistCliApi
         AgentSessionList,
         AgentSessionShow,
         AgentSessionTranscript,
+        ProjectTemplateList,
+        ProjectTemplateShow,
     }
 
     internal static TableShape ParseTableShape(string? shape)

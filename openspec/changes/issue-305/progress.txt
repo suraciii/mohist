@@ -1,0 +1,17 @@
+## Codebase Patterns
+
+- New command groups follow the `ProjectRepoCommands` pattern: a single file `MohistCliCommands.ProjectWorkflow.cs` with `internal static class ProjectWorkflowCommands` containing `Build()` and private per-verb builders.
+- `template` and `config` sub-groups are separate methods on the same class; `config` is registered as a skeleton in T-001 (empty command, filled in T-002).
+- Template CRUD verbs:
+  - `list` → `PrintWithOutputAsync` with `ProjectTemplateList` table shape
+  - `create` → `PrintPostWithOutputAsync` with `ProjectTemplateShow` table shape, `--yaml` option with `ExpandAtFileAsync`
+  - `show` → `PrintWithOutputAsync` with `ProjectTemplateShow` table shape
+  - `update` → `PrintPutWithOutputAsync` with `ProjectTemplateShow` table shape, `--yaml` option with `ExpandAtFileAsync`
+  - `delete` → `PrintDeleteWithOutputAsync` with `ProjectTemplateShow` table shape
+- JSON output mode (`-o json`) prints only the `data` portion of the envelope (via `PrintResponseAsync`), not `{success, data}`. Tests must check for data content, not `"success"`.
+- All verbs reuse `ProjectRefOption()`, `OutputOption()`, `ValidateOutputMode`, `ResolveProjectIdAsync`.
+- Table renderers for project templates added in `TableRenderer.ProjectWorkflow.cs` (new partial), with `ProjectTemplateList`/`ProjectTemplateShow` switch cases in `TableRenderer.cs`.
+
+## Decisions
+
+- Config subcommand is registered as empty skeleton in T-001 so `mo project workflow --help` lists both `template` and `config` from the start (aligns with spec AC).

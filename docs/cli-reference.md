@@ -38,7 +38,22 @@ mo project list
 mo project show <name-or-id>
 mo project use <name>              # 等同于 mo use
 mo project delete <name>
+mo project repo ...                # 仓库管理（见 Repository 管理）
+mo project workflow template ...   # Workflow 模板管理
+mo project workflow config ...     # Workflow 配置管理
 ```
+
+### Workflow 模板管理
+
+```bash
+mo project workflow template list                      # 列出所有 workflow 模板
+mo project workflow template create --yaml <yaml|@file> # 创建 workflow 模板
+mo project workflow template show <template-id>         # 查看 workflow 模板详情
+mo project workflow template update <template-id> --yaml <yaml|@file> # 更新 workflow 模板
+mo project workflow template delete <template-id>       # 删除 workflow 模板
+```
+
+`--yaml` 接受 inline YAML 或 `@file`（从文件读取）。所有子命令支持 `-o table|json` 和 `--project`/`--project-id`。
 
 ## Issue 管理
 
