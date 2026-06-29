@@ -116,12 +116,11 @@ public class ApiContractSpecs
                 projectId,
             });
 
-            // The runner-reported maxWorkflowSlots field is intentionally
-            // ignored for dispatch capacity (issue-222 T-002). Capacity is
-            // sourced from the persisted definition state and only mutates
-            // through PATCH /api/runner/{runnerId}. This test exercises the
-            // PATCH path: register defaults the runner to 1 slot, then
-            // PATCH bumps it to 4 and the agent status view reflects it.
+            // Capacity is sourced from the persisted definition state and
+            // only mutates through PATCH /api/runner/{runnerId}. This test
+            // exercises the PATCH path: register defaults the runner to 1
+            // slot, then PATCH bumps it to 4 and the agent status view
+            // reflects it.
             await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 4 });
 
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{projectId}/agent/status");

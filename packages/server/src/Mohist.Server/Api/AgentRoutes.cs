@@ -118,10 +118,6 @@ public static class AgentRoutes
         foreach (var runner in runners)
         {
             var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
-            // Persisted slots are the sole authoritative source for dispatch
-            // capacity (issue-222 Decision 2). The runner-reported
-            // MaxWorkflowSlots field is preserved on RunnerInfo for
-            // runner-line compatibility but MUST NOT influence capacity.
             slots[runner.RunnerId] = await grain.GetSlotsAsync();
         }
         return slots;
@@ -152,10 +148,7 @@ public sealed record AgentStatusResponse(
             .Select(r =>
             {
                 // Persisted slots are the sole authoritative source for
-                // dispatch capacity (issue-222 Decision 2). The
-                // runner-reported MaxWorkflowSlots field on RunnerInfo is
-                // preserved for runner-line compatibility but MUST NOT
-                // influence capacity.
+                // dispatch capacity.
                 var maxSlots = persistedSlotsByRunner.TryGetValue(r.RunnerId, out var slots)
                     ? slots
                     : RunnerCapacity.DefaultMaxWorkflowSlots;

@@ -2,14 +2,43 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/runtime/acp-connection.js"
 
-const connect = vi.fn()
-const heartbeat = vi.fn()
-const disconnect = vi.fn()
-const poll = vi.fn()
-const startSignalR = vi.fn()
-const stopSignalR = vi.fn()
-const getConnectionId = vi.fn(() => "conn-1")
-const probeLiveness = vi.fn(async () => true)
+const mocks = vi.hoisted(() => ({
+  connect: vi.fn(),
+  heartbeat: vi.fn(),
+  disconnect: vi.fn(),
+  poll: vi.fn(),
+  report: vi.fn(),
+  startSignalR: vi.fn(),
+  stopSignalR: vi.fn(),
+  getConnectionId: vi.fn(() => "conn-1"),
+  probeLiveness: vi.fn(async () => true),
+  blockingAction: vi.fn(),
+  forceReconnect: vi.fn(async () => undefined),
+  createSharedAcpConnection: vi.fn(),
+  shutdownSharedAcpConnection: vi.fn(),
+  setSessionHandlers: vi.fn(),
+  clearSessionHandlers: vi.fn(),
+  acpShutdown: vi.fn(),
+}))
+
+const {
+  connect,
+  heartbeat,
+  disconnect,
+  poll,
+  report,
+  startSignalR,
+  stopSignalR,
+  getConnectionId,
+  probeLiveness,
+  blockingAction,
+  forceReconnect,
+  createSharedAcpConnection,
+  shutdownSharedAcpConnection,
+  setSessionHandlers,
+  clearSessionHandlers,
+  acpShutdown,
+} = mocks
 
 // Capture the onReconnected callback that RunnerHost passes into the
 // RunnerSignalRClient constructor. Each new RunnerSignalRClient instance
@@ -18,16 +47,13 @@ const probeLiveness = vi.fn(async () => true)
 let capturedOnReconnected: ((connectionId: string) => void) | null = null
 let capturedFollowupTargetResolver: ((target: SessionTarget) => { connection: unknown; sessionId: string; projectId: string } | null) | null = null
 
-const forceReconnect = vi.fn(async () => undefined)
-const createSharedAcpConnection = vi.fn()
-const shutdownSharedAcpConnection = vi.fn()
-
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
     connect = connect
     heartbeat = heartbeat
     disconnect = disconnect
     poll = poll
+    report = report
     getLastCleanupPolicy = () => null
   },
 }))
@@ -50,9 +76,11 @@ vi.mock("../src/runtime/opencode-models.js", () => ({
   discoverOpencodeModels: vi.fn(async () => ({ models: ["openai/gpt-5.5"], variants: {} })),
 }))
 
-const setSessionHandlers = vi.fn()
-const clearSessionHandlers = vi.fn()
-const acpShutdown = vi.fn()
+vi.mock("../src/actions/registry.js", () => ({
+  createDefaultRegistry: () => ({
+    resolve: (uses?: string | null) => uses === "test/block" ? blockingAction : undefined,
+  }),
+}))
 
 vi.mock("../src/runtime/acp-connection.js", () => ({
   AcpSessionManager: class {
@@ -78,9 +106,16 @@ beforeEach(() => {
   })
   acpShutdown.mockResolvedValue(undefined)
   shutdownSharedAcpConnection.mockResolvedValue(undefined)
+  blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve({ status: "failed", message: "aborted" })
+      return
+    }
+    signal.addEventListener("abort", () => resolve({ status: "failed", message: "aborted" }), { once: true })
+  }))
 })
 describe("RunnerHost", () => {
-  it("RunnerRegistration_ReportsConfiguredWorkflowSlots", async () => {
+  it("RunnerRegistration_DoesNotReportWorkflowSlots", async () => {
     vi.clearAllMocks()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
@@ -97,7 +132,6 @@ describe("RunnerHost", () => {
       runnerId: "runner-test",
       projectId: "project-1",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 3,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -112,10 +146,61 @@ describe("RunnerHost", () => {
       expect.objectContaining({
         projectId: "project-1",
         coderModels: ["openai/gpt-5.5"],
-        maxWorkflowSlots: 3,
       }),
       expect.any(AbortSignal),
     )
+    expect(Object.keys(connect.mock.calls[0][0]).sort()).toEqual([
+      "buildGitHash",
+      "capabilities",
+      "coderModelVariants",
+      "coderModels",
+      "connectionId",
+      "projectId",
+    ])
+  })
+
+  it("WorkerPool_PollsUntilServerReturnsNoWorkWithoutLocalConcurrencyCap", async () => {
+    vi.clearAllMocks()
+    getConnectionId.mockReturnValue("conn-1")
+    probeLiveness.mockResolvedValue(true)
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    report.mockResolvedValue(undefined)
+    startSignalR.mockResolvedValue(undefined)
+    stopSignalR.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const work = (id: string) => ({
+      workflowRunId: "",
+      workId: `work-${id}`,
+      workType: "task",
+      uses: "test/block",
+      ownerKind: "agent-job",
+      agentJobId: `job-${id}`,
+      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+    })
+    poll
+      .mockResolvedValueOnce(work("1"))
+      .mockResolvedValueOnce(work("2"))
+      .mockResolvedValueOnce(work("3"))
+      .mockImplementation(async () => {
+        controller.abort()
+        return null
+      })
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      projectId: "project-1",
+      runnerRoot: "/tmp/mohist-runner-test",
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+      dispatchLivenessProbeIntervalMs: 60_000,
+    })
+
+    const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(poll.mock.calls.length).toBeGreaterThanOrEqual(4), { timeout: 5_000 })
+    await expect(run).resolves.toBeUndefined()
   })
 
   it("RunnerShutdown_UnregistersRunner", async () => {
@@ -134,7 +219,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -171,7 +255,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -204,7 +287,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 1,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -236,7 +318,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 1,
@@ -270,7 +351,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 1,
@@ -293,7 +373,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -314,7 +393,6 @@ describe("RunnerHost", () => {
       runnerId: "runner-test",
       projectId: "runner-project",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -343,7 +421,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 1,
@@ -383,7 +460,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -433,7 +509,6 @@ describe("RunnerHost", () => {
       serverUrl: "http://localhost:3456",
       runnerId: "runner-test",
       runnerRoot: "/tmp/mohist-runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 1,

@@ -27,7 +27,6 @@ public static class RunnerRoutes
                 req.Hostname ?? Environment.MachineName,
                 req.ProjectId,
                 req.CoderModels,
-                MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots),
                 BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                 CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants)));
             return Results.Ok();
@@ -55,7 +54,6 @@ public static class RunnerRoutes
                     req.Hostname ?? Environment.MachineName,
                     req.ProjectId,
                     req.CoderModels,
-                    MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots),
                     BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
                     CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants));
                 await runner.HeartbeatRepairAsync(info);
@@ -469,7 +467,6 @@ public record RunnerRegisterRequest(
     string? ProjectId = null,
     string? Hostname = null,
     string[]? CoderModels = null,
-    int? MaxWorkflowSlots = null,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null);
 public record RunnerSlotsPatchRequest(int Slots);
@@ -479,7 +476,6 @@ public record RunnerHeartbeatRequest(
     string? ProjectId = null,
     string? Hostname = null,
     string[]? CoderModels = null,
-    int? MaxWorkflowSlots = null,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
     string? ConnectionId = null);

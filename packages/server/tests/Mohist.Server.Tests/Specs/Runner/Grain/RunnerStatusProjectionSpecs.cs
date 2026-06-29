@@ -271,11 +271,11 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
     [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
-    public async Task GetRunnersAsync_CapacityUsesPersistedSlots_AndIgnoresReportedMaxWorkflowSlots()
+    public async Task GetRunnersAsync_CapacityUsesPersistedSlots()
     {
         var runnerId = $"runner-cap-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "cap-host", "test-project", MaxWorkflowSlots: 99));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "cap-host", "test-project"));
         await runner.UpdateAsync(4);
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));

@@ -60,9 +60,7 @@ public class RunnerStatusService : IScopedService
         try
         {
             runtime = await runnerGrain.GetRuntimeStateAsync();
-            // Slots come from the runner grain (persisted definition state),
-            // not from the runner-reported MaxWorkflowSlots field on the
-            // registry RunnerInfo. The grain is the single source of truth.
+            // Slots come from the runner grain's persisted definition state.
             slots = await runnerGrain.GetSlotsAsync();
         }
         catch

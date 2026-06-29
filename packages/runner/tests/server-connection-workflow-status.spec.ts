@@ -21,7 +21,6 @@ describe("ServerConnection.workflowRunsStatus", () => {
       runnerId: "runner-test",
       projectId: "project-1",
       runnerRoot: "/tmp/runner-test",
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 1000,
       heartbeatIntervalMs: 15_000,
       dispatchLivenessProbeIntervalMs: 10_000,

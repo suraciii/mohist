@@ -41,9 +41,6 @@ public interface IRunnerGrain : IGrainWithStringKey
 public static class RunnerCapacity
 {
     public const int DefaultMaxWorkflowSlots = 1;
-
-    public static int Normalize(int? maxWorkflowSlots) =>
-        maxWorkflowSlots is > 0 ? maxWorkflowSlots.Value : DefaultMaxWorkflowSlots;
 }
 
 [GenerateSerializer]
@@ -55,13 +52,6 @@ public record RunnerInfo(
     string[]? CoderModels = null,
     string Kind = "external",
     DateTimeOffset? RegisteredAt = null,
-    /// <summary>
-    /// Reported dispatch capacity from the runner process. Non-authoritative:
-    /// the persisted definition state (queried via <see cref="IRunnerGrain.GetSlotsAsync"/>)
-    /// is the sole source of dispatch capacity. This field is preserved for
-    /// runner-line compatibility and registry telemetry only.
-    /// </summary>
-    int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots,
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null);
 

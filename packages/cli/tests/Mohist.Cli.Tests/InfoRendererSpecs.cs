@@ -16,7 +16,7 @@ public class InfoRendererSpecs
                 OpencodeRuntime: new InfoVerboseOpencodeRuntime("opencode", "1.0.0", 5, Resolved: true),
                 EnvVars: [new InfoVerboseEnvVar("RUNNER_ID", "r1")],
                 OsRuntime: new InfoVerboseOsRuntime("linux", "x64", ".NET 11.0", "v22.5.0"),
-                Capacity: new InfoVerboseCapacity(1, 4),
+                Capacity: new InfoVerboseCapacity(1),
                 DiskUsage: new InfoVerboseDiskUsage([], Resolved: true));
         }
 

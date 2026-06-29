@@ -26,7 +26,7 @@ function mockResponse({ status, contentType = "application/json", body = "{}" }:
 }
 
 function options() {
-  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", maxConcurrentWorkflows: 1, pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
+  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
 }
 
 describe("ServerConnection.uploadArtifact", () => {
@@ -373,7 +373,6 @@ describe("ServerConnection.buildGitHash", () => {
         capabilities: ["spec/*"],
         projectId: "project-1",
         coderModels: ["openai/gpt-4"],
-        maxWorkflowSlots: 2,
         buildGitHash: hash,
       },
       new AbortController().signal,
@@ -393,14 +392,13 @@ describe("ServerConnection.buildGitHash", () => {
     const connection = new ServerConnection(options(), hash)
 
     await connection.heartbeat(
-      { capabilities: ["spec/*"], projectId: "project-1", coderModels: ["openai/gpt-4"], maxWorkflowSlots: 2 },
+      { capabilities: ["spec/*"], projectId: "project-1", coderModels: ["openai/gpt-4"] },
       new AbortController().signal,
     )
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const body = JSON.parse(init.body as string)
     expect(body.buildGitHash).toBe(hash)
-    expect(body.maxWorkflowSlots).toBe(2)
     expect(body.coderModels).toEqual(["openai/gpt-4"])
   })
 
@@ -409,14 +407,13 @@ describe("ServerConnection.buildGitHash", () => {
     const connection = new ServerConnection(options(), null)
 
     await connection.heartbeat(
-      { capabilities: ["spec/*"], projectId: "project-1", maxWorkflowSlots: 2 },
+      { capabilities: ["spec/*"], projectId: "project-1" },
       new AbortController().signal,
     )
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain("/api/runner/runner-1/heartbeat")
     const body = JSON.parse(init.body as string)
-    expect(body.maxWorkflowSlots).toBe(2)
     expect(body.buildGitHash).toBeNull()
   })
 })

@@ -342,8 +342,8 @@ public class GenericAgentSessionCancelApiSpecs : IAsyncLifetime
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId = project.Id,
-            maxWorkflowSlots = 2,
         });
+        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/agents/{agent.Id}/sessions",

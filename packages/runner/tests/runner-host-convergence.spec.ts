@@ -103,7 +103,6 @@ describe("RunnerHost convergence wiring (T-003)", () => {
       runnerId: "runner-test",
       projectId: "project-1",
       runnerRoot: root,
-      maxConcurrentWorkflows: 1,
       pollIntervalMs: 60_000,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,

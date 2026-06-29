@@ -77,9 +77,6 @@ public abstract class WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
-            // The runner-reported MaxWorkflowSlots field is non-authoritative.
-            // Tests that want a non-default capacity must update the
-            // persisted definition state via UpdateAsync.
             await runner.UpdateAsync(maxWorkflowSlots);
         }
         return runnerId;

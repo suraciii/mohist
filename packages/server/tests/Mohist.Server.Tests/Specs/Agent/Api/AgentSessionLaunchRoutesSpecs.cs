@@ -440,8 +440,8 @@ public class AgentSessionLaunchRoutesSpecs
             capabilities = new[] { "spec/*" },
             hostname = $"{runnerId}-host",
             projectId,
-            maxWorkflowSlots = 2,
         });
+        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);

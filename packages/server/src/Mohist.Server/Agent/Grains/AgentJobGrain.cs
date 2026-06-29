@@ -283,9 +283,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (state.Status != RunnerStatus.Online)
             return false;
 
-        // Slots are sourced from the runner grain (which reads from the
-        // persisted definition state). The runner-reported MaxWorkflowSlots
-        // on RunnerInfo is non-authoritative and intentionally ignored here.
+        // Slots are sourced from the runner grain's persisted definition state.
         var maxSlots = await runner.GetSlotsAsync();
         var activeWorkCount = state.ActiveWorks
             .Select(w => w.OwnerId)
