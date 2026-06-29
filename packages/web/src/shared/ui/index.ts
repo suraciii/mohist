@@ -12,3 +12,8 @@ export {
   type UploadAttachmentOptions,
   type UploadedAttachment,
 } from './attachment-composer'
+
+export {
+  EpicDescriptionField,
+  type EpicDescriptionFieldProps,
+} from './epic-description-field'

@@ -1,0 +1,35 @@
+# Issue #281 — working memory
+
+T-001 (Shared epic description scaffold, detector, and EpicDescriptionField) — done.
+
+## Codebase Patterns
+
+- **Pure helpers in `shared/lib/...`** use kebab-case filename + sibling `.test.ts` (e.g. `format-compact.ts` ↔ `format-compact.test.ts`). `vitest` globals are on (`describe`/`it`/`expect` are imported explicitly here, which matches the rest of `shared/lib`).
+- **Cross-feature shared UI** sits under `shared/ui/<feature-folder>/<Component>.tsx` with a sibling `index.ts` and `.test.tsx` (e.g. `markdown-reader/`, `attachment-composer/`). The top-level `shared/ui/index.ts` re-exports the public surface.
+- **Form fields that wrap primitives** compose `Textarea` / `Input` / `Button` from `@/shared/ui/components/...` and apply wrapper classes for mobile safety. `EpicListPage.test.tsx` already uses a `stubWidth` helper for `documentElement.scrollWidth/clientWidth` overflow assertions — reuse that pattern in dialog-level tests.
+- **`useCreateEpic` is consumed only by `EpicCreateDialog`**; the success toast is a single-consumer concern and can move into the dialog without breaking other call sites (T-002 work).
+- **`composeIssueTemplateBody` (in `entities/issue-templates/api/client.ts`)** is the convention for joining `## Title\n<placeholder>` sections with blank lines — `EPIC_DESCRIPTION_TEMPLATE` follows the same shape.
+
+## Decisions
+
+- **Template constant placement**: `shared/lib/epic-description-template.ts`. Lives next to other pure formatters in `shared/lib/`. Avoiding `entities/epic/model` (UI scaffold is not domain).
+- **Detector strictness**: `hasEpicDescriptionStructure` returns true only when **all four** headers (`## Goal`, `## Background`, `## Non-goals`, `## Scope`) are present. Case-sensitive. False for null/empty/simple. Conservative by design — false negatives only ever lead to an extra Insert action; they never destroy content.
+- **Field API surface**: `EpicDescriptionField` is fully controlled (`value`/`onChange`); the parent decides the initial value. The Insert-template logic is internal to the field (uses `EPIC_DESCRIPTION_TEMPLATE` directly). Insert handles three separator cases:
+  - empty → set to template
+  - ends with `\n\n` → no extra separator
+  - ends with `\n` (single) → one extra `\n`
+  - otherwise → `\n\n`
+- **Mobile-safe wrapper**: `cn('w-full max-w-full break-words', className)` on the outer `<div>`. Matches `EpicListPage`/`EpicDetailPage` conventions for the same class set.
+- **Re-export**: added to `shared/ui/index.ts` alongside the existing `MarkdownReader` / `AttachmentComposer` exports.
+
+## Gotchas
+
+- `node_modules` is not committed — first `npm install` is required before `typecheck` / `test:run` can run.
+- The pre-existing `Textarea` primitive does not forward refs, so cursor-based insertion is out of scope for the foundation. The current Insert strategy appends at the end, which is the simpler "append" half of the spec's "append/insert at cursor/end" wording; both halves are acceptable per design Decision 2 & 3.
+- A self-test bug surfaced while writing the field tests: an initial `if/else` cascade had `needsBlankLine = !endsWith('\n\n')`, so the `needsSingleNewline` branch was unreachable. Fixed by inlining a three-way `if/else if/else` on the ending, and corrected the test expectation accordingly (`'Existing notes\n'` + `\n` separator = `'Existing notes\n\n' + template`).
+- The `Textarea` primitive already includes `w-full` in its class list, but the task acceptance criterion requires the **field wrapper** to carry `w-full max-w-full break-words` so any sibling content (e.g. a future help row) also wraps — applied on the outer `<div>`.
+
+## Status
+
+- T-001: shipped. `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both green (2829 tests passing).
+- T-002 (Create flow) and T-003 (Edit flow) are pending; they will consume the field via `import { EpicDescriptionField } from '@/shared/ui'`.
