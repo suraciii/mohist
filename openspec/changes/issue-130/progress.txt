@@ -162,3 +162,32 @@
   - Transcript returns without workflow run id; unknown → 404
   - Transcript for workflow session → 404
   - List distinctness: agent-scoped vs project-wide list
+
+### T-006: Issue and epic agent-session association read endpoints
+
+#### New route file: `AgentSessionContextAssociationRoutes.cs`
+- Two read-only endpoints:
+  - `GET /api/projects/{projectRef}/issues/{number}/agent-sessions` — queries generic `agent-launch` sessions by `(project-id, source-kind=agent-launch, agent-launch/issue-number)` via the T-001 indexed column `LabelAgentLaunchIssueNumber`.
+  - `GET /api/projects/{projectRef}/epics/{epicRef}/agent-sessions` — same pattern using the `LabelAgentLaunchEpicNumber` column. Resolves `{epicRef}` by number-then-id mirroring the existing `EpicRoutes` inline resolver; unknown epic → 404.
+- Both groups add `ProjectResolutionEndpointFilter` independently.
+- Registered in `MohistApiRegistration.cs` between `MapAgentSessionListRoutes` and `MapAgentSessionFollowupRoutes`.
+
+#### New DTO: `AgentSessionContextAssociationDto`
+- Lightweight association entry with `SessionId`, `AgentId`, `AgentName`, `Status`, `CreatedAt`, `SessionLink` (relative URL to the session summary route).
+- Defined in `AgentSessionReadModels.cs` before `GenericAgentSessionSummaryContextRefsDto`.
+
+#### New querier method: `ListSessionsByContextRefAsync`
+- Added to `AgentSessionQuerier` right after `ListAgentSessionsAsync`.
+- Queries via `_sessionQuery.ListByLabelsAsync` with the three indexed labels, resolves terminal status via `LoadTerminalFactsAsync` + `ResolveAgentSessionListStatus` (same status vocabulary as the agent-scoped list).
+- Takes `(projectId, projectRef, labelKey, labelValue)` — `projectRef` is passed through from the route to build the `SessionLink`.
+
+#### Integration specs: `AgentSessionContextAssociationApiSpecs`
+- 6 test scenarios:
+  - Issue association returns sessions referencing that issue
+  - Issue with no associated sessions → 200 []
+  - Epic association returns sessions referencing that epic (by number)
+  - Epic with no associated sessions → 200 []
+  - Epic by id resolves correctly (number-then-id)
+  - Unknown epic ref → 404
+- Tests seed `AgentSessionRow` directly into the DB (same pattern as `AgentSessionReadApiSpecs`).
+- Issue creation uses grains (`IIssueGrain`, `IIssueCounterGrain`) with a project that has a repository; epic creation uses the HTTP API.

@@ -209,6 +209,62 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
+    /// Lists generic <c>agent-launch</c> sessions that carry a specific
+    /// context-reference label (issue-number or epic-number), returning a
+    /// lightweight association list for the issue/epic association endpoints
+    /// (issue-130 T-006). Filters by <c>(project-id, source-kind=agent-launch,
+    /// {labelKey}={labelValue})</c> using the T-001 indexed columns. Session
+    /// status is resolved via the same terminal-fact logic as
+    /// <see cref="ListAgentSessionsAsync"/>. Each returned entry includes a
+    /// relative URL link back to the session summary route
+    /// (<c>/api/projects/{projectRef}/agent-sessions/{sessionId}</c>).
+    /// Empty result (no matching sessions) returns <c>[]</c>.
+    /// </summary>
+    /// <remarks>
+    /// The method performs no writes and creates no scope/mount/supervisor/
+    /// ownership lifecycle — the association is a pure read derived from
+    /// labels the launcher already stamps. The <paramref name="projectRef"/>
+    /// parameter is the raw route <c>{projectRef}</c> value used to build
+    /// the <see cref="AgentSessionContextAssociationDto.SessionLink"/>;
+    /// it may differ from the internal <paramref name="projectId"/>.
+    /// </remarks>
+    public async Task<IReadOnlyList<AgentSessionContextAssociationDto>> ListSessionsByContextRefAsync(
+        string projectId,
+        string projectRef,
+        string labelKey,
+        string labelValue,
+        CancellationToken ct = default)
+    {
+        var records = await _sessionQuery.ListByLabelsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [labelKey] = labelValue,
+            },
+            AgentSessionQueryOrder.CreatedDescending,
+            ct: ct);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var sessionIds = records.Select(r => r.Session.Id).ToArray();
+        var terminalFacts = await LoadTerminalFactsAsync(db, sessionIds, ct);
+
+        return records.Select(record =>
+        {
+            var s = record.Session;
+            var fact = terminalFacts.GetValueOrDefault(s.Id);
+            var status = ResolveAgentSessionListStatus(record, fact);
+            return new AgentSessionContextAssociationDto(
+                s.Id,
+                Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty,
+                Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty,
+                status,
+                s.Status.CreatedAt.ToString("o"),
+                $"/api/projects/{projectRef}/agent-sessions/{s.Id}");
+        }).ToList();
+    }
+
+    /// <summary>
     /// Resolves the workbench-vocabulary status for an agent-scoped list
     /// entry (issued-130 T-002 / design D2). Terminal facts take
     /// precedence; <c>running</c> requires the runner to have bound

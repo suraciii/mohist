@@ -254,6 +254,25 @@ public sealed record GenericAgentSessionSummaryDto(
     [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
 /// <summary>
+/// Lightweight association entry returned by the issue/epic agent-session
+/// association read endpoints
+/// (<c>GET /api/projects/{projectRef}/issues/{number}/agent-sessions</c>
+/// and <c>GET /api/projects/{projectRef}/epics/{epicRef}/agent-sessions</c>).
+/// Issue-130 T-006: each entry carries the session id, the agent id and
+/// agent name, the status, the created timestamp, and a link back to the
+/// session summary route (<c>GET .../agent-sessions/{sessionId}</c>).
+/// <see cref="SessionLink"/> is a relative URL path the client can use
+/// to navigate to the session summary.
+/// </summary>
+public sealed record AgentSessionContextAssociationDto(
+    string SessionId,
+    string AgentId,
+    string AgentName,
+    string Status,
+    string CreatedAt,
+    string SessionLink);
+
+/// <summary>
 /// Optional envelope of context references recorded on a generic
 /// AgentSession at launch (issue-130 T-003 / design D4). Each field is
 /// null when the session carried no such reference; the envelope itself
