@@ -22,3 +22,14 @@
 - **Modified**: `IIssueTemplate.cs`, `IssueTemplates.cs`, `IssueTemplateRegistry.cs`, `IssueTemplateRoutes.cs`, `Mohist.Server.csproj`, `templates/*.md` (quoting), test `.csproj`
 - **Deleted**: `MohistDefaultIssueTemplate.cs`
 - **Tests**: `IssueTemplateRegistrySpecs.cs` (rewritten), `IssueTemplateApiSpecs.cs` (rewritten), `IssueTemplateBodyParserSpecs.cs` (new)
+
+## T-002: CLI render trimmed template metadata and feature alias
+
+### Changes
+- **TableRenderer.IssueTemplates.cs**: `RenderIssueTemplateList` now renders `name`, `description`, `source` columns (removed `about` and `default`). `RenderIssueTemplateShow` renders `description` instead of `about`, removes `isDefault`, `suitableFor`, and `defaults.*` fields.
+- **MohistCliCommands.Issue.cs**: Help text updated from `"e.g. mohist/default"` to `"e.g. feature"`.
+- **CliIssueTemplateCommandSpecs.cs**: Mock data updated to new trimmed shape (`description` instead of `about`, no `isDefault`/`suitableFor`/`defaults`). Tests assert list shows name+description, get shows sections. Added `TemplateGet_FeatureAndLegacyAlias_RenderIdentically` test asserting `feature` and `mohist/default` produce identical output. Removed `TemplateGet_DefaultsBlock_RendersRiskAndWorkflow` (defaults no longer rendered).
+
+### Verification
+- `dotnet build Mohist.sln` — 0 warnings, 0 errors
+- 19 CLI template command tests — all passed

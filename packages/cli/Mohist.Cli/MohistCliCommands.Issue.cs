@@ -2178,7 +2178,7 @@ internal static class IssueCommands
     private static Command BuildTemplateGet(MohistCliApi api)
     {
         var cmd = new Command("get", "Show a single issue template by name");
-        var nameArg = new Argument<string>("name") { Description = "Template name or id (e.g. mohist/default)" };
+        var nameArg = new Argument<string>("name") { Description = "Template name or id (e.g. feature)" };
         var (projectOpt, projectIdOpt) = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption();
         cmd.Arguments.Add(nameArg);
