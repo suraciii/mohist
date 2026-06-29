@@ -87,3 +87,39 @@
   `(TurnId, Type, CorrelationKey)`. Test seed data must assign unique
   `CorrelationKey` values for parts with the same `Type` (e.g. multiple
   tool call parts must each have a different CorrelationKey).
+
+### T-004: Activity/active-agents attribution for generic sessions
+
+#### `ToActivityCard` branches on `source-kind=agent-launch`
+- `AgentSessionQuerier.ToActivityCard` (line 840) now detects
+  `source-kind=agent-launch` and produces `agent_{agentId}` as the `IssueId`
+  instead of `issue_{projectId}_{issueNumber}`. AgentId/AgentName are
+  populated from labels; workflow cards pass null for both new fields.
+- `ActivityCardDto` gained two `string?` fields: `AgentId` and `AgentName`,
+  inserted between `FailureReason` and `EventSummary`. Workflow cards leave
+  them null; null fields are omitted from JSON by ASP.NET Core's default
+  `JsonIgnoreCondition.WhenWritingNull`.
+
+#### `ListActiveAgentsAsync` no longer skips blank workflowRunId/workId
+- `WorkflowActivityQuerier.ListActiveAgentsAsync` now handles generic
+  agent-launch sessions in a dedicated branch before the workflow branch.
+  Generic entries get `agent_{agentId}` as IssueId, AgentId/AgentName from
+  labels, and a null TaskProgress (design D6 degenerate). The workflow
+  branch's blank-skip guard (workflowRunId/workId) remains for non-generic
+  sessions only.
+- `ActiveAgentDto` gained two `string?` fields: `AgentId` and `AgentName`.
+- `ActiveAgentProgressDto.TaskProgress` changed from `TaskProgressDto` to
+  `TaskProgressDto?` to support the degenerative progress for generic sessions.
+
+#### Integration specs use seeded AgentSessionRow, not full launch pipeline
+- `AgentSessionActivityVisibilitySpecs` seeds rows directly into the DB
+  (same pattern as `AgentUsageTimeseriesApiSpecs`). Tests verify:
+  - Generic card carries agent id/name
+  - No synthetic `issue_..._0` card for no-issue-ref sessions
+  - Issue-ref session has issue number but is agent-attributed
+  - Active generic session appears in `/agent/status` activeAgents
+  - Workflow card has no agentId/agentName in JSON
+- The existing `AgentSessionLaunchRoutesSpecs.Launch_GenericSession_IsReadableByProductMetadataAndTranscriptRoutes`
+  test is broken by T-003's DTO change from `AgentSessionMetadataDto` (has `Id`)
+  to `GenericAgentSessionSummaryDto` (has `SessionId`). This is a pre-existing
+  T-003 issue, not caused by T-004.

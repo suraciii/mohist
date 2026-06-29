@@ -848,6 +848,35 @@ public class AgentSessionQuerier : IScopedService
         var stage = Label(record, AgentSessionQueryMetadataKeys.Stage);
         var workId = Label(record, AgentSessionQueryMetadataKeys.WorkId);
         var workType = Label(record, AgentSessionQueryMetadataKeys.WorkType);
+        var sourceKind = Label(record, AgentSessionQueryMetadataKeys.SourceKind);
+
+        if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
+        {
+            var agentId = Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty;
+            var agentName = Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty;
+            return new ActivityCardDto(
+                $"agent_{agentId}",
+                issueNumber,
+                issueTitle,
+                stage ?? string.Empty,
+                null,
+                s.Id,
+                AgentSessionJsonHelper.StatusName(s),
+                s.Settings.Model,
+                null,
+                s.Status.CreatedAt.ToString("o"),
+                null,
+                lastActivityAt,
+                new ActivityWorkItemDto(workType ?? "task", workId ?? sessionName, workId ?? sessionName, stage, null),
+                taskProgress,
+                latestEvent is null ? null : ToPreview(latestEvent),
+                null,
+                agentId,
+                agentName,
+                ToEventSummaryDto(eventSummary),
+                ToUsageDto(usage));
+        }
+
         return new ActivityCardDto(
             $"issue_{projectId}_{issueNumber}",
             issueNumber,
@@ -864,6 +893,8 @@ public class AgentSessionQuerier : IScopedService
             new ActivityWorkItemDto(workType ?? "task", workId ?? sessionName, workId ?? sessionName, stage, null),
             taskProgress,
             latestEvent is null ? null : ToPreview(latestEvent),
+            null,
+            null,
             null,
             ToEventSummaryDto(eventSummary),
             ToUsageDto(usage));

@@ -39,8 +39,42 @@ public class WorkflowActivityQuerier : IScopedService
         foreach (var record in sessions.Where(IsActive))
         {
             var session = record.Session;
+            var sourceKind = Label(record, AgentSessionQueryMetadataKeys.SourceKind);
             var workflowRunId = Label(record, AgentSessionQueryMetadataKeys.WorkflowRunId);
             var workId = Label(record, AgentSessionQueryMetadataKeys.WorkId);
+            var recordProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
+            var issueNumber = IssueNumber(record);
+            var workType = Label(record, AgentSessionQueryMetadataKeys.WorkType) ?? string.Empty;
+            var stage = Label(record, AgentSessionQueryMetadataKeys.Stage);
+            var lastActivity = LastActivityAt(session).ToString("o");
+
+            if (string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal))
+            {
+                var agentId = Label(record, GenericAgentSessionMetadata.AgentId) ?? string.Empty;
+                var agentName = Label(record, GenericAgentSessionMetadata.AgentName) ?? string.Empty;
+                result.Add(new ActiveAgentDto(
+                    session.Runtime.RunnerId,
+                    $"agent_{agentId}",
+                    issueNumber,
+                    recordProjectId,
+                    workflowRunId ?? string.Empty,
+                    workId ?? string.Empty,
+                    workType,
+                    stage,
+                    null,
+                    session.Id,
+                    (session.Status.BoundAt ?? session.Status.CreatedAt).ToString("o"),
+                    lastActivity,
+                    new ActiveAgentProgressDto(
+                        stage,
+                        new ActiveWorkItemDto(string.IsNullOrWhiteSpace(workType) ? "session" : workType, session.Id, session.Id),
+                        null,
+                        lastActivity),
+                    agentId,
+                    agentName));
+                continue;
+            }
+
             if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(workId))
                 continue;
 
@@ -51,11 +85,6 @@ public class WorkflowActivityQuerier : IScopedService
             var currentStage = status.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
             var completed = currentStage?.Tasks.Count(t => string.Equals(t.Status, TaskRunStatus.Completed.ToString(), StringComparison.Ordinal)) ?? 0;
             var total = currentStage?.Tasks.Count ?? 0;
-            var lastActivity = LastActivityAt(session).ToString("o");
-            var recordProjectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
-            var issueNumber = IssueNumber(record);
-            var workType = Label(record, AgentSessionQueryMetadataKeys.WorkType) ?? string.Empty;
-            var stage = Label(record, AgentSessionQueryMetadataKeys.Stage);
 
             result.Add(new ActiveAgentDto(
                 session.Runtime.RunnerId,
@@ -74,7 +103,9 @@ public class WorkflowActivityQuerier : IScopedService
                     stage,
                     new ActiveWorkItemDto(workType == string.Empty ? "task" : workType, workId, workId),
                     new TaskProgressDto(completed, total),
-                    lastActivity)));
+                    lastActivity),
+                null,
+                null));
         }
 
         return result;
@@ -114,7 +145,7 @@ public class WorkflowActivityQuerier : IScopedService
     }
 }
 
-public sealed record ActiveAgentDto(string RunnerId, string IssueId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress);
-public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto TaskProgress, string LastActivityAt);
+public sealed record ActiveAgentDto(string RunnerId, string IssueId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress, string? AgentId, string? AgentName);
+public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto? TaskProgress, string LastActivityAt);
 public sealed record ActiveWorkItemDto(string Type, string Id, string Title);
 public sealed record TaskProgressDto(int Completed, int Total);

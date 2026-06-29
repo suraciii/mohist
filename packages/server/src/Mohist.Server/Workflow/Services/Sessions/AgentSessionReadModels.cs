@@ -296,6 +296,8 @@ public sealed record ActivityCardDto(
     ActivityTaskProgressDto? TaskProgress,
     ActivityPreviewDto? LastActivity,
     string? FailureReason,
+    string? AgentId,
+    string? AgentName,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
