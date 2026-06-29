@@ -13,24 +13,22 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var headers = new[] { "id", "name", "about", "default" };
-        var widths = new[] { IdSoftCap, TitleSoftCap, BodySoftCap, 7 };
+        var headers = new[] { "template", "project", "created", "updated" };
+        var widths = new[] { IdSoftCap, IdSoftCap, 24, 24 };
 
         var cells = new List<string[]>();
         foreach (var row in rows)
         {
-            var id = StringOf(row, "id");
-            var name = StringOf(row, "name");
-            var about = StringOf(row, "description");
-            if (string.IsNullOrEmpty(about))
-                about = StringOf(row, "about");
-            var isDefault = BoolOf(row, "isDefault") ? "yes" : "";
+            var templateId = StringOf(row, "templateId");
+            var projectId = StringOf(row, "projectId");
+            var createdAt = StringOf(row, "createdAt");
+            var updatedAt = StringOf(row, "updatedAt");
             cells.Add(new[]
             {
-                Truncate(id, IdSoftCap),
-                Truncate(name, TitleSoftCap),
-                Truncate(about, BodySoftCap),
-                Truncate(isDefault, 7),
+                Truncate(templateId, IdSoftCap),
+                Truncate(projectId, IdSoftCap),
+                Truncate(createdAt, 24),
+                Truncate(updatedAt, 24),
             });
         }
 
@@ -45,24 +43,32 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var id = StringOf(data, "id");
-        var name = StringOf(data, "name");
-        var description = StringOf(data, "description");
-        if (string.IsNullOrEmpty(description))
-            description = StringOf(data, "about");
-        var isDefault = BoolOf(data, "isDefault");
-        var yaml = StringOf(data, "yaml");
+        var templateId = StringOf(data, "templateId");
+        var projectId = StringOf(data, "projectId");
+        var createdAt = StringOf(data, "createdAt");
+        var updatedAt = StringOf(data, "updatedAt");
+        var definition = StringOf(data, "definition");
+        var deleted = BoolOf(data, "deleted");
 
-        _out.WriteLine($"id:          {id}");
-        _out.WriteLine($"name:        {name}");
-        _out.WriteLine($"description: {Truncate(description, BodySoftCap)}");
-        _out.WriteLine($"default:     {(isDefault ? "yes" : "no")}");
+        if (!string.IsNullOrEmpty(templateId))
+            _out.WriteLine($"template: {templateId}");
+        if (!string.IsNullOrEmpty(projectId))
+            _out.WriteLine($"project:  {projectId}");
+        if (!string.IsNullOrEmpty(createdAt))
+            _out.WriteLine($"created:  {createdAt}");
+        if (!string.IsNullOrEmpty(updatedAt))
+            _out.WriteLine($"updated:  {updatedAt}");
+        if (deleted)
+        {
+            _out.WriteLine("deleted:  yes");
+            return;
+        }
 
-        if (!string.IsNullOrEmpty(yaml))
+        if (!string.IsNullOrEmpty(definition))
         {
             _out.WriteLine("");
-            _out.WriteLine("yaml:");
-            foreach (var line in yaml.Split('\n'))
+            _out.WriteLine("definition:");
+            foreach (var line in definition.Split('\n'))
                 _out.WriteLine($"  | {line.TrimEnd('\r')}");
         }
     }
@@ -84,6 +90,66 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"  default template: {(string.IsNullOrEmpty(defaultTemplateId) ? "(none)" : defaultTemplateId)}");
 
         RenderWorkflowProfileVariables(data["variables"]);
-        RenderWorkflowProfilePrompts(data["prompts"]);
+        RenderProjectWorkflowProfilePrompts(data["prompts"]);
+    }
+
+    private void RenderProjectWorkflowProfilePrompts(JsonNode? prompts)
+    {
+        _out.WriteLine("");
+        _out.WriteLine("prompts:");
+
+        if (prompts is JsonObject obj)
+        {
+            foreach (var kvp in obj.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            {
+                var raw = kvp.Value is JsonValue jv && jv.TryGetValue<string>(out var s) ? s : null;
+                if (raw is null)
+                {
+                    _out.WriteLine($"  {kvp.Key}: <invalid>");
+                    continue;
+                }
+
+                var preview = Truncate(raw.Replace("\r\n", "\n"), 200);
+                _out.WriteLine($"  {kvp.Key}:");
+                foreach (var line in preview.Split('\n'))
+                    _out.WriteLine($"    | {line.TrimEnd('\r')}");
+            }
+            return;
+        }
+
+        if (prompts is not JsonArray arr || arr.Count == 0)
+        {
+            _out.WriteLine("  (none)");
+            return;
+        }
+
+        foreach (var prompt in arr.OfType<JsonObject>()
+                     .OrderBy(p => StringOf(p, "key"), StringComparer.Ordinal))
+        {
+            var key = StringOf(prompt, "key");
+            var source = StringOf(prompt, "source");
+            var stage = StringOf(prompt, "stage");
+            var body = StringOf(prompt, "body");
+            var header = string.IsNullOrEmpty(key) ? "<unknown>" : key;
+            var details = new List<string>();
+            if (!string.IsNullOrEmpty(source))
+                details.Add($"source: {source}");
+            if (!string.IsNullOrEmpty(stage))
+                details.Add($"stage: {stage}");
+
+            _out.WriteLine(details.Count == 0
+                ? $"  {header}:"
+                : $"  {header} ({string.Join(", ", details)}):");
+
+            if (string.IsNullOrEmpty(body))
+            {
+                _out.WriteLine("    body: (empty)");
+                continue;
+            }
+
+            var preview = Truncate(body.Replace("\r\n", "\n"), 200);
+            foreach (var line in preview.Split('\n'))
+                _out.WriteLine($"    | {line.TrimEnd('\r')}");
+        }
     }
 }

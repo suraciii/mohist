@@ -35,18 +35,18 @@ internal static class ProjectWorkflowCommands
         if (dataNode is null)
             return 1;
 
+        if (string.Equals(mode, "json", StringComparison.Ordinal))
+        {
+            api.Output.WriteLine(dataNode.ToJsonString(MohistCliApi.JsonOutputOptions));
+            return 0;
+        }
+
         var (promptsExitCode, promptsData) = await api.GetDataOrPrintErrorAsync(promptsPath);
         if (promptsExitCode != 0)
             return promptsExitCode;
         if (promptsData is null)
             return 1;
         dataNode["prompts"] = promptsData.DeepClone();
-
-        if (string.Equals(mode, "json", StringComparison.Ordinal))
-        {
-            api.Output.WriteLine(dataNode.ToJsonString(MohistCliApi.JsonOutputOptions));
-            return 0;
-        }
 
         return await api.RenderTableAsync(dataNode, MohistCliApi.TableShape.ProjectWorkflowProfile);
     }

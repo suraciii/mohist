@@ -25,13 +25,21 @@ public class CliProjectWorkflowCommandSpecs
         return (handler, http, output, error, fs, new FakeCommandExecutor());
     }
 
-    private static object SampleTemplate(bool includeYaml = true) => new
+    private const string SampleTemplateDefinition = "name: workflow\ntasks:\n  - stage: plan\n    with:\n      greeting: hi\n";
+
+    private static object SampleTemplateInfo() => new
     {
-        id = "tpl_abc",
-        name = "default",
-        description = "Default workflow template",
-        isDefault = true,
-        yaml = includeYaml ? "name: workflow\ntasks:\n  - stage: plan\n    with:\n      greeting: hi\n" : null,
+        projectId = "proj_abc",
+        templateId = "tpl_abc",
+        createdAt = "2026-06-29T10:00:00Z",
+        updatedAt = "2026-06-29T10:15:00Z",
+    };
+
+    private static object SampleTemplateDefinitionPayload() => new
+    {
+        projectId = "proj_abc",
+        templateId = "tpl_abc",
+        definition = SampleTemplateDefinition,
     };
 
     [Fact]
@@ -75,8 +83,8 @@ public class CliProjectWorkflowCommandSpecs
                     success = true,
                     data = new[]
                     {
-                        new { id = "tpl_abc", name = "default", description = "Default template", isDefault = true },
-                        new { id = "tpl_xyz", name = "custom", description = "Custom template", isDefault = false },
+                        new { projectId = "proj_abc", templateId = "tpl_abc", createdAt = "2026-06-29T10:00:00Z", updatedAt = "2026-06-29T10:15:00Z" },
+                        new { projectId = "proj_abc", templateId = "tpl_xyz", createdAt = "2026-06-29T11:00:00Z", updatedAt = "2026-06-29T11:15:00Z" },
                     },
                 });
             }
@@ -91,9 +99,10 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Equal("/api/projects/proj_abc/workflow-templates", getReq.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
         Assert.Contains("tpl_abc", stdout);
-        Assert.Contains("default", stdout);
+        Assert.Contains("proj_abc", stdout);
+        Assert.Contains("2026-06-29T10:00:00Z", stdout);
         Assert.Contains("tpl_xyz", stdout);
-        Assert.Contains("custom", stdout);
+        Assert.DoesNotContain("default", stdout);
     }
 
     [Fact]
@@ -106,7 +115,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new[] { new { id = "tpl_abc", name = "default" } },
+                    data = new[] { new { projectId = "proj_abc", templateId = "tpl_abc" } },
                 });
             }
             return null!;
@@ -131,7 +140,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateInfo(),
                 });
             }
             return null!;
@@ -158,7 +167,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateInfo(),
                 });
             }
             return null!;
@@ -184,7 +193,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateInfo(),
                 });
             }
             return null!;
@@ -196,7 +205,8 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.Contains("tpl_abc", stdout);
-        Assert.Contains("default", stdout);
+        Assert.Contains("proj_abc", stdout);
+        Assert.Contains("2026-06-29T10:15:00Z", stdout);
     }
 
     [Fact]
@@ -209,7 +219,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateInfo(),
                 });
             }
             return null!;
@@ -256,7 +266,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateDefinitionPayload(),
                 });
             }
             return null!;
@@ -270,7 +280,8 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Equal("/api/projects/proj_abc/workflow-templates/tpl_abc", getReq.RequestUri?.PathAndQuery);
         var stdout = output.ToString();
         Assert.Contains("tpl_abc", stdout);
-        Assert.Contains("default", stdout);
+        Assert.Contains("definition:", stdout);
+        Assert.Contains("greeting: hi", stdout);
     }
 
     [Fact]
@@ -305,7 +316,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateInfo(),
                 });
             }
             return null!;
@@ -331,7 +342,7 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = SampleTemplate(),
+                    data = SampleTemplateInfo(),
                 });
             }
             return null!;
@@ -417,7 +428,7 @@ public class CliProjectWorkflowCommandSpecs
         var (handler, http, output, error, fs, executor) = CreateHarness(req =>
         {
             if (req.Method == HttpMethod.Get)
-                return RecordingHttpHandler.Json(new { success = true, data = new[] { new { id = "tpl_a", name = "t" } } });
+                return RecordingHttpHandler.Json(new { success = true, data = new[] { new { projectId = "proj_abc", templateId = "tpl_a" } } });
             return null!;
         });
 
@@ -497,7 +508,29 @@ public class CliProjectWorkflowCommandSpecs
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new Dictionary<string, object> { ["plan_prompt"] = "You are a planner" },
+                    data = new[]
+                    {
+                        new
+                        {
+                            key = "plan_prompt",
+                            displayName = "Plan Prompt",
+                            description = "Plan instructions",
+                            tags = Array.Empty<string>(),
+                            stage = "plan",
+                            body = "You are a planner",
+                            source = "project",
+                        },
+                        new
+                        {
+                            key = "check_prompt",
+                            displayName = "Check Prompt",
+                            description = "Check instructions",
+                            tags = Array.Empty<string>(),
+                            stage = "check",
+                            body = "You are a reviewer",
+                            source = "system",
+                        },
+                    },
                 });
             }
             return null!;
@@ -513,6 +546,8 @@ public class CliProjectWorkflowCommandSpecs
         Assert.Contains("foo", stdout);
         Assert.Contains("bar", stdout);
         Assert.Contains("plan_prompt", stdout);
+        Assert.Contains("source: project", stdout);
+        Assert.Contains("You are a planner", stdout);
     }
 
     [Fact]
@@ -528,14 +563,6 @@ public class CliProjectWorkflowCommandSpecs
                     data = new { defaultTemplateId = "tpl_abc" },
                 });
             }
-            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts")
-            {
-                return RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new { plan_prompt = "You are a planner" },
-                });
-            }
             return null!;
         });
 
@@ -546,6 +573,8 @@ public class CliProjectWorkflowCommandSpecs
         var stdout = output.ToString();
         Assert.DoesNotContain("\"success\"", stdout);
         Assert.Contains("tpl_abc", stdout);
+        Assert.DoesNotContain("plan_prompt", stdout);
+        Assert.Single(handler.Requests);
     }
 
     [Fact]
