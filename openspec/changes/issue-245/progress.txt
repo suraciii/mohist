@@ -19,3 +19,21 @@
   - DTO projection reflects chain (LineageDto_PopulatedSession_ProjectsAllEntries + LineageDto_LegacySessionWithCurrentBinding_SynthesizesSingleEntry + LineageDto_UnboundSession_ReturnsNullWithoutThrowing)
   - no-rebind is a no-op (RebindRuntimeSession_NoRebind_DoesNotGrowLineageOrEmitBound)
   - legacy backfill (RebindRuntimeSession_AfterLegacyRehydration_BackfillsPredecessorIntoLineage)
+
+## T-002 Learnings
+
+- `ContextUsageHistoryEntry` (domain) is intentionally NOT decorated with `[GenerateSerializer]`: it lives only inside `AgentSessionStatusSnapshot`, which the grain persists via JSON (`JSON.Options`), so the code-gen Orleans serializer is never invoked on it. The DTO projection `ContextUsageHistoryEntryDto` likewise stays a plain record. Only types in `[GenerateSerializer]` grain interfaces / contracts need the attribute (per the codebase pattern noted above).
+- Cap and bucket constants (`ContextUsageHistoryCap = 24`, `ContextUsageHistoryBucket = TimeSpan.FromSeconds(30)`) live as `public const` / `public static readonly` on `AgentSessionExtensions` so the Fake tests can assert against the actual production values without magic numbers leaking into test code.
+- `AppendUsageHistorySample` short-circuits when `history is null` — legacy sessions whose `ContextUsageHistory` was never persisted stay `null` forever, and the wire projection (`BuildUsageHistoryDto`) returns `null` for both null and empty inputs. The wire stays quiet (no `contextUsageHistory` field emitted) for any session that never recorded a usage sample; Pulse maps "no field" to "hide the chart".
+- The `ApplyUsage` signature gained a required `DateTime now` parameter so the transition can stamp the thinned sample. Every call site was updated (the grain's `RuntimeEventTypes.UsageUpdated` arm passes the grain `now`; all Fake tests pass a fixed `DateTime`). Optional defaults were not used — the call sites are all internal and easy to keep in sync.
+- `ToUsageDto(AgentSession s)` is the new querier overload that reads the history; the older `ToUsageDto(AgentUsageSummary u)` is retained for callers that already hold a summary and don't need history (single-session detail / metadata DTOs). The activity feed path (`ToActivityCard` → `ActivityCardDto.Usage`) is the canonical user of the new overload; this is the only permitted relaxation per the dashboard-pulse spec and no new endpoint is introduced.
+- `dotnet test` (server) goes green: 3019 passed, 13 skipped, 0 failed (was 3006 after T-001; added 13 new tests across `AgentSessionDomainSpecs` and `AgentSessionRecoveryDomainSpecs`). Treat-warnings-as-errors clean.
+- Acceptance scenarios verified by tests:
+  - append on usage update (ApplyUsage_AppendsContextUsageHistorySample)
+  - append on context_health_update (RecordContextHealthUpdate_AppendsContextUsageHistorySample)
+  - cap enforced (last-N retained) (ApplyUsage_HistoryHardCapRetainsLastNSamples + RecordContextHealthUpdate_HistoryHardCapRetainsLastNSamples)
+  - time-thinning coalesces nearby samples (ApplyUsage_HistoryTimeThinningCoalescesNearbySamples + RecordContextHealthUpdate_HistoryTimeThinningCoalescesNearbySamples)
+  - missing context window is a no-op (ApplyUsage_MissingContextWindow_DoesNotAppendSample + RecordContextHealthUpdate_MissingContextWindow_DoesNotAppendSample)
+  - DTO projection reflects history (ToUsageDto_ForSession_PropagatesUsageHistoryOnDto)
+  - null / empty history stays quiet on the wire (BuildUsageHistoryDto_NullHistory_ReturnsNull + BuildUsageHistoryDto_EmptyHistory_ReturnsNull + ToUsageDto_ForSession_NoHistory_LeavesUsageHistoryAbsent)
+  - populated history projects entry-by-entry with ISO-8601 `at` (BuildUsageHistoryDto_PopulatedSession_ProjectsAllEntries)

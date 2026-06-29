@@ -934,7 +934,6 @@ public class AgentSessionQuerier : IScopedService
     {
         var s = record.Session;
         var lastActivityAt = AgentSessionJsonHelper.LastActivityAt(s).ToString("o");
-        var usage = AgentSessionJsonHelper.Usage(s);
         var issueNumber = IssueNumber(record);
         var projectId = Label(record, AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty;
         var sessionName = Label(record, AgentSessionQueryMetadataKeys.SessionName) ?? s.Id;
@@ -990,7 +989,7 @@ public class AgentSessionQuerier : IScopedService
             null,
             null,
             ToEventSummaryDto(eventSummary),
-            ToUsageDto(usage));
+            ToUsageDto(s));
     }
 
     private static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
@@ -1113,14 +1112,46 @@ public class AgentSessionQuerier : IScopedService
 
     private static string? Annotation(AgentSession session, string key) => session.Metadata.Annotation(key);
 
-    private static AgentUsageDto ToUsageDto(AgentSession s) =>
-        ToUsageDto(AgentSessionJsonHelper.Usage(s));
+    /// <summary>
+    /// Same overload as <see cref="ToUsageDto(AgentUsageSummary)"/> but reads
+    /// the session's bounded <c>ContextUsageHistory</c> so the activity DTO
+    /// can carry the trend data (issue-245 T-002 / design D5). Internal so
+    /// the Fake tests can exercise the same projection path that builds
+    /// <c>ActivityCardDto.Usage</c> on the wire.
+    /// </summary>
+    internal static AgentUsageDto ToUsageDto(AgentSession s) =>
+        ToUsageDto(AgentSessionJsonHelper.Usage(s), BuildUsageHistoryDto(s));
 
     private static AgentUsageDto ToUsageDto(AgentUsageSummary u) =>
         new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
             u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
             AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
             ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)));
+
+    private static AgentUsageDto ToUsageDto(AgentUsageSummary u, IReadOnlyList<ContextUsageHistoryEntryDto>? history) =>
+        new(u.InputTokens, u.OutputTokens, u.TotalTokens, u.CachedReadTokens, u.ThoughtTokens,
+            u.CostAmount, u.CostCurrency, u.ContextWindowUsed, u.ContextWindowSize,
+            AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize),
+            ContextHealthClassifier.Classify(AgentSessionJsonHelper.ContextUsagePercent(u.ContextWindowUsed, u.ContextWindowSize)),
+            history);
+
+    /// <summary>
+    /// Builds the <see cref="ContextUsageHistoryEntryDto"/> projection from
+    /// <see cref="AgentSession.Status.ContextUsageHistory"/>. Returns
+    /// <c>null</c> when the session has not yet recorded any usage
+    /// (grain never thinned a sample) so the wire stays quiet for
+    /// historical/legacy sessions. An empty list is projected as
+    /// <c>null</c> for the same reason (issue-245 T-002 / design D5).
+    /// </summary>
+    internal static IReadOnlyList<ContextUsageHistoryEntryDto>? BuildUsageHistoryDto(AgentSession domainSession)
+    {
+        var history = domainSession.Status.ContextUsageHistory;
+        if (history is null || history.Count == 0) return null;
+
+        return history
+            .Select(e => new ContextUsageHistoryEntryDto(e.At.ToString("o"), e.Percent))
+            .ToList();
+    }
 
     private static AgentEventSummaryDto ToEventSummaryDto(AgentSessionTranscriptSummary? s) =>
         s is null

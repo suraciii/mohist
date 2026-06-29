@@ -106,10 +106,11 @@ public sealed record AgentSessionStatusSnapshot(
     DateTime? BoundAt = null,
     DateTime? LastDataAt = null,
     AgentUsageSummary? UsageSummary = null,
-    IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null)
+    IReadOnlyList<RuntimeSessionLineageEntry>? RuntimeSessionLineage = null,
+    IReadOnlyList<ContextUsageHistoryEntry>? ContextUsageHistory = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: []);
+        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), RuntimeSessionLineage: [], ContextUsageHistory: []);
 }
 
 public sealed record AgentUsageSummary(
@@ -122,3 +123,15 @@ public sealed record AgentUsageSummary(
     string? CostCurrency = null,
     long? ContextWindowUsed = null,
     long? ContextWindowSize = null);
+
+/// <summary>
+/// One sample in the bounded context-usage history retained on
+/// <see cref="AgentSessionStatusSnapshot.ContextUsageHistory"/>. The
+/// list is appended on <c>usage.updated</c> / <c>context_health_update</c>,
+/// hard-capped at a small fixed size (~24 samples) and time-thinned to
+/// a coarse bucket (~30s) so the grain state and downstream payloads
+/// stay small regardless of session length (issue-245 T-002, design D5).
+/// </summary>
+public sealed record ContextUsageHistoryEntry(
+    [property: JsonPropertyName("at")] DateTime At,
+    [property: JsonPropertyName("percent")] double Percent);

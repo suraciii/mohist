@@ -435,6 +435,190 @@ public class AgentSessionRecoveryDomainSpecs
         Assert.Equal("yellow", Assert.IsType<AgentSessionContextHealthUpdated>(yellow[0].Value).HealthStatus);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RecordContextHealthUpdate_AppendsContextUsageHistorySample()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 5, 0, 0, DateTimeKind.Utc);
+
+        session.RecordContextHealthUpdate("red", 85d, 85_000, 100_000, now);
+
+        Assert.NotNull(session.Status.ContextUsageHistory);
+        var sample = Assert.Single(session.Status.ContextUsageHistory!);
+        Assert.Equal(now, sample.At);
+        Assert.Equal(85.0, sample.Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RecordContextHealthUpdate_HistoryTimeThinningCoalescesNearbySamples()
+    {
+        var session = CreateSession();
+        var bucketStart = new DateTime(2026, 6, 10, 5, 0, 0, DateTimeKind.Utc);
+        var sameBucketLater = bucketStart.AddSeconds(10);
+        var sameBucketLatest = bucketStart.AddSeconds(25);
+        var nextBucket = bucketStart.AddSeconds(45);
+
+        session.RecordContextHealthUpdate("yellow", 55d, 55_000, 100_000, bucketStart);
+        session.RecordContextHealthUpdate("yellow", 60d, 60_000, 100_000, sameBucketLater);
+        session.RecordContextHealthUpdate("red", 70d, 70_000, 100_000, sameBucketLatest);
+        session.RecordContextHealthUpdate("red", 80d, 80_000, 100_000, nextBucket);
+
+        var history = session.Status.ContextUsageHistory!;
+        // 1st & 2nd & 3rd share a bucket; 3rd wins (last-wins). 4th lands in
+        // the next bucket and is appended unchanged.
+        Assert.Equal(2, history.Count);
+        Assert.Equal(sameBucketLatest, history[0].At);
+        Assert.Equal(70.0, history[0].Percent);
+        Assert.Equal(nextBucket, history[1].At);
+        Assert.Equal(80.0, history[1].Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RecordContextHealthUpdate_HistoryHardCapRetainsLastNSamples()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 5, 0, 0, 0, DateTimeKind.Utc);
+        const int total = AgentSessionExtensions.ContextUsageHistoryCap + 5;
+
+        for (var i = 0; i < total; i++)
+        {
+            var at = now.AddSeconds(i * AgentSessionExtensions.ContextUsageHistoryBucket.TotalSeconds);
+            var percent = (i + 1) * 1d;
+            var used = (long)(percent * 1_000);
+            session.RecordContextHealthUpdate("yellow", percent, used, 100_000, at);
+        }
+
+        var history = session.Status.ContextUsageHistory!;
+        Assert.Equal(AgentSessionExtensions.ContextUsageHistoryCap, history.Count);
+        Assert.Equal(6.0, history[0].Percent);
+        Assert.Equal(total * 1d, history[^1].Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void RecordContextHealthUpdate_MissingContextWindow_DoesNotAppendSample()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 5, 0, 0, 0, DateTimeKind.Utc);
+
+        session.RecordContextHealthUpdate("yellow", null, null, null, now);
+
+        Assert.Empty(session.Status.ContextUsageHistory!);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void BuildUsageHistoryDto_PopulatedSession_ProjectsAllEntries()
+    {
+        var session = CreateSession();
+        var firstAt = new DateTime(2026, 6, 10, 5, 0, 0, 0, DateTimeKind.Utc);
+        var secondAt = firstAt.AddMinutes(1);
+        session.Status = session.Status with
+        {
+            ContextUsageHistory = new[]
+            {
+                new ContextUsageHistoryEntry(firstAt, 25.0),
+                new ContextUsageHistoryEntry(secondAt, 50.0)
+            }
+        };
+
+        var dto = AgentSessionQuerier.BuildUsageHistoryDto(session);
+
+        Assert.NotNull(dto);
+        Assert.Equal(2, dto!.Count);
+        Assert.Equal(firstAt.ToString("o"), dto[0].At);
+        Assert.Equal(25.0, dto[0].Percent);
+        Assert.Equal(secondAt.ToString("o"), dto[1].At);
+        Assert.Equal(50.0, dto[1].Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void BuildUsageHistoryDto_NullHistory_ReturnsNull()
+    {
+        // Legacy rehydration — grain state deserialised before T-002 has no
+        // recorded history. The wire stays quiet (null) instead of an empty
+        // array so Pulse can rely on `null` == "no data".
+        var session = CreateSession();
+        session.Status = session.Status with { ContextUsageHistory = null };
+
+        var dto = AgentSessionQuerier.BuildUsageHistoryDto(session);
+
+        Assert.Null(dto);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void BuildUsageHistoryDto_EmptyHistory_ReturnsNull()
+    {
+        var session = CreateSession();
+        session.Status = session.Status with { ContextUsageHistory = Array.Empty<ContextUsageHistoryEntry>() };
+
+        var dto = AgentSessionQuerier.BuildUsageHistoryDto(session);
+
+        Assert.Null(dto);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ToUsageDto_ForSession_PropagatesUsageHistoryOnDto()
+    {
+        // End-to-end through the existing querier path: a populated history on
+        // the session is projected onto AgentUsageDto.ContextUsageHistory,
+        // which is what ActivityCardDto.Usage exposes on the wire. No new
+        // endpoint is introduced.
+        var session = CreateSession();
+        var at = new DateTime(2026, 6, 10, 5, 0, 0, 0, DateTimeKind.Utc);
+        session.Status = session.Status with
+        {
+            UsageSummary = new AgentUsageSummary
+            {
+                ContextWindowUsed = 60_000,
+                ContextWindowSize = 100_000
+            },
+            ContextUsageHistory = new[] { new ContextUsageHistoryEntry(at, 60.0) }
+        };
+
+        var dto = AgentSessionQuerier.ToUsageDto(session);
+
+        Assert.NotNull(dto.ContextUsageHistory);
+        var sample = Assert.Single(dto.ContextUsageHistory!);
+        Assert.Equal(at.ToString("o"), sample.At);
+        Assert.Equal(60.0, sample.Percent);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
+    [Fact]
+    public void ToUsageDto_ForSession_NoHistory_LeavesUsageHistoryAbsent()
+    {
+        var session = CreateSession();
+        session.Status = session.Status with
+        {
+            UsageSummary = new AgentUsageSummary
+            {
+                ContextWindowUsed = 30_000,
+                ContextWindowSize = 100_000
+            },
+            ContextUsageHistory = null
+        };
+
+        var dto = AgentSessionQuerier.ToUsageDto(session);
+
+        Assert.Null(dto.ContextUsageHistory);
+    }
+
     private static AgentSession CreateSession()
     {
         var metadata = new AgentSessionMetadata()

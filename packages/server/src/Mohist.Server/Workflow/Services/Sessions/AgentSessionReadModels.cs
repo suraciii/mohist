@@ -14,7 +14,20 @@ public sealed record AgentUsageDto(
     long? ContextWindowUsed,
     long? ContextWindowSize,
     double? ContextUsagePercent,
-    string? HealthStatus);
+    string? HealthStatus,
+    [property: JsonPropertyName("contextUsageHistory")] IReadOnlyList<ContextUsageHistoryEntryDto>? ContextUsageHistory = null);
+
+/// <summary>
+/// DTO projection of <see cref="Mohist.Server.Sessions.Domain.ContextUsageHistoryEntry"/>.
+/// One sample of the bounded context-usage history exposed on
+/// <see cref="AgentUsageDto.ContextUsageHistory"/> so the Pulse
+/// zone can render a context-usage trend mini-chart from the live
+/// activity feed (issue-245 T-002 / design D5). The list is omitted
+/// from the wire when empty (<c>JsonIgnoreCondition.WhenWritingNull</c>).
+/// </summary>
+public sealed record ContextUsageHistoryEntryDto(
+    [property: JsonPropertyName("at")] string At,
+    [property: JsonPropertyName("percent")] double Percent);
 
 public sealed record AgentEventSummaryDto(
     string? ResolvedModel,
