@@ -49,6 +49,17 @@ public sealed class RecordingIEventPublisher : IEventPublisher
         }
     }
 
+    public async Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
+    {
+        var record = new RecordedPublish(envelope.Type, envelope.Source.ToString(), envelope.Subject, envelope.Data);
+        lock (_gate)
+        {
+            _published.Add(record);
+        }
+
+        await _inner.PublishAsync(envelope, ct);
+    }
+
     public async Task PublishAsync<TData>(
         TData data,
         string type,

@@ -93,13 +93,14 @@ describe('AppSidebar primary navigation', () => {
     expect(screen.queryByText('Home')).not.toBeInTheDocument()
   })
 
-  it('preserves the canonical navigation order: Dashboard, Issues, Activity, Runners, Epics, Logs, Settings, Archived', () => {
+  it('preserves the canonical navigation order: Dashboard, Issues, Inbox, Activity, Runners, Epics, Logs, Settings, Archived', () => {
     renderSidebar('/demo')
 
     const order = getNavTestIdsInOrder()
     expect(order).toEqual([
       'nav-dashboard',
       'nav-issues',
+      'nav-inbox',
       'nav-activity',
       'nav-runners',
       'nav-epics',

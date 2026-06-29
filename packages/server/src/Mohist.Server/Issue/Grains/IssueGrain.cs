@@ -623,7 +623,7 @@ public async Task<string> CreateAsync(string projectId, int number, string title
                     extensions: extensions);
 
                 await _eventStore.AppendAsync(envelope);
-                await _eventBus.PublishAsync(evt, type, source, subject, extensions, CancellationToken.None);
+                await _eventBus.PublishAsync(envelope, CancellationToken.None);
             }
         }
         catch (Exception ex)

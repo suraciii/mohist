@@ -13,6 +13,7 @@ import {
   FolderIcon,
   PowerIcon,
   PowerOffIcon,
+  InboxIcon,
 } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
@@ -42,6 +43,7 @@ interface AppSidebarProps {
 const primaryNav = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon, to: '/' },
   { key: 'issues', label: 'Issues', icon: ListTodoIcon, to: '/issues' },
+  { key: 'inbox', label: 'Inbox', icon: InboxIcon, to: '/inbox' },
   { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity' },
   { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners' },
   { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics' },

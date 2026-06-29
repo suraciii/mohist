@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboardIcon, ListTodoIcon, ActivityIcon, MenuIcon } from 'lucide-react'
+import { LayoutDashboardIcon, ListTodoIcon, ActivityIcon, MenuIcon, InboxIcon } from 'lucide-react'
 import { useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
 import { useProjectPath } from '../../../entities/project'
@@ -36,6 +36,12 @@ export function MobileBottomNav() {
       path: '/activity',
       testId: 'mobile-nav-activity',
       icon: <ActivityIcon className="size-5" />,
+    },
+    {
+      label: 'Inbox',
+      path: '/inbox',
+      testId: 'mobile-nav-inbox',
+      icon: <InboxIcon className="size-5" />,
     },
     {
       label: 'Epics',

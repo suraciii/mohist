@@ -46,24 +46,28 @@ describe('MobileBottomNav primary navigation', () => {
     cleanup()
   })
 
-  it('exposes Dashboard and Issues destinations', () => {
+  it('exposes Dashboard, Issues, and Inbox destinations', () => {
     renderMobileNav('/demo')
 
     expect(screen.getByTestId('mobile-nav-dashboard')).toBeInTheDocument()
     expect(screen.getByTestId('mobile-nav-issues')).toBeInTheDocument()
+    expect(screen.getByTestId('mobile-nav-inbox')).toBeInTheDocument()
     expect(within(screen.getByTestId('mobile-nav-dashboard')).getByText('Dashboard')).toBeInTheDocument()
     expect(within(screen.getByTestId('mobile-nav-issues')).getByText('Issues')).toBeInTheDocument()
+    expect(within(screen.getByTestId('mobile-nav-inbox')).getByText('Inbox')).toBeInTheDocument()
   })
 
-  it('places Dashboard before Issues in the rendered tab order', () => {
+  it('places Inbox after Activity and before Epics in the rendered tab order', () => {
     renderMobileNav('/demo')
 
     const order = getMobileNavTestIdsInOrder()
-    const dashboardIndex = order.indexOf('mobile-nav-dashboard')
-    const issuesIndex = order.indexOf('mobile-nav-issues')
+    const activityIndex = order.indexOf('mobile-nav-activity')
+    const inboxIndex = order.indexOf('mobile-nav-inbox')
+    const epicsIndex = order.indexOf('mobile-nav-epics')
 
-    expect(dashboardIndex).toBeGreaterThanOrEqual(0)
-    expect(issuesIndex).toBeGreaterThan(dashboardIndex)
+    expect(activityIndex).toBeGreaterThanOrEqual(0)
+    expect(inboxIndex).toBeGreaterThan(activityIndex)
+    expect(epicsIndex).toBeGreaterThan(inboxIndex)
   })
 
   it('navigates to the project root when Dashboard is activated', () => {
@@ -91,6 +95,21 @@ describe('MobileBottomNav primary navigation', () => {
 
     renderMobileNav('/demo/issues/42')
     expect(screen.getByTestId('mobile-nav-issues')).toHaveAttribute('data-active', 'true')
+  })
+
+  it('navigates to /inbox when Inbox is activated', () => {
+    renderMobileNav('/demo')
+
+    const inbox = screen.getByTestId('mobile-nav-inbox')
+    fireEvent.click(inbox)
+
+    expect(inbox).toHaveAttribute('data-active', 'true')
+  })
+
+  it('highlights the Inbox tab on /inbox', () => {
+    renderMobileNav('/demo/inbox')
+
+    expect(screen.getByTestId('mobile-nav-inbox')).toHaveAttribute('data-active', 'true')
   })
 
   it('highlights the Dashboard tab on the project root', () => {

@@ -68,7 +68,7 @@ public class WorkflowRunStore : IWorkflowRunStore
             await _eventStore.AppendAsync(envelope, ct);
             try
             {
-                await _eventPublisher.PublishAsync(evt, envelope.Type, source, ct: ct);
+                await _eventPublisher.PublishAsync(envelope, ct);
             }
             catch
             {

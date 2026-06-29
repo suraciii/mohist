@@ -22,6 +22,12 @@ public sealed class InMemoryEventBus : IEventPublisher
 
     private readonly List<Subscription> _subscriptions;
 
+    public Task PublishAsync(CloudEvent envelope, CancellationToken ct = default)
+    {
+        if (envelope is null) throw new ArgumentNullException(nameof(envelope));
+        return DispatchAsync(envelope, ct);
+    }
+
     /// <summary>
     /// Adds a subscription after construction. Used by test fixtures that
     /// build the bus empty and then wire the same handlers the production
@@ -59,6 +65,11 @@ public sealed class InMemoryEventBus : IEventPublisher
             subject: subject,
             extensions: extDict);
 
+        await DispatchAsync(evt, ct).ConfigureAwait(false);
+    }
+
+    private async Task DispatchAsync(CloudEvent evt, CancellationToken ct)
+    {
         // Snapshot the subscription list so concurrent AddSubscription calls
         // (used by test fixtures that wire handlers post-construction) do not
         // mutate it mid-dispatch.
