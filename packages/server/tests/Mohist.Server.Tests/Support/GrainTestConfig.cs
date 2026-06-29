@@ -41,6 +41,7 @@ public static class GrainTestConfig
         FakeTimeProvider? timeProvider = null)
     {
         siloBuilder.UseInMemoryReminderService();
+        DecorateReminderTable(siloBuilder.Services);
         siloBuilder.AddMemoryGrainStorageAsDefault();
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options
             .UseSqlite(connectionString));
@@ -79,6 +80,25 @@ public static class GrainTestConfig
         {
             opts.WorkCompletionTimeout = TimeSpan.FromMinutes(10);
         });
+    }
+
+    private static void DecorateReminderTable(IServiceCollection services)
+    {
+        var descriptor = services.Last(d => d.ServiceType == typeof(IReminderTable));
+        services.Remove(descriptor);
+        services.AddSingleton(provider => new ControllableReminderTable(CreateReminderTable(provider, descriptor)));
+        services.AddSingleton<IReminderTable>(provider => provider.GetRequiredService<ControllableReminderTable>());
+    }
+
+    private static IReminderTable CreateReminderTable(IServiceProvider provider, ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is IReminderTable instance)
+            return instance;
+
+        if (descriptor.ImplementationFactory is not null)
+            return (IReminderTable)descriptor.ImplementationFactory(provider)!;
+
+        return (IReminderTable)ActivatorUtilities.CreateInstance(provider, descriptor.ImplementationType!);
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher
