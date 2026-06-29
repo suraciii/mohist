@@ -172,7 +172,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             }
         }
 
-        if (!GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running))
+        if (!HasOutstandingWork())
             await MaybeUnregisterWorkTimeoutReminderAsync();
     }
 
@@ -401,7 +401,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             terminalStatus,
             reason);
 
-        if (!GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running))
+        if (!HasOutstandingWork())
             await MaybeUnregisterWorkTimeoutReminderAsync();
 
         return new RunnerWorkReportResult(
@@ -532,7 +532,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 terminalReason);
         }
 
-        if (!GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running))
+        if (!HasOutstandingWork())
             await MaybeUnregisterWorkTimeoutReminderAsync();
 
         var reason = !accepted.Accepted
@@ -865,10 +865,18 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _worksState.WriteStateAsync();
     }
 
+    private bool HasOutstandingWork()
+    {
+        return GetWorks().Any(w => w.Status is RunnerWorkStatus.Pending or RunnerWorkStatus.Running);
+    }
+
     private async Task EnsureWorkTimeoutReminderAsync()
     {
         try
         {
+            if (await this.GetReminder(WorkTimeoutReminderName) is not null)
+                return;
+
             await this.RegisterOrUpdateReminder(
                 WorkTimeoutReminderName,
                 WorkTimeoutReminderPeriod,
@@ -884,13 +892,26 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         try
         {
+            if (HasOutstandingWork())
+                return;
+
             var reminder = await this.GetReminder(WorkTimeoutReminderName);
-            if (reminder is not null)
-                await this.UnregisterReminder(reminder);
+            if (reminder is null)
+                return;
+
+            if (HasOutstandingWork())
+                return;
+
+            await this.UnregisterReminder(reminder);
+
+            if (HasOutstandingWork())
+                await EnsureWorkTimeoutReminderAsync();
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Runner {RunnerId} failed to unregister work-timeout reminder", RunnerId);
+            if (HasOutstandingWork())
+                await EnsureWorkTimeoutReminderAsync();
         }
     }
 
