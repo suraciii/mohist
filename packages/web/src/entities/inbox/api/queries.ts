@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import type { InboxArchiveResponse, InboxItem, InboxMarkAllReadResponse, InboxMarkReadResponse } from '../model/types'
-import { archiveInboxItem, getInbox, markAllInboxRead, markInboxItemRead } from './client'
+import type { InboxArchiveResponse, InboxItem, InboxMarkAllReadResponse, InboxMarkReadResponse, InboxSubscription, InboxSubscriptionUpdate } from '../model/types'
+import { archiveInboxItem, getInbox, getInboxSubscription, markAllInboxRead, markInboxItemRead, updateInboxSubscription } from './client'
 
 export const inboxQueryKey = (projectId?: string | null) =>
   projectId
@@ -71,6 +71,38 @@ export function useArchiveInboxItem() {
     onSuccess: () => {
       invalidateInbox(queryClient, projectId)
       toast.success('Inbox item archived')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export const subscriptionQueryKey = (projectId?: string | null) =>
+  projectId
+    ? ['inbox-subscription', projectId] as const
+    : ['inbox-subscription'] as const
+
+export function useInboxSubscription() {
+  const { projectId } = useProject()
+  return useQuery<InboxSubscription>({
+    queryKey: subscriptionQueryKey(projectId),
+    queryFn: () => getInboxSubscription(projectId ?? undefined),
+    enabled: !!projectId,
+  })
+}
+
+export function useUpdateInboxSubscription() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<InboxSubscription, Error, InboxSubscriptionUpdate>({
+    mutationFn: (data) => updateInboxSubscription(projectId, data),
+    onSuccess: () => {
+      if (projectId) {
+        queryClient.invalidateQueries({
+          queryKey: ['inbox-subscription', projectId],
+        })
+      }
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

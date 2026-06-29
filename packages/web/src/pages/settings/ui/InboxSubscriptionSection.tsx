@@ -1,0 +1,69 @@
+import { Switch } from '@base-ui/react/switch'
+import { CardSection } from '@/shared/ui/components/card-section'
+import { Label } from '@/shared/ui/components/label'
+import {
+  NOTIFICATION_KINDS,
+  type NotificationKind,
+  useInboxSubscription,
+  useUpdateInboxSubscription,
+} from '../../../entities/inbox'
+import { SettingsSection } from './SettingsSection'
+
+const KIND_LABELS: Record<NotificationKind, string> = {
+  [NOTIFICATION_KINDS.WorkflowFailed]: 'Workflow failed',
+  [NOTIFICATION_KINDS.ApprovalRequested]: 'Approval requested',
+  [NOTIFICATION_KINDS.IssueStarted]: 'Issue started',
+  [NOTIFICATION_KINDS.IssueCompleted]: 'Issue completed',
+}
+
+const KIND_ORDER: NotificationKind[] = [
+  NOTIFICATION_KINDS.WorkflowFailed,
+  NOTIFICATION_KINDS.ApprovalRequested,
+  NOTIFICATION_KINDS.IssueStarted,
+  NOTIFICATION_KINDS.IssueCompleted,
+]
+
+export function InboxSubscriptionSection() {
+  const { data: subscription, isLoading } = useInboxSubscription()
+  const update = useUpdateInboxSubscription()
+
+  function handleToggle(kind: NotificationKind, checked: boolean) {
+    if (!subscription) return
+    update.mutate({
+      ...subscription,
+      [kind]: checked,
+    })
+  }
+
+  return (
+    <SettingsSection title="Inbox Notifications">
+      <CardSection title="Notification Kinds">
+        <p className="mb-4 text-sm text-muted-foreground">
+          Choose which notification kinds are recorded in this project's inbox.
+        </p>
+        {isLoading ? (
+          <div className="py-2 text-sm text-muted-foreground">Loading subscription preferences...</div>
+        ) : (
+          <div className="space-y-3">
+            {KIND_ORDER.map((kind) => {
+              const checked = subscription?.[kind] ?? true
+              return (
+                <Label key={kind} className="flex cursor-pointer items-center justify-between gap-4 py-1">
+                  <span>{KIND_LABELS[kind]}</span>
+                  <Switch.Root
+                    checked={checked}
+                    onCheckedChange={(nextChecked) => handleToggle(kind, nextChecked)}
+                    className="flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-input bg-gray-200 transition-colors data-[checked]:bg-blue-600 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:bg-gray-700 dark:data-[checked]:bg-blue-500"
+                    data-testid={`inbox-toggle-${kind}`}
+                  >
+                    <Switch.Thumb className="block size-4 rounded-full bg-white shadow-sm transition-transform data-[checked]:translate-x-4" />
+                  </Switch.Root>
+                </Label>
+              )
+            })}
+          </div>
+        )}
+      </CardSection>
+    </SettingsSection>
+  )
+}

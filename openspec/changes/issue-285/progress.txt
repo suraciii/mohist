@@ -52,3 +52,30 @@
 - PUT endpoint accepts `JsonElement` body for key validation against `NotificationKinds.IsDefined` before deserializing to DTO
 - `InboxSubscriptionDto` uses `[JsonPropertyName("workflow_failed")]` etc. so JSON keys match `NotificationKind` values exactly (snake_case), not camelCase
 - All six acceptance criteria verified by tests: read default, update+re-read, unknown-key rejection, missing-key rejection, project isolation, and unknown project 404 from ProjectResolutionEndpointFilter
+
+## T-004 — Web inbox subscription settings surface
+
+### Files Created
+- `packages/web/src/pages/settings/ui/InboxSubscriptionSection.tsx` — renders four @base-ui/react/switch toggles wrapped in Label, with product-facing labels
+- `packages/web/src/pages/settings/ui/InboxSubscriptionSection.test.tsx` — 8 tests: labels, no raw event names, toggle state, mutation, loading, accessible name
+
+### Files Modified
+- `packages/web/src/entities/inbox/model/types.ts` — added InboxSubscription + InboxSubscriptionUpdate types
+- `packages/web/src/entities/inbox/api/client.ts` — added getInboxSubscription, updateInboxSubscription client functions
+- `packages/web/src/entities/inbox/api/client.test.ts` — added get/update subscription API tests
+- `packages/web/src/entities/inbox/api/queries.ts` — added subscriptionQueryKey, useInboxSubscription, useUpdateInboxSubscription
+- `packages/web/src/entities/inbox/api/queries.test.ts` — added subscription hook tests (query key, query, mutation, invalidation scoping)
+- `packages/web/src/entities/inbox/index.ts` — exported new client functions and hooks
+- `packages/web/src/pages/settings/ui/SettingsPage.tsx` — added 'inbox' to VALID_SECTIONS/SECTION_META, import InboxSubscriptionSection, case in SectionContent
+- `packages/web/src/pages/settings/ui/SettingsPage.test.tsx` — added inbox tab to existing tab-existence test, added inbox render test
+
+### Key Decisions (followed design.md D6)
+- New dedicated 'inbox' tab, not PreferencesSection (PreferencesSection.tsx untouched)
+- KIND_LABELS defined inline in section file using product-facing strings ("Workflow failed", etc.)
+- Switch.Root wrapped in <Label> for accessible name (base-ui Switch.Root overrides id prop, so htmlFor doesn't work; implicit label association via wrapping works)
+- useUpdateInboxSubscription invalidates only ['inbox-subscription', projectId] — NOT ['inbox', projectId]
+- @base-ui/react/switch used inline; no shared Switch component yet
+- All 3009 tests pass + typecheck clean
+
+### Gotchas
+- @base-ui/react/switch Switch.Root renders a <span> with role="switch" and a hidden <input>. It overrides the id prop passed to it (auto-generates base-ui-xxx IDs). To satisfy aria-toggle-field-name a11y, wrap the switch in a <Label> element rather than using htmlFor/id association.
