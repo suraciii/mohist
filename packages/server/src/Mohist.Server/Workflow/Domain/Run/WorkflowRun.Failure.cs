@@ -141,11 +141,9 @@ public static partial class WorkflowRunExtensions
         public IReadOnlyList<WorkflowEvent> RerunFromStage(string stageId)
         {
             var targetIdx = run.Stages.FindIndex(s => s.Id == stageId);
-            var reachedStageIds = run.ReachedStageIds.ToHashSet(StringComparer.Ordinal);
-            foreach (var reached in run.Stages.Where(s => s.Initialized).Select(s => s.Id))
-                reachedStageIds.Add(reached);
+            var currentIdx = run.Stages.FindIndex(s => s.Id == run.CurrentStageId);
             var eligibleStages = run.Stages
-                .Where(s => reachedStageIds.Contains(s.Id))
+                .Take(currentIdx + 1)
                 .Select(s => s.Id)
                 .ToList();
 
@@ -158,7 +156,7 @@ public static partial class WorkflowRunExtensions
                         eligibleStages
                     });
 
-            if (!reachedStageIds.Contains(stageId))
+            if (targetIdx > currentIdx)
                 throw new WorkflowControlRejectionException(
                     "stage_not_reached",
                     $"Stage '{stageId}' has not been reached yet. Choose a stage the workflow run has already reached.",

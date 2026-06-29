@@ -184,6 +184,27 @@ public class WorkflowRerunFromStageApiSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
+    public async Task RerunFromStage_TimelineWithLowLimitStillOmitsInvalidatedTaskHistory()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedInProgressIssueWithWorkflowRunAsync();
+        await DriveWorkflowToFailedBuildAsync(wrId, projectId);
+
+        await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/rerun-from-stage",
+            new { stage = "build" });
+
+        var events = await GetDataArrayAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/events?limit=4");
+
+        Assert.DoesNotContain(events, IsInvalidatedBuildTaskEvent);
+        Assert.Contains(events, e =>
+            e.GetProperty("type").GetString() == "com.mohist.workflow.stage.started"
+            && e.GetProperty("data").GetProperty("stage").GetString() == "build");
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
     public async Task RerunFromStage_WorkflowRunEventsOmitInvalidatedTaskHistory()
     {
         var (projectId, _, _, wrId) = await SeedInProgressIssueWithWorkflowRunAsync();
@@ -201,6 +222,29 @@ public class WorkflowRerunFromStageApiSpecs
             e.GetProperty("type").GetString() == "com.mohist.workflow.task.failed"
             && e.GetProperty("data").GetProperty("stage").GetString() == "build");
     }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public async Task RerunFromStage_WorkflowRunEventsWithLowLimitStillOmitInvalidatedTaskHistory()
+    {
+        var (projectId, _, _, wrId) = await SeedInProgressIssueWithWorkflowRunAsync();
+        await DriveWorkflowToFailedBuildAsync(wrId, projectId);
+
+        var workflowGrain = _grains.GetGrain<IWorkflowGrain>(wrId);
+        await workflowGrain.RerunFromStageAsync("build");
+
+        var events = await GetDataArrayAsync($"/api/workflow-runs/{wrId}/events?limit=4");
+
+        Assert.DoesNotContain(events, IsInvalidatedBuildTaskEvent);
+        Assert.Contains(events, e =>
+            e.GetProperty("type").GetString() == "com.mohist.workflow.stage.started"
+            && e.GetProperty("data").GetProperty("stage").GetString() == "build");
+    }
+
+    private static bool IsInvalidatedBuildTaskEvent(JsonElement e) =>
+        e.GetProperty("type").GetString() is "com.mohist.workflow.task.completed" or "com.mohist.workflow.task.failed"
+        && e.GetProperty("data").GetProperty("stage").GetString() == "build";
 
     private async Task<List<JsonElement>> GetDataArrayAsync(string path)
     {

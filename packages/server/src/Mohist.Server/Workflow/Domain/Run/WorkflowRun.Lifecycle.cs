@@ -83,12 +83,6 @@ public static partial class WorkflowRunExtensions
                 ?? throw new InvalidOperationException($"Current stage {run.CurrentStageId} not found");
         }
 
-        private void MarkStageReached(string stageId)
-        {
-            if (!run.ReachedStageIds.Contains(stageId, StringComparer.Ordinal))
-                run.ReachedStageIds.Add(stageId);
-        }
-
         public IReadOnlyList<WorkflowEvent> Start()
         {
             if (run.Status != WorkflowRunStatus.Pending && run.Status != WorkflowRunStatus.Paused)

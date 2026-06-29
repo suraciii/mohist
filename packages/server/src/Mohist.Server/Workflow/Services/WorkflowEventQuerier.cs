@@ -40,8 +40,14 @@ public sealed class WorkflowEventQuerier : IScopedService
         CancellationToken ct = default)
     {
         var run = await _runs.LoadAsync(workflowRunId, ct);
-        var events = await _events.ListAsync(workflowRunId, limit, ct);
-        return FilterInvalidatedControlEvents(events, run);
+        var events = await _events.ListAsync(workflowRunId, int.MaxValue, ct);
+        var filtered = FilterInvalidatedControlEvents(events, run);
+        if (filtered.Count <= limit)
+            return filtered;
+
+        return filtered
+            .Skip(filtered.Count - limit)
+            .ToList();
     }
 
     private static IReadOnlyList<StoredCloudEvent> FilterInvalidatedControlEvents(

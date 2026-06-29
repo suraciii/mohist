@@ -191,29 +191,33 @@ public class RerunFromStageSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void RerunFromStage_PreviouslyReachedLaterStage_RemainsEligibleAfterBackwardRerun()
+    public void RerunFromStage_PreviouslyReachedLaterStage_RejectedAfterBackwardRerunUntilProgressCatchesUp()
     {
         var run = BuildCompletedRun();
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
         run.RerunFromStage("plan");
+        var stagesAfterPlanRerun = run.Stages.ToList();
 
-        var events = run.RerunFromStage("integrate");
+        var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
+            run.RerunFromStage("integrate"));
 
-        Assert.Equal("integrate", run.CurrentStageId);
+        Assert.Equal("stage_not_reached", ex.Code);
+        Assert.Equal("plan", run.CurrentStageId);
         Assert.Null(run.Failure);
-        Assert.Equal(2, run.Stages.Single(s => s.Id == "integrate").Attempt);
-        Assert.Contains(events, e => e is StageStarted started && started.Stage == "integrate");
+        Assert.Equal(WorkflowRunStatus.Running, run.Status);
+        Assert.Same(stagesAfterPlanRerun[0], run.Stages[0]);
+        Assert.Same(stagesAfterPlanRerun[1], run.Stages[1]);
+        Assert.Same(stagesAfterPlanRerun[2], run.Stages[2]);
     }
 
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void RerunFromStage_InitializedStageCountsAsReachedWhenLifetimeListIsMissing()
+    public void RerunFromStage_CurrentInitializedStageIsEligible()
     {
         var run = BuildCompletedRun();
-        run.ReachedStageIds.Clear();
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
 
