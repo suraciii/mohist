@@ -1,6 +1,6 @@
 ### Requirement: Readable Mohist coder transcript
 
-The dedicated session page SHALL read top-to-bottom as a Mohist prompt followed by a Coder response and resulting output. It SHALL resemble an opencode-style conversation transcript more than a workflow dashboard or event log. The page SHALL always render a session header/breadcrumb above the transcript across every render branch, including the main transcript view when one or more turns exist, the empty state, and the loading/waiting state. The header SHALL display the session title, status badge, workflow stage, a link back to the owning issue, and the turn count. The recovery bar, when present, SHALL render as a sub-region of this header rather than as a standalone narrow bar. During an active (running) session, the page MAY additionally present a followup composer at the bottom so the user can inject messages mid-run without canceling the agent.
+The dedicated session page SHALL read top-to-bottom as a Mohist prompt followed by a Coder response and resulting output. It SHALL resemble an opencode-style conversation transcript more than a workflow dashboard or event log. The page SHALL always render a session header/breadcrumb above the transcript across every render branch, including the main transcript view when one or more turns exist, the empty state, and the loading/waiting state. The header SHALL display the session title, status badge, workflow stage, a link back to the owning issue, and the turn count. The recovery bar, when present, SHALL render as a sub-region of this header rather than as a standalone narrow bar, and SHALL remain visible (sticky) within the page scroll context while the transcript body scrolls so the Compact/Reset actions and context-health bar stay reachable at all times. During an active (running) session, the page MAY additionally present a followup composer at the bottom so the user can inject messages mid-run without canceling the agent. Compaction events SHALL also be surfaced in a compact summary atop the transcript rather than only inside expanded transcript rounds, so a user can see that context was compacted without expanding individual rounds.
 
 #### Scenario: Conversation speakers are clear
 
@@ -39,6 +39,18 @@ The dedicated session page SHALL read top-to-bottom as a Mohist prompt followed 
 - **AND** the header SHALL show the session title, status badge, workflow stage, a link back to the owning issue, and the turn count
 - **AND** the recovery bar, when present, SHALL render within the header region rather than as a standalone narrow bar
 - **AND** the rendered header SHALL match the header shown in the empty and waiting states
+
+#### Scenario: Recovery bar stays visible while the transcript scrolls
+
+- **WHEN** the recovery bar is present and the transcript body is scrolled
+- **THEN** the recovery bar SHALL remain visible within the page scroll context (sticky)
+- **AND** the Compact/Reset actions and context-health bar SHALL remain reachable without scrolling back to the top
+
+#### Scenario: Compaction events surface in a compact summary atop the transcript
+
+- **WHEN** the session has one or more recorded compaction events
+- **THEN** the transcript SHALL surface a compact summary of those compaction events atop the transcript
+- **AND** the summary SHALL be visible without expanding an individual transcript round
 
 ### Requirement: Turn-level timestamps in transcript
 
