@@ -81,7 +81,7 @@ Workflow 不是写死的。产品模型支持多个 **Workflow Profile**，每�
 
 Epic 是为一个产品目标做规划并驱动其自动推进的单位。新建的 Epic 默认 `idle`，通过 **Start** 启动自治推进——Epic 会自动在完成的 linked issue 之后启动下一个可推进的 issue。
 
-详见[用 Epic 规划](epics.md)了解完整生命周期。
+详见 [用 Epic 规划](epics.md) 了解完整生命周期。
 
 ## Skill（外部 agent 能力）
 

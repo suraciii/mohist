@@ -283,7 +283,6 @@ mo issue list --output json | \
 - 看完整命令树：`mo --help`
 - 看子命令选项：`mo <command> --help`
 
-
 ## 退出码
 
 | Code | 含义 |

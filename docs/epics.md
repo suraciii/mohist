@@ -154,7 +154,7 @@ Epic 有五个生命周期状态，由用户操作和自动推进共同驱动。
 | `idle` | 已创建，但未开始自动推进 | 创建后默认 |
 | `running` | 正在自动推进 linked issues | 从 `idle` 执行 Start |
 | `paused` | 暂停自动推进，当前 in-progress issue 不中断 | 从 `running` 执行 Pause |
-| `done` | 完成（所有 issue delivered） | 从 `running` 执行 Mark Done |
+| `done` | 完成（没有 open linked issues） | 在非 `paused`、非 terminal 状态下执行 Mark Done，且所有 linked issues 都已进入终态 |
 | `closed` | 关闭（不再继续） | 任意状态（非 terminal）执行 Close |
 
 - **新建 Epic 默认为 `idle`**，不会自动开始推进。必须显式 Start 才会进入 `running`。
@@ -200,7 +200,7 @@ curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/resume
 
 ### 自动推进与 running-but-idle
 
-`running` 的 Epic 会在当前 in-progress linked issue 到达终态（`done` / `closed` / `cancelled`）后，**自动推进到下一个 startable issue**。`idle` 和 `paused` 状态的 Epic **不会自动推进**。
+`running` 的 Epic 会在当前 in-progress linked issue 到达终态（`done` / `cancelled`）后，**自动推进到下一个 startable issue**。`idle` 和 `paused` 状态的 Epic **不会自动推进**。
 
 当一个 `running` 的 Epic 没有可推进的 next startable issue 时，它处于 **running-but-idle** 的可观察情况。此时 Epic 仍然是 `running` 状态（**不是第六个状态**），`progress.nextIssueReason` 字段会解释当前为什么没有推进（例如所有 linked issue 已完成、下一个 issue 被 blocked 等）。
 
@@ -214,7 +214,7 @@ curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/resume
 ### Mark done / Close
 
 ```bash
-# Mark done（前置条件：所有 issue 必须已经 delivered）
+# Mark done（前置条件：非 paused/terminal，且没有 open linked issues）
 mo epic done <epic-id-or-number>
 # curl -X POST http://localhost:3456/api/projects/<project>/epics/<epic-id>/done
 
@@ -231,7 +231,7 @@ mo epic close <epic-id-or-number>
 4. **推进中**：当一个 linked issue 到达终态，`running` 的 Epic 自动推进到下一个 startable issue。你可以用 `mo epic show <id>` 查看 `progress.nextIssue` 了解下一步。
 5. **需暂停时**：`mo epic pause <id>` 暂停推进，当前 issue 不受影响。
 6. **恢复时**：`mo epic resume <id>` 恢复推进，Epic 重新评估并推进下一个 issue。
-7. **完成时**：所有 issue delivered 后 `mo epic done <id>`。
+7. **完成时**：没有 open linked issues 时 `mo epic done <id>`。`deliveredCount` 仍只统计已 delivered 的 issue；cancelled issue 是终态，会满足完成 readiness，但不计入 delivered。
 
 ## 和 workflow 的关系
 

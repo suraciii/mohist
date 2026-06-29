@@ -134,13 +134,13 @@ URL: `/epics` 和 `/epics/<id>`
 
 所有 epic 按状态分组展示：
 
-| 分组 | 含义 | 默认展开 |
+| 分组 | 含义 | 展示方式 |
 |---|---|---|
 | **Running** | 正在自动推进 linked issues（有 in-progress issue） | 展开 |
 | **Ready to start** | 有可推进的 next issue，等待启动 | 展开 |
 | **Waiting / Blocked** | 有 nextIssueReason（如 blocked、依赖未就绪） | 展开 |
 | **Idle / Empty** | 无 next issue、无 blocker、无 linked issues | 展开 |
-| **Paused** | 暂停推进（当前 in-progress issue 不中断） | 展开 |
+| **Paused** | 暂停推进（当前 in-progress issue 不中断） | 常规分区，始终显示 |
 | **Done** | 已完成 | 折叠 |
 | **Closed** | 已关闭 | 折叠 |
 
@@ -157,7 +157,7 @@ URL: `/epics` 和 `/epics/<id>`
 | **Start Epic** | Epic 为 idle 状态 | 开始自动推进 linked issues |
 | **Pause** | Epic 为 running 状态 | 暂停推进（当前 in-progress issue 不中断） |
 | **Resume** | Epic 为 paused 状态 | 恢复推进，重新评估 readiness |
-| **Mark Done** | 所有 linked issues 已 delivered（readyToMarkDone） | 标记完成 |
+| **Mark Done** | `readyToMarkDone` 为 true（所有 linked issues 都已进入终态，没有 open linked issues） | 标记完成 |
 | **Close Epic** | 非 terminal 状态 | 关闭 Epic |
 
 操作按钮带 pending 状态反馈（Starting... / Pausing... / Resuming... / Marking... / Closing...）。
@@ -165,7 +165,7 @@ URL: `/epics` 和 `/epics/<id>`
 ### 详情页信息
 
 详情页展示三个统计卡片：
-- **Progress** — X / Y delivered + 进度条 + Ready to mark done 标记
+- **Progress** — X / Y delivered + 进度条 + Ready to mark done 标记。delivered 只统计已完成交付的 issue；`readyToMarkDone` 依据是否仍有 open linked issues 判断。
 - **Next Issue** — 下一个待推进 issue + 推进状态说明
 - **Current Activity** — 当前活动的 linked issues（按 health 分组）
 
