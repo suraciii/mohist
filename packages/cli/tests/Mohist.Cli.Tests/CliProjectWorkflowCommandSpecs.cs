@@ -25,8 +25,6 @@ public class CliProjectWorkflowCommandSpecs
         return (handler, http, output, error, fs, new FakeCommandExecutor());
     }
 
-    private const string SampleTemplateDefinition = "name: workflow\ntasks:\n  - stage: plan\n    with:\n      greeting: hi\n";
-
     private static object SampleTemplateInfo() => new
     {
         projectId = "proj_abc",
@@ -39,7 +37,18 @@ public class CliProjectWorkflowCommandSpecs
     {
         projectId = "proj_abc",
         templateId = "tpl_abc",
-        definition = SampleTemplateDefinition,
+        definition = new
+        {
+            name = "workflow",
+            tasks = new[]
+            {
+                new
+                {
+                    stage = "plan",
+                    with = new { greeting = "hi" },
+                },
+            },
+        },
     };
 
     [Fact]
@@ -281,7 +290,8 @@ public class CliProjectWorkflowCommandSpecs
         var stdout = output.ToString();
         Assert.Contains("tpl_abc", stdout);
         Assert.Contains("definition:", stdout);
-        Assert.Contains("greeting: hi", stdout);
+        Assert.Contains("\"stage\": \"plan\"", stdout);
+        Assert.Contains("\"greeting\": \"hi\"", stdout);
     }
 
     [Fact]
@@ -553,14 +563,32 @@ public class CliProjectWorkflowCommandSpecs
     [Fact]
     public async Task ConfigGet_JsonMode_EmitsRawPayload()
     {
+        var getCount = 0;
         var (handler, http, output, error, fs, executor) = CreateHarness(req =>
         {
             if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile")
             {
+                getCount++;
                 return RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { defaultTemplateId = "tpl_abc" },
+                    data = new
+                    {
+                        defaultTemplateId = "tpl_abc",
+                        variables = new { vars = new { foo = "bar" }, stages = new { } },
+                    },
+                });
+            }
+            if (req.Method == HttpMethod.Get && req.RequestUri?.PathAndQuery == "/api/projects/proj_abc/workflow-profile/prompts")
+            {
+                getCount++;
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[]
+                    {
+                        new { key = "plan_prompt", body = "You are a planner", source = "project" },
+                    },
                 });
             }
             return null!;
@@ -573,8 +601,10 @@ public class CliProjectWorkflowCommandSpecs
         var stdout = output.ToString();
         Assert.DoesNotContain("\"success\"", stdout);
         Assert.Contains("tpl_abc", stdout);
-        Assert.DoesNotContain("plan_prompt", stdout);
-        Assert.Single(handler.Requests);
+        Assert.Contains("foo", stdout);
+        Assert.Contains("plan_prompt", stdout);
+        Assert.Contains("You are a planner", stdout);
+        Assert.Equal(2, getCount);
     }
 
     [Fact]

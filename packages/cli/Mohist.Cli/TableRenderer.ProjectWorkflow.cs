@@ -47,7 +47,7 @@ internal sealed partial class TableRenderer
         var projectId = StringOf(data, "projectId");
         var createdAt = StringOf(data, "createdAt");
         var updatedAt = StringOf(data, "updatedAt");
-        var definition = StringOf(data, "definition");
+        var definition = DefinitionTextOf(data["definition"]);
         var deleted = BoolOf(data, "deleted");
 
         if (!string.IsNullOrEmpty(templateId))
@@ -71,6 +71,15 @@ internal sealed partial class TableRenderer
             foreach (var line in definition.Split('\n'))
                 _out.WriteLine($"  | {line.TrimEnd('\r')}");
         }
+    }
+
+    private static string DefinitionTextOf(JsonNode? definition)
+    {
+        if (definition is null)
+            return "";
+        if (definition is JsonValue value && value.TryGetValue<string>(out var text))
+            return text;
+        return definition.ToJsonString(MohistCliApi.JsonOutputOptions);
     }
 
     private void RenderProjectWorkflowProfile(JsonNode? data)

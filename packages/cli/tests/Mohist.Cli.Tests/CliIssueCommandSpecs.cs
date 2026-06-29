@@ -91,6 +91,35 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task ArchiveWithoutNumberOrAllCompleted_FailsClearlyWithoutCallingApi()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            throw new InvalidOperationException("API must not be called when archive target is missing"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive"], output, error, fileSystem, executor);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("<number> is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ArchiveSingleIssue_StillArchivesNumber()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "archive", "42"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/issues/42/archive", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
     public async Task ArchiveAllCompleted_InvalidOutput_FailsWithoutCallingApi()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

@@ -787,6 +787,12 @@ internal static class IssueCommands
                     return 1;
                 }
 
+                if (!allCompleted && string.IsNullOrWhiteSpace(number))
+                {
+                    api.Error.WriteLine("<number> is required unless --all-completed is used");
+                    return 1;
+                }
+
                 var resolvedProjectId = await api.ResolveProjectIdAsync(project, projectId);
                 if (resolvedProjectId is null)
                     return 1;

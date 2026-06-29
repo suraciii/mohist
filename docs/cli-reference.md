@@ -146,7 +146,7 @@ mo issue session show <number> <name>            # 查看 session 元数据
 mo issue session transcript <number> <name>      # 查看 session 对话摘要
 mo issue session compact <number> <name>         # 压缩 session 上下文
 mo issue session reset <number> <name>           # 重置 session 上下文
-mo issue session followup <number> <name> --text <text|--text-file|--text-stdin>  # 向运行中的 session 推送后续指令
+mo issue session followup <number> <name> --text <text>  # 向运行中的 session 推送后续指令
 ```
 
 `followup` 的文本源选项（三者选一）：
