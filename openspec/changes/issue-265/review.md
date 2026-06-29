@@ -10,41 +10,44 @@
 
 - [ID: item-1]
   Severity: blocking
-  Scope: `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Failure.cs`
-  Evidence: `RerunFromStage` treats any stage in `ReachedStageIds` as eligible (`WorkflowRun.Failure.cs:144-169`) and then scans active work only in `[targetIdx..end]` (`WorkflowRun.Failure.cs:170-181`) before switching `CurrentStageId` to the target (`WorkflowRun.Failure.cs:204`). After a successful backward rerun, this lets a caller immediately jump to a previously reached later stage while the newly restarted earlier stage still has pending/running work. Example: complete through `integrate`, call `rerun-from-stage(plan)` so `plan` is restarted and `build`/`integrate` are fresh, then call `rerun-from-stage(integrate)`. The second call is accepted because `integrate` is in `ReachedStageIds`, but it ignores active `plan` work because `plan` is before the target. That can orphan or bypass earlier active control state, violating the issue requirement that active work and stage control remain consistent after the operation. The current tests explicitly assert later lifetime reachability remains selectable (`RerunFromStageSpecs.cs:194-207`) but do not cover the active earlier-work case. [disallowed:product-behavior]
-  SuggestedAction: Either make eligibility/progress relative to the current valid control frontier, or, if lifetime reachability is intended, reject a target when any stage before it is not a completed valid progress stage or has active work. Add regression coverage for repeated rerun-from-stage calls where a prior backward rerun has left earlier pending/running work.
-  Verification: Add a domain or grain test for `rerun-from-stage(plan)` followed by `rerun-from-stage(integrate)` before `plan` completes, and assert the second operation is rejected with state unchanged and no orphan work/lock side effects.
+  Scope: `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.Failure.cs`, rerun-from-stage active-work validation
+  Evidence: `RerunFromStage` rejects any task whose status is not `Completed` or `Failed` (`WorkflowRun.Failure.cs:168-174`) and any check whose status is `Pending` or `Running` (`WorkflowRun.Failure.cs:175-178`) before it replaces the target stage. That makes `rerun-from-stage(current)` reject common failed stages that existing `rerun` can restart: `InitializeStage` creates all tasks and checks as pending (`WorkflowRun.Stage.cs:18-31`), and `FailTask` marks only the currently running task failed while leaving later tasks/checks pending (`WorkflowRun.Task.cs:50-66`). Example: a stage has two tasks and/or checks, the first task fails, and the user calls `rerun-from-stage` for that current failed stage. The new action returns `active_work_in_range` instead of creating a new attempt, even though the issue defines `rerun` as the current-stage special case of `rerun-from-stage` and requires existing `rerun` semantics to remain unchanged. Current tests miss this because the API failed-build template has no checks and only one build task (`WorkflowRerunFromStageApiSpecs.cs:324-331`), while domain tests add artificial pending checks only to assert rejection rather than covering the failed-stage recovery case. [disallowed:product-behavior]
+  SuggestedAction: Refine active-work detection so it blocks genuinely in-flight work that must be stopped/cancelled, without treating ordinary unstarted control items left behind by a failed target stage as active external work. Add domain/grain/API regression coverage for a failed current stage with additional pending tasks and pending checks, asserting `rerun-from-stage(current)` behaves like `rerun`: state is replaced, failure clears, locks are released consistently, and no active running work is silently orphaned.
+  Verification: Add a workflow with at least two tasks and a check in one stage, fail the first task, call `RerunFromStageAsync(currentStage)`, and verify success plus a new initialized attempt. Also verify the existing active-running-task rejection still fires for actual in-flight work in the invalidation range.
   Status: open
 
 - [ID: item-2]
   Severity: warning
-  Scope: `packages/server/src/Mohist.Server/Workflow/Services/WorkflowEventQuerier.cs`
-  Evidence: Invalidated control-history filtering infers invalidation points from only the already-limited event slice returned by `_events.ListAsync(workflowRunId, limit, ct)` (`WorkflowEventQuerier.cs:42-44`). The filter only marks a rerun when it sees a duplicate `StageStarted` in that slice (`WorkflowEventQuerier.cs:61-73`). With a small `limit`, or any page that includes old invalidated task/check events and the new rerun `StageStarted` but excludes the original `StageStarted`, the rerun marker is treated as the first start and `validFromEventId` remains empty, so old invalidated task/check events are returned. This violates the acceptance criterion that timeline reads must not surface invalidated old attempt history. Existing tests use `limit=200` (`WorkflowRerunFromStageApiSpecs.cs:168,195`), which masks this pagination/windowing edge case. [disallowed:product-behavior]
-  SuggestedAction: Determine invalidation watermarks from the full workflow event history, a separate marker query, or persisted attempt/invalidation metadata before applying the requested response limit. Add a regression test with a low limit that excludes the original `StageStarted` but includes invalidated task/check events around the rerun marker.
-  Verification: Call `/api/workflow-runs/{wrId}/events?limit=<small>` and `/api/projects/{projectId}/issues/{number}/events?limit=<small>` after a rerun-from-stage and assert invalidated task/check/stage control events are still omitted.
+  Scope: `packages/server/src/Mohist.Server/Workflow/Services/WorkflowEventQuerier.cs`, workflow event reads
+  Evidence: To filter invalidated attempt history, `ListWorkflowEventsAsync` now ignores the caller's `limit` during storage access and calls `_events.ListAsync(workflowRunId, int.MaxValue, ct)` (`WorkflowEventQuerier.cs:42-44`), then filters and paginates in memory (`WorkflowEventQuerier.cs:45-50`). The previous route passed the requested limit directly into `IEventStore.ListAsync` (`origin/master:WorkflowEventRoutes.cs`), which translated to a bounded SQL `Take(limit)` (`EventStore.cs:92-101`). This restores correctness for low-limit rerun timelines, but it turns every workflow-events request into an unbounded per-run read and JSON materialization. Long-lived workflow runs or runs with many artifact/control events can make a small `?limit=20` request scan and allocate the whole event stream. [disallowed:architectural/performance]
+  SuggestedAction: Preserve correctness without unbounded reads. For example, persist/query explicit invalidation markers, query only `StageStarted` markers separately to compute cutoff ids, or add a bounded event-store query that can return the requested page plus the minimal marker context needed for filtering.
+  Verification: Add a test or benchmark-style integration check that a low-limit timeline after rerun filters old attempts while the storage query remains bounded, and review SQL/log output or a fake `IEventStore` assertion that `int.MaxValue` is not used for normal timeline reads.
   Status: open
 
 - [ID: item-3]
   Severity: test-gap
-  Scope: regression coverage
-  Evidence: The new tests cover the main happy path, unknown/never-reached stage, active work inside the invalidation range, lock release, runtime variables, API status codes, and CLI body shape. They do not cover two important edge cases exposed by the implementation: repeated rerun-from-stage calls that make a lifetime-reached later stage selectable while earlier restarted work is still active, and low-limit timeline/event reads where the original `StageStarted` is outside the queried window.
-  SuggestedAction: Add targeted regression tests for the two scenarios above before accepting the candidate.
-  Verification: New tests should fail on the current snapshot and pass after item-1/item-2 are fixed.
+  Scope: rerun-from-stage regression coverage
+  Evidence: The new coverage exercises the happy path, unknown/never-reached stage, active running work, lock release, runtime variable preservation, CLI body shape, and low-limit timeline filtering. It does not cover the failed-current-stage case where normal initialized-but-unstarted tasks/checks remain pending, which is the main behavioral gap in item-1.
+  SuggestedAction: Add focused domain and grain/API tests for failed multi-task and task-plus-check stages before changing the active-work predicate, so the intended distinction between inactive pending control items and true in-flight work is locked down.
+  Verification: The new tests should fail on the current candidate and pass after the active-work fix.
   Status: open
 
 ## Follow-up Items
 
-- [ID: item-4]
-  Severity: follow-up
-  Scope: `openspec/changes/issue-265/design.md`, `openspec/changes/issue-265/tasks.json`, `packages/server/src/Mohist.Server/Workflow/Domain/Run/WorkflowRun.cs`
-  Evidence: The implementation adds a persisted `WorkflowRun.ReachedStageIds` field (`WorkflowRun.cs:46`) and tests lifetime reachability after a backward rerun, while `design.md` explicitly rejected a high-water/lifetime field and `tasks.json` says no new persisted field. This is not a product failure by itself, but it creates traceability drift between the reviewed candidate and the workflow artifacts.
-  SuggestedAction: Update the design/task artifacts to reflect the final semantics, or change the implementation back to the position/current-frontier model. This should be resolved together with item-1 because the behavior choice affects correctness.
-  Status: follow-up
+(none)
 
 ## Pre-existing or Out-of-scope Items
 
-(none)
+- [ID: item-4]
+  Severity: warning
+  Scope: npm dependency audit
+  Evidence: The full `npm test` run reported `9 vulnerabilities (3 moderate, 3 high, 3 critical)` during package audit output. This change did not add npm dependencies and the audit output is not specific to rerun-from-stage.
+  SuggestedAction: Track dependency audit remediation separately from issue-265.
+  Status: pre-existing
 
-Verification run: `npm test` passed. The .NET suite reported 3090 passed, 13 skipped; web Vitest reported 2941 passed, 1 skipped; runner Vitest reported 786 passed, 23 skipped. `git diff --check master...HEAD` also passed.
+## Verification
+
+- `dotnet test Mohist.sln --filter "FullyQualifiedName~RerunFromStage|FullyQualifiedName~CliIssueRerunFromStage|FullyQualifiedName~IssueArchivedDetailApiSpecs|FullyQualifiedName~RunnerWorkflowStatusRouterSpecs"` passed: 59 tests.
+- `npm test` passed: server/CLI/web build plus runner tests completed successfully; runner output included expected diagnostic stderr from fake failure scenarios.
 
 <promise>FAIL</promise>
