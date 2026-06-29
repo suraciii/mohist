@@ -18,6 +18,7 @@ using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.Inbox;
 using Mohist.Server.Project.Domain;
+using Mohist.Server.Workflow.Services.Sessions;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
 
@@ -142,9 +143,35 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LabelSourceKind)
                 .HasComputedColumnSql("""json_extract("State", '$.metadata.labels."mohist.io/source-kind"')""", stored: true);
 
+            // Direct Agent (agent-launch) labels. SQL paths are built from
+            // GenericAgentSessionMetadata constants so a rename is a compile
+            // error instead of a silent drift between metadata and DB.
+            entity.Property(e => e.LabelAgentId)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.AgentId), stored: true);
+            entity.Property(e => e.LabelAgentName)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.AgentName), stored: true);
+            entity.Property(e => e.LabelAgentLaunchIssueNumber)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.IssueNumber), stored: true);
+            entity.Property(e => e.LabelAgentLaunchEpicNumber)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.EpicNumber), stored: true);
+            entity.Property(e => e.LabelAgentLaunchRepository)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.Repository), stored: true);
+            entity.Property(e => e.LabelAgentLaunchWorkspacePath)
+                .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.WorkspacePath), stored: true);
+
             entity.HasIndex(e => new { e.LabelProjectId, e.CreatedAt }).HasDatabaseName("IX_AgentSessions_LabelProjectId_CreatedAt");
             entity.HasIndex(e => e.LabelSourceId).HasDatabaseName("IX_AgentSessions_LabelSourceId");
             entity.HasIndex(e => new { e.LabelSourceId, e.LabelSessionName }).HasDatabaseName("IX_AgentSessions_LabelSourceId_LabelSessionName");
+
+            // issued-130 T-001: composite index for the agent-scoped recency
+            // list, plus single-column indexes on the two context-ref number
+            // labels used by the issue/epic association reads.
+            entity.HasIndex(e => new { e.LabelAgentId, e.LabelProjectId, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_LabelAgentId_LabelProjectId_CreatedAt");
+            entity.HasIndex(e => e.LabelAgentLaunchIssueNumber)
+                .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchIssueNumber");
+            entity.HasIndex(e => e.LabelAgentLaunchEpicNumber)
+                .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchEpicNumber");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
@@ -584,6 +611,13 @@ public class MohistDbContext : DbContext
         }
         return true;
     }
+
+    // issued-130 T-001: build a json_extract stored-column expression whose
+    // path is keyed by a label-name constant. Returning the expression from
+    // one helper means a rename in GenericAgentSessionMetadata is a
+    // compile-time error rather than a silent SQL/metadata drift.
+    private static string JsonExtractLabel(string key) =>
+        $$"""json_extract("State", '$.metadata.labels."{{key}}"')""";
 
     private static int DictionaryHash(Dictionary<string, string>? value)
     {

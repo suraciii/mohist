@@ -178,6 +178,115 @@ public sealed record WorkflowSessionDto(
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 
+/// <summary>
+/// Read shape for a generic (non-workflow) <see cref="Sessions.Domain.AgentSession"/>
+/// as surfaced by the agent-scoped list endpoint
+/// (<c>GET /api/projects/{projectRef}/agents/{agentRef}/sessions</c>).
+/// Issued-130 T-002 / design D2: the status field carries one of the
+/// spec vocabulary values (<c>running</c> / <c>completed</c> / <c>failed</c>
+/// / <c>stopped</c>) so the workbench can derive the four primary state
+/// groupings (recent / running / failed / ended) directly from the list
+/// output, and the legacy runner-protocol <c>cancelled</c> alias is
+/// normalised to <c>stopped</c>. <see cref="ContextRefs"/> is the
+/// optional envelope of context references stamped on the session at
+/// launch (issue / epic / repository / workspace path); absent when the
+/// session carried no such reference. Workflow-shaped fields
+/// (<c>workflowRunId</c>, <c>sessionName</c>, <c>workId</c>,
+/// <c>workType</c>, <c>stage</c>) are omitted by construction.
+/// </summary>
+public sealed record AgentSessionListItemDto(
+    string SessionId,
+    string AgentId,
+    string AgentName,
+    [property: JsonPropertyName("status")] string Status,
+    string CreatedAt,
+    string? LastActivityAt,
+    string? ResolvedModel,
+    [property: JsonPropertyName("contextRefs")] AgentSessionListContextRefsDto? ContextRefs);
+
+/// <summary>
+/// Optional envelope of context references recorded on a generic
+/// AgentSession at launch (issue-130 T-002). Each field is null when the
+/// session carried no such reference; the envelope itself is null when
+/// the session had no context references at all.
+/// </summary>
+public sealed record AgentSessionListContextRefsDto(
+    int? IssueNumber,
+    string? EpicNumber,
+    string? Repository,
+    string? WorkspacePath);
+
+/// <summary>
+/// Read shape for the generic-session summary route
+/// (<c>GET /api/projects/{projectRef}/agent-sessions/{sessionId}</c>),
+/// surfaced as the
+/// <see cref="Workflow.Services.Sessions.AgentSessionQuerier.GetGenericSessionSummaryAsync"/>
+/// response. Issue-130 T-003 / design D4: the summary carries the
+/// resolved Agent profile identity (id + name), the session status in
+/// the spec vocabulary (<c>running</c> / <c>completed</c> / <c>failed</c>
+/// / <c>stopped</c>), the created / last-activity timestamps, the
+/// resolved model, the usage metrics, the failure category (when
+/// present), the tool call and tool error counts, and the optional
+/// context references stamped at launch. Workflow-only fields
+/// (<c>workflowRunId</c>, <c>sessionName</c>, <c>workId</c>,
+/// <c>workType</c>, <c>stage</c>) are absent by construction rather than
+/// nulled — the record simply does not declare them, so a generic
+/// session's summary cannot fabricate workflow identity.
+/// </summary>
+/// <remarks>
+/// <see cref="ContextRefs"/> is the optional envelope of context
+/// references (issue / epic / repository / workspace path) recorded on
+/// the session metadata at launch; it is <c>null</c> when the session
+/// carried no context reference, in line with "absent rather than null".
+/// </remarks>
+public sealed record GenericAgentSessionSummaryDto(
+    string SessionId,
+    string AgentId,
+    string AgentName,
+    [property: JsonPropertyName("status")] string Status,
+    string CreatedAt,
+    string? LastActivityAt,
+    string? ResolvedModel,
+    string? FailureCategory,
+    int? ToolCallCount,
+    int? ToolErrorCount,
+    [property: JsonPropertyName("contextRefs")] GenericAgentSessionSummaryContextRefsDto? ContextRefs,
+    [property: JsonPropertyName("usage")] AgentUsageDto Usage);
+
+/// <summary>
+/// Lightweight association entry returned by the issue/epic agent-session
+/// association read endpoints
+/// (<c>GET /api/projects/{projectRef}/issues/{number}/agent-sessions</c>
+/// and <c>GET /api/projects/{projectRef}/epics/{epicRef}/agent-sessions</c>).
+/// Issue-130 T-006: each entry carries the session id, the agent id and
+/// agent name, the status, the created timestamp, and a link back to the
+/// session summary route (<c>GET .../agent-sessions/{sessionId}</c>).
+/// <see cref="SessionLink"/> is a relative URL path the client can use
+/// to navigate to the session summary.
+/// </summary>
+public sealed record AgentSessionContextAssociationDto(
+    string SessionId,
+    string AgentId,
+    string AgentName,
+    string Status,
+    string CreatedAt,
+    string SessionLink);
+
+/// <summary>
+/// Optional envelope of context references recorded on a generic
+/// AgentSession at launch (issue-130 T-003 / design D4). Each field is
+/// null when the session carried no such reference; the envelope itself
+/// is null when the session had no context references at all, mirroring
+/// <see cref="AgentSessionListContextRefsDto"/> but kept as a distinct
+/// type so the summary's wire shape evolves independently of the
+/// agent-scoped list's.
+/// </summary>
+public sealed record GenericAgentSessionSummaryContextRefsDto(
+    int? IssueNumber,
+    string? EpicNumber,
+    string? Repository,
+    string? WorkspacePath);
+
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);
 
 public sealed record ActivityDto(
@@ -206,6 +315,8 @@ public sealed record ActivityCardDto(
     ActivityTaskProgressDto? TaskProgress,
     ActivityPreviewDto? LastActivity,
     string? FailureReason,
+    string? AgentId,
+    string? AgentName,
     [property: JsonPropertyName("eventSummary")] AgentEventSummaryDto EventSummary,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage);
 

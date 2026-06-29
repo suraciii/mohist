@@ -123,6 +123,15 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentSessionCancel:
                 RenderAgentSessionCancel(data);
                 break;
+            case MohistCliApi.TableShape.AgentSessionList:
+                RenderAgentSessionList(data);
+                break;
+            case MohistCliApi.TableShape.AgentSessionShow:
+                RenderAgentSessionShow(data);
+                break;
+            case MohistCliApi.TableShape.AgentSessionTranscript:
+                RenderAgentSessionTranscript(data);
+                break;
             default:
                 _out.WriteLine(data?.ToJsonString() ?? "");
                 break;

@@ -38,7 +38,7 @@ public class CliAgentSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionHelp_ListsLaunchFollowupCancel()
+    public async Task SessionHelp_ListsAllSixSubcommands()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new InvalidOperationException("API must not be called for help"));
@@ -48,6 +48,9 @@ public class CliAgentSessionCommandSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
+        Assert.Contains("list", stdout, StringComparison.Ordinal);
+        Assert.Contains("show", stdout, StringComparison.Ordinal);
+        Assert.Contains("transcript", stdout, StringComparison.Ordinal);
         Assert.Contains("launch", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
         Assert.Contains("cancel", stdout, StringComparison.Ordinal);
@@ -764,5 +767,417 @@ public class CliAgentSessionCommandSpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("--output", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionList_Table_ResolvesAgentAndRendersSessions()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { new { id = "agent_123", name = "reviewer", status = "active" } },
+                }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new[]
+                {
+                    new { sessionId = "sess_1", agentId = "agent_123", agentName = "reviewer", status = "running", createdAt = "2026-06-26T10:00:00Z", lastActivityAt = "2026-06-26T10:05:00Z", resolvedModel = "gpt-5" },
+                    new { sessionId = "sess_2", agentId = "agent_123", agentName = "reviewer", status = "failed", createdAt = "2026-06-26T09:00:00Z", lastActivityAt = "2026-06-26T09:30:00Z", resolvedModel = "gpt-5" },
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "reviewer", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal("/api/projects/proj_test/agents?all=true", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal(HttpMethod.Get, handler.Requests[1].Method);
+        Assert.Equal("/api/projects/proj_test/agents/agent_123/sessions", handler.Requests[1].RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("sess_1", stdout, StringComparison.Ordinal);
+        Assert.Contains("sess_2", stdout, StringComparison.Ordinal);
+        Assert.Contains("running", stdout, StringComparison.Ordinal);
+        Assert.Contains("failed", stdout, StringComparison.Ordinal);
+        Assert.Contains("gpt-5", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionList_Json_EmitsRawPayload()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { new { id = "agent_123", name = "reviewer", status = "active" } },
+                }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new[]
+                {
+                    new { sessionId = "sess_1", agentId = "agent_123", agentName = "reviewer", status = "running", createdAt = "2026-06-26T10:00:00Z" },
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "reviewer", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"sessionId\": \"sess_1\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"agentName\": \"reviewer\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionList_HonorsStatusFilter()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { new { id = "agent_123", name = "reviewer", status = "active" } },
+                }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new object[]
+                {
+                    new { sessionId = "sess_1", agentId = "agent_123", agentName = "reviewer", status = "failed", createdAt = "2026-06-26T10:00:00Z" },
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "reviewer", "--status", "failed", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Contains("?status=failed", handler.Requests[1].RequestUri?.PathAndQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionList_UnknownAgent_SurfacesClientError()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = Array.Empty<object>(),
+                }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new object[] { } }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "nope", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Agent 'nope' not found", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SessionList_UnknownAgentById_SurfacesServer404Error()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            return Task.FromResult(RecordingHttpHandler.JsonError(
+                "Agent 'agent_missing' not found", "agent_not_found", HttpStatusCode.NotFound));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "agent_missing", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Agent 'agent_missing' not found", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+        Assert.Equal("/api/projects/proj_test/agents/agent_missing", handler.Requests[0].RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task SessionShow_Table_RendersEnrichedSummary()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    sessionId = "sess_123",
+                    agentId = "agent_456",
+                    agentName = "reviewer",
+                    status = "running",
+                    createdAt = "2026-06-26T10:00:00Z",
+                    lastActivityAt = "2026-06-26T10:05:00Z",
+                    resolvedModel = "gpt-5",
+                    failureCategory = (string?)null,
+                    toolCallCount = 12,
+                    toolErrorCount = 1,
+                    contextRefs = new
+                    {
+                        issueNumber = 42,
+                        epicNumber = (string?)null,
+                        repository = "core",
+                        workspacePath = "/tmp/ws",
+                    },
+                    usage = new
+                    {
+                        inputTokens = 2000,
+                        outputTokens = 1210,
+                        totalTokens = 3210,
+                        costAmount = 0.05,
+                        costCurrency = "USD",
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_123", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/api/projects/proj_test/agent-sessions/sess_123", request.RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("agent:       agent_456 (reviewer)", stdout, StringComparison.Ordinal);
+        Assert.Contains("status:      running", stdout, StringComparison.Ordinal);
+        Assert.Contains("created:     2026-06-26T10:00:00Z", stdout, StringComparison.Ordinal);
+        Assert.Contains("model:       gpt-5", stdout, StringComparison.Ordinal);
+        Assert.Contains("tool calls:  12", stdout, StringComparison.Ordinal);
+        Assert.Contains("tool errors: 1", stdout, StringComparison.Ordinal);
+        Assert.Contains("tokens:      3210 (input 2000, output 1210)", stdout, StringComparison.Ordinal);
+        Assert.Contains("cost:        0.05 USD", stdout, StringComparison.Ordinal);
+        Assert.Contains("issue #42", stdout, StringComparison.Ordinal);
+        Assert.Contains("repo: core", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionShow_Json_EmitsRawPayload()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    sessionId = "sess_123",
+                    agentId = "agent_456",
+                    agentName = "reviewer",
+                    status = "running",
+                    createdAt = "2026-06-26T10:00:00Z",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_123", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"sessionId\": \"sess_123\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"agentName\": \"reviewer\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionShow_NotFound_SurfacesServer404()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "Agent session sess_missing not found", "session_not_found", HttpStatusCode.NotFound)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_missing", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(4, exitCode);
+        Assert.Contains("Agent session sess_missing not found", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public async Task SessionTranscript_Table_RendersSummaryNotFullDump()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    turns = new object[]
+                    {
+                        new { id = "turn_1", startedAt = "2026-06-26T10:00:00Z", user = new { role = "mohist", text = "first message body", kind = "task", sentAt = "2026-06-26T10:00:00Z" }, assistant = new[] { new { type = "text", text = "assistant response", id = "part_1", startedAt = "2026-06-26T10:00:05Z" } } },
+                        new { id = "turn_2", startedAt = "2026-06-26T10:05:00Z", user = new { role = "mohist", text = "second message body", kind = "task", sentAt = "2026-06-26T10:05:00Z" }, assistant = new[] { new { type = "tool", id = "part_2", tool = new { toolCallId = "call_1", toolName = "read_file" }, startedAt = "2026-06-26T10:05:05Z" } } },
+                    },
+                    partCount = 4,
+                    lastActivityAt = "2026-06-26T10:05:00Z",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "transcript", "sess_123", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/api/projects/proj_test/agent-sessions/sess_123/transcript", request.RequestUri?.PathAndQuery);
+        var stdout = output.ToString();
+        Assert.Contains("turns:          2", stdout, StringComparison.Ordinal);
+        Assert.Contains("parts:          4", stdout, StringComparison.Ordinal);
+        Assert.Contains("first activity: 2026-06-26T10:00:00Z", stdout, StringComparison.Ordinal);
+        Assert.Contains("last activity:  2026-06-26T10:05:00Z", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("first message body", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("assistant response", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionTranscript_Json_EmitsFullTranscript()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    turns = new object[]
+                    {
+                        new { id = "turn_1", startedAt = "2026-06-26T10:00:00Z", user = new { role = "mohist", text = "first message body", kind = "task", sentAt = "2026-06-26T10:00:00Z" }, assistant = new[] { new { type = "text", text = "assistant response", id = "part_1" } } },
+                    },
+                    partCount = 1,
+                    lastActivityAt = "2026-06-26T10:00:00Z",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "transcript", "sess_123", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"partCount\": 1", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"text\": \"first message body\"", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionTranscript_NotFound_SurfacesServer404()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "Agent session sess_missing not found", "session_not_found", HttpStatusCode.NotFound)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "transcript", "sess_missing", "-o", "table"], output, error, fileSystem, executor);
+
+        Assert.Equal(4, exitCode);
+        Assert.Contains("Agent session sess_missing not found", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public async Task SessionShow_ShowAndTranscriptUnchanged_AreDistinctFromIssueSessionVerbs()
+    {
+        // Verify the agent session show/transcript hit the generic session endpoints,
+        // not the workflow-session issue-scoped endpoints.
+        var (http, showHandler, showOutput, showError, showFs, showExec) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { sessionId = "sess_123", agentId = "agent_456", agentName = "reviewer", status = "running" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "show", "sess_123", "-o", "json"],
+            showOutput, showError, showFs, showExec);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/projects/proj_test/agent-sessions/sess_123", showHandler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Contains("\"agentId\": \"agent_456\"", showOutput.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SessionList_UsesAgentIdDirectlyWhenPassed()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.Contains("/agents/agent_123", StringComparison.Ordinal) && !path.Contains("/sessions", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { id = "agent_123", name = "reviewer", status = "active" },
+                }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new object[]
+                {
+                    new { sessionId = "sess_1", status = "running", createdAt = "2026-06-26T10:00:00Z" },
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "agent_123", "-o", "json"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("/api/projects/proj_test/agents/agent_123", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal("/api/projects/proj_test/agents/agent_123/sessions", handler.Requests[1].RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task SessionList_DefaultOutputIsTable()
+    {
+        var (http, handler, output, error, fileSystem, executor) = SetupEnv((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+            {
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new[] { new { id = "agent_123", name = "reviewer" } },
+                }));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new object[]
+                {
+                    new { sessionId = "sess_1", status = "running", createdAt = "2026-06-26T10:00:00Z", resolvedModel = "gpt-5" },
+                },
+            }));
+        });
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["agent", "session", "list", "reviewer"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("sess_1", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("running", output.ToString(), StringComparison.Ordinal);
     }
 }

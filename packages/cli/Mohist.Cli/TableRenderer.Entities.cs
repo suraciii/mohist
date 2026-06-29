@@ -157,4 +157,110 @@ internal sealed partial class TableRenderer
         var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
         _out.WriteLine($"state: {stateText}");
     }
+
+    private void RenderAgentSessionList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        var headers = new[] { "session id", "status", "created", "model" };
+        var widths = new[] { IdSoftCap, 14, 24, TitleSoftCap };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            var sessionId = StringOf(row, "sessionId");
+            var status = StringOf(row, "status");
+            var createdAt = StringOf(row, "createdAt");
+            var model = StringOf(row, "resolvedModel");
+            cells.Add(new[]
+            {
+                Truncate(sessionId, IdSoftCap),
+                Truncate(status, 14),
+                Truncate(createdAt, 24),
+                Truncate(model, TitleSoftCap),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
+    private void RenderAgentSessionShow(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var agentId = StringOf(data, "agentId");
+        var agentName = StringOf(data, "agentName");
+        var status = StringOf(data, "status");
+        var createdAt = StringOf(data, "createdAt");
+        var lastActivityAt = StringOf(data, "lastActivityAt");
+        var resolvedModel = StringOf(data, "resolvedModel");
+        var failureCategory = StringOf(data, "failureCategory");
+        var toolCallCount = NumberOf(data, "toolCallCount");
+        var toolErrorCount = NumberOf(data, "toolErrorCount");
+        var contextRefs = data["contextRefs"] as JsonObject;
+
+        var usage = data["usage"] as JsonObject;
+        var totalTokens = NumberOf(usage, "totalTokens");
+        var inputTokens = NumberOf(usage, "inputTokens");
+        var outputTokens = NumberOf(usage, "outputTokens");
+        var costAmount = NumberOf(usage, "costAmount");
+        var costCurrency = StringOf(usage, "costCurrency");
+        var costText = string.IsNullOrEmpty(costAmount) ? "" : $"{costAmount} {costCurrency}".Trim();
+        var tokenText = FormatTokenUsage(inputTokens, outputTokens, totalTokens);
+
+        _out.WriteLine($"agent:       {agentId} ({agentName})");
+        _out.WriteLine($"status:      {status}");
+        _out.WriteLine($"created:     {createdAt}");
+        _out.WriteLine($"last active: {lastActivityAt}");
+        _out.WriteLine($"model:       {resolvedModel}");
+        if (!string.IsNullOrEmpty(failureCategory))
+            _out.WriteLine($"failure:     {failureCategory}");
+        _out.WriteLine($"tool calls:  {toolCallCount}");
+        _out.WriteLine($"tool errors: {toolErrorCount}");
+        if (!string.IsNullOrEmpty(tokenText))
+            _out.WriteLine($"tokens:      {tokenText}");
+        if (!string.IsNullOrEmpty(costText))
+            _out.WriteLine($"cost:        {costText}");
+        if (contextRefs is not null)
+        {
+            var issueNumber = NumberOf(contextRefs, "issueNumber");
+            var epicNumber = StringOf(contextRefs, "epicNumber");
+            var repository = StringOf(contextRefs, "repository");
+            var workspacePath = StringOf(contextRefs, "workspacePath");
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(issueNumber))
+                parts.Add($"issue #{issueNumber}");
+            if (!string.IsNullOrEmpty(epicNumber))
+                parts.Add($"epic #{epicNumber}");
+            if (!string.IsNullOrEmpty(repository))
+                parts.Add($"repo: {repository}");
+            if (!string.IsNullOrEmpty(workspacePath))
+                parts.Add($"ws: {workspacePath}");
+            if (parts.Count > 0)
+                _out.WriteLine($"context:     {string.Join(", ", parts)}");
+        }
+    }
+
+    private void RenderAgentSessionTranscript(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        var turns = data["turns"] as JsonArray ?? new JsonArray();
+        var turnCount = turns.Count.ToString();
+        var partCount = NumberOf(data, "partCount");
+        var firstActivity = turns.Count > 0 ? StringOf(turns[0], "startedAt") : "";
+        var lastActivity = StringOf(data, "lastActivityAt");
+
+        _out.WriteLine($"turns:          {turnCount}");
+        _out.WriteLine($"parts:          {partCount}");
+        _out.WriteLine($"first activity: {firstActivity}");
+        _out.WriteLine($"last activity:  {lastActivity}");
+    }
 }
