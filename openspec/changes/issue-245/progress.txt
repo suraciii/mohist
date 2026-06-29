@@ -37,3 +37,25 @@
   - DTO projection reflects history (ToUsageDto_ForSession_PropagatesUsageHistoryOnDto)
   - null / empty history stays quiet on the wire (BuildUsageHistoryDto_NullHistory_ReturnsNull + BuildUsageHistoryDto_EmptyHistory_ReturnsNull + ToUsageDto_ForSession_NoHistory_LeavesUsageHistoryAbsent)
   - populated history projects entry-by-entry with ISO-8601 `at` (BuildUsageHistoryDto_PopulatedSession_ProjectsAllEntries)
+
+## T-003 Learnings
+
+- `ContextHealthIndicator` is the single funnel for all three surfaces (list-row `ActiveSessionCard`, Pulse `CompactSessionCard`, and the session page's recovery region via `ContextHealthBar`). Centralizing the alert treatment here means cross-surface consistency is by construction — no per-call-site logic needed. The classifier (`classifyContextHealth` / `resolveContextUsage` in `model/context-health.ts`) was reused unchanged.
+- Severity styling lives in three records on the component: `DOT_CLASS` (the small dot), `TEXT_CLASS` (text color), and `CONTAINER_CLASS` (background pill + border for yellow/red). The `SEVERITY_LABEL` record maps each status to a stable `data-severity` value (`ok` / `warning` / `critical`) so tests can assert semantically rather than parsing colors.
+- Green is deliberately quiet: `text-gray-600` + `bg-gray-400` dot, no background pill, no glyph, no role/aria-live. The existing `text-green-700` / `bg-green-500` would have read as "warning color" and violated the "renders without any alert styling or warning color" scenario, so it was swapped for neutral grays. A healthy session should not advertise a non-existent problem.
+- Yellow uses `AlertTriangleIcon` (lucide-react, matching the broader project's icon choice over inline SVG — e.g. `SystemUpdateOutcomeView.tsx`, `SessionRecoveryActions.tsx`), red uses `CircleAlertIcon`. Both are `aria-hidden="true"` because the descriptive text/title carries the announcement.
+- The descriptive tooltip / `aria-label` / `title` is built by `buildSeverityTooltip(status, percent)`:
+  - red    → `"Context window 95% full — at limit, compact or reset recommended"`
+  - yellow → `"Context window 72% full — near limit"`
+  - green  → `"Context usage 45%"` (simple, non-alarmist)
+  - `ariaLabel` prop still wins when supplied by the caller (escape hatch for tests and any future override).
+- Role/aria wiring matches the established pattern in the codebase (`SessionRecoveryActions.tsx:201-202` for the red inline error, `ContextHealthBar.tsx:79-80` for the warning banner): red → `role="alert"` + `aria-live="polite"`, yellow → `role="status"` (no live region — `role="status"` implies an implicit `aria-live="polite"` per WAI-ARIA but adding it explicitly would over-announce for the warning tier), green → no role / no aria-live.
+- The indicator is wrapped in a small pill (`rounded px-1.5 bg-yellow-50 border border-yellow-300` and the red equivalent) at warning/critical thresholds so the alert treatment is visible at a glance in list rows without being as heavy as the full `ContextHealthBar` banner. The pill background is intentionally subtle so the row layout stays compact.
+- Tests are split:
+  - `ContextHealthIndicator.test.tsx` (28 tests, +17) — unit tests covering all four spec scenarios (yellow/red alert, green quiet, missing/non-finite hide, explicit percent overrides, derivation fallback) plus the 60% / 80% threshold boundaries.
+  - `SessionCard.test.tsx` — 3 existing threshold tests rewritten to assert the full alert treatment (role / aria-live / glyph / descriptive tooltip).
+  - `CompactSessionCard.test.tsx` — 3 new tests asserting the same alert treatment on the Pulse surface.
+  - `ContextHealthIndicator.consistency.test.tsx` (new file, 7 tests) — cross-surface consistency: snapshots the indicator attrs from `ActiveSessionCard` and `CompactSessionCard` rendered with the same usage and asserts they are identical. Covers green (quiet), yellow (warning), red (critical), and missing-data (hidden) scenarios. This is the explicit "Alert treatment is consistent across every surface" spec scenario rendered as a test.
+- `data-severity` attribute is added alongside the existing `data-status` for stable, semantic test selectors — `data-status` carries the classifier color name (`green`/`yellow`/`red`), `data-severity` carries the alert tier (`ok`/`warning`/`critical`). Both are exposed for flexibility.
+- `npm run typecheck -w packages/web` and `npm run test:run -w packages/web` both green: 189 test files, 2827 tests + 1 skipped (was 2800 before; +27 from this task). All previous ContextHealthBar, SessionCard, and CompactSessionCard tests still pass — the indicator refactor is purely additive.
+- The non-positive-window rule (windowSize = 0 with no explicit percent → hide) is delegated to `resolveContextUsage` / `resolveContextUsagePercent` unchanged: the explicit-percent path takes priority when provided and is finite, so the only "hide" path is when no usable percent can be derived at all. A non-positive window is treated as missing data.

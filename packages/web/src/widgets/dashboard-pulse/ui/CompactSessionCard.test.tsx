@@ -158,6 +158,64 @@ describe('CompactSessionCard', () => {
     expect(indicator).toHaveTextContent('95%')
   })
 
+  it('renders a quiet green indicator at low usage (no glyph, no role)', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 300_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 30,
+      }),
+    )
+
+    const indicator = screen.getByTestId('context-health-indicator')
+    expect(indicator).toHaveAttribute('data-status', 'green')
+    expect(indicator).toHaveAttribute('data-severity', 'ok')
+    expect(indicator).toHaveTextContent('30%')
+    expect(indicator).toHaveAttribute('title', 'Context usage 30%')
+    expect(indicator).not.toHaveAttribute('role')
+    expect(indicator).not.toHaveAttribute('aria-live')
+    expect(screen.queryByTestId('context-health-glyph')).toBeNull()
+  })
+
+  it('renders yellow alert treatment at moderate usage with role="status" and warning glyph', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 720_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 72,
+      }),
+    )
+
+    const indicator = screen.getByTestId('context-health-indicator')
+    expect(indicator).toHaveAttribute('data-status', 'yellow')
+    expect(indicator).toHaveAttribute('data-severity', 'warning')
+    expect(indicator).toHaveTextContent('72%')
+    expect(indicator).toHaveAttribute('role', 'status')
+    expect(indicator).toHaveAttribute('title', 'Context window 72% full — near limit')
+    expect(indicator).toHaveAttribute('aria-label', 'Context window 72% full — near limit')
+    expect(screen.getByTestId('context-health-glyph')).toBeInTheDocument()
+  })
+
+  it('renders red critical alert treatment at high usage with role="alert" and aria-live="polite"', () => {
+    renderCard(
+      makeCard({
+        contextWindowUsed: 950_000,
+        contextWindowSize: 1_000_000,
+        contextUsagePercent: 95,
+      }),
+    )
+
+    const indicator = screen.getByTestId('context-health-indicator')
+    expect(indicator).toHaveAttribute('data-status', 'red')
+    expect(indicator).toHaveAttribute('data-severity', 'critical')
+    expect(indicator).toHaveTextContent('95%')
+    expect(indicator).toHaveAttribute('role', 'alert')
+    expect(indicator).toHaveAttribute('aria-live', 'polite')
+    expect(indicator).toHaveAttribute('title', 'Context window 95% full — at limit, compact or reset recommended')
+    expect(indicator).toHaveAttribute('aria-label', 'Context window 95% full — at limit, compact or reset recommended')
+    expect(screen.getByTestId('context-health-glyph')).toBeInTheDocument()
+  })
+
   it('hides context-health indicator when contextWindowSize is null', () => {
     renderCard(
       makeCard({
