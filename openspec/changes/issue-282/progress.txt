@@ -50,3 +50,30 @@
 - Added "可自动推进" to both one-liners (minimal change, signals self-driving capability).
 - Both already link to epics.md; section intro in README.md left unchanged (neutral section description).
 - Scoped grep confirmed no 'active' as Epic status or "只/仅是组织" claim in either file.
+
+## T-006
+
+### Audit scope
+- packages/web: pages/epics, pages/epic-detail, entities/epic, features/*-epic, widgets/epic-*
+- Docs: all *.md under docs/
+
+### Findings: Web UI
+- **Bare `Active` Epic status label**: Not found. All user-visible Epic status badges use five-state labels (Idle/Running/Paused/Done/Closed). JSX text `Active` occurrences are for issue-health, dashboard, or activity-page contexts — not Epic status.
+- **Ambiguous bare `Start`**: Not found. The Epic lifecycle action correctly renders as `'Start Epic'` (EpicDetailPage.tsx:721). The per-issue `'Start'` (EpicDetailPage.tsx:165) is for starting individual linked issues, not the Epic lifecycle — clearly scoped by its row context and `data-testid="linked-issue-start"`.
+- **`No linked issues` copy**: All occurrences neutral (no implication of active progression):
+  - `EpicListPage.tsx:89` — empty-card subtext for an Epic with no linked issues
+  - `EpicDetailPage.tsx:836` — advancement-section empty state ("No linked issues yet")
+  - `EpicDetailPage.tsx:1020` — linked-issues-list empty state ("No linked issues yet.")
+  - `EpicDetailPage.tsx:1060` — close-dialog description for empty Epic
+  - `advancement.ts:151` — "No pending startable linked issues" (advancement info)
+  - `graphBanner.ts:18` — "Not enough linked issues to draw a graph"
+- **Internal symbols left unchanged**: groupActiveEpics, ActiveEpicGroups, IssueHealth.Active, parseEpicStatus('active'), activeEpics, activeSections, ActiveGroupKey, ActiveGroupDescriptor — all as-is (per decision 4).
+
+### Findings: Docs
+- No `active` as Epic status in any doc. The `active` occurrences in troubleshooting.md, the-workflow.md, web-ui.md, and concepts.md all refer to Issue Health — not Epic status.
+- No purely-static-organizer framing found (no "只/仅是组织", "不参与执行", "只是集合" in any doc).
+- JSON example `activeIssues` field in epics.md:140 is a server API response field name (internal symbol, not user-facing copy). Already noted in T-001.
+
+### Conclusion
+- **Zero stragglers found** across both packages/web (target directories) and docs/. No edits needed.
+- Edit-on-find policy: zero edits is a valid outcome. This audit verifies the docs+Web surface is mutually consistent with the self-driving model.
