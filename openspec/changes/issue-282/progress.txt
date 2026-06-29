@@ -26,3 +26,13 @@
 - Added idle default + Start triggers autonomous progression.
 - Replaced example bullets with a concise single paragraph; linked to epics.md for full lifecycle.
 - One-liner at top of file still uses "多个相关 Issue 组成 Epic" (acceptable as simplified summary).
+
+## T-003
+
+- Rewrote docs/web-ui.md Epics page section (~web-ui.md:133) to document list-page state groups and detail-page lifecycle actions.
+- Verified exact UI labels by reading EpicListPage.tsx, EpicDetailPage.tsx, groupActiveEpics.ts, and primaryLifecycleAction.ts.
+- List-page groups: Running, Ready to start, Waiting / Blocked, Idle / Empty, Paused, Done, Closed.
+- Detail-page actions: Start Epic, Pause, Resume, Mark Done, Close Epic.
+- Added Paused group to the list-page table (present in UI as its own section between active and done).
+- Added Close Epic to action table (present in UI as a secondary action for non-terminal epics).
+- Linked to epics.md for lifecycle state machine (no duplication).
