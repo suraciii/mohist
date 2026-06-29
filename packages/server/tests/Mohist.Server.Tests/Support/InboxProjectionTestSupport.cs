@@ -112,6 +112,22 @@ internal static class InboxProjectionTestSupport
         await db.SaveChangesAsync();
     }
 
+    public static async Task SeedSubscriptionAsync(
+        TestDatabase database,
+        string projectId,
+        bool workflowFailedEnabled = true,
+        bool approvalRequestedEnabled = true,
+        bool issueStartedEnabled = true,
+        bool issueCompletedEnabled = true)
+    {
+        var store = new InboxSubscriptionStore(database.Factory);
+        await store.SetAsync(projectId, new InboxSubscriptionState(
+            WorkflowFailedEnabled: workflowFailedEnabled,
+            ApprovalRequestedEnabled: approvalRequestedEnabled,
+            IssueStartedEnabled: issueStartedEnabled,
+            IssueCompletedEnabled: issueCompletedEnabled));
+    }
+
     public static async Task SeedWorkflowRunAsync(
         TestDatabase database,
         string workflowRunId,
@@ -253,6 +269,7 @@ internal static class InboxProjectionTestSupport
                 services.AddSingleton<IDbContextFactory<MohistDbContext>>(_database.Factory);
                 services.AddSingleton(eventPublisher);
                 services.AddScoped<InboxStore>();
+                services.AddScoped<InboxSubscriptionStore>();
                 services.AddScoped<IWorkflowRunStore>(sp => new WorkflowRunStore(
                     _database.Factory,
                     new NoopEventStore(),

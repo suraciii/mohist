@@ -23,3 +23,19 @@
 
 ### Gotchas
 - The Designer.cs for a migration reflects the FULL model (all entities), not just the new one. Both .Designer.cs and ModelSnapshot.cs contain the same BuildTargetModel content; the Designer differs only in the [Migration] attribute and partial class name.
+
+## T-002 — Subscription-gated inbox projection
+
+### Files Modified
+- `packages/server/src/Mohist.Server/Inbox/InboxModels.cs` — added `IsEnabled(string kind)` method to `InboxSubscriptionState` record
+- `packages/server/src/Mohist.Server/Events/Subscriptions/InboxProjectionHandler.cs` — added subscription gate after issue resolution, before draft creation: resolves `InboxSubscriptionStore` from scope, reads subscription for project, returns early if `kind` is disabled (skipping both `InsertAsync` and hint publish)
+- `packages/server/tests/Mohist.Server.Tests/Support/InboxProjectionTestSupport.cs` — registered `InboxSubscriptionStore` in test DI scope; added `SeedSubscriptionAsync` helper
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Inbox/InboxProjectionHandlerSpecs.cs` — added 7 new tests: enabled, disabled, all-disabled, missing-default, existing-items-untouched, re-enabled, replay-disabled
+- `packages/server/tests/Mohist.Server.Tests/Specs/Events/Inbox/InboxProjectionHandlerRealtimeHintSpecs.cs` — added `DisabledKind_PublishesNoHint`
+
+### Key Decisions (followed design.md D4)
+- Subscription gate inserted after issue resolution and before `InboxItemDraft` creation (~line 138), exactly as D4 prescribes
+- Early return skips both `inboxStore.InsertAsync` and the `IEventPublisher.PublishAsync` hint — no insert, no hint
+- Missing subscription row → `InboxSubscriptionState` default (all-enabled) → gate passes → MVP behavior preserved
+- No in-process cache; each projected event reads subscription fresh from store
+- Test DI scope must explicitly register `InboxSubscriptionStore` (the production scope uses `AddMohistConventionalServices` auto-registration via `IScopedService` marker; the test harness builds its own scope manually)

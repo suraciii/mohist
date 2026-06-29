@@ -280,6 +280,35 @@ public class InboxProjectionHandlerRealtimeHintSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
     [Fact]
+    public async Task DisabledKind_PublishesNoHint()
+    {
+        await using var database = InboxProjectionTestSupport.CreateDatabase();
+        await InboxProjectionTestSupport.SeedIssueAsync(database,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 42,
+            title: "No hint when disabled");
+        await InboxProjectionTestSupport.SeedSubscriptionAsync(database, "proj_a",
+            issueStartedEnabled: false);
+
+        var publisher = new CapturingEventPublisher();
+        var handler = InboxProjectionTestSupport.CreateHandler(database, publisher);
+        var evt = InboxProjectionTestSupport.BuildIssueEvent(
+            type: EventCatalog.ReverseDns.IssueWorkStarted,
+            projectId: "proj_a",
+            issueId: "issue_1",
+            issueNumber: 42,
+            eventId: "evt-no-hint-disabled");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(publisher.Published);
+        Assert.Empty(await InboxProjectionTestSupport.GetInboxAsync(database, "proj_a"));
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Inbox)]
+    [Fact]
     public async Task Hint_ProjectIdExtensionMatchesOwningProjectNotSourceRoute()
     {
         // Defends against accidental leak: the projectid stamped on the

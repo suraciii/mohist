@@ -78,4 +78,14 @@ public sealed record InboxSubscriptionState(
     bool WorkflowFailedEnabled = true,
     bool ApprovalRequestedEnabled = true,
     bool IssueStartedEnabled = true,
-    bool IssueCompletedEnabled = true);
+    bool IssueCompletedEnabled = true)
+{
+    public bool IsEnabled(string kind) => kind switch
+    {
+        NotificationKinds.WorkflowFailed => WorkflowFailedEnabled,
+        NotificationKinds.ApprovalRequested => ApprovalRequestedEnabled,
+        NotificationKinds.IssueStarted => IssueStartedEnabled,
+        NotificationKinds.IssueCompleted => IssueCompletedEnabled,
+        _ => false,
+    };
+}
